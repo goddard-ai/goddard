@@ -876,7 +876,7 @@ impl RightPanelSurface {
         Self::Terminal(Uuid::new_v4())
     }
 
-    fn terminal_id(&self) -> Option<Uuid> {
+    pub(super) fn terminal_id(&self) -> Option<Uuid> {
         match self {
             Self::Terminal(id) => Some(*id),
             _ => None,
@@ -1842,9 +1842,7 @@ impl Waku {
         if let Some(state) = state {
             for surface in &state.surfaces {
                 if let Some(terminal_id) = surface.terminal_id() {
-                    self.right_panel_terminals.remove(&terminal_id);
-                    self.right_panel_terminal_commands.remove(&terminal_id);
-                    self.custom_command_runs.remove(&terminal_id);
+                    self.drop_terminal(terminal_id);
                 }
                 if let Some(browser_id) = surface.browser_id() {
                     self.right_panel_browsers.remove(&browser_id);
@@ -1947,6 +1945,14 @@ impl Waku {
     ) {
         self.settings_page = None;
         if self.state.selected_session.is_none() {
+            // Terminal mode owns the main area; ⌘J refocuses the selected
+            // terminal there rather than opening the panel's strip.
+            if let Some(terminal_id) = self.selected_terminal
+                && let Some(terminal) = self.right_panel_terminals.get(&terminal_id)
+            {
+                let focus = terminal.read(cx).focus_handle(cx);
+                window.focus(&focus, cx);
+            }
             cx.notify();
             return;
         }
@@ -2062,6 +2068,12 @@ impl Waku {
         }
         if let Some(terminal_id) = surface.terminal_id() {
             self.ensure_right_panel_terminal(terminal_id, cx);
+            self.register_terminal(
+                terminal_id,
+                self.state.selected_session,
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf),
+            );
         }
         // Browser views are created on the surface's first render, which has
         // the `Window` their webview must attach to.
@@ -2159,14 +2171,12 @@ impl Waku {
         }
     }
 
-    fn close_right_panel_surface(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn close_right_panel_surface(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.right_panel_surfaces.len() {
             return;
         }
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
-            self.right_panel_terminals.remove(&terminal_id);
-            self.right_panel_terminal_commands.remove(&terminal_id);
-            self.custom_command_runs.remove(&terminal_id);
+            self.drop_terminal(terminal_id);
         }
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
             self.right_panel_browsers.remove(&browser_id);
@@ -2502,7 +2512,7 @@ impl Waku {
     /// that is no longer on screen; its result stays silent rather than
     /// toasting into another session's context. Switching back before the
     /// finish restores the surface and the report.
-    fn custom_command_finished(
+    pub(super) fn custom_command_finished(
         &mut self,
         terminal_id: Uuid,
         exit_code: Option<i32>,
@@ -2573,7 +2583,7 @@ impl Waku {
     /// the 24ms poll cadence — so publishes are throttled to the
     /// stream-commit cadence with one trailing flush that lands whatever
     /// the last burst left.
-    fn refresh_command_run_tail(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn refresh_command_run_tail(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
         let Some(tail) = self
             .right_panel_terminals
             .get(&terminal_id)
@@ -2630,8 +2640,13 @@ impl Waku {
     }
 
     /// Close the tab a finished terminal belongs to, wherever it sits — the
-    /// active session's tab strip or a background session's saved surfaces.
-    fn close_terminal_view_surface(&mut self, view: &Entity<TerminalView>, cx: &mut Context<Self>) {
+    /// active session's tab strip, a background session's saved surfaces,
+    /// or the Terminals group's global list.
+    pub(super) fn close_terminal_view_surface(
+        &mut self,
+        view: &Entity<TerminalView>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(terminal_id) = self
             .right_panel_terminals
             .iter()
@@ -2639,36 +2654,7 @@ impl Waku {
         else {
             return;
         };
-        if let Some(index) = self
-            .right_panel_surfaces
-            .iter()
-            .position(|surface| surface.terminal_id() == Some(terminal_id))
-        {
-            self.close_right_panel_surface(index, cx);
-            return;
-        }
-        for state in self.right_panel_session_states.values_mut() {
-            let Some(index) = state
-                .surfaces
-                .iter()
-                .position(|surface| surface.terminal_id() == Some(terminal_id))
-            else {
-                continue;
-            };
-            state.surfaces.remove(index);
-            state.active_surface = state.active_surface.and_then(|active| {
-                (!state.surfaces.is_empty()).then(|| match active.cmp(&index) {
-                    std::cmp::Ordering::Greater => active - 1,
-                    std::cmp::Ordering::Equal => index.saturating_sub(1),
-                    std::cmp::Ordering::Less => active.min(state.surfaces.len() - 1),
-                })
-            });
-            break;
-        }
-        self.right_panel_terminals.remove(&terminal_id);
-        self.right_panel_terminal_commands.remove(&terminal_id);
-        self.custom_command_runs.remove(&terminal_id);
-        cx.notify();
+        self.close_terminal(terminal_id, cx);
     }
 
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
@@ -2700,46 +2686,7 @@ impl Waku {
             .get(&terminal_id)
             .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
         if !matches_project {
-            let command = self.right_panel_terminal_commands.get(&terminal_id);
-            let launch = command
-                .cloned()
-                .map(TerminalLaunch::CustomCommand)
-                .unwrap_or(TerminalLaunch::Shell);
-            let close_on_exit = command.is_some_and(|command| command.close_on_success);
-            let view =
-                cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
-            cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
-                match event {
-                    // The command's startup line ends in `&& exit`, so the
-                    // shell only goes away on its own when the script
-                    // succeeded — the exit event is the close signal.
-                    TerminalViewEvent::Exited => {
-                        if close_on_exit {
-                            this.close_terminal_view_surface(&view, cx);
-                        }
-                    }
-                    TerminalViewEvent::CommandFinished(code) => {
-                        // A finished command may have changed the
-                        // checkout, so drop the cached snapshot; the
-                        // next read refetches.
-                        this.refresh_selected_branch_snapshot(cx);
-                        this.custom_command_finished(terminal_id, *code, cx);
-                    }
-                    TerminalViewEvent::LocalhostUrl(url) => {
-                        this.on_localhost_url_detected(&view, url.clone(), cx);
-                    }
-                }
-            })
-            .detach();
-            if command.is_some() {
-                // The view's 24ms poll notifies on every PTY dirty flag;
-                // each one is a chance to refresh the toast's output tail.
-                cx.observe(&view, move |this, _, cx| {
-                    this.refresh_command_run_tail(terminal_id, cx);
-                })
-                .detach();
-            }
-            self.right_panel_terminals.insert(terminal_id, view);
+            self.spawn_terminal_entity(terminal_id, working_directory, cx);
         }
     }
 
@@ -2758,6 +2705,9 @@ impl Waku {
                     .iter()
                     .filter_map(RightPanelSurface::terminal_id)
             }))
+            // Global terminals belong to no surface list; their records are
+            // what keep their entities alive.
+            .chain(self.terminal_records.keys().copied())
             .collect::<HashSet<_>>();
         self.right_panel_terminals
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));

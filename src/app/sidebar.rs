@@ -69,6 +69,10 @@ impl SessionDateGroup {
 pub(super) enum SidebarGroup {
     /// Pinned tasks, always the first section regardless of grouping.
     Pinned,
+    /// Every terminal — session-scoped and global — sitting between the
+    /// search field and the session history. Starts collapsed; pinned
+    /// terminals keep a row while it is.
+    Terminals,
     Date(SessionDateGroup),
     Project(Uuid),
     Projectless,
@@ -78,6 +82,7 @@ impl SidebarGroup {
     fn element_key(self) -> SharedString {
         match self {
             Self::Pinned => "pinned".into(),
+            Self::Terminals => "terminals".into(),
             Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
             Self::Projectless => "projectless".into(),
@@ -87,6 +92,7 @@ impl SidebarGroup {
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
             Self::Pinned => mix(fingerprint, 0x300),
+            Self::Terminals => mix(fingerprint, 0x400),
             Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
@@ -607,6 +613,8 @@ pub(super) enum SidebarRow {
     Session(Uuid),
     /// A project's GitHub browser entry, under its expanded group header.
     GitHub(Uuid),
+    /// A terminal in the Terminals group.
+    Terminal(Uuid),
     /// Reveals the next batch of older sessions in a project section.
     ShowMore(SidebarGroup),
     /// Spacing between date groups.
@@ -643,6 +651,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::GitHub(_) => SIDEBAR_GITHUB_ROW_HEIGHT,
+        SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
     })
@@ -2054,6 +2063,19 @@ impl Waku {
             mix(fingerprint, self.sidebar_collapsed_groups.len() as u64),
             collapsed,
         );
+        // The Terminals group reads its ids in list order plus each row's
+        // pin state — pinned rows survive the fold, so both feed the rows.
+        for terminal_id in self.sidebar_terminal_ids() {
+            fingerprint = mix_uuid(fingerprint, terminal_id);
+            fingerprint = mix(
+                fingerprint,
+                u64::from(
+                    self.terminal_records
+                        .get(&terminal_id)
+                        .is_some_and(|record| record.pinned),
+                ),
+            );
+        }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today, now));
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
@@ -2073,6 +2095,26 @@ impl Waku {
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
         let mut rows = vec![SidebarRow::Search];
+
+        // The Terminals group sits between the search field and the session
+        // history. Its header renders even with no terminals — expanding an
+        // empty group is how a first global terminal is made — and folding
+        // it keeps only the pinned rows.
+        let terminals_collapsed = self
+            .sidebar_collapsed_groups
+            .contains(&SidebarGroup::Terminals);
+        rows.push(SidebarRow::Header(SidebarGroup::Terminals));
+        for terminal_id in self.sidebar_terminal_ids() {
+            if !terminals_collapsed
+                || self
+                    .terminal_records
+                    .get(&terminal_id)
+                    .is_some_and(|record| record.pinned)
+            {
+                rows.push(SidebarRow::Terminal(terminal_id));
+            }
+        }
+        rows.push(SidebarRow::GroupSpacer);
 
         // Pinned tasks lead the sidebar in both groupings, ordered by the same
         // recency the row displays — newest first, independent of the ordering
@@ -2177,7 +2219,10 @@ impl Waku {
                 }
             }
         }
-        if rows.len() == 1 {
+        let has_session_header = rows.iter().any(|row| {
+            matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Terminals)
+        });
+        if !has_session_header {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
                 SidebarGrouping::Date => SidebarGroup::Date(SessionDateGroup::Today),
@@ -2254,10 +2299,19 @@ impl Waku {
                 let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
                     matches!(
                         row,
-                        SidebarRow::Session(_) | SidebarRow::GitHub(_) | SidebarRow::ShowMore(_)
+                        SidebarRow::Session(_)
+                            | SidebarRow::GitHub(_)
+                            | SidebarRow::Terminal(_)
+                            | SidebarRow::ShowMore(_)
                     )
                 });
-                self.render_sidebar_group_header(group, index == 1, has_expanded_children, cx)
+                // The header actions belong to the session history — the
+                // Terminals group sits above it but never carries them.
+                let first = group != SidebarGroup::Terminals
+                    && !rows[..index].iter().any(|row| {
+                        matches!(row, SidebarRow::Header(other) if *other != SidebarGroup::Terminals)
+                    });
+                self.render_sidebar_group_header(group, first, has_expanded_children, cx)
                     .into_any_element()
             }
             SidebarRow::Session(session_id) => {
@@ -2274,6 +2328,9 @@ impl Waku {
             }
             SidebarRow::GitHub(project_id) => self
                 .render_sidebar_github_row(project_id, cx)
+                .into_any_element(),
+            SidebarRow::Terminal(terminal_id) => self
+                .render_sidebar_terminal_item(terminal_id, cx)
                 .into_any_element(),
             SidebarRow::ShowMore(group) => {
                 self.render_sidebar_show_more(group, cx).into_any_element()
@@ -2302,14 +2359,19 @@ impl Waku {
             .entry(group)
             .or_insert_with(|| cx.focus_handle())
             .clone();
-        let show_group_icon = matches!(group, SidebarGroup::Project(_) | SidebarGroup::Projectless);
+        let show_group_icon = matches!(
+            group,
+            SidebarGroup::Project(_) | SidebarGroup::Projectless | SidebarGroup::Terminals
+        );
         let group_icon = match group {
             SidebarGroup::Projectless => "icons/chat.svg",
+            SidebarGroup::Terminals => "icons/terminal.svg",
             _ if collapsed => "icons/folder.svg",
             _ => "icons/folder-open.svg",
         };
         let label = match group {
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
+            SidebarGroup::Terminals => tr!("sidebar.terminals"),
             SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(project_id) => self
                 .state
@@ -2320,7 +2382,10 @@ impl Waku {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("project.chat"),
         };
-        let updated_chevron = matches!(group, SidebarGroup::Date(_) | SidebarGroup::Pinned)
+        let updated_chevron = matches!(
+            group,
+            SidebarGroup::Date(_) | SidebarGroup::Pinned | SidebarGroup::Terminals
+        )
             .then(|| {
                 icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
                     .when(collapsed, |icon| {
@@ -2372,7 +2437,14 @@ impl Waku {
                         })
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
-                        .tooltip(Tooltip::text_with_action(tr!("menu.new_task"), &NewSession))
+                        .tooltip(if group == SidebarGroup::Terminals {
+                            Tooltip::text_with_action(
+                                tr!("right_panel.new_terminal"),
+                                &ToggleTerminals,
+                            )
+                        } else {
+                            Tooltip::text_with_action(tr!("menu.new_task"), &NewSession)
+                        })
                         .child(icon("icons/compose.svg", 14.0, theme.text_secondary))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -2430,24 +2502,27 @@ impl Waku {
             .when(first, |element| {
                 element.child(self.render_sidebar_header_actions(cx))
             })
-            .when(show_group_icon && has_expanded_children, |element| {
-                element.child(
-                    div()
-                        .absolute()
-                        .left(px(SIDEBAR_GROUP_GUIDE_X))
-                        .top(px(19.0))
-                        .bottom(px(-2.0))
-                        .w(px(1.0))
-                        .bg(theme.border),
-                )
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_sidebar_group(group, cx);
+            .when(
+                show_group_icon && has_expanded_children && group != SidebarGroup::Terminals,
+                |element| {
+                    element.child(
+                        div()
+                            .absolute()
+                            .left(px(SIDEBAR_GROUP_GUIDE_X))
+                            .top(px(19.0))
+                            .bottom(px(-2.0))
+                            .w(px(1.0))
+                            .bg(theme.border),
+                    )
+                },
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.toggle_sidebar_group(group, window, cx);
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "enter" | "space" => {
-                        this.toggle_sidebar_group(group, cx);
+                        this.toggle_sidebar_group(group, window, cx);
                         cx.stop_propagation();
                     }
                     "left" if !collapsed => {
@@ -2455,7 +2530,7 @@ impl Waku {
                         cx.stop_propagation();
                     }
                     "right" if collapsed => {
-                        this.set_sidebar_group_collapsed(group, false, cx);
+                        this.toggle_sidebar_group(group, window, cx);
                         cx.stop_propagation();
                     }
                     _ => {}
@@ -2478,6 +2553,18 @@ impl Waku {
         match group {
             SidebarGroup::Project(project_id) => self.select_project(project_id, cx),
             SidebarGroup::Projectless => self.create_projectless_session(cx),
+            // The Terminals group's compose button opens a global terminal
+            // in the home directory, expanding the group so the new row —
+            // and the selection — is visible.
+            SidebarGroup::Terminals => {
+                self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+                if let Some(home) = dirs::home_dir()
+                    && let Some(terminal_id) = self.create_terminal(home, None, cx)
+                {
+                    self.select_terminal(terminal_id, window, cx);
+                }
+                return;
+            }
             SidebarGroup::Pinned | SidebarGroup::Date(_) => return,
         }
         let focus = self.composer_focus(cx);
@@ -2546,7 +2633,20 @@ impl Waku {
         cx.notify();
     }
 
-    fn toggle_sidebar_group(&mut self, group: SidebarGroup, cx: &mut Context<Self>) {
+    fn toggle_sidebar_group(
+        &mut self,
+        group: SidebarGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Opening the Terminals group is a selection, not just disclosure:
+        // the last-shown terminal takes the main area.
+        if group == SidebarGroup::Terminals
+            && self.sidebar_collapsed_groups.contains(&group)
+        {
+            self.expand_terminals_group(window, cx);
+            return;
+        }
         let collapsed = !self.sidebar_collapsed_groups.contains(&group);
         self.set_sidebar_group_collapsed(group, collapsed, cx);
     }
@@ -2571,7 +2671,7 @@ impl Waku {
         }
     }
 
-    fn set_sidebar_group_collapsed(
+    pub(super) fn set_sidebar_group_collapsed(
         &mut self,
         group: SidebarGroup,
         collapsed: bool,
@@ -3242,9 +3342,17 @@ impl Waku {
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
         let session = self.selected_session();
-        let title = session
-            .map(localized_session_title)
-            .unwrap_or_else(|| tr!("session.new_task"));
+        let title = if let Some(terminal_id) = self.selected_terminal {
+            self.right_panel_terminals
+                .get(&terminal_id)
+                .map(|terminal| single_line_label(terminal.read(cx).title()))
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| tr!("right_panel.terminal"))
+        } else {
+            session
+                .map(localized_session_title)
+                .unwrap_or_else(|| tr!("session.new_task"))
+        };
         let agent_preset_label = session
             .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
             .and_then(|session| self.agent_preset_label_for_session(session));

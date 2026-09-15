@@ -160,6 +160,12 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
+        // The browser claims the main area — a selected terminal gives way
+        // and the Terminals group folds, same as picking a chat does.
+        self.selected_terminal = None;
+        if self.sidebar_collapsed_groups.insert(SidebarGroup::Terminals) {
+            self.sidebar_rows_fingerprint.set(None);
+        }
         self.state.selected_project = Some(project_id);
         let browser = self
             .github_browsers

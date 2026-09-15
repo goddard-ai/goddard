@@ -107,6 +107,7 @@ actions!(
         CancelTurn,
         ArchiveSession,
         ToggleSessionPin,
+        ToggleTerminals,
         CopySelection,
         CopyWorkingDirectory,
         AddToChat,
@@ -390,6 +391,11 @@ pub fn run() {
                 // meaning everywhere else.
                 KeyBinding::new("secondary-l", AddToChat, Some("Transcript")),
                 KeyBinding::new("secondary-j", FocusTerminal, None),
+                // ⌘T is the Terminals group chord: it expands the sidebar
+                // section (selecting the last-shown terminal, or spawning one
+                // in ~ when none exists), and once a full-width terminal is
+                // active it opens another in the same directory.
+                KeyBinding::new("secondary-t", ToggleTerminals, None),
                 KeyBinding::new("secondary-/", ToggleModelPicker, None),
                 KeyBinding::new("secondary-shift-b", ToggleBranchPicker, None),
                 KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),

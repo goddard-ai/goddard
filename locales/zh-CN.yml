@@ -350,6 +350,7 @@ sidebar.ordering_last_updated: 最近更新
 sidebar.ordering_last_created: 最近创建
 sidebar.show_more: 显示更多
 sidebar.pinned: 已置顶
+sidebar.terminals: 终端
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周
 sidebar.this_month: 本月
@@ -900,6 +901,7 @@ session.worktree_recreated: 工作树缺失，已重新创建——未提交的�
 session.moved_to_worktree: "已移动到工作树 %{name}"
 right_panel.browser: 浏览器
 right_panel.terminal: 终端
+right_panel.new_terminal: 新建终端
 right_panel.files: 文件
 right_panel.diff: 审阅
 right_panel.toggle: 显示或隐藏右侧面板

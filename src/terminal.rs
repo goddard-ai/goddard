@@ -894,6 +894,16 @@ impl TerminalView {
             .unwrap_or_default()
     }
 
+    /// The surface's current title — the shell's OSC-set name while the
+    /// program running in it controls it, the localized default otherwise.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn panel_width(&self) -> f32 {
+        self.panel_width
+    }
+
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
     }

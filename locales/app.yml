@@ -722,6 +722,8 @@ sidebar.show_more:
   en: Show more
 sidebar.pinned:
   en: Pinned
+sidebar.terminals:
+  en: Terminals
 sidebar.yesterday:
   en: Yesterday
 sidebar.this_week:
@@ -1839,6 +1841,8 @@ right_panel.browser:
   en: Browser
 right_panel.terminal:
   en: Terminal
+right_panel.new_terminal:
+  en: New terminal
 right_panel.files:
   en: Files
 right_panel.diff:

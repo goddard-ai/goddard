@@ -312,6 +312,7 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::adjust_font_size_action))
                 .on_action(cx.listener(Self::open_localhost_url_action))
                 .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
+                .on_action(cx.listener(Self::toggle_terminals_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
@@ -403,6 +404,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::adjust_font_size_action))
             .on_action(cx.listener(Self::open_localhost_url_action))
             .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
+            .on_action(cx.listener(Self::toggle_terminals_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
@@ -456,15 +458,31 @@ impl Render for Waku {
                     // composer attachments. The group marks the column's
                     // hitbox so the composer card can light itself up as the
                     // landing zone wherever the drag is held.
-                    .when(self.selected_project().is_some(), |element| {
-                        element
-                            .group(composer::SESSION_DROP_GROUP)
-                            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                                this.stage_dropped_files(paths, window, cx);
-                            }))
-                    })
+                    .when(
+                        self.selected_project().is_some() && self.selected_terminal.is_none(),
+                        |element| {
+                            element
+                                .group(composer::SESSION_DROP_GROUP)
+                                .on_drop(cx.listener(
+                                    |this, paths: &ExternalPaths, window, cx| {
+                                        this.stage_dropped_files(paths, window, cx);
+                                    },
+                                ))
+                        },
+                    )
                     .child(self.render_header(window, cx))
-                    .child(if let Some(project_id) = github_project {
+                    // A selected terminal takes the column in place of the
+                    // transcript, the GitHub browser, or the new-task prompt.
+                    .child(if let Some(terminal_id) = self
+                        .selected_terminal
+                        .filter(|id| self.right_panel_terminals.contains_key(id))
+                    {
+                        self.render_main_terminal(
+                            terminal_id,
+                            self.chat_viewport_width(window),
+                            cx,
+                        )
+                    } else if let Some(project_id) = github_project {
                         self.render_github_browser(project_id, window, cx)
                     } else if empty {
                         self.render_empty_state(cx).into_any_element()
@@ -475,12 +493,15 @@ impl Render for Waku {
                             .into_any_element()
                     })
                     .children(permission)
-                    .when(self.selected_project().is_some(), |element| {
-                        element
-                            .children(self.render_queued_messages(cx))
-                            .child(self.render_composer(window, cx))
-                            .child(self.render_workspace_footer(cx))
-                    })
+                    .when(
+                        self.selected_project().is_some() && self.selected_terminal.is_none(),
+                        |element| {
+                            element
+                                .children(self.render_queued_messages(cx))
+                                .child(self.render_composer(window, cx))
+                                .child(self.render_workspace_footer(cx))
+                        },
+                    )
                     .relative()
                     .children(toast)
                     .when(self.sidebar_visible, |element| {

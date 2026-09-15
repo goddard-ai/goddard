@@ -81,7 +81,8 @@ use crate::{
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
     ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder, ToggleFindCaseSensitive,
     ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
-    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleUsagePanel, ToggleWorkspace,
+    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
+    ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1653,6 +1654,17 @@ pub struct Waku {
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
     right_panel_terminals: HashMap<Uuid, Entity<TerminalView>>,
+    /// Every terminal the sidebar's Terminals group lists — session-scoped
+    /// and global alike — keyed by the terminal surface's id.
+    /// `terminal_order` carries the flat list's creation order.
+    terminal_records: HashMap<Uuid, TerminalRecord>,
+    terminal_order: Vec<Uuid>,
+    /// The terminal filling the main area. Set only while no session is
+    /// selected; activating a chat clears it and folds the group.
+    selected_terminal: Option<Uuid>,
+    /// The terminal last shown in the main area. Survives the group's
+    /// collapse so re-expanding lands on it again.
+    last_visible_terminal: Option<Uuid>,
     /// The custom command a terminal surface was opened for, keyed by the
     /// surface's terminal id. Absent for plain shell terminals; the entry
     /// tells `ensure_right_panel_terminal` how to spawn the PTY and carries
@@ -1965,6 +1977,7 @@ mod sidebar;
 mod skills_page;
 mod streaming;
 mod task_switcher;
+mod terminals;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
@@ -1991,6 +2004,7 @@ pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
 pub use skills_page::init as init_skills_keys;
 use streaming::*;
+use terminals::TerminalRecord;
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
 
@@ -3582,7 +3596,9 @@ impl Waku {
                 session_navigation,
                 session_rename: None,
                 session_rename_input,
-                sidebar_collapsed_groups: HashSet::new(),
+                // The Terminals group starts folded every launch — its rows
+                // are opt-in, unlike the session history below them.
+                sidebar_collapsed_groups: HashSet::from([SidebarGroup::Terminals]),
                 sidebar_shortcut_hints: false,
                 sidebar_shortcut_hint_generation: 0,
                 sidebar_shortcut_hint_chord_used: false,
@@ -3653,6 +3669,10 @@ impl Waku {
                 working_trees: QueryCache::new(MAX_CACHED_WORKSPACES),
                 workspace_queries_stale: false,
                 right_panel_terminals: HashMap::new(),
+                terminal_records: HashMap::new(),
+                terminal_order: Vec::new(),
+                selected_terminal: None,
+                last_visible_terminal: None,
                 right_panel_terminal_commands: HashMap::new(),
                 custom_command_runs: HashMap::new(),
                 provider_setup_terminals: HashMap::new(),

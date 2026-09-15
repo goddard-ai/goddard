@@ -101,6 +101,14 @@ impl Waku {
         {
             self.unarchive_session(session_id, false, cx);
         }
+        // Selecting a chat folds the Terminals group; the terminal keeps its
+        // last-visible memory for the next expand.
+        if self
+            .sidebar_collapsed_groups
+            .insert(SidebarGroup::Terminals)
+        {
+            self.sidebar_rows_fingerprint.set(None);
+        }
         self.reveal_sidebar_session(session_id);
         let needs_hydration = self
             .state
@@ -245,6 +253,9 @@ impl Waku {
             self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
+        // Session selection and terminal selection are mutually exclusive —
+        // the transcript takes the main area back from the terminal.
+        self.selected_terminal = None;
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
@@ -321,7 +332,7 @@ impl Waku {
 
     /// Park the departing session's scroll position for back/forward history.
     /// Runs while `selected_session` still points at the session being left.
-    fn store_transcript_scroll_position(&mut self) {
+    pub(super) fn store_transcript_scroll_position(&mut self) {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
@@ -856,9 +867,30 @@ impl Waku {
     pub(super) fn toggle_session_pin_action(
         &mut self,
         _: &ToggleSessionPin,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The chord pins whichever surface it plausibly means: the
+        // full-width terminal while one owns the main area, the right-panel
+        // terminal while it holds focus, the selected task otherwise.
+        if let Some(terminal_id) = self.selected_terminal {
+            self.toggle_terminal_pin(terminal_id, cx);
+            return;
+        }
+        let focused_terminal = self
+            .active_right_panel_surface()
+            .and_then(RightPanelSurface::terminal_id)
+            .filter(|terminal_id| {
+                self.right_panel_terminals
+                    .get(terminal_id)
+                    .is_some_and(|terminal| {
+                        terminal.read(cx).focus_handle(cx).is_focused(window)
+                    })
+            });
+        if let Some(terminal_id) = focused_terminal {
+            self.toggle_terminal_pin(terminal_id, cx);
+            return;
+        }
         if let Some(session_id) = self.state.selected_session {
             self.toggle_session_pin(session_id, cx);
         }
@@ -1292,8 +1324,12 @@ impl Waku {
             return;
         };
         // The composer only exists once a project is on screen; settings
-        // replaces the workspace root wholesale.
-        if self.selected_project().is_none() || self.settings_page.is_some() {
+        // replaces the workspace root wholesale, and a selected terminal —
+        // not the composer — owns the main area's keystrokes.
+        if self.selected_project().is_none()
+            || self.settings_page.is_some()
+            || self.selected_terminal.is_some()
+        {
             return;
         }
         // An overlay owns the keyboard while it is up — including one whose

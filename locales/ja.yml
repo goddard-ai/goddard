@@ -362,6 +362,7 @@ sidebar.ordering_last_updated: 最終更新
 sidebar.ordering_last_created: 作成日
 sidebar.show_more: もっと見る
 sidebar.pinned: ピン留め
+sidebar.terminals: ターミナル
 sidebar.yesterday: 昨日
 sidebar.this_week: 今週
 sidebar.this_month: 今月
@@ -935,6 +936,7 @@ session.moved_to_worktree: "ワークツリー %{name} へ移動しました"
 
 right_panel.browser: ブラウザ
 right_panel.terminal: ターミナル
+right_panel.new_terminal: 新しいターミナル
 right_panel.files: ファイル
 right_panel.diff: レビュー
 right_panel.toggle: 右パネルの表示を切り替える
