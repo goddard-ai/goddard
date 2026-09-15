@@ -883,25 +883,15 @@ impl Waku {
         let picker_enabled = session.is_some_and(|session| session.can_choose_model(provider));
 
         if !picker_enabled {
-            return div()
-                .h(px(24.0))
-                .px(px(7.0))
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .child(provider_mark(
+            return MenuChip::new("composer-provider-model")
+                .provider(
                     &theme,
                     provider,
-                    10.5,
                     provider_color(&theme, provider).opacity(0.9),
-                ))
-                .child(
-                    div()
-                        .max_w(px(210.0))
-                        .truncate()
-                        .text_color(theme.text_secondary)
-                        .child(SharedString::from(selected_model_name)),
                 )
+                .label(selected_model_name)
+                .caret(false)
+                .disabled(true)
                 .into_any_element();
         }
 
