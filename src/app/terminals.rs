@@ -85,9 +85,12 @@ impl Waku {
             match event {
                 // The command's startup line ends in `&& exit`, so the
                 // shell only goes away on its own when the script
-                // succeeded — the exit event is the close signal.
+                // succeeded — the exit event is the close signal. A
+                // terminal filling the main area has no tab strip to
+                // retire into, so its shell exiting (ctrl+d, `exit`, a
+                // signal) closes it too.
                 TerminalViewEvent::Exited => {
-                    if close_on_exit {
+                    if close_on_exit || this.selected_terminal == Some(terminal_id) {
                         this.close_terminal_view_surface(&view, cx);
                     }
                 }
