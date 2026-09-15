@@ -2863,10 +2863,10 @@ impl Waku {
             );
         }
         Some(
-            div().flex_none().px(px(20.0)).child(
+            div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
                 div()
                     .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
                     .mx_auto()
                     .px(px(14.0))
                     .child(
@@ -2957,10 +2957,10 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
-        div().flex_none().px(px(20.0)).child(
+        div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
             div()
                 .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
+                .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
                 .mx_auto()
                 .rounded(px(16.0))
                 .border(hairline())
@@ -4209,13 +4209,13 @@ impl Waku {
         let usage_meter = self.render_usage_meter(cx);
         div()
             .flex_none()
-            .px(px(20.0))
+            .px(px(20.0 - COMPOSER_OVERHANG))
             .pb(px(8.0))
             .pt(px(4.0))
             .child(
                 div()
                     .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
                     .mx_auto()
                     .text_size(sp(12.5))
                     .line_height(sp(14.0))

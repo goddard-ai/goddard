@@ -91,6 +91,9 @@ const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 8.0;
 const CONTENT_MAX_WIDTH: f32 = 720.0;
+/// The composer assembly — queued messages, input card, and workspace footer —
+/// overhangs the scrollable transcript column by this much on each side.
+const COMPOSER_OVERHANG: f32 = 12.0;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
