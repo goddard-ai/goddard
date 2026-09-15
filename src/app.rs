@@ -1424,6 +1424,8 @@ pub struct Waku {
     /// background inspection that decides whether it opens.
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
+    /// The keyboard-shortcut cheatsheet opened from the sidebar footer.
+    shortcuts_dialog: Option<shortcuts_dialog::ShortcutsDialogState>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
     goal_dialog_request: Option<goal_dialog::GoalDialogRequest>,
     /// Goal operations accepted before the session's runtime exists. Goals
@@ -2015,6 +2017,7 @@ mod run_script;
 mod runtime;
 mod sessions;
 mod settings;
+mod shortcuts_dialog;
 mod sidebar;
 mod skills_page;
 mod streaming;
@@ -2044,6 +2047,7 @@ pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
+pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow, format_time_ago, mix_str};
 pub use skills_page::init as init_skills_keys;
@@ -3621,6 +3625,7 @@ impl Waku {
                 commit_dialog: None,
                 archive_dialog: None,
                 archive_preview_pending: HashSet::new(),
+                shortcuts_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,
                 pending_goal_operations: HashMap::new(),

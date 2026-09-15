@@ -2429,6 +2429,7 @@ impl Waku {
             || self.project_switcher.is_open()
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
+            || self.shortcuts_dialog.is_some()
             || self.image_preview.is_some()
             || self.composer.read(cx).context_menu_open(cx)
             || self

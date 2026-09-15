@@ -1382,6 +1382,43 @@ impl Waku {
                         this.open_settings_action(&OpenSettings, window, cx);
                     })),
             )
+            .child(
+                div()
+                    .id("open-shortcuts")
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .w(px(26.0))
+                    .h(px(26.0))
+                    .flex_none()
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .tooltip(Tooltip::text(tr!("shortcuts.title")))
+                    .child(icon("icons/keyboard.svg", 14.0, theme.text_tertiary))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let focus = this.open_shortcuts_dialog(cx);
+                        // Like the other deferred surfaces, focus lands two
+                        // frames after the modal joins the dispatch tree.
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                        });
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            let focus = this.open_shortcuts_dialog(cx);
+                            window.on_next_frame(move |window, _| {
+                                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                            });
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
             .child(div().flex_1())
             .when_some(self.render_updater_button(cx), |footer, button| {
                 footer.child(button)

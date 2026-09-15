@@ -295,6 +295,7 @@ pub fn run() {
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);
+            crate::app::init_shortcuts_dialog_keys(cx);
             crate::theme::init(cx);
             crate::platform::init_reduce_motion(cx);
 
@@ -316,298 +317,7 @@ pub fn run() {
             cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
             cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
 
-            cx.bind_keys([
-                // `secondary` is Command on macOS and Control elsewhere.
-                KeyBinding::new("secondary-q", Quit, None),
-                KeyBinding::new("secondary-w", CloseWindow, None),
-                KeyBinding::new("secondary-n", NewSession, None),
-                KeyBinding::new("secondary-o", NewProject, None),
-                KeyBinding::new("secondary-,", OpenSettings, None),
-                KeyBinding::new("secondary-b", ToggleSidebar, None),
-                KeyBinding::new("secondary-alt-b", ToggleRightPanel, None),
-                // ⌘K opens the palette even in the terminal; ⌘⇧K clears the
-                // scrollback there instead — hand-rolled in the terminal's
-                // `on_key_down`. Elsewhere Ctrl+K is a shell shortcut
-                // (readline kill-line), so it keeps passing through.
-                KeyBinding::new(
-                    "secondary-k",
-                    ToggleCommandPalette,
-                    if cfg!(target_os = "macos") {
-                        None
-                    } else {
-                        Some("!Terminal")
-                    },
-                ),
-                KeyBinding::new("secondary-p", ToggleFileFinder, None),
-                KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
-                KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
-                KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
-                // ⌘1–⌘9 jump to the nth visible task in the sidebar; holding
-                // ⌘ shows the same numbers as chips on the rows.
-                KeyBinding::new("secondary-1", SelectSidebarSession { index: 0 }, None),
-                KeyBinding::new("secondary-2", SelectSidebarSession { index: 1 }, None),
-                KeyBinding::new("secondary-3", SelectSidebarSession { index: 2 }, None),
-                KeyBinding::new("secondary-4", SelectSidebarSession { index: 3 }, None),
-                KeyBinding::new("secondary-5", SelectSidebarSession { index: 4 }, None),
-                KeyBinding::new("secondary-6", SelectSidebarSession { index: 5 }, None),
-                KeyBinding::new("secondary-7", SelectSidebarSession { index: 6 }, None),
-                KeyBinding::new("secondary-8", SelectSidebarSession { index: 7 }, None),
-                KeyBinding::new("secondary-9", SelectSidebarSession { index: 8 }, None),
-                // ⌘0 zooms out to Big Picture mode: the sessions most worth a
-                // glance, side by side, with the composer docked underneath.
-                KeyBinding::new("secondary-0", ToggleBigPicture, None),
-                // Step between turn prompts — the navigation rail's
-                // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
-                // pair works with the composer focused; in the terminal the
-                // keys pass through to the shell.
-                KeyBinding::new(
-                    "secondary-alt-up",
-                    GoToPreviousTurn,
-                    Some("Waku && !Terminal"),
-                ),
-                KeyBinding::new(
-                    "secondary-alt-down",
-                    GoToNextTurn,
-                    Some("Waku && !Terminal"),
-                ),
-                // Same spelling VS Code gives its terminal toggle; unclaimed
-                // in text fields, so it fires with the composer focused too.
-                // ⌘D reads as "done" and is the left-hand-only alternative.
-                KeyBinding::new("ctrl-`", GoToLatestUnseenCompletion, Some("Waku")),
-                KeyBinding::new("secondary-d", GoToLatestUnseenCompletion, Some("Waku")),
-                // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
-                // jumps to the next one waiting.
-                KeyBinding::new(
-                    "secondary-shift-d",
-                    MarkUnreadAndGoToNextUnseen,
-                    Some("Waku"),
-                ),
-                KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
-                KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
-                KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),
-                KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Waku")),
-                KeyBinding::new("down", SwitchTaskForward, Some("TaskSwitcher")),
-                KeyBinding::new("right", SwitchTaskForward, Some("TaskSwitcher")),
-                KeyBinding::new("up", SwitchTaskBackward, Some("TaskSwitcher")),
-                KeyBinding::new("left", SwitchTaskBackward, Some("TaskSwitcher")),
-                KeyBinding::new("home", SelectFirstTask, Some("TaskSwitcher")),
-                KeyBinding::new("end", SelectLastTask, Some("TaskSwitcher")),
-                KeyBinding::new("enter", ConfirmTaskSwitch, Some("TaskSwitcher")),
-                KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
-                // The project switcher opens from a New Task draft and
-                // commits when the platform modifier is released, the same
-                // gesture as ctrl-tab above. Registered after New Session at
-                // the same depth, the chord wins the tie and only falls
-                // through to creating a task when no draft can take it.
-                KeyBinding::new("secondary-n", SwitchProjectForward, None),
-                KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
-                KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
-                KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
-                // Re-bound on the overlay context so the chord cancels when
-                // the switcher's focus path does not pass "Waku" (the
-                // settings branch renders the layer as its sibling).
-                KeyBinding::new(
-                    "secondary-escape",
-                    CancelProjectSwitch,
-                    Some("ProjectSwitcher"),
-                ),
-                KeyBinding::new(
-                    "secondary-shift-escape",
-                    CancelProjectSwitch,
-                    Some("ProjectSwitcher"),
-                ),
-                KeyBinding::new("down", SwitchProjectForward, Some("ProjectSwitcher")),
-                KeyBinding::new("right", SwitchProjectForward, Some("ProjectSwitcher")),
-                KeyBinding::new("up", SwitchProjectBackward, Some("ProjectSwitcher")),
-                KeyBinding::new("left", SwitchProjectBackward, Some("ProjectSwitcher")),
-                KeyBinding::new("home", SelectFirstProject, Some("ProjectSwitcher")),
-                KeyBinding::new("end", SelectLastProject, Some("ProjectSwitcher")),
-                KeyBinding::new("enter", ConfirmProjectSwitch, Some("ProjectSwitcher")),
-                KeyBinding::new("escape", CancelProjectSwitch, Some("ProjectSwitcher")),
-                KeyBinding::new("secondary-l", FocusComposer, None),
-                // With the transcript focused — which a text selection
-                // guarantees — ⌘L is the "Add to chat" pill's shortcut. The
-                // action falls back to FocusComposer when no annotatable
-                // selection is on screen, so the chord keeps its global
-                // meaning everywhere else.
-                KeyBinding::new("secondary-l", AddToChat, Some("Transcript")),
-                KeyBinding::new("secondary-j", FocusTerminal, None),
-                // ⌘R opens the run-a-script picker everywhere except the
-                // browser surface, whose deeper context keeps it as reload.
-                KeyBinding::new("secondary-r", RunProjectScript, None),
-                // ⌘T is the Terminals group chord: it expands the sidebar
-                // section (selecting the last-shown terminal, or spawning one
-                // in ~ when none exists), and once a full-width terminal is
-                // active it opens another in the same directory.
-                KeyBinding::new("secondary-t", ToggleTerminals, None),
-                KeyBinding::new("secondary-/", ToggleModelPicker, None),
-                KeyBinding::new("secondary-shift-b", ToggleBranchPicker, None),
-                KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
-                KeyBinding::new("secondary-shift-t", ToggleWorkspace, None),
-                KeyBinding::new("secondary-u", ToggleUsagePanel, None),
-                KeyBinding::new("secondary-s", SaveFile, None),
-                // Font-size zoom follows focus: in the terminal it sizes the
-                // terminal, on a code surface the code setting, and anywhere
-                // else the interface. `secondary-=` covers ⌘= while
-                // `secondary-shift-=` catches the ⌘+ spelling on layouts
-                // where + is shift-=.
-                KeyBinding::new(
-                    "secondary-=",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Terminal,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("Terminal"),
-                ),
-                KeyBinding::new(
-                    "secondary-shift-=",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Terminal,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("Terminal"),
-                ),
-                KeyBinding::new(
-                    "secondary--",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Terminal,
-                        direction: FontSizeDirection::Decrease,
-                    },
-                    Some("Terminal"),
-                ),
-                KeyBinding::new(
-                    "secondary-=",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Code,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("ReviewDiff || FileEditorPane"),
-                ),
-                KeyBinding::new(
-                    "secondary-shift-=",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Code,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("ReviewDiff || FileEditorPane"),
-                ),
-                KeyBinding::new(
-                    "secondary--",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Code,
-                        direction: FontSizeDirection::Decrease,
-                    },
-                    Some("ReviewDiff || FileEditorPane"),
-                ),
-                // The browser webview keeps ⌘± for its own page zoom.
-                KeyBinding::new(
-                    "secondary-=",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Ui,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("!Browser"),
-                ),
-                KeyBinding::new(
-                    "secondary-shift-=",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Ui,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("!Browser"),
-                ),
-                KeyBinding::new(
-                    "secondary--",
-                    AdjustFontSize {
-                        target: FontSizeTarget::Ui,
-                        direction: FontSizeDirection::Decrease,
-                    },
-                    Some("!Browser"),
-                ),
-                // Escape is real input for a focused terminal — vim, fzf, and
-                // agent TUIs all need it — so bare Escape is excluded from
-                // CancelTurn there. ⌥Escape remains the one-press stop and
-                // works with the terminal focused, skipping the confirmation
-                // a bare Escape requires.
-                KeyBinding::new(
-                    "escape",
-                    CancelTurn { immediate: false },
-                    Some("Waku && !Terminal"),
-                ),
-                KeyBinding::new("alt-escape", CancelTurn { immediate: true }, Some("Waku")),
-                KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Waku")),
-                KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Waku")),
-                KeyBinding::new("secondary-c", CopySelection, Some("Waku")),
-                KeyBinding::new("secondary-shift-c", CopyWorkingDirectory, Some("Waku")),
-                // Find and replace in the right panel's file editor, on the
-                // conventional VS Code bindings. The primary shortcut + G cycles matches from
-                // the editor without moving focus to the bar.
-                KeyBinding::new("secondary-f", OpenFind, Some("Waku")),
-                // The text input's macOS-style Ctrl-F caret binding is more
-                // specific than Waku's root context. Reassert the platform
-                // primary shortcut for inputs inside this window so Ctrl-F
-                // remains find-in-page on Linux/Windows while Cmd-F keeps the
-                // native behavior on macOS.
-                KeyBinding::new("secondary-f", OpenFind, Some("Waku > TextInput")),
-                KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Waku")),
-                KeyBinding::new("secondary-g", FindNext, Some("Waku")),
-                KeyBinding::new("secondary-shift-g", FindPrevious, Some("Waku")),
-                // Scoped to the editor pane: escape closes the bar there and
-                // falls through to CancelTurn anywhere else.
-                KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
-                KeyBinding::new("escape", CloseFind, Some("FindBar")),
-                // Between FileEditorPane and Waku: escape in a maximized
-                // panel tab exits the mode once no find bar claims it,
-                // instead of reaching CancelTurn. A terminal tab keeps the
-                // keystroke for the pty even while maximized.
-                KeyBinding::new(
-                    "escape",
-                    ExitPanelFullscreen,
-                    Some("PanelFullscreen && !Terminal"),
-                ),
-                KeyBinding::new(
-                    "secondary-alt-c",
-                    ToggleFindCaseSensitive,
-                    Some("FileEditorPane"),
-                ),
-                KeyBinding::new(
-                    "secondary-alt-w",
-                    ToggleFindWholeWord,
-                    Some("FileEditorPane"),
-                ),
-                KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
-                KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
-                KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
-                // Browser surface. Deeper than "Waku", so while focus is on the
-                // page or its address bar the browser reads the platform's
-                // conventional navigation shortcuts; the same keys elsewhere
-                // keep their app meanings. The clipboard trio is rebound
-                // because GPUI's window view claims key equivalents before
-                // AppKit can walk the responder chain into the webview.
-                KeyBinding::new("secondary-l", FocusBrowserAddress, Some("Browser")),
-                KeyBinding::new("secondary-r", BrowserReload, Some("Browser")),
-                KeyBinding::new("secondary-shift-r", BrowserHardReload, Some("Browser")),
-                KeyBinding::new("secondary-[", BrowserBack, Some("Browser")),
-                KeyBinding::new("secondary-]", BrowserForward, Some("Browser")),
-                KeyBinding::new("escape", BrowserStop, Some("Browser")),
-                KeyBinding::new("secondary-alt-i", BrowserDevtools, Some("Browser")),
-                KeyBinding::new("secondary-c", WebviewCopy, Some("Browser")),
-                KeyBinding::new("secondary-x", WebviewCut, Some("Browser")),
-                KeyBinding::new("secondary-v", WebviewPaste, Some("Browser")),
-                KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
-                KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
-                // A terminal's detected localhost URL: opens externally;
-                // adding shift opens it in a built-in browser tab instead.
-                KeyBinding::new("secondary-alt-o", OpenLocalhostUrl, None),
-                KeyBinding::new("secondary-alt-shift-o", OpenLocalhostUrlInTab, None),
-            ]);
-
-            #[cfg(target_os = "macos")]
-            cx.bind_keys([
-                KeyBinding::new("cmd-h", Hide, None),
-                KeyBinding::new("alt-cmd-h", HideOthers, None),
-            ]);
-
+            bind_keys(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
 
             // Unlike AppKit, Linux has no Dock activation path that can
@@ -706,6 +416,302 @@ pub fn run() {
             // relaunched build has successfully opened its main window.
             crate::updater::signal_relaunch_ready();
         });
+}
+
+/// The window-level key bindings, registered once at startup. Kept callable
+/// so tests can populate a keymap identical to the app's.
+pub(crate) fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        // `secondary` is Command on macOS and Control elsewhere.
+        KeyBinding::new("secondary-q", Quit, None),
+        KeyBinding::new("secondary-w", CloseWindow, None),
+        KeyBinding::new("secondary-n", NewSession, None),
+        KeyBinding::new("secondary-o", NewProject, None),
+        KeyBinding::new("secondary-,", OpenSettings, None),
+        KeyBinding::new("secondary-b", ToggleSidebar, None),
+        KeyBinding::new("secondary-alt-b", ToggleRightPanel, None),
+        // ⌘K opens the palette even in the terminal; ⌘⇧K clears the
+        // scrollback there instead — hand-rolled in the terminal's
+        // `on_key_down`. Elsewhere Ctrl+K is a shell shortcut
+        // (readline kill-line), so it keeps passing through.
+        KeyBinding::new(
+            "secondary-k",
+            ToggleCommandPalette,
+            if cfg!(target_os = "macos") {
+                None
+            } else {
+                Some("!Terminal")
+            },
+        ),
+        KeyBinding::new("secondary-p", ToggleFileFinder, None),
+        KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
+        KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
+        KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
+        // ⌘1–⌘9 jump to the nth visible task in the sidebar; holding
+        // ⌘ shows the same numbers as chips on the rows.
+        KeyBinding::new("secondary-1", SelectSidebarSession { index: 0 }, None),
+        KeyBinding::new("secondary-2", SelectSidebarSession { index: 1 }, None),
+        KeyBinding::new("secondary-3", SelectSidebarSession { index: 2 }, None),
+        KeyBinding::new("secondary-4", SelectSidebarSession { index: 3 }, None),
+        KeyBinding::new("secondary-5", SelectSidebarSession { index: 4 }, None),
+        KeyBinding::new("secondary-6", SelectSidebarSession { index: 5 }, None),
+        KeyBinding::new("secondary-7", SelectSidebarSession { index: 6 }, None),
+        KeyBinding::new("secondary-8", SelectSidebarSession { index: 7 }, None),
+        KeyBinding::new("secondary-9", SelectSidebarSession { index: 8 }, None),
+        // ⌘0 zooms out to Big Picture mode: the sessions most worth a
+        // glance, side by side, with the composer docked underneath.
+        KeyBinding::new("secondary-0", ToggleBigPicture, None),
+        // Step between turn prompts — the navigation rail's
+        // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
+        // pair works with the composer focused; in the terminal the
+        // keys pass through to the shell.
+        KeyBinding::new(
+            "secondary-alt-up",
+            GoToPreviousTurn,
+            Some("Waku && !Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-down",
+            GoToNextTurn,
+            Some("Waku && !Terminal"),
+        ),
+        // Same spelling VS Code gives its terminal toggle; unclaimed
+        // in text fields, so it fires with the composer focused too.
+        // ⌘D reads as "done" and is the left-hand-only alternative.
+        KeyBinding::new("ctrl-`", GoToLatestUnseenCompletion, Some("Waku")),
+        KeyBinding::new("secondary-d", GoToLatestUnseenCompletion, Some("Waku")),
+        // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
+        // jumps to the next one waiting.
+        KeyBinding::new(
+            "secondary-shift-d",
+            MarkUnreadAndGoToNextUnseen,
+            Some("Waku"),
+        ),
+        KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
+        KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
+        KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),
+        KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Waku")),
+        KeyBinding::new("down", SwitchTaskForward, Some("TaskSwitcher")),
+        KeyBinding::new("right", SwitchTaskForward, Some("TaskSwitcher")),
+        KeyBinding::new("up", SwitchTaskBackward, Some("TaskSwitcher")),
+        KeyBinding::new("left", SwitchTaskBackward, Some("TaskSwitcher")),
+        KeyBinding::new("home", SelectFirstTask, Some("TaskSwitcher")),
+        KeyBinding::new("end", SelectLastTask, Some("TaskSwitcher")),
+        KeyBinding::new("enter", ConfirmTaskSwitch, Some("TaskSwitcher")),
+        KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
+        // The project switcher opens from a New Task draft and
+        // commits when the platform modifier is released, the same
+        // gesture as ctrl-tab above. Registered after New Session at
+        // the same depth, the chord wins the tie and only falls
+        // through to creating a task when no draft can take it.
+        KeyBinding::new("secondary-n", SwitchProjectForward, None),
+        KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
+        KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
+        KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
+        // Re-bound on the overlay context so the chord cancels when
+        // the switcher's focus path does not pass "Waku" (the
+        // settings branch renders the layer as its sibling).
+        KeyBinding::new(
+            "secondary-escape",
+            CancelProjectSwitch,
+            Some("ProjectSwitcher"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-escape",
+            CancelProjectSwitch,
+            Some("ProjectSwitcher"),
+        ),
+        KeyBinding::new("down", SwitchProjectForward, Some("ProjectSwitcher")),
+        KeyBinding::new("right", SwitchProjectForward, Some("ProjectSwitcher")),
+        KeyBinding::new("up", SwitchProjectBackward, Some("ProjectSwitcher")),
+        KeyBinding::new("left", SwitchProjectBackward, Some("ProjectSwitcher")),
+        KeyBinding::new("home", SelectFirstProject, Some("ProjectSwitcher")),
+        KeyBinding::new("end", SelectLastProject, Some("ProjectSwitcher")),
+        KeyBinding::new("enter", ConfirmProjectSwitch, Some("ProjectSwitcher")),
+        KeyBinding::new("escape", CancelProjectSwitch, Some("ProjectSwitcher")),
+        KeyBinding::new("secondary-l", FocusComposer, None),
+        // With the transcript focused — which a text selection
+        // guarantees — ⌘L is the "Add to chat" pill's shortcut. The
+        // action falls back to FocusComposer when no annotatable
+        // selection is on screen, so the chord keeps its global
+        // meaning everywhere else.
+        KeyBinding::new("secondary-l", AddToChat, Some("Transcript")),
+        KeyBinding::new("secondary-j", FocusTerminal, None),
+        // ⌘R opens the run-a-script picker everywhere except the
+        // browser surface, whose deeper context keeps it as reload.
+        KeyBinding::new("secondary-r", RunProjectScript, None),
+        // ⌘T is the Terminals group chord: it expands the sidebar
+        // section (selecting the last-shown terminal, or spawning one
+        // in ~ when none exists), and once a full-width terminal is
+        // active it opens another in the same directory.
+        KeyBinding::new("secondary-t", ToggleTerminals, None),
+        KeyBinding::new("secondary-/", ToggleModelPicker, None),
+        KeyBinding::new("secondary-shift-b", ToggleBranchPicker, None),
+        KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
+        KeyBinding::new("secondary-shift-t", ToggleWorkspace, None),
+        KeyBinding::new("secondary-u", ToggleUsagePanel, None),
+        KeyBinding::new("secondary-s", SaveFile, None),
+        // Font-size zoom follows focus: in the terminal it sizes the
+        // terminal, on a code surface the code setting, and anywhere
+        // else the interface. `secondary-=` covers ⌘= while
+        // `secondary-shift-=` catches the ⌘+ spelling on layouts
+        // where + is shift-=.
+        KeyBinding::new(
+            "secondary-=",
+            AdjustFontSize {
+                target: FontSizeTarget::Terminal,
+                direction: FontSizeDirection::Increase,
+            },
+            Some("Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-=",
+            AdjustFontSize {
+                target: FontSizeTarget::Terminal,
+                direction: FontSizeDirection::Increase,
+            },
+            Some("Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary--",
+            AdjustFontSize {
+                target: FontSizeTarget::Terminal,
+                direction: FontSizeDirection::Decrease,
+            },
+            Some("Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary-=",
+            AdjustFontSize {
+                target: FontSizeTarget::Code,
+                direction: FontSizeDirection::Increase,
+            },
+            Some("ReviewDiff || FileEditorPane"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-=",
+            AdjustFontSize {
+                target: FontSizeTarget::Code,
+                direction: FontSizeDirection::Increase,
+            },
+            Some("ReviewDiff || FileEditorPane"),
+        ),
+        KeyBinding::new(
+            "secondary--",
+            AdjustFontSize {
+                target: FontSizeTarget::Code,
+                direction: FontSizeDirection::Decrease,
+            },
+            Some("ReviewDiff || FileEditorPane"),
+        ),
+        // The browser webview keeps ⌘± for its own page zoom.
+        KeyBinding::new(
+            "secondary-=",
+            AdjustFontSize {
+                target: FontSizeTarget::Ui,
+                direction: FontSizeDirection::Increase,
+            },
+            Some("!Browser"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-=",
+            AdjustFontSize {
+                target: FontSizeTarget::Ui,
+                direction: FontSizeDirection::Increase,
+            },
+            Some("!Browser"),
+        ),
+        KeyBinding::new(
+            "secondary--",
+            AdjustFontSize {
+                target: FontSizeTarget::Ui,
+                direction: FontSizeDirection::Decrease,
+            },
+            Some("!Browser"),
+        ),
+        // Escape is real input for a focused terminal — vim, fzf, and
+        // agent TUIs all need it — so bare Escape is excluded from
+        // CancelTurn there. ⌥Escape remains the one-press stop and
+        // works with the terminal focused, skipping the confirmation
+        // a bare Escape requires.
+        KeyBinding::new(
+            "escape",
+            CancelTurn { immediate: false },
+            Some("Waku && !Terminal"),
+        ),
+        KeyBinding::new("alt-escape", CancelTurn { immediate: true }, Some("Waku")),
+        KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Waku")),
+        KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Waku")),
+        KeyBinding::new("secondary-c", CopySelection, Some("Waku")),
+        KeyBinding::new("secondary-shift-c", CopyWorkingDirectory, Some("Waku")),
+        // Find and replace in the right panel's file editor, on the
+        // conventional VS Code bindings. The primary shortcut + G cycles matches from
+        // the editor without moving focus to the bar.
+        KeyBinding::new("secondary-f", OpenFind, Some("Waku")),
+        // The text input's macOS-style Ctrl-F caret binding is more
+        // specific than Waku's root context. Reassert the platform
+        // primary shortcut for inputs inside this window so Ctrl-F
+        // remains find-in-page on Linux/Windows while Cmd-F keeps the
+        // native behavior on macOS.
+        KeyBinding::new("secondary-f", OpenFind, Some("Waku > TextInput")),
+        KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Waku")),
+        KeyBinding::new("secondary-g", FindNext, Some("Waku")),
+        KeyBinding::new("secondary-shift-g", FindPrevious, Some("Waku")),
+        // Scoped to the editor pane: escape closes the bar there and
+        // falls through to CancelTurn anywhere else.
+        KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
+        KeyBinding::new("escape", CloseFind, Some("FindBar")),
+        // Between FileEditorPane and Waku: escape in a maximized
+        // panel tab exits the mode once no find bar claims it,
+        // instead of reaching CancelTurn. A terminal tab keeps the
+        // keystroke for the pty even while maximized.
+        KeyBinding::new(
+            "escape",
+            ExitPanelFullscreen,
+            Some("PanelFullscreen && !Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-c",
+            ToggleFindCaseSensitive,
+            Some("FileEditorPane"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-w",
+            ToggleFindWholeWord,
+            Some("FileEditorPane"),
+        ),
+        KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
+        KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
+        KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
+        // Browser surface. Deeper than "Waku", so while focus is on the
+        // page or its address bar the browser reads the platform's
+        // conventional navigation shortcuts; the same keys elsewhere
+        // keep their app meanings. The clipboard trio is rebound
+        // because GPUI's window view claims key equivalents before
+        // AppKit can walk the responder chain into the webview.
+        KeyBinding::new("secondary-l", FocusBrowserAddress, Some("Browser")),
+        KeyBinding::new("secondary-r", BrowserReload, Some("Browser")),
+        KeyBinding::new("secondary-shift-r", BrowserHardReload, Some("Browser")),
+        KeyBinding::new("secondary-[", BrowserBack, Some("Browser")),
+        KeyBinding::new("secondary-]", BrowserForward, Some("Browser")),
+        KeyBinding::new("escape", BrowserStop, Some("Browser")),
+        KeyBinding::new("secondary-alt-i", BrowserDevtools, Some("Browser")),
+        KeyBinding::new("secondary-c", WebviewCopy, Some("Browser")),
+        KeyBinding::new("secondary-x", WebviewCut, Some("Browser")),
+        KeyBinding::new("secondary-v", WebviewPaste, Some("Browser")),
+        KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
+        KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
+        // A terminal's detected localhost URL: opens externally;
+        // adding shift opens it in a built-in browser tab instead.
+        KeyBinding::new("secondary-alt-o", OpenLocalhostUrl, None),
+        KeyBinding::new("secondary-alt-shift-o", OpenLocalhostUrlInTab, None),
+    ]);
+
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("cmd-h", Hide, None),
+        KeyBinding::new("alt-cmd-h", HideOthers, None),
+    ]);
 }
 
 /// Rebuild the native menu bar in the active locale. GPUI menus own their

@@ -168,6 +168,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "hourglass",
     "hexagon",
     "info",
+    "keyboard",
     "laptop",
     "list",
     "list-filter",

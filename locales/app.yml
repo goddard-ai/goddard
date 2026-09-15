@@ -2696,3 +2696,275 @@ usage_error.unknown_error:
   en: unknown error
 usage_error.curl_no_status:
   en: curl returned no HTTP status line
+shortcuts.title:
+  en: Keyboard Shortcuts
+shortcuts.done:
+  en: Done
+shortcuts.section.global:
+  en: Everywhere
+shortcuts.section.workspace:
+  en: Workspace
+shortcuts.section.composer:
+  en: Composer & Text Fields
+shortcuts.section.editing:
+  en: Text Editing
+shortcuts.section.terminal:
+  en: Terminal
+shortcuts.section.palette:
+  en: Command Palette
+shortcuts.section.finder:
+  en: File Finder
+shortcuts.section.switchers:
+  en: Task & Project Switchers
+shortcuts.section.find:
+  en: Find
+shortcuts.section.browser:
+  en: Browser
+shortcuts.section.editor:
+  en: Editor & Diff
+shortcuts.section.dialogs:
+  en: Git & Dialogs
+shortcuts.section.bigpicture:
+  en: Big Picture
+shortcuts.section.settings:
+  en: Settings & Skills
+shortcuts.section.menus:
+  en: Menus & Popovers
+shortcuts.file_finder:
+  en: File Finder
+shortcuts.big_picture:
+  en: Toggle Big Picture
+shortcuts.jump_to_task:
+  en: Jump to Task by Position
+shortcuts.toggle_terminals:
+  en: Toggle Terminals
+shortcuts.usage_panel:
+  en: Usage Panel
+shortcuts.save_file:
+  en: Save File
+shortcuts.open_localhost:
+  en: Open Localhost URL
+shortcuts.open_localhost_tab:
+  en: Open Localhost URL in Tab
+shortcuts.open_settings:
+  en: Open Settings
+shortcuts.fps_counter:
+  en: FPS Counter
+shortcuts.font_bigger:
+  en: Increase Font Size
+shortcuts.font_smaller:
+  en: Decrease Font Size
+shortcuts.font_bigger_ui:
+  en: Increase Interface Font Size
+shortcuts.font_smaller_ui:
+  en: Decrease Interface Font Size
+shortcuts.navigate_back:
+  en: Navigate Back
+shortcuts.navigate_forward:
+  en: Navigate Forward
+shortcuts.previous_turn:
+  en: Previous Turn
+shortcuts.next_turn:
+  en: Next Turn
+shortcuts.latest_unseen:
+  en: Jump to Latest Unseen Completion
+shortcuts.mark_unread_next:
+  en: Mark Unread & Jump to Next
+shortcuts.task_switcher:
+  en: Cycle Forward Through Tasks
+shortcuts.task_switcher_back:
+  en: Cycle Backward Through Tasks
+shortcuts.project_switcher:
+  en: Cycle Forward Through Projects
+shortcuts.project_switcher_back:
+  en: Cycle Backward Through Projects
+shortcuts.stop_turn:
+  en: Stop Current Turn
+shortcuts.stop_turn_now:
+  en: Stop Turn Immediately
+shortcuts.add_to_chat:
+  en: Add Selection to Chat
+shortcuts.archive_task:
+  en: Archive Task
+shortcuts.pin_task:
+  en: Pin or Unpin Task
+shortcuts.copy_selection:
+  en: Copy Selection
+shortcuts.copy_workdir:
+  en: Copy Working Directory
+shortcuts.find:
+  en: Find in File
+shortcuts.find_replace:
+  en: Find & Replace
+shortcuts.find_next:
+  en: Next Match
+shortcuts.find_previous:
+  en: Previous Match
+shortcuts.submit:
+  en: Submit
+shortcuts.newline:
+  en: Insert Newline
+shortcuts.steer:
+  en: Steer the Running Turn
+shortcuts.clear_field:
+  en: Clear Field or Dismiss
+shortcuts.move_left:
+  en: Move Left
+shortcuts.move_right:
+  en: Move Right
+shortcuts.move_up:
+  en: Move Up
+shortcuts.move_down:
+  en: Move Down
+shortcuts.word_back:
+  en: Move to Previous Word
+shortcuts.word_forward:
+  en: Move to Next Word
+shortcuts.line_start:
+  en: Move to Line Start
+shortcuts.line_end:
+  en: Move to Line End
+shortcuts.doc_start:
+  en: Move to Document Start
+shortcuts.doc_end:
+  en: Move to Document End
+shortcuts.paragraph_back:
+  en: Move Paragraph Backward
+shortcuts.paragraph_forward:
+  en: Move Paragraph Forward
+shortcuts.paragraph_start:
+  en: Move to Paragraph Start
+shortcuts.paragraph_end:
+  en: Move to Paragraph End
+shortcuts.delete_back:
+  en: Delete Backward
+shortcuts.delete_forward:
+  en: Delete Forward
+shortcuts.delete_word_back:
+  en: Delete Previous Word
+shortcuts.delete_word_forward:
+  en: Delete Next Word
+shortcuts.delete_line_back:
+  en: Delete to Line Start
+shortcuts.delete_line_forward:
+  en: Delete to Line End
+shortcuts.kill_line_back:
+  en: Delete to Paragraph Start
+shortcuts.kill_line_forward:
+  en: Delete to Paragraph End
+shortcuts.select_left:
+  en: Select Left
+shortcuts.select_right:
+  en: Select Right
+shortcuts.select_up:
+  en: Select Up
+shortcuts.select_down:
+  en: Select Down
+shortcuts.select_word_back:
+  en: Select to Previous Word
+shortcuts.select_word_forward:
+  en: Select to Next Word
+shortcuts.select_line_start:
+  en: Select to Line Start
+shortcuts.select_line_end:
+  en: Select to Line End
+shortcuts.select_doc_start:
+  en: Select to Document Start
+shortcuts.select_doc_end:
+  en: Select to Document End
+shortcuts.select_paragraph_back:
+  en: Select Paragraph Backward
+shortcuts.select_paragraph_forward:
+  en: Select Paragraph Forward
+shortcuts.clear_scrollback:
+  en: Clear Scrollback
+shortcuts.select_next:
+  en: Next Entry
+shortcuts.select_previous:
+  en: Previous Entry
+shortcuts.select_first:
+  en: First Entry
+shortcuts.select_last:
+  en: Last Entry
+shortcuts.select_page_down:
+  en: Page Down
+shortcuts.select_page_up:
+  en: Page Up
+shortcuts.confirm:
+  en: Confirm
+shortcuts.dismiss:
+  en: Dismiss
+shortcuts.switcher_next:
+  en: Next Task
+shortcuts.switcher_previous:
+  en: Previous Task
+shortcuts.switcher_first:
+  en: First Task
+shortcuts.switcher_last:
+  en: Last Task
+shortcuts.switcher_confirm:
+  en: Confirm
+shortcuts.switcher_cancel:
+  en: Cancel
+shortcuts.project_next:
+  en: Next Project
+shortcuts.project_previous:
+  en: Previous Project
+shortcuts.project_confirm:
+  en: Confirm
+shortcuts.project_cancel:
+  en: Cancel
+shortcuts.replace_all:
+  en: Replace All
+shortcuts.close_find:
+  en: Close Find Bar
+shortcuts.find_case:
+  en: Toggle Match Case
+shortcuts.find_word:
+  en: Toggle Whole Word
+shortcuts.find_regex:
+  en: Toggle Regex
+shortcuts.browser_address:
+  en: Focus Address Bar
+shortcuts.browser_reload:
+  en: Reload
+shortcuts.browser_hard_reload:
+  en: Hard Reload
+shortcuts.browser_back:
+  en: Back
+shortcuts.browser_forward:
+  en: Forward
+shortcuts.browser_stop:
+  en: Stop Loading
+shortcuts.browser_devtools:
+  en: Open DevTools
+shortcuts.browser_address_cancel:
+  en: Cancel Address Edit
+shortcuts.exit_fullscreen_panel:
+  en: Exit Fullscreen Panel
+shortcuts.git_primary:
+  en: Commit or Primary Action
+shortcuts.confirm_dialog:
+  en: Confirm Dialog
+shortcuts.confirm_archive:
+  en: Confirm Archive
+shortcuts.dismiss_dialog:
+  en: Dismiss Dialog
+shortcuts.bigpicture_move:
+  en: Focus Left Session
+shortcuts.bigpicture_move_right:
+  en: Focus Right Session
+shortcuts.bigpicture_open:
+  en: Open Session
+shortcuts.next_field:
+  en: Next Field
+shortcuts.previous_field:
+  en: Previous Field
+shortcuts.menu_next_tab:
+  en: Next Tab
+shortcuts.menu_previous_tab:
+  en: Previous Tab
+shortcuts.cancel_rename:
+  en: Cancel Rename
+shortcuts.close_preview:
+  en: Close Preview

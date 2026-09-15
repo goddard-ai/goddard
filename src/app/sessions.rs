@@ -1373,6 +1373,7 @@ impl Waku {
             || self.project_switcher.is_open()
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
+            || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()
             || self.image_preview.is_some()
             || self.menus.borrow().values().any(|menu| menu.is_open())
