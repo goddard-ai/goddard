@@ -1430,3 +1430,5 @@ git_panel.not_a_repository: Git リポジトリではありません
 git_panel.unexpected_result: デーモンから予期しない応答がありました
 git_panel.resolve_rebase_prompt: このリポジトリでの `git pull --rebase` が競合で停止しました。作業ツリーの競合を解決してリベースを続行してください。
 git_panel.resolve_merge_prompt: このリポジトリでの `git pull` マージが競合で停止しました。作業ツリーの競合を解決してマージを完了してください。
+git_panel.open_file_in: "%{app} で開く"
+git_panel.open_file: エディタでファイルを開く

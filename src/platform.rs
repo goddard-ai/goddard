@@ -317,6 +317,57 @@ pub struct ExternalApp {
     pub icon: std::sync::Arc<gpui::Image>,
 }
 
+impl ExternalApp {
+    /// Reads as an editor for a single file — the catalog also lists the
+    /// file manager and terminals, which only meaningfully open folders.
+    pub fn is_editor(&self) -> bool {
+        matches!(
+            self.id,
+            "vscode" | "cursor" | "zed" | "devin" | "xcode" | "android-studio"
+        )
+    }
+
+    /// The `<scheme>://file/<path>:<line>` deep link this app registers, when
+    /// it has one. Apps without one get a plain document open instead.
+    fn file_line_scheme(&self) -> Option<&'static str> {
+        match self.id {
+            "vscode" => Some("vscode"),
+            "cursor" => Some("cursor"),
+            "zed" => Some("zed"),
+            "devin" => Some("windsurf"),
+            _ => None,
+        }
+    }
+}
+
+/// The `<scheme>://file/<path>:<line>` URL an editor deep link expects. The
+/// `url` crate percent-encodes the path; `:` survives the path encode set,
+/// which is what the editors split the line on.
+fn editor_file_line_url(scheme: &str, path: &std::path::Path, line: u32) -> Option<String> {
+    let mut url = url::Url::parse(&format!("{scheme}://file/")).ok()?;
+    url.set_path(&format!("{}:{line}", path.to_string_lossy()));
+    Some(url.into())
+}
+
+/// Open the file `path` in `app`, landing on `line` when the app takes a
+/// line deep link and opening the document plainly when it does not. Every
+/// route hands off to the OS asynchronously, so this is safe from any click
+/// path.
+pub fn open_file_in_app(
+    path: &std::path::Path,
+    line: Option<u32>,
+    app: &ExternalApp,
+    cx: &gpui::App,
+) {
+    if let (Some(line), Some(scheme)) = (line, app.file_line_scheme()) {
+        if let Some(url) = editor_file_line_url(scheme, path, line) {
+            cx.open_url(&url);
+            return;
+        }
+    }
+    open_path_in_app(path, app.bundle_id);
+}
+
 /// Known folder-capable apps in menu order — editors, the file manager,
 /// terminals, IDEs. An entry lists every bundle id it ships under; the first
 /// installed one wins.

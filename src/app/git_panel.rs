@@ -1186,6 +1186,45 @@ impl Waku {
         })
         .detach();
     }
+
+    /// The app a commit file opens in: the persisted "open in" choice while
+    /// it is an editor, otherwise the first installed editor — the catalog
+    /// also lists the file manager and terminals, which cannot take a file.
+    /// A deliberate non-editor pick is still honored last.
+    fn preferred_file_app(&self) -> Option<&crate::platform::ExternalApp> {
+        let persisted = self
+            .state
+            .open_in_app
+            .as_deref()
+            .and_then(|id| self.open_in_apps.iter().find(|app| app.id == id));
+        persisted
+            .filter(|app| app.is_editor())
+            .or_else(|| self.open_in_apps.iter().find(|app| app.is_editor()))
+            .or(persisted)
+    }
+
+    /// A file's "open" affordance in the commit modal — `None` opens the
+    /// file, `Some` lands the editor on that line when the app takes a line
+    /// deep link.
+    fn open_commit_file(&self, relative_path: &str, line: Option<u32>, cx: &mut Context<Self>) {
+        let Some(workspace) = self.git_panel.as_ref().map(|panel| panel.workspace.clone()) else {
+            return;
+        };
+        let path = workspace.join(relative_path);
+        match self.preferred_file_app() {
+            Some(app) => crate::platform::open_file_in_app(&path, line, app, cx),
+            None => crate::platform::open_with_default_app(&path, cx),
+        }
+    }
+
+    /// "Open in <app>" for the file header's button, naming the resolved
+    /// target when one is installed.
+    fn open_commit_file_tooltip(&self) -> String {
+        match self.preferred_file_app() {
+            Some(app) => tr!("git_panel.open_file_in", app = app.label),
+            None => tr!("git_panel.open_file"),
+        }
+    }
 }
 
 enum GitPanelPrimary {
@@ -2699,11 +2738,13 @@ impl Waku {
                 let Some(file) = snapshot.files.get(line.file_index) else {
                     return div().into_any_element();
                 };
+                let open_path = file.path.clone();
                 div()
                     .w_full()
                     .min_w_0()
                     .h(px(26.0))
-                    .px(px(12.0))
+                    .pl(px(12.0))
+                    .pr(px(6.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
@@ -2728,15 +2769,32 @@ impl Waku {
                     )
                     .child(
                         div()
+                            .flex_none()
                             .text_size(sp(12.0))
                             .text_color(theme.success)
                             .child(format!("+{}", file.additions)),
                     )
                     .child(
                         div()
+                            .flex_none()
                             .text_size(sp(12.0))
                             .text_color(theme.danger)
                             .child(format!("-{}", file.deletions)),
+                    )
+                    .child(
+                        icon_button(
+                            SharedString::from(format!(
+                                "git-panel-commit-modal-open-{}",
+                                line.file_index
+                            )),
+                            "icons/external-link.svg",
+                            theme,
+                        )
+                        .tooltip(Tooltip::text(self.open_commit_file_tooltip()))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_commit_file(&open_path, None, cx);
+                            cx.stop_propagation();
+                        })),
                     )
                     .into_any_element()
             }
@@ -2754,14 +2812,36 @@ impl Waku {
             }
             crate::review_diff::LineKind::Context
             | crate::review_diff::LineKind::Addition
-            | crate::review_diff::LineKind::Deletion => right_panel::render_diff_code_row(
-                line,
-                index,
-                "git-panel-commit-diff",
-                &self.transcript_selection,
-                right_panel::DiffRowStyle::activity(self.state.code_font_size, code_family),
-                &theme,
-            ),
+            | crate::review_diff::LineKind::Deletion => {
+                let row = right_panel::render_diff_code_row(
+                    line,
+                    index,
+                    "git-panel-commit-diff",
+                    &self.transcript_selection,
+                    right_panel::DiffRowStyle::activity(self.state.code_font_size, code_family),
+                    &theme,
+                );
+                let Some(file) = snapshot.files.get(line.file_index) else {
+                    return row;
+                };
+                // A double-click opens the file at the row's shown line —
+                // the postimage number, falling back to the preimage for
+                // deletions.
+                let path = file.path.clone();
+                let target_line = line.new_line.or(line.old_line);
+                div()
+                    .id(SharedString::from(format!(
+                        "git-panel-commit-diff-open-{index}"
+                    )))
+                    .w_full()
+                    .child(row)
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        if event.click_count() == 2 {
+                            this.open_commit_file(&path, target_line, cx);
+                        }
+                    }))
+                    .into_any_element()
+            }
         }
     }
 }
