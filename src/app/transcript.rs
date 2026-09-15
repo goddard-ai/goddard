@@ -1413,3 +1413,31 @@ pub(super) fn message_starts_followup_turn(messages: &[Message], message_index: 
             .iter()
             .any(|message| message.role == MessageRole::User)
 }
+
+/// Whether this row's prompt earns the follow-up gap. The gap marks a turn
+/// boundary, so a prompt that lands directly behind another prompt earns
+/// nothing — two consecutive prompts cluster, with no row between them for
+/// the gap to separate.
+pub(super) fn row_starts_followup_turn(
+    session: &AgentSession,
+    rows: &[TranscriptRowKind],
+    row_index: usize,
+) -> bool {
+    let Some(TranscriptRowKind::Message(message_index)) = rows.get(row_index).copied() else {
+        return false;
+    };
+    message_starts_followup_turn(&session.messages, message_index)
+        && !row_index
+            .checked_sub(1)
+            .and_then(|previous| rows.get(previous))
+            .is_some_and(|previous| {
+                matches!(
+                    previous,
+                    TranscriptRowKind::Message(previous_index)
+                        if session
+                            .messages
+                            .get(*previous_index)
+                            .is_some_and(|message| message.role == MessageRole::User)
+                )
+            })
+}

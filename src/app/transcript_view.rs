@@ -1330,29 +1330,20 @@ impl Waku {
         // this frame. Recomputing the row list here would rebuild the whole
         // transcript's row kinds — several allocations proportional to the
         // session — once for every visible row, every frame.
-        let (row_count, kind) = {
+        let (row_count, kind, starts_followup_turn) = {
             let kinds = self.transcript_row_kinds.borrow();
             let kind = kinds
                 .get(index)
                 .copied()
                 .unwrap_or(TranscriptRowKind::Message(index));
-            (kinds.len(), kind)
+            let starts_followup_turn = self
+                .selected_session()
+                .is_some_and(|session| row_starts_followup_turn(session, &kinds, index));
+            (kinds.len(), kind, starts_followup_turn)
         };
         let response_turn_id = self
             .selected_session()
             .and_then(|session| response_row_turn_id(session, kind));
-        let starts_followup_turn = match kind {
-            TranscriptRowKind::Message(message_index) => {
-                self.selected_session().is_some_and(|session| {
-                    message_starts_followup_turn(&session.messages, message_index)
-                })
-            }
-            TranscriptRowKind::TurnBlock(_)
-            | TranscriptRowKind::TurnFold(_)
-            | TranscriptRowKind::ResponseFooter(_, _)
-            | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => false,
-        };
         let inner = match kind {
             TranscriptRowKind::Message(message_index) => self
                 .selected_session()

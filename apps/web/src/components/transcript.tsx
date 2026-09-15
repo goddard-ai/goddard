@@ -698,6 +698,21 @@ function buildTranscriptItems(
     }
   }
 
+  // Back-to-back prompts cluster: the follow-up gap marks a turn boundary,
+  // and nothing rendered between two prompts for it to separate.
+  for (let index = 1; index < items.length; index++) {
+    const item = items[index]!
+    const previous = items[index - 1]!
+    if (
+      item.kind === 'message'
+      && item.followUp
+      && previous.kind === 'message'
+      && previous.message.role === 'user'
+    ) {
+      item.followUp = false
+    }
+  }
+
   if (['connecting', 'working', 'waiting', 'background'].includes(session.status)) {
     const runningIndex = lastIndexWhere(session.turns, (turn) => turn.status === 'running')
     const running = runningIndex >= 0 ? session.turns[runningIndex] : null

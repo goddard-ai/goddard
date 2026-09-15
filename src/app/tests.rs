@@ -18,8 +18,9 @@ use super::{
     navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
     navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
     previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
-    response_footer_message_index, response_row_turn_id, session_accepts_turn_output,
-    session_is_reapable, session_opens_at_last_prompt, settle_stream_segment,
+    response_footer_message_index, response_row_turn_id, row_starts_followup_turn,
+    session_accepts_turn_output, session_is_reapable, session_opens_at_last_prompt,
+    settle_stream_segment,
     should_refresh_branch_after_activity, should_show_navigation_rail,
     should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
     transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
@@ -923,6 +924,35 @@ fn only_later_user_messages_start_followup_turns() {
     assert!(!message_starts_followup_turn(&messages, 1));
     assert!(message_starts_followup_turn(&messages, 2));
     assert!(!message_starts_followup_turn(&messages, 3));
+}
+
+#[test]
+fn a_prompt_directly_behind_another_skips_the_followup_gap() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("first prompt");
+    // A steer the provider folded into the live turn lands directly behind
+    // the prompt that opened it.
+    session.push_user_message_with_presentation("actually, also this", None, Vec::new(), None);
+    session.push_message(MessageRole::Assistant, "answer");
+    session.finish_active_turn(TurnStatus::Completed);
+    session.begin_turn("second prompt");
+
+    let rows = folded_transcript_row_kinds(&session, &HashSet::new());
+    let row_index = |message_index: usize| {
+        rows.iter()
+            .position(|kind| *kind == Message(message_index))
+            .unwrap()
+    };
+
+    assert!(!row_starts_followup_turn(&session, &rows, 0));
+    assert!(
+        !row_starts_followup_turn(&session, &rows, row_index(1)),
+        "two consecutive prompts cluster — no row between them to separate"
+    );
+    assert!(
+        row_starts_followup_turn(&session, &rows, row_index(3)),
+        "a prompt behind a settled response still opens the turn gap"
+    );
 }
 
 #[test]
