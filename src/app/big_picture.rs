@@ -8,7 +8,9 @@
 //!
 //! Clicking a card never navigates: it targets the docked composer at that
 //! session, and clicking again — or sending — returns it to new-task mode.
-//! Escape (or clicking the scrim) closes the overlay.
+//! The arrow keys do the same without a confirm step: they move the highlight
+//! and retarget the composer in one motion. Escape peels off the target first,
+//! then closes the overlay; clicking the scrim closes it outright.
 
 use gpui::{KeyBinding, actions};
 
@@ -323,6 +325,8 @@ impl Waku {
         slots.iter().map(|slot| slot.session_id).collect()
     }
 
+    /// Arrows move the highlight *and* retarget the composer — no separate
+    /// confirm step. The docked prompt follows whichever card is highlighted.
     fn move_big_picture_highlight(&mut self, reverse: bool, cx: &mut Context<Self>) {
         let order = self.big_picture_navigable();
         if order.is_empty() {
@@ -339,16 +343,22 @@ impl Waku {
             None => 0,
         };
         self.big_picture.highlighted = order.get(next).copied();
-        cx.notify();
+        self.set_big_picture_target(self.big_picture.highlighted, cx);
     }
 
+    /// Escape peels off one layer at a time: an armed target first, the
+    /// overlay second.
     pub(super) fn dismiss_big_picture_action(
         &mut self,
         _: &DismissBigPicture,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_big_picture(window, cx);
+        if self.big_picture.target.is_some() {
+            self.set_big_picture_target(None, cx);
+        } else {
+            self.close_big_picture(window, cx);
+        }
     }
 
     pub(super) fn big_picture_left_action(
@@ -369,19 +379,16 @@ impl Waku {
         self.move_big_picture_highlight(false, cx);
     }
 
+    /// Enter no longer arms the target — arrows and clicks already did. Its
+    /// one remaining job is dropping focus into the docked composer.
     pub(super) fn big_picture_confirm_action(
         &mut self,
         _: &BigPictureConfirm,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_id) = self.big_picture.highlighted {
-            self.toggle_big_picture_target(session_id, cx);
-        } else {
-            // Nothing to aim at: Enter belongs to the composer then.
-            let focus = self.composer_focus(cx);
-            window.focus(&focus, cx);
-        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
     }
 
     /// Reconcile mounted slots against this frame's ranking. Runs from

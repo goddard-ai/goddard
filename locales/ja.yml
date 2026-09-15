@@ -110,7 +110,7 @@ task_switcher.recently_viewed: 最近表示したタスク
 big_picture.new_task_placeholder: 新しいタスクを開始…
 big_picture.follow_up_placeholder: "%{title} に返信…"
 big_picture.replying_to: "%{title} に返信中"
-big_picture.hint: ← → で選択・enter で宛先を切り替え・esc で閉じる
+big_picture.hint: ← → で宛先を選択・esc で解除してから閉じる
 big_picture.loading: 読み込み中…
 big_picture.empty_transcript: メッセージはまだありません
 big_picture.status.waiting: 入力待ち

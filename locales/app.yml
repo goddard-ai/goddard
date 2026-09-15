@@ -218,7 +218,7 @@ big_picture.follow_up_placeholder:
 big_picture.replying_to:
   en: "Replying to %{title}"
 big_picture.hint:
-  en: ← → choose · enter to target · esc to close
+  en: ← → to target · esc to untarget, then close
 big_picture.loading:
   en: Loading…
 big_picture.empty_transcript:
