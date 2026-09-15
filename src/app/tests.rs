@@ -2286,6 +2286,36 @@ fn model_picker_highlight_wraps_at_both_ends() {
 }
 
 #[test]
+fn model_picker_highlight_seeds_from_the_selected_model() {
+    use super::composer::picker_selected_model_index;
+    use crate::model::ProviderModel;
+
+    let models: Vec<(ProviderKind, ProviderModel)> = ["claude-a", "claude-b", "claude-c"]
+        .into_iter()
+        .map(|model| (ProviderKind::Claude, ProviderModel::new(model, model)))
+        .collect();
+
+    // The first arrow moves relative to the session's model — the row the
+    // reveal scrolled into view — rather than jumping to an end.
+    let seed = picker_selected_model_index(ProviderKind::Claude, Some("claude-b"), &models);
+    assert_eq!(seed, Some(1));
+    assert_eq!(next_picker_highlight(seed, models.len(), "down"), Some(2));
+    assert_eq!(next_picker_highlight(seed, models.len(), "up"), Some(0));
+
+    // A row the list does not contain — another provider's tab, or no
+    // selected model at all — leaves the cursor unseeded so the arrows open
+    // on an edge as before.
+    assert_eq!(
+        picker_selected_model_index(ProviderKind::Codex, Some("claude-b"), &models),
+        None
+    );
+    assert_eq!(
+        picker_selected_model_index(ProviderKind::Claude, None, &models),
+        None
+    );
+}
+
+#[test]
 fn only_opencode_providers_offer_an_explicit_reasoning_default_reset() {
     for provider in ProviderKind::ALL {
         assert_eq!(

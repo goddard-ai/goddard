@@ -1437,9 +1437,20 @@ impl Waku {
         models: &[(ProviderKind, ProviderModel)],
         cx: &mut Context<Self>,
     ) {
+        // With nothing highlighted yet the cursor sits on the session's
+        // model — the row the reveal scrolled into view — so the first arrow
+        // moves relative to it rather than jumping to an end. A row that is
+        // not listed (another tab's list, an unknown model) keeps the old
+        // behavior of starting at an edge.
         let current = self
             .model_picker_highlight
-            .filter(|index| *index < models.len());
+            .filter(|index| *index < models.len())
+            .or_else(|| {
+                let session = self.selected_session();
+                let provider = session.map(|session| session.provider).unwrap_or_default();
+                let model = session.and_then(|session| self.catalog_model_id_for_session(session));
+                picker_selected_model_index(provider, model, models)
+            });
         let Some(next) = next_picker_highlight(current, models.len(), key) else {
             return;
         };
@@ -1488,17 +1499,15 @@ impl Waku {
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
-        let index = visible_picker_models(
+        let models = visible_picker_models(
             &self.probes,
             &self.state.favorite_models,
             &self.state.disabled_providers,
             locked_provider,
             self.model_picker_tab,
             "",
-        )
-        .iter()
-        .position(|(kind, model)| *kind == provider && selected_model == Some(model.id.as_str()))
-        .unwrap_or(0);
+        );
+        let index = picker_selected_model_index(provider, selected_model, &models).unwrap_or(0);
         self.model_picker_scroll.scroll_to_item(index);
     }
 
@@ -4405,6 +4414,20 @@ pub(super) fn next_picker_highlight(
         "up" => Some(current.map_or(len - 1, |index| (index + len - 1) % len)),
         _ => None,
     }
+}
+
+/// The row `provider`/`model_id` occupies in `models`, when it is listed.
+/// Shared by the scroll reveal and by the keyboard cursor's seed so the
+/// filled "current model" row and the first arrow press agree on where the
+/// selection sits.
+pub(super) fn picker_selected_model_index(
+    provider: ProviderKind,
+    model_id: Option<&str>,
+    models: &[(ProviderKind, ProviderModel)],
+) -> Option<usize> {
+    models
+        .iter()
+        .position(|(kind, model)| *kind == provider && model_id == Some(model.id.as_str()))
 }
 
 /// The sidebar tabs the picker can land on, in rail order: favorites first,
