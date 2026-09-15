@@ -23,6 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -286,6 +287,10 @@ pub struct FlatText {
     pub runs: Vec<TextRun>,
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
+    /// `Annotation N` citations that resolve against a submitted annotation
+    /// set: byte ranges paired with the label's 1-based index. Painted as a
+    /// dotted underline; hovering previews the annotation.
+    pub annotation_refs: Vec<(Range<usize>, usize)>,
     pub math: Option<Rc<math_text::MathData>>,
 }
 
@@ -401,8 +406,40 @@ pub fn flatten(
         runs: out,
         links,
         code_ranges,
+        annotation_refs: Vec::new(),
         math: (!math.is_empty()).then(|| Rc::new(math_text::MathData::new(math))),
     }
+}
+
+/// `Annotation N` — the citation label the annotation prompt header teaches
+/// the agent to answer with. Word-bounded on both sides and ASCII
+/// case-insensitive on the word.
+static ANNOTATION_REFERENCE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bannotation[ \t]+(\d+)\b").unwrap());
+
+/// The `(byte range, 1-based label)` pairs of every resolvable `Annotation N`
+/// citation in a flat text. Matches inside code or link ranges are skipped —
+/// quoted or formatted mentions are not citations — and a label beyond
+/// `limit` resolves to nothing, so it stays plain text rather than promising
+/// a tooltip that does not exist.
+fn annotation_references(flat: &FlatText, limit: usize) -> Vec<(Range<usize>, usize)> {
+    let overlaps = |range: &Range<usize>| {
+        flat.code_ranges
+            .iter()
+            .any(|code| code.start < range.end && range.start < code.end)
+            || flat
+                .links
+                .iter()
+                .any(|(link, _)| link.start < range.end && range.start < link.end)
+    };
+    ANNOTATION_REFERENCE
+        .captures_iter(flat.text.as_ref())
+        .filter_map(|captures| {
+            let range = captures.get(0)?.range();
+            let index = captures.get(1)?.as_str().parse::<usize>().ok()?;
+            (index >= 1 && index <= limit && !overlaps(&range)).then_some((range, index))
+        })
+        .collect()
 }
 
 /// A flat string with uniform styling, for non-markdown transcript text.
@@ -432,6 +469,7 @@ pub fn flatten_plain(
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
+        annotation_refs: Vec::new(),
         math: None,
     }
 }
@@ -601,6 +639,10 @@ pub struct Ctx<'a> {
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
+    /// How many `Annotation N` labels this row can cite — the size of the
+    /// annotation set its most recent annotated submission carried. Zero on
+    /// rows and surfaces that cannot cite annotations.
+    annotation_ref_labels: usize,
     /// Cross-frame flatten cache, when this render has one to consult.
     cache: Option<&'a MarkdownView>,
     next_ordinal: Cell<usize>,
@@ -628,6 +670,7 @@ impl<'a> Ctx<'a> {
             selection,
             search: None,
             link_handler: None,
+            annotation_ref_labels: 0,
             cache: None,
             next_ordinal: Cell::new(0),
             starts_block: Cell::new(true),
@@ -649,6 +692,13 @@ impl<'a> Ctx<'a> {
 
     pub fn with_link_handler(mut self, handler: LinkHandler) -> Self {
         self.link_handler = Some(handler);
+        self
+    }
+
+    /// Enable `Annotation N` citation marks for this row. `count` is the
+    /// resolvable annotation set's size; a larger label gets no affordance.
+    pub fn with_annotation_labels(mut self, count: usize) -> Self {
+        self.annotation_ref_labels = count;
         self
     }
 
@@ -695,6 +745,7 @@ impl<'a> Ctx<'a> {
             selection: self.selection.clone(),
             search: self.search.clone(),
             link_handler: self.link_handler.clone(),
+            annotation_ref_labels: self.annotation_ref_labels,
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
             starts_block: Cell::new(self.starts_block.get()),
@@ -720,6 +771,29 @@ impl<'a> Ctx<'a> {
     /// string and `TextRun`s untouched, so an unchanged paragraph costs one
     /// `Rc` clone per frame instead of a fresh allocation.
     fn flat(&self, ordinal: usize, build: impl FnOnce() -> FlatText) -> Rc<FlatText> {
+        self.flat_inner(ordinal, true, build)
+    }
+
+    /// [`Self::flat`] without citation detection — a code block's contents are
+    /// quoted text, not the agent's voice, so `Annotation N` inside one is no
+    /// citation.
+    fn flat_undecorated(&self, ordinal: usize, build: impl FnOnce() -> FlatText) -> Rc<FlatText> {
+        self.flat_inner(ordinal, false, build)
+    }
+
+    fn flat_inner(
+        &self,
+        ordinal: usize,
+        detect_refs: bool,
+        build: impl FnOnce() -> FlatText,
+    ) -> Rc<FlatText> {
+        let build = || {
+            let mut flat = build();
+            if detect_refs && self.annotation_ref_labels > 0 {
+                flat.annotation_refs = annotation_references(&flat, self.annotation_ref_labels);
+            }
+            flat
+        };
         match self.cache {
             Some(view) => view.flat(ordinal, build),
             None => Rc::new(build()),
@@ -747,6 +821,8 @@ fn text_element_with_selection(
     search_match_wash: Hsla,
     active_search_match_wash: Hsla,
     annotation_wash: Hsla,
+    ref_underline: Hsla,
+    ref_underline_hovered: Hsla,
     block_break: bool,
 ) -> AnyElement {
     let styled = StyledText::new(flat.text.clone()).with_runs(runs);
@@ -773,6 +849,7 @@ fn text_element_with_selection(
     let underlay = canvas(|_, _, _| (), {
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
+        let annotation_refs = flat.annotation_refs.clone();
         let layout = layout.clone();
         let key = key.clone();
         move |_, _, window, _| {
@@ -846,6 +923,28 @@ fn text_element_with_selection(
                     }
                 }
             }
+            // `Annotation N` citations wear a dotted underline — the
+            // affordance for the hover tooltip that resolves the label back
+            // to the submitted annotation's quote and comment.
+            if !annotation_refs.is_empty() {
+                let hovered_ref = selection.annotations.borrow().hovered_ref.clone();
+                for (range, _) in &annotation_refs {
+                    let emphasised =
+                        hovered_ref
+                            .as_ref()
+                            .is_some_and(|(hover_key, hover_range)| {
+                                *hover_key == key && *hover_range == *range
+                            });
+                    let color = if emphasised {
+                        ref_underline_hovered
+                    } else {
+                        ref_underline
+                    };
+                    for rect in range_rects(&layout, range, 0.0, 0.0) {
+                        paint_dotted_underline(window, rect, color);
+                    }
+                }
+            }
             if let Some(range) = selection.selection.borrow().wash_range(&key) {
                 for rect in range_rects(&layout, &range, 0.0, 0.0) {
                     window.paint_quad(quad(
@@ -864,6 +963,7 @@ fn text_element_with_selection(
                 key: key.clone(),
                 text: Rc::from(text.as_ref()),
                 block_break,
+                annotation_refs: annotation_refs.clone(),
                 geometry: TextGeometry::Text(layout.clone()),
             });
         }
@@ -910,6 +1010,8 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.palette.search_match,
         ctx.palette.active_search_match,
         ctx.palette.annotation,
+        ctx.palette.tertiary,
+        ctx.palette.secondary,
         ctx.take_block_break(),
     )
 }
@@ -937,6 +1039,8 @@ pub fn selectable_flat_text(
         None,
         code_wash,
         selection_wash,
+        gpui::transparent_black(),
+        gpui::transparent_black(),
         gpui::transparent_black(),
         gpui::transparent_black(),
         gpui::transparent_black(),
@@ -1044,6 +1148,27 @@ fn range_rects(
         }
     }
     rects
+}
+
+/// A dotted baseline mark under `rect` — the hover affordance of an
+/// `Annotation N` citation, kept visually distinct from a link's solid
+/// underline.
+fn paint_dotted_underline(window: &mut Window, rect: Bounds<Pixels>, color: Hsla) {
+    const DOT: f32 = 1.5;
+    const PERIOD: f32 = 3.0;
+    let y = rect.bottom() - px(DOT) - px(0.5);
+    let mut x = rect.left();
+    while x + px(DOT) <= rect.right() {
+        window.paint_quad(quad(
+            Bounds::new(point(x, y), size(px(DOT), px(DOT))),
+            px(DOT / 2.0),
+            color,
+            px(0.0),
+            gpui::transparent_black(),
+            BorderStyle::default(),
+        ));
+        x += px(PERIOD);
+    }
 }
 
 /// Painted glyph boxes for a byte range in a registered text element.
@@ -1748,7 +1873,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
     let key = ctx.next_key();
     // Tokenizing is the most expensive flatten in the document, so a settled
     // code block is exactly the case the cache exists for.
-    let flat = ctx.flat(key.index, || {
+    let flat = ctx.flat_undecorated(key.index, || {
         let lang = language.and_then(highlight::lang_for_tag);
         let mut code_font = font(ctx.families.code.clone());
         code_font.weight = FontWeight::NORMAL;
@@ -1757,6 +1882,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             runs: code_runs(code, lang, &code_font, ctx.palette),
             links: Vec::new(),
             code_ranges: Vec::new(),
+            annotation_refs: Vec::new(),
             math: None,
         }
     });
@@ -2446,5 +2572,57 @@ mod tests {
         // An empty table falls back to even columns.
         let even = column_widths(&[], &[], 3);
         assert!(even.iter().all(|width| (width - 1.0 / 3.0).abs() < 1e-6));
+    }
+
+    fn refs(text: &str, limit: usize) -> Vec<(Range<usize>, usize)> {
+        annotation_references(
+            &flatten_plain(
+                text.to_owned(),
+                crate::fonts::DEFAULT_UI_FAMILY,
+                FontWeight::NORMAL,
+                palette().text,
+            ),
+            limit,
+        )
+    }
+
+    #[test]
+    fn annotation_references_match_word_bounded_labels() {
+        assert_eq!(refs("see Annotation 1 for details", 2), vec![(4..16, 1)]);
+        // The word is case-insensitive and several labels can appear.
+        assert_eq!(
+            refs("annotation 2 and Annotation 1", 2),
+            vec![(0..12, 2), (17..29, 1)]
+        );
+        // Word boundaries on both sides: glued and plural forms are not
+        // citations, and neither is a digit-glued label.
+        assert!(refs("preAnnotation 1", 3).is_empty());
+        assert!(refs("Annotations 1", 3).is_empty());
+        assert!(refs("Annotation 1x", 3).is_empty());
+        assert_eq!(refs("(Annotation 3).", 3), vec![(1..13, 3)]);
+    }
+
+    #[test]
+    fn annotation_references_only_mark_resolvable_labels() {
+        // Labels past the set's size — and "Annotation 0", which is no label —
+        // stay plain text.
+        assert_eq!(refs("Annotation 3", 2), Vec::new());
+        assert_eq!(refs("Annotation 0", 2), Vec::new());
+    }
+
+    #[test]
+    fn annotation_references_skip_code_and_links() {
+        let text = "run `Annotation 1` then Annotation 2";
+        let mut flat = flatten_plain(
+            text.to_owned(),
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        flat.code_ranges.push(4..17);
+        assert_eq!(annotation_references(&flat, 2), vec![(24..36, 2)]);
+        flat.code_ranges.clear();
+        flat.links.push((4..17, "https://example.com".to_owned()));
+        assert_eq!(annotation_references(&flat, 2), vec![(24..36, 2)]);
     }
 }

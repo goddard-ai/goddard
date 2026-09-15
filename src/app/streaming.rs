@@ -501,20 +501,26 @@ impl Waku {
                 // not keep claiming aborted work is running for the rest of
                 // the turn, and the next delta opens a fresh part on this side
                 // of the boundary.
-                if let Some(session) = self.state.session_mut(session_id) {
+                let sent_message_id = if let Some(session) = self.state.session_mut(session_id) {
                     settle_stream_segment(session);
-                    session.push_user_message_with_presentation(
+                    let message_id = session.push_user_message_with_presentation(
                         message,
                         submission.display_content,
                         submission.attachments,
                         sent_by_task,
                     );
                     session.updated_at = unix_time();
+                    Some(message_id)
+                } else {
+                    None
+                };
+                if let Some(message_id) = sent_message_id {
+                    self.record_sent_annotations(session_id, message_id, &submission.annotations);
                 }
                 runtime.stream_phase = None;
             }
             DriverEvent::SteerRejected { message, reason } => {
-                let submission = runtime
+                let mut submission = runtime
                     .pending_steers
                     .iter()
                     .position(|submission| submission.prompt == message)
@@ -551,9 +557,12 @@ impl Waku {
                     // second driver process only to have it clobbered when the
                     // drain re-inserts the detached runtime.
                     if let Some(session) = self.state.session_mut(session_id) {
-                        session
-                            .queued_messages
-                            .insert(0, submission.into_queued_message());
+                        let annotations = std::mem::take(&mut submission.annotations);
+                        let queued = submission.into_queued_message();
+                        if !annotations.is_empty() {
+                            self.queued_annotations.insert(queued.id, annotations);
+                        }
+                        session.queued_messages.insert(0, queued);
                     }
                     if allow_queue_drain {
                         self.pending_queue_drains.push(session_id);

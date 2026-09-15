@@ -12,7 +12,15 @@
 //! on [`TranscriptSelection`] so the renderer can reach it from paint
 //! closures; session switches park and restore it (see
 //! `reset_visible_state`), and sending drains it into the prompt.
+//!
+//! A submission's drained set also parks under its user message
+//! (`sent_annotations`): the prompt header teaches the agent to cite it as
+//! "Annotation N", and a reply doing so gets a dotted underline whose hover
+//! tooltip shows the quoted passage and comment — see
+//! [`Waku::annotation_ref_set`].
 
+use std::ops::Range;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
@@ -22,7 +30,7 @@ use gpui::{
 
 use crate::input::Clear;
 use crate::md::render::{TranscriptSelection, text_range_bounds};
-use crate::md::selection::{Span, TranscriptAnnotation};
+use crate::md::selection::{Span, TextKey, TranscriptAnnotation};
 use crate::ui::ActivationExt;
 use crate::ui::menu::{DismissMenu, FloatingSurface, MenuAlign};
 use crate::ui::shortcut::ShortcutHint;
@@ -71,6 +79,25 @@ pub(super) struct AnnotationPress {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct AnnotationHover {
     pub id: u64,
+    pub visible: bool,
+}
+
+/// An `Annotation N` citation hit-tested under the pointer: its element, its
+/// byte range within it, and the label's 1-based index into the resolved set.
+#[derive(Clone, Debug)]
+pub(super) struct AnnotationRefHit {
+    pub key: TextKey,
+    pub range: Range<usize>,
+    pub index: usize,
+}
+
+/// The citation hover pending or showing its tooltip — the same two-phase
+/// settle as [`AnnotationHover`].
+#[derive(Clone, Debug)]
+pub(super) struct AnnotationRefHover {
+    pub key: TextKey,
+    pub range: Range<usize>,
+    pub index: usize,
     pub visible: bool,
 }
 
@@ -400,6 +427,74 @@ impl Waku {
         std::mem::take(&mut annotations.items)
     }
 
+    /// Park a submission's drained annotations under the user message that
+    /// carries them, so an "Annotation N" citation in the reply keeps a
+    /// referent for its underline and tooltip. Called once the message exists
+    /// in the session; a submission that is later unwound leaves a set keyed
+    /// to a message id nothing can resolve, which is dead weight only.
+    pub(super) fn record_sent_annotations(
+        &mut self,
+        session_id: Uuid,
+        user_message_id: Uuid,
+        annotations: &[TranscriptAnnotation],
+    ) {
+        if annotations.is_empty() {
+            return;
+        }
+        self.sent_annotations
+            .entry(session_id)
+            .or_default()
+            .push((user_message_id, Rc::new(annotations.to_vec())));
+    }
+
+    /// The annotation set an `Annotation N` citation inside `message`'s reply
+    /// resolves against: the set carried by the most recent annotated user
+    /// message before it. Cached under the row-kinds fingerprint like the
+    /// response footers — sends and rewinds both move it.
+    pub(super) fn annotation_ref_set(
+        &self,
+        message_id: Uuid,
+    ) -> Option<Rc<Vec<TranscriptAnnotation>>> {
+        self.refresh_transcript_row_kinds();
+        let fingerprint = self.transcript_row_kinds_fingerprint.get();
+        if self.annotation_ref_sets_fingerprint.get() != fingerprint {
+            let mut resolved = HashMap::new();
+            if let Some(session) = self.selected_session()
+                && let Some(sets) = self.sent_annotations.get(&session.id)
+            {
+                let mut current = None;
+                for message in &session.messages {
+                    if message.role == MessageRole::User {
+                        if let Some((_, set)) = sets.iter().find(|(id, _)| *id == message.id) {
+                            current = Some(set.clone());
+                        }
+                    } else if message.role == MessageRole::Assistant
+                        && let Some(set) = &current
+                    {
+                        resolved.insert(message.id, set.clone());
+                    }
+                }
+            }
+            *self.annotation_ref_sets.borrow_mut() = resolved;
+            self.annotation_ref_sets_fingerprint.set(fingerprint);
+        }
+        self.annotation_ref_sets.borrow().get(&message_id).cloned()
+    }
+
+    /// First on-screen glyph rect of a citation's range, for the tooltip to
+    /// anchor to. `None` when the row is virtualized away.
+    fn annotation_ref_anchor(&self, key: &TextKey, range: &Range<usize>) -> Option<Bounds<Pixels>> {
+        let registry = self.transcript_selection.registry.borrow();
+        let entry = registry.entries().iter().find(|entry| entry.key == *key)?;
+        if entry.geometry.is_missing() {
+            return None;
+        }
+        let viewport = self.active_transcript_rows().viewport_bounds();
+        text_range_bounds(&entry.geometry, range)
+            .into_iter()
+            .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())
+    }
+
     /// Drop annotations whose message no longer renders — a rewind removes it
     /// from the session entirely. Runs once per frame and only when the set is
     /// non-empty, so the common path costs one emptiness check.
@@ -628,6 +723,57 @@ impl Waku {
         )
     }
 
+    /// The citation tooltip, surfaced after the hover delay over an
+    /// `Annotation N` mention: the annotated passage dimmed above the user's
+    /// comment, so the label resolves to what was actually said. Like the
+    /// highlight tooltip it is pointer-transparent — anchored above the
+    /// citation with a gap and no hit targets.
+    pub(super) fn render_annotation_ref_tooltip(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self
+            .annotation_ref_hover
+            .as_ref()
+            .filter(|hover| hover.visible)?;
+        let message_id = Uuid::parse_str(hover.key.row.strip_prefix("message-")?).ok()?;
+        let set = self.annotation_ref_set(message_id)?;
+        let annotation = set.get(hover.index - 1)?;
+        let anchor = self.annotation_ref_anchor(&hover.key, &hover.range)?;
+        let theme = Theme::current(cx);
+        let quote = annotation_quote_preview(annotation);
+        let comment = annotation.comment.trim().to_owned();
+        let card = div()
+            .max_w(px(320.0))
+            .px(px(7.0))
+            .py(px(4.0))
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.raised)
+            .shadow_md()
+            .text_size(sp(12.5))
+            .line_height(sp(15.0))
+            .flex()
+            .flex_col()
+            .gap(px(3.0))
+            .child(div().text_color(theme.text_tertiary).child(quote))
+            .when(!comment.is_empty(), |card| {
+                card.child(div().text_color(theme.text_secondary).child(comment))
+            });
+        Some(
+            deferred(FloatingSurface::new(
+                card.into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
     /// The composer's "N annotations" chip, with an always-visible clear-all
     /// control: tabbable, focus-ringed, activating on Enter or Space.
     pub(super) fn render_annotation_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -735,17 +881,31 @@ impl Waku {
                     return;
                 }
                 let hit = annotation_hit_at(&selection, event.position);
+                // A citation inside an annotated passage loses to the
+                // highlight — its tooltip already describes the comment.
+                let ref_hit = if hit.is_none() {
+                    annotation_ref_hit_at(&selection, event.position)
+                } else {
+                    None
+                };
                 let changed = {
                     let mut annotations = selection.annotations.borrow_mut();
-                    if annotations.hovered == hit {
+                    let hovered_ref = ref_hit
+                        .as_ref()
+                        .map(|hit| (hit.key.clone(), hit.range.clone()));
+                    if annotations.hovered == hit && annotations.hovered_ref == hovered_ref {
                         false
                     } else {
                         annotations.hovered = hit;
+                        annotations.hovered_ref = hovered_ref;
                         true
                     }
                 };
                 if changed {
-                    let _ = waku.update(cx, |this, cx| this.annotation_hover_changed(hit, cx));
+                    let _ = waku.update(cx, |this, cx| {
+                        this.annotation_hover_changed(hit, cx);
+                        this.annotation_ref_hover_changed(ref_hit, cx);
+                    });
                     window.refresh();
                 }
             }
@@ -795,6 +955,37 @@ impl Waku {
                         .is_some_and(|hover| hover.id == id && !hover.visible)
                     {
                         this.annotation_hover = Some(AnnotationHover { id, visible: true });
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    fn annotation_ref_hover_changed(
+        &mut self,
+        hit: Option<AnnotationRefHit>,
+        cx: &mut Context<Self>,
+    ) {
+        self.annotation_ref_hover = hit.map(|hit| AnnotationRefHover {
+            key: hit.key,
+            range: hit.range,
+            index: hit.index,
+            visible: false,
+        });
+        if let Some(hover) = &self.annotation_ref_hover {
+            let key = hover.key.clone();
+            let range = hover.range.clone();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(ANNOTATION_HOVER_DELAY).await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.annotation_ref_hover.as_ref().is_some_and(|hover| {
+                        !hover.visible && hover.key == key && hover.range == range
+                    }) && let Some(hover) = this.annotation_ref_hover.as_mut()
+                    {
+                        hover.visible = true;
                         cx.notify();
                     }
                 });
@@ -864,6 +1055,47 @@ fn annotation_hit_at(selection: &TranscriptSelection, position: Point<Pixels>) -
         }
     }
     None
+}
+
+/// The `Annotation N` citation containing `position`, consulting the frame's
+/// painted geometry — the underline ranges each element registered as it
+/// painted.
+fn annotation_ref_hit_at(
+    selection: &TranscriptSelection,
+    position: Point<Pixels>,
+) -> Option<AnnotationRefHit> {
+    let registry = selection.registry.borrow();
+    for entry in registry.entries() {
+        if entry.annotation_refs.is_empty() || entry.geometry.is_missing() {
+            continue;
+        }
+        for (range, index) in &entry.annotation_refs {
+            let hit = text_range_bounds(&entry.geometry, range)
+                .iter()
+                .any(|rect| rect.contains(&position));
+            if hit {
+                return Some(AnnotationRefHit {
+                    key: entry.key.clone(),
+                    range: range.clone(),
+                    index: *index,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// The quoted passage as the citation tooltip shows it — trimmed and capped
+/// so a long selection cannot blow the card up.
+fn annotation_quote_preview(annotation: &TranscriptAnnotation) -> String {
+    const MAX_CHARS: usize = 240;
+    let quote = annotation.quoted_text();
+    let quote = quote.trim();
+    if quote.chars().count() <= MAX_CHARS {
+        return quote.to_owned();
+    }
+    let preview: String = quote.chars().take(MAX_CHARS).collect();
+    format!("{}…", preview.trim_end())
 }
 
 #[cfg(test)]

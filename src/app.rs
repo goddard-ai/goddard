@@ -467,8 +467,10 @@ impl ComposerSubmission {
             display_content: message.display_content,
             human_content: None,
             attachments: message.attachments,
-            // The annotation header already lives inside `content`; queueing
-            // counts as sent, so the highlights stay cleared.
+            // The annotation header already lives inside `content`; the
+            // structured set rides `queued_annotations` and the caller
+            // reattaches it. Queueing counts as sent, so the highlights stay
+            // cleared.
             annotations: Vec::new(),
             hidden: message.hidden,
         }
@@ -1966,6 +1968,23 @@ pub struct Waku {
     annotation_hover: Option<annotations::AnnotationHover>,
     /// A mouse-down that landed on a highlight, pending its mouse-up.
     annotation_press: Option<annotations::AnnotationPress>,
+    /// Annotation sets that already shipped in a submission, parked per
+    /// session as `(user message id, set)` pairs in send order. An agent
+    /// reply citing "Annotation N" resolves against the most recent set
+    /// before it — see `annotation_ref_set`. In-memory only, like the live
+    /// set.
+    sent_annotations: HashMap<Uuid, Vec<(Uuid, Rc<Vec<TranscriptAnnotation>>)>>,
+    /// Sets drained into a queued follow-up, keyed by `QueuedMessage::id`;
+    /// the message picks them back up when it leaves the queue.
+    queued_annotations: HashMap<Uuid, Vec<TranscriptAnnotation>>,
+    /// `Annotation N` citation under the pointer; `visible` once the hover
+    /// delay elapsed.
+    annotation_ref_hover: Option<annotations::AnnotationRefHover>,
+    /// Per-assistant-message citation resolution — the set each reply's
+    /// "Annotation N" labels point at — rebuilt under the row-kinds
+    /// fingerprint like the response footers.
+    annotation_ref_sets: RefCell<HashMap<Uuid, Rc<Vec<TranscriptAnnotation>>>>,
+    annotation_ref_sets_fingerprint: Cell<Option<u64>>,
     /// The app's window handle, for focus restore from contexts (entity
     /// subscriptions) that carry no `&mut Window`.
     window_handle: gpui::AnyWindowHandle,
@@ -3913,6 +3932,11 @@ impl Waku {
                 annotation_comment_input,
                 annotation_hover: None,
                 annotation_press: None,
+                sent_annotations: HashMap::new(),
+                queued_annotations: HashMap::new(),
+                annotation_ref_hover: None,
+                annotation_ref_sets: RefCell::new(HashMap::new()),
+                annotation_ref_sets_fingerprint: Cell::new(None),
                 window_handle: window.window_handle(),
                 transcript_focus: cx.focus_handle(),
                 transcript_search: None,

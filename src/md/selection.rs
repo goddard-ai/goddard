@@ -220,6 +220,10 @@ pub struct RegisteredText<G = ()> {
     pub text: Rc<str>,
     /// True when this element begins a markdown block, for copy spacing.
     pub block_break: bool,
+    /// `Annotation N` citations painted in this element: byte ranges paired
+    /// with the label's 1-based index. Only transcript rows that resolve
+    /// against a submitted annotation set carry any.
+    pub annotation_refs: Vec<(Range<usize>, usize)>,
     pub geometry: G,
 }
 
@@ -352,6 +356,9 @@ impl TranscriptAnnotation {
 pub struct Annotations {
     pub items: Vec<TranscriptAnnotation>,
     pub hovered: Option<u64>,
+    /// The `Annotation N` citation under the pointer, identified by its
+    /// element and byte range, so its dotted underline can emphasise.
+    pub hovered_ref: Option<(TextKey, Range<usize>)>,
     pub editing: Option<u64>,
 }
 
@@ -463,6 +470,7 @@ mod tests {
                 key: TextKey::new(*row, index),
                 text: Rc::from(*text),
                 block_break: index > 0,
+                annotation_refs: Vec::new(),
                 geometry: (),
             });
         }
@@ -692,6 +700,7 @@ mod tests {
             key: TextKey::new("row-a", 0),
             text: Rc::from("a"),
             block_break: false,
+            annotation_refs: Vec::new(),
             geometry: (),
         });
         assert_eq!(registry.position(&TextKey::new("row-a", 0)), Some(0));

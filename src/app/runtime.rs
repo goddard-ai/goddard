@@ -3313,10 +3313,16 @@ impl Waku {
         if submission.prompt.is_empty() {
             return;
         }
+        // The annotation header already lives inside `prompt`; the structured
+        // set parks under the queued id so the follow-up's replies can still
+        // resolve its "Annotation N" citations once it sends.
+        let annotations = std::mem::take(&mut submission.annotations);
+        let message = submission.into_queued_message();
+        if !annotations.is_empty() {
+            self.queued_annotations.insert(message.id, annotations);
+        }
         if let Some(session) = self.state.session_mut(session_id) {
-            session
-                .queued_messages
-                .push(submission.into_queued_message());
+            session.queued_messages.push(message);
             session.updated_at = unix_time();
         }
         self.save();
@@ -3334,6 +3340,7 @@ impl Waku {
                 .queued_messages
                 .retain(|message| message.id != message_id);
         }
+        self.queued_annotations.remove(&message_id);
         self.save();
         cx.notify();
     }
@@ -3356,7 +3363,12 @@ impl Waku {
         }) else {
             return;
         };
-        self.restore_composer_submission(ComposerSubmission::from_queued_message(message), cx);
+        let mut submission = ComposerSubmission::from_queued_message(message);
+        submission.annotations = self
+            .queued_annotations
+            .remove(&message_id)
+            .unwrap_or_default();
+        self.restore_composer_submission(submission, cx);
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         self.save();
@@ -3382,8 +3394,13 @@ impl Waku {
         }) else {
             return;
         };
+        let mut submission = ComposerSubmission::from_queued_message(message);
+        submission.annotations = self
+            .queued_annotations
+            .remove(&message_id)
+            .unwrap_or_default();
         self.save();
-        self.steer_composer_submission(ComposerSubmission::from_queued_message(message), cx);
+        self.steer_composer_submission(submission, cx);
     }
 
     /// Activate the same action as the oldest queued row's Steer control.
@@ -3440,11 +3457,13 @@ impl Waku {
         else {
             return;
         };
-        self.submit_submission_for_session(
-            session_id,
-            ComposerSubmission::from_queued_message(message),
-            cx,
-        );
+        let queued_id = message.id;
+        let mut submission = ComposerSubmission::from_queued_message(message);
+        submission.annotations = self
+            .queued_annotations
+            .remove(&queued_id)
+            .unwrap_or_default();
+        self.submit_submission_for_session(session_id, submission, cx);
     }
 
     fn submit_submission_for_session(
@@ -3553,30 +3572,37 @@ impl Waku {
         } else {
             Vec::new()
         };
-        let transcript_anchor = if let Some(session) = self.state.session_mut(session_id) {
-            // A hidden prompt is not user input: no title, no anchor, and no
-            // transcript row — the turn's work lands on the tail instead.
-            if !hidden {
-                session.set_title_from_prompt(&human_prompt);
-            }
-            let turn_id = if hidden {
-                session.begin_hidden_turn(&prompt)
-            } else {
-                session.begin_turn_with_presentation(
-                    &prompt,
-                    submission.display_content.clone(),
-                    submission.attachments.clone(),
+        let (transcript_anchor, sent_message_id) =
+            if let Some(session) = self.state.session_mut(session_id) {
+                // A hidden prompt is not user input: no title, no anchor, and no
+                // transcript row — the turn's work lands on the tail instead.
+                if !hidden {
+                    session.set_title_from_prompt(&human_prompt);
+                }
+                let turn_id = if hidden {
+                    session.begin_hidden_turn(&prompt)
+                } else {
+                    session.begin_turn_with_presentation(
+                        &prompt,
+                        submission.display_content.clone(),
+                        submission.attachments.clone(),
+                    )
+                };
+                session.status = SessionStatus::Connecting;
+                session.updated_at = unix_time();
+                (
+                    (selected && !hidden).then_some(TranscriptAnchor {
+                        session_id,
+                        turn_id,
+                    }),
+                    session.messages.last().map(|message| message.id),
                 )
+            } else {
+                (None, None)
             };
-            session.status = SessionStatus::Connecting;
-            session.updated_at = unix_time();
-            (selected && !hidden).then_some(TranscriptAnchor {
-                session_id,
-                turn_id,
-            })
-        } else {
-            None
-        };
+        if let Some(message_id) = sent_message_id {
+            self.record_sent_annotations(session_id, message_id, &submission.annotations);
+        }
         self.analytics
             .track(crate::analytics::Event::TurnSubmitted {
                 provider,

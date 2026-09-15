@@ -208,6 +208,7 @@ impl Waku {
         let annotation_offer = self.render_annotation_offer(window, cx);
         let annotation_editor = self.render_annotation_editor(cx);
         let annotation_tooltip = self.render_annotation_tooltip(cx);
+        let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -417,6 +418,7 @@ impl Waku {
             .children(annotation_offer)
             .children(annotation_editor)
             .children(annotation_tooltip)
+            .children(annotation_ref_tooltip)
             .into_any_element()
     }
 
@@ -1437,6 +1439,14 @@ impl Waku {
                         .with_context_menu(menu.clone());
                     if let Some(highlights) = self.transcript_search_highlights(message_index) {
                         ctx = ctx.with_search_highlights(highlights);
+                    }
+                    // Replies may cite the annotations their prompt carried
+                    // as "Annotation N"; the resolved set's size bounds which
+                    // labels get the dotted-underline affordance.
+                    if message.role == MessageRole::Assistant
+                        && let Some(set) = self.annotation_ref_set(message.id)
+                    {
+                        ctx = ctx.with_annotation_labels(set.len());
                     }
                     // Human and assistant messages share the Markdown path.
                     // Parse only visible rows rather than doing work for every

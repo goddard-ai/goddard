@@ -1531,6 +1531,7 @@ impl Waku {
                     .insert(owner, std::mem::take(&mut annotations.items));
             }
             annotations.hovered = None;
+            annotations.hovered_ref = None;
             annotations.editing = None;
             self.annotation_session = self.state.selected_session;
             if let Some(id) = self.state.selected_session {
@@ -1539,9 +1540,20 @@ impl Waku {
         }
         self.annotation_editor = None;
         self.annotation_hover = None;
+        self.annotation_ref_hover = None;
         self.annotation_press = None;
         self.transcript_annotations
             .retain(|id, _| self.state.sessions.iter().any(|session| session.id == *id));
+        self.sent_annotations
+            .retain(|id, _| self.state.sessions.iter().any(|session| session.id == *id));
+        self.queued_annotations.retain(|id, _| {
+            self.state.sessions.iter().any(|session| {
+                session
+                    .queued_messages
+                    .iter()
+                    .any(|message| message.id == *id)
+            })
+        });
         self.reset_transcript_search_for_session();
         let (streaming_messages, live_reasoning) = self.selected_session().map_or_else(
             || (Vec::new(), Vec::new()),

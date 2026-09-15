@@ -597,6 +597,7 @@ impl Element for MathText {
             key: self.key.clone(),
             text: Rc::from(self.flat.text.as_ref()),
             block_break: self.block_break,
+            annotation_refs: Vec::new(),
             geometry: TextGeometry::Math(self.geometry.clone()),
         });
     }
