@@ -273,6 +273,12 @@ const ENTER_DRIFT: f32 = 0.05;
 /// The extra downward settle for a center-anchored (modal) entrance.
 const MODAL_SETTLE: Pixels = px(5.0);
 
+/// How far past a surface's bounds its drop shadow can reach — `shadow_xl`'s
+/// offset plus a 3× blur tail. The reveal targets the dilated bounds so the
+/// shadow lands inside the clip and fades in with the card; a clip that stops
+/// at the card's edge hides it until the last frame, where it pops in.
+const SHADOW_BLEED: Pixels = px(100.0);
+
 /// A one-shot entrance for a floating surface — menu, popover, or dialog.
 ///
 /// GPUI transforms only SVG subtrees, so the "grow" is painted as a clip: the
@@ -421,8 +427,11 @@ where
         } else {
             point(px(0.0), -MODAL_SETTLE * (1.0 - progress))
         };
+        // Reveal toward the shadow-dilated bounds: scaling the dilation with
+        // progress keeps the grow-from-anchor read while keeping the fading
+        // shadow inside the clip.
         let mask = ContentMask {
-            bounds: reveal_bounds(anchor, bounds, progress),
+            bounds: reveal_bounds(anchor, bounds.dilate(SHADOW_BLEED), progress),
         };
         window.with_element_offset(drift, |window| {
             window.with_content_mask(Some(mask), |window| child.prepaint(window, cx));
