@@ -64,12 +64,12 @@ impl SessionDateGroup {
 
 /// Stable identity for a collapsible sidebar section. Keeping both variants in
 /// one set preserves each view's disclosure state when the user switches
-/// between Project and Updated grouping.
+/// between Project and Date grouping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SidebarGroup {
     /// Pinned tasks, always the first section regardless of grouping.
     Pinned,
-    Updated(SessionDateGroup),
+    Date(SessionDateGroup),
     Project(Uuid),
     Projectless,
 }
@@ -78,7 +78,7 @@ impl SidebarGroup {
     fn element_key(self) -> SharedString {
         match self {
             Self::Pinned => "pinned".into(),
-            Self::Updated(group) => format!("updated-{}", group.index()).into(),
+            Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
             Self::Projectless => "projectless".into(),
         }
@@ -87,7 +87,7 @@ impl SidebarGroup {
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
             Self::Pinned => mix(fingerprint, 0x300),
-            Self::Updated(group) => mix(fingerprint, group.index() as u64 + 1),
+            Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
         }
@@ -97,14 +97,14 @@ impl SidebarGroup {
 fn sidebar_grouping_label(grouping: SidebarGrouping) -> String {
     match grouping {
         SidebarGrouping::Project => tr!("sidebar.grouping_project"),
-        SidebarGrouping::Updated => tr!("sidebar.grouping_updated"),
+        SidebarGrouping::Date => tr!("sidebar.grouping_date"),
     }
 }
 
 fn sidebar_ordering_label(ordering: SidebarOrdering) -> String {
     match ordering {
-        SidebarOrdering::Newest => tr!("sidebar.ordering_newest"),
-        SidebarOrdering::Oldest => tr!("sidebar.ordering_oldest"),
+        SidebarOrdering::LastUpdated => tr!("sidebar.ordering_last_updated"),
+        SidebarOrdering::LastCreated => tr!("sidebar.ordering_last_created"),
     }
 }
 
@@ -253,15 +253,17 @@ pub(super) fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
     session.last_reply_at.unwrap_or(session.created_at)
 }
 
-fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrdering) {
+/// The timestamp the ordering preference sorts and date-groups by.
+fn sidebar_ordering_timestamp(session: &AgentSession, ordering: SidebarOrdering) -> u64 {
     match ordering {
-        SidebarOrdering::Newest => {
-            sessions.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)))
-        }
-        SidebarOrdering::Oldest => {
-            sessions.sort_by_key(|session| sidebar_session_timestamp(session))
-        }
+        SidebarOrdering::LastUpdated => sidebar_session_timestamp(session),
+        SidebarOrdering::LastCreated => session.created_at,
     }
+}
+
+fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrdering) {
+    sessions
+        .sort_by_key(|session| std::cmp::Reverse(sidebar_ordering_timestamp(session, ordering)));
 }
 
 fn project_sidebar_groups(
@@ -900,7 +902,7 @@ impl Waku {
                         sidebar_grouping_label(grouping),
                         move |_| {
                             let project_weak = grouping_weak.clone();
-                            let updated_weak = grouping_weak.clone();
+                            let date_weak = grouping_weak.clone();
                             vec![
                                 MenuItem::new(tr!("sidebar.grouping_project"), move |_, cx| {
                                     let _ = project_weak.update(cx, |this, cx| {
@@ -908,12 +910,12 @@ impl Waku {
                                     });
                                 })
                                 .selected(grouping == SidebarGrouping::Project),
-                                MenuItem::new(tr!("sidebar.grouping_updated"), move |_, cx| {
-                                    let _ = updated_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_grouping(SidebarGrouping::Updated, cx);
+                                MenuItem::new(tr!("sidebar.grouping_date"), move |_, cx| {
+                                    let _ = date_weak.update(cx, |this, cx| {
+                                        this.set_sidebar_grouping(SidebarGrouping::Date, cx);
                                     });
                                 })
-                                .selected(grouping == SidebarGrouping::Updated),
+                                .selected(grouping == SidebarGrouping::Date),
                             ]
                         },
                     ),
@@ -921,21 +923,33 @@ impl Waku {
                         tr!("sidebar.ordering"),
                         sidebar_ordering_label(ordering),
                         move |_| {
-                            let newest_weak = ordering_weak.clone();
-                            let oldest_weak = ordering_weak.clone();
+                            let updated_weak = ordering_weak.clone();
+                            let created_weak = ordering_weak.clone();
                             vec![
-                                MenuItem::new(tr!("sidebar.ordering_newest"), move |_, cx| {
-                                    let _ = newest_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_ordering(SidebarOrdering::Newest, cx);
-                                    });
-                                })
-                                .selected(ordering == SidebarOrdering::Newest),
-                                MenuItem::new(tr!("sidebar.ordering_oldest"), move |_, cx| {
-                                    let _ = oldest_weak.update(cx, |this, cx| {
-                                        this.set_sidebar_ordering(SidebarOrdering::Oldest, cx);
-                                    });
-                                })
-                                .selected(ordering == SidebarOrdering::Oldest),
+                                MenuItem::new(
+                                    tr!("sidebar.ordering_last_updated"),
+                                    move |_, cx| {
+                                        let _ = updated_weak.update(cx, |this, cx| {
+                                            this.set_sidebar_ordering(
+                                                SidebarOrdering::LastUpdated,
+                                                cx,
+                                            );
+                                        });
+                                    },
+                                )
+                                .selected(ordering == SidebarOrdering::LastUpdated),
+                                MenuItem::new(
+                                    tr!("sidebar.ordering_last_created"),
+                                    move |_, cx| {
+                                        let _ = created_weak.update(cx, |this, cx| {
+                                            this.set_sidebar_ordering(
+                                                SidebarOrdering::LastCreated,
+                                                cx,
+                                            );
+                                        });
+                                    },
+                                )
+                                .selected(ordering == SidebarOrdering::LastCreated),
                             ]
                         },
                     ),
@@ -1732,14 +1746,14 @@ impl Waku {
             fingerprint,
             match self.state.sidebar_grouping {
                 SidebarGrouping::Project => 1,
-                SidebarGrouping::Updated => 2,
+                SidebarGrouping::Date => 2,
             },
         );
         fingerprint = mix(
             fingerprint,
             match self.state.sidebar_ordering {
-                SidebarOrdering::Newest => 1,
-                SidebarOrdering::Oldest => 2,
+                SidebarOrdering::LastUpdated => 1,
+                SidebarOrdering::LastCreated => 2,
             },
         );
         for session in &self.state.sessions {
@@ -1754,7 +1768,7 @@ impl Waku {
                 fingerprint = mix(
                     fingerprint,
                     u64::from(
-                        sidebar_session_timestamp(session)
+                        sidebar_ordering_timestamp(session, self.state.sidebar_ordering)
                             >= now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS),
                     ),
                 );
@@ -1828,19 +1842,18 @@ impl Waku {
         sorted_sessions.retain(|session| session.pinned_at.is_none());
 
         match self.state.sidebar_grouping {
-            SidebarGrouping::Updated => {
+            SidebarGrouping::Date => {
                 let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
                 for session in sorted_sessions {
-                    grouped_sessions
-                        [session_date_group(sidebar_session_timestamp(session), today).index()]
+                    grouped_sessions[session_date_group(
+                        sidebar_ordering_timestamp(session, self.state.sidebar_ordering),
+                        today,
+                    )
+                    .index()]
                     .push(session.id);
                 }
-                let mut groups = SessionDateGroup::ALL;
-                if self.state.sidebar_ordering == SidebarOrdering::Oldest {
-                    groups.reverse();
-                }
-                for date_group in groups {
-                    let group = SidebarGroup::Updated(date_group);
+                for date_group in SessionDateGroup::ALL {
+                    let group = SidebarGroup::Date(date_group);
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
@@ -1854,7 +1867,12 @@ impl Waku {
                 let recent_cutoff = now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS);
                 let session_timestamps = sorted_sessions
                     .iter()
-                    .map(|session| (session.id, sidebar_session_timestamp(session)))
+                    .map(|session| {
+                        (
+                            session.id,
+                            sidebar_ordering_timestamp(session, self.state.sidebar_ordering),
+                        )
+                    })
                     .collect::<HashMap<_, _>>();
                 let projectless_root = crate::projectless::workspace_root();
                 let projectless_project_ids = self
@@ -1893,7 +1911,7 @@ impl Waku {
         if rows.len() == 1 {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
-                SidebarGrouping::Updated => SidebarGroup::Updated(SessionDateGroup::Today),
+                SidebarGrouping::Date => SidebarGroup::Date(SessionDateGroup::Today),
                 SidebarGrouping::Project => {
                     let projectless_root = crate::projectless::workspace_root();
                     self.state
@@ -2017,7 +2035,7 @@ impl Waku {
         };
         let label = match group {
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
-            SidebarGroup::Updated(group) => group.label(),
+            SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(project_id) => self
                 .state
                 .projects
@@ -2027,7 +2045,7 @@ impl Waku {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("project.chat"),
         };
-        let updated_chevron = matches!(group, SidebarGroup::Updated(_) | SidebarGroup::Pinned)
+        let updated_chevron = matches!(group, SidebarGroup::Date(_) | SidebarGroup::Pinned)
             .then(|| {
                 icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
                     .when(collapsed, |icon| {
@@ -2185,7 +2203,7 @@ impl Waku {
         match group {
             SidebarGroup::Project(project_id) => self.select_project(project_id, cx),
             SidebarGroup::Projectless => self.create_projectless_session(cx),
-            SidebarGroup::Pinned | SidebarGroup::Updated(_) => return,
+            SidebarGroup::Pinned | SidebarGroup::Date(_) => return,
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -3336,7 +3354,7 @@ mod tests {
     #[test]
     fn collapsed_sidebar_group_keeps_only_its_header_and_spacer() {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
-        let group = SidebarGroup::Updated(SessionDateGroup::Today);
+        let group = SidebarGroup::Date(SessionDateGroup::Today);
         let mut expanded = Vec::new();
         append_sidebar_group_rows(&mut expanded, group, &sessions, false, false);
         assert_eq!(
@@ -3455,19 +3473,19 @@ mod tests {
         renamed_old_session.updated_at = 1_000;
 
         let mut newer_unanswered_session = AgentSession::new(project_id, ProviderKind::Codex);
-        newer_unanswered_session.created_at = 30;
+        newer_unanswered_session.created_at = 15;
         newer_unanswered_session.last_reply_at = None;
-        newer_unanswered_session.updated_at = 30;
+        newer_unanswered_session.updated_at = 15;
 
         assert_eq!(sidebar_session_timestamp(&renamed_old_session), 20);
-        assert_eq!(sidebar_session_timestamp(&newer_unanswered_session), 30);
+        assert_eq!(sidebar_session_timestamp(&newer_unanswered_session), 15);
 
         let mut sessions = vec![&renamed_old_session, &newer_unanswered_session];
-        sort_sidebar_sessions(&mut sessions, SidebarOrdering::Newest);
-        assert_eq!(sessions[0].id, newer_unanswered_session.id);
-
-        sort_sidebar_sessions(&mut sessions, SidebarOrdering::Oldest);
+        sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastUpdated);
         assert_eq!(sessions[0].id, renamed_old_session.id);
+
+        sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastCreated);
+        assert_eq!(sessions[0].id, newer_unanswered_session.id);
     }
 
     #[test]
@@ -3723,7 +3741,7 @@ mod tests {
     #[test]
     fn selected_session_uses_nearest_bottom_edge_for_an_unmeasured_lower_row() {
         let target = Uuid::from_u128(31);
-        let group = SidebarGroup::Updated(SessionDateGroup::Today);
+        let group = SidebarGroup::Date(SessionDateGroup::Today);
         let mut rows = vec![SidebarRow::Search, SidebarRow::Header(group)];
         rows.extend((1..=40).map(|id| SidebarRow::Session(Uuid::from_u128(id))));
         rows.push(SidebarRow::GroupSpacer);

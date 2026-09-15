@@ -332,10 +332,10 @@ sidebar.search: 搜索
 sidebar.options: 侧边栏选项
 sidebar.grouping: 分组
 sidebar.grouping_project: 项目
-sidebar.grouping_updated: 更新时间
+sidebar.grouping_date: 日期
 sidebar.ordering: 排序
-sidebar.ordering_newest: 最新优先
-sidebar.ordering_oldest: 最旧优先
+sidebar.ordering_last_updated: 最近更新
+sidebar.ordering_last_created: 最近创建
 sidebar.show_more: 显示更多
 sidebar.pinned: 已置顶
 sidebar.yesterday: 昨天

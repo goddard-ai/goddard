@@ -343,10 +343,10 @@ sidebar.search: 検索
 sidebar.options: サイドバーオプション
 sidebar.grouping: グループ化
 sidebar.grouping_project: プロジェクト
-sidebar.grouping_updated: 更新日
+sidebar.grouping_date: 日付
 sidebar.ordering: 並び順
-sidebar.ordering_newest: 新しい順
-sidebar.ordering_oldest: 古い順
+sidebar.ordering_last_updated: 最終更新
+sidebar.ordering_last_created: 作成日
 sidebar.show_more: もっと見る
 sidebar.pinned: ピン留め
 sidebar.yesterday: 昨日

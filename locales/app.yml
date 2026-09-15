@@ -669,14 +669,14 @@ sidebar.grouping:
   en: Grouping
 sidebar.grouping_project:
   en: Project
-sidebar.grouping_updated:
-  en: Updated
+sidebar.grouping_date:
+  en: Date
 sidebar.ordering:
   en: Ordering
-sidebar.ordering_newest:
-  en: Newest first
-sidebar.ordering_oldest:
-  en: Oldest first
+sidebar.ordering_last_updated:
+  en: Last updated
+sidebar.ordering_last_created:
+  en: Last created
 sidebar.show_more:
   en: Show more
 sidebar.pinned:

@@ -41,16 +41,22 @@ pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 pub enum SidebarGrouping {
     Project,
     #[default]
-    Updated,
+    #[serde(alias = "updated")]
+    Date,
 }
 
-/// Direction of task history inside the sidebar's current grouping.
+/// Which timestamp orders task history inside the sidebar's current grouping,
+/// always most recent first.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SidebarOrdering {
+    /// The task's last agent reply, falling back to its creation.
     #[default]
-    Newest,
-    Oldest,
+    #[serde(alias = "newest")]
+    LastUpdated,
+    /// The task's creation.
+    #[serde(alias = "oldest")]
+    LastCreated,
 }
 
 /// One of the bundled sounds the desktop can play when a task the user is
@@ -762,8 +768,8 @@ impl PersistedState {
             sidebar_visible: true,
             right_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
-            sidebar_grouping: SidebarGrouping::Updated,
-            sidebar_ordering: SidebarOrdering::Newest,
+            sidebar_grouping: SidebarGrouping::Date,
+            sidebar_ordering: SidebarOrdering::LastUpdated,
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
             window_state: None,
@@ -1672,9 +1678,16 @@ mod tests {
     fn legacy_app_state_defaults_sidebar_presentation() {
         let state: AppState = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
 
-        assert_eq!(state.sidebar_grouping, SidebarGrouping::Updated);
-        assert_eq!(state.sidebar_ordering, SidebarOrdering::Newest);
+        assert_eq!(state.sidebar_grouping, SidebarGrouping::Date);
+        assert_eq!(state.sidebar_ordering, SidebarOrdering::LastUpdated);
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
+
+        let state: AppState = serde_json::from_str(
+            r#"{"app_state_version":1,"sidebar_grouping":"updated","sidebar_ordering":"oldest"}"#,
+        )
+        .unwrap();
+        assert_eq!(state.sidebar_grouping, SidebarGrouping::Date);
+        assert_eq!(state.sidebar_ordering, SidebarOrdering::LastCreated);
     }
 
     #[test]
