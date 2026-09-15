@@ -4,6 +4,8 @@ import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
 import { watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
+import readline from "node:readline";
+import { WakuClient } from "../packages/waku-client/src/client";
 
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
@@ -17,6 +19,24 @@ const daemonPath = join(
   targetDir,
   `debug/waku-debug-daemon${executableSuffix}`,
 );
+const appExecutablePath = isMacOS
+  ? join(appPath, "Contents/MacOS", appName)
+  : appPath;
+const daemonToken =
+  process.env.WAKU_DAEMON_TOKEN ?? crypto.randomUUID().replaceAll("-", "");
+const externalDaemonAddress = process.env.WAKU_DAEMON_ADDRESS;
+const interactive = process.stdin.isTTY === true;
+const daemonPortBase = 34_123;
+const daemonPortScanLimit = 20;
+const daemonReadyTimeoutMs = 15_000;
+const daemonShutdownTimeoutMs = 1_000;
+const daemonIdlePollMs = 2_000;
+const liveSessionStatuses = new Set([
+  "connecting",
+  "working",
+  "waiting",
+  "background",
+]);
 const watchedDirectories = [
   "src",
   "crates",
@@ -41,6 +61,18 @@ type HyprlandContext = {
 $.cwd(root);
 
 let app: ReturnType<typeof Bun.spawn> | undefined;
+let daemon: ReturnType<typeof Bun.spawn> | undefined;
+let daemonBind: string | undefined;
+let daemonAddress: string | undefined;
+let daemonRestartPending = false;
+let daemonRestartWhenIdle = false;
+let daemonRestarting = false;
+let protocolDirty = false;
+let forceDaemonRestart = false;
+let controlClient: WakuClient | undefined;
+let lastDeferredLiveCount: number | undefined;
+let lastDaemonSpawnAt = 0;
+let commandInput: readline.Interface | undefined;
 let stopping = false;
 let building = false;
 let queuedBuild: BuildTarget | undefined;
@@ -351,6 +383,309 @@ async function buildDaemon(): Promise<boolean> {
   return true;
 }
 
+// The watcher owns the daemon and passes `--parent-pid` pointing at itself, so
+// the daemon outlives every app relaunch but still dies with the watcher. The
+// app connects over the socket like a remote client, which is what lets it
+// re-attach to live sessions and reconnect on its own after a daemon restart.
+type DaemonReady = { address: string };
+
+async function spawnDaemon(bind: string): Promise<void> {
+  const child = Bun.spawn(
+    [daemonPath, "--bind", bind, "--parent-pid", String(process.pid)],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        WAKU_DAEMON_TOKEN: daemonToken,
+        WAKU_APP_EXECUTABLE: appExecutablePath,
+      },
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  );
+  let ready: DaemonReady;
+  try {
+    ready = await readDaemonReady(child);
+  } catch (error) {
+    child.kill();
+    throw error;
+  }
+  daemon = child;
+  daemonBind = bind;
+  daemonAddress = ready.address;
+  controlClient = undefined;
+  lastDaemonSpawnAt = Date.now();
+  void watchDaemonExit(child);
+}
+
+// The app connects as a remote client, so nothing else notices a dead daemon.
+// A daemon that survived a while is restarted immediately; one that died fast
+// is left for a manual 'd' so a crashing build cannot loop.
+function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
+  void child.exited.then(async (code) => {
+    if (daemon !== child || stopping) return;
+    daemon = undefined;
+    console.error(`[waku-dev] Daemon exited unexpectedly (${code}).`);
+    if (Date.now() - lastDaemonSpawnAt > 30_000) {
+      await restartDaemon("unexpected exit");
+    } else {
+      daemonRestartPending = true;
+      console.log("[waku-dev] Press 'd' to restart the daemon.");
+    }
+  });
+}
+
+// The daemon announces its bound address as one JSON line on stdout. Keep
+// draining the stream afterward so a chatty daemon can never block on a full
+// pipe.
+function readDaemonReady(
+  child: ReturnType<typeof Bun.spawn>,
+): Promise<DaemonReady> {
+  return new Promise((resolveReady, rejectReady) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      rejectReady(new Error("timed out waiting for the daemon to start"));
+    }, daemonReadyTimeoutMs);
+    void child.exited.then((code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectReady(
+        new Error(`Goddard daemon exited before becoming ready (${code})`),
+      );
+    });
+    void (async () => {
+      const stdout = child.stdout;
+      if (stdout === null || typeof stdout === "number") {
+        settled = true;
+        clearTimeout(timer);
+        rejectReady(new Error("daemon stdout was not piped"));
+        return;
+      }
+      const reader = stdout.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (settled) continue;
+          buffer += decoder.decode(value, { stream: true });
+          const newline = buffer.indexOf("\n");
+          if (newline === -1) continue;
+          settled = true;
+          clearTimeout(timer);
+          resolveReady(JSON.parse(buffer.slice(0, newline)) as DaemonReady);
+        }
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        rejectReady(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
+  });
+}
+
+// A pre-set WAKU_DAEMON_ADDRESS keeps working: the watcher adopts that daemon
+// instead of spawning its own, and never restarts it.
+async function ensureDaemon(): Promise<void> {
+  if (externalDaemonAddress) {
+    if (process.env.WAKU_DAEMON_TOKEN === undefined) {
+      console.warn(
+        "[waku-dev] WAKU_DAEMON_TOKEN is unset; the external daemon will likely reject the app.",
+      );
+    }
+    daemonAddress = externalDaemonAddress;
+    console.log(
+      `[waku-dev] Using external daemon at ${externalDaemonAddress}; the watcher will not restart it.`,
+    );
+    return;
+  }
+  let lastError: unknown;
+  for (let offset = 0; offset < daemonPortScanLimit; offset++) {
+    try {
+      await spawnDaemon(`127.0.0.1:${daemonPortBase + offset}`);
+      console.log(
+        `[waku-dev] Daemon listening on ${daemonAddress}; it stays up across app relaunches.`,
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      // The port was taken or the daemon refused the bind; try the next one.
+    }
+  }
+  throw new Error("could not bind the Goddard daemon to a loopback port", {
+    cause: lastError,
+  });
+}
+
+async function stopDaemon(): Promise<void> {
+  const child = daemon;
+  daemon = undefined;
+  if (child === undefined || child.exitCode !== null) return;
+  try {
+    if (controlClient?.connected) controlClient.shutdownDaemon();
+  } catch {
+    // Fall through to signal-based shutdown.
+  }
+  const finished = await Promise.race([
+    child.exited.then(() => true),
+    Bun.sleep(daemonShutdownTimeoutMs).then(() => false),
+  ]);
+  if (!finished) child.kill();
+  await child.exited.catch(() => {});
+  controlClient = undefined;
+}
+
+// A live session is one with a provider runtime a daemon restart would kill.
+// Persisted statuses are stale after any daemon restart, so sessions that look
+// live are confirmed through AttachSession — it observes the actor without
+// mutating it and returns a null runtimeId when no process is running.
+async function liveSessionCount(): Promise<number | undefined> {
+  if (daemonAddress === undefined) return undefined;
+  try {
+    controlClient ??= new WakuClient({
+      address: daemonAddress,
+      token: daemonToken,
+      requestTimeoutMs: 5_000,
+    });
+    if (!controlClient.connected) await controlClient.connect();
+    const response = await controlClient.request(
+      { type: "loadTaskState" },
+      undefined,
+      undefined,
+      { timeoutMs: 5_000 },
+    );
+    if (response.type !== "taskState") return undefined;
+    const candidates = response.sessions.filter((session) =>
+      liveSessionStatuses.has(session.status),
+    );
+    let live = 0;
+    for (const session of candidates.slice(0, 50)) {
+      const attach = await controlClient.request(
+        { type: "attachSession" },
+        session.id,
+      );
+      if (attach.type === "sessionRuntime" && attach.runtimeId !== null) {
+        live += 1;
+      }
+    }
+    return live;
+  } catch {
+    return undefined;
+  }
+}
+
+async function restartDaemon(reason: string): Promise<void> {
+  if (daemonRestarting || stopping) return;
+  if (daemonBind === undefined) {
+    console.log(
+      "[waku-dev] The daemon is externally managed; restart it yourself.",
+    );
+    daemonRestartPending = false;
+    return;
+  }
+  daemonRestarting = true;
+  try {
+    console.log(
+      `[waku-dev] Restarting the daemon (${reason}); the app will reconnect on its own.`,
+    );
+    await stopDaemon();
+    if (stopping) return;
+    try {
+      await spawnDaemon(daemonBind);
+      daemonRestartPending = false;
+      daemonRestartWhenIdle = false;
+      console.log(`[waku-dev] Daemon restarted on ${daemonAddress}.`);
+    } catch (error) {
+      console.error("[waku-dev] Daemon restart failed:", error);
+      daemonRestartPending = true;
+    }
+  } finally {
+    daemonRestarting = false;
+  }
+}
+
+function armDaemonRestartWhenIdle(): void {
+  if (!daemonRestartPending) {
+    console.log("[waku-dev] No pending daemon restart.");
+    return;
+  }
+  if (daemonRestartWhenIdle) return;
+  daemonRestartWhenIdle = true;
+  lastDeferredLiveCount = undefined;
+  console.log(
+    "[waku-dev] Daemon restart armed; it fires once no live sessions remain.",
+  );
+  void pollForDaemonIdle();
+}
+
+async function pollForDaemonIdle(): Promise<void> {
+  while (daemonRestartWhenIdle && daemonRestartPending && !stopping) {
+    if (!building && !daemonRestarting) {
+      const live = await liveSessionCount();
+      if (live === 0) {
+        await restartDaemon("sessions idle");
+        return;
+      }
+      if (live !== undefined && live !== lastDeferredLiveCount) {
+        console.log(
+          `[waku-dev] ${live} live session${live === 1 ? "" : "s"} still running.`,
+        );
+        lastDeferredLiveCount = live;
+      }
+    }
+    await Bun.sleep(daemonIdlePollMs);
+  }
+  daemonRestartWhenIdle = false;
+}
+
+async function handleCommand(command: string): Promise<void> {
+  switch (command) {
+    case "":
+      return;
+    case "d":
+      if (building) {
+        console.log(
+          "[waku-dev] A build is in progress; try again when it finishes.",
+        );
+        return;
+      }
+      await restartDaemon("requested");
+      return;
+    case "D":
+      armDaemonRestartWhenIdle();
+      return;
+    case "a":
+      queuedBuild = mergedTarget(queuedBuild, "app");
+      void drainBuildQueue();
+      return;
+    case "b":
+      forceDaemonRestart = true;
+      queuedBuild = mergedTarget(queuedBuild, "app");
+      void drainBuildQueue();
+      return;
+    default:
+      console.log(
+        "[waku-dev] Commands: 'd' restarts the daemon, 'D' restarts it once " +
+          "sessions go idle, 'a' rebuilds and relaunches the app, 'b' does both.",
+      );
+  }
+}
+
+function startCommandLoop(): void {
+  if (!interactive) return;
+  commandInput = readline.createInterface({ input: process.stdin });
+  commandInput.on("line", (line) => void handleCommand(line.trim()));
+}
+
+function closeCommandLoop(): void {
+  commandInput?.close();
+  commandInput = undefined;
+}
+
 async function stopApp(): Promise<void> {
   const waiter = app;
   app = undefined;
@@ -364,12 +699,21 @@ async function stopApp(): Promise<void> {
   }
 }
 
-function launchApp(): ReturnType<typeof Bun.spawn> {
+function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
+  if (daemonAddress === undefined) {
+    console.error("[waku-dev] The daemon is not running; cannot launch the app.");
+    return undefined;
+  }
   console.log(`[waku-dev] Launching ${appPath}`);
   const command = isMacOS ? ["open", "-n", "-W", appPath] : [appPath];
   const launchedApp = Bun.spawn(command, {
     cwd: root,
-    env: { ...process.env, WAKU_DAEMON_PATH: daemonPath },
+    env: {
+      ...process.env,
+      WAKU_DAEMON_PATH: daemonPath,
+      WAKU_DAEMON_ADDRESS: daemonAddress,
+      WAKU_DAEMON_TOKEN: daemonToken,
+    },
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -379,6 +723,8 @@ function launchApp(): ReturnType<typeof Bun.spawn> {
     stopping = true;
     closeWatchers();
     clearRebuildTimer();
+    closeCommandLoop();
+    await stopDaemon();
     await releaseHyprlandRules();
     console.log("[waku-dev] App exited; stopping the watcher.");
     process.exitCode = exitCode;
@@ -422,6 +768,9 @@ function targetForChange(
   ) {
     return "daemon";
   }
+  // The wire protocol is shared by both sides, so the running daemon must be
+  // replaced before the rebuilt app launches or the handshake mismatches.
+  if (relativePath.startsWith("waku-protocol/")) protocolDirty = true;
   return "app";
 }
 
@@ -474,16 +823,31 @@ async function drainBuildQueue(): Promise<void> {
 
       if (target === "daemon") {
         if (daemonChangeRevision === buildDaemonRevision) {
+          daemonRestartPending = true;
+          const live = await liveSessionCount();
+          const detail =
+            live === undefined
+              ? ""
+              : live === 0
+                ? "; no live sessions"
+                : `; ${live} live session${live === 1 ? "" : "s"} would be interrupted`;
           console.log(
-            "[waku-dev] Daemon rebuilt; Goddard will swap the process without relaunching.",
+            `[waku-dev] Daemon rebuilt${detail} — 'd' restarts it, 'D' waits for idle.`,
           );
+          // Non-interactive runs cannot press 'd'; keep the previous
+          // rebuild-and-swap behavior so the daemon never goes stale.
+          if (!interactive) {
+            await restartDaemon("non-interactive rebuild");
+          } else if (daemonRestartWhenIdle && live === 0) {
+            await restartDaemon("sessions idle");
+          }
         }
         continue;
       }
 
       // App changes make a bundle compiled from an older revision stale. A
-      // daemon-only edit does not: launch the app, then let its supervisor pick
-      // up the independently rebuilt daemon.
+      // daemon-only edit does not: the daemon survives the relaunch, so
+      // sessions keep running while the window reloads.
       if (appChangeRevision !== buildAppRevision) {
         console.log(
           "[waku-dev] More changes arrived during the build; waiting to rebuild.",
@@ -491,6 +855,16 @@ async function drainBuildQueue(): Promise<void> {
         continue;
       }
 
+      const daemonRestartReason = forceDaemonRestart
+        ? "requested"
+        : protocolDirty
+          ? "protocol changed"
+          : undefined;
+      forceDaemonRestart = false;
+      protocolDirty = false;
+      if (daemonRestartReason !== undefined) {
+        await restartDaemon(daemonRestartReason);
+      }
       await stopApp();
       if (!stopping) await prepareHyprlandLaunch();
       if (!stopping) app = launchApp();
@@ -504,10 +878,12 @@ async function drainBuildQueue(): Promise<void> {
 async function cleanup(): Promise<void> {
   if (stopping) return;
   stopping = true;
-  console.log("[waku-dev] Stopping watcher and app...");
+  console.log("[waku-dev] Stopping watcher, app, and daemon...");
   closeWatchers();
   clearRebuildTimer();
+  closeCommandLoop();
   await stopApp();
+  await stopDaemon();
   await releaseHyprlandRules();
 }
 
@@ -524,6 +900,14 @@ if (!initialBuildSucceeded) {
   process.exit(1);
 }
 
+try {
+  await ensureDaemon();
+} catch (error) {
+  console.error("[waku-dev]", error);
+  closeWatchers();
+  process.exit(1);
+}
+
 if (appChangeRevision === initialAppRevision) {
   await stopApp();
   await prepareHyprlandLaunch();
@@ -535,6 +919,9 @@ if (appChangeRevision === initialAppRevision) {
   if (queuedBuild !== undefined) void drainBuildQueue();
 }
 
+startCommandLoop();
 console.log(
-  "[waku-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Goddard.",
+  "[waku-dev] Watching for source changes. The daemon survives app relaunches; " +
+    "after a daemon rebuild, 'd' restarts it, 'D' once sessions go idle, " +
+    "'a' rebuilds and relaunches the app, 'b' does both.",
 );
