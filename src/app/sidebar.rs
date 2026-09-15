@@ -1684,7 +1684,8 @@ impl Waku {
     /// Arm or clear the ⌘-hold row chips as the primary modifier changes.
     /// The chips advertise a bare ⌘1–⌘9 chord, so any second modifier —
     /// held first or added mid-hold — keeps them hidden; releasing back to
-    /// the bare modifier re-arms the delay.
+    /// the bare modifier re-arms the delay. A hold that already spent ⌘ on
+    /// a chord stays quiet until ⌘ comes all the way back up.
     pub(super) fn sidebar_shortcuts_modifiers_changed(
         &mut self,
         event: &gpui::ModifiersChangedEvent,
@@ -1693,6 +1694,9 @@ impl Waku {
     ) {
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
+        if !event.modifiers.secondary() {
+            self.sidebar_shortcut_hint_chord_used = false;
+        }
         if event.modifiers != gpui::Modifiers::secondary_key() {
             if self.sidebar_shortcut_hints {
                 self.sidebar_shortcut_hints = false;
@@ -1700,7 +1704,7 @@ impl Waku {
             }
             return;
         }
-        if self.sidebar_shortcut_hints {
+        if self.sidebar_shortcut_hints || self.sidebar_shortcut_hint_chord_used {
             return;
         }
         let generation = self.sidebar_shortcut_hint_generation;
@@ -1719,11 +1723,35 @@ impl Waku {
         .detach();
     }
 
+    /// A ⌘-modified keystroke spends the current hold: the user already put
+    /// the modifier to work, so the chips stay down until ⌘ comes back up.
+    /// Registered on the capture phase so chords a binding claims count the
+    /// same as unclaimed ones; a pending reveal timer is cancelled by the
+    /// generation bump.
+    pub(super) fn sidebar_shortcuts_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.keystroke.modifiers.secondary() {
+            return;
+        }
+        self.sidebar_shortcut_hint_chord_used = true;
+        self.sidebar_shortcut_hint_generation =
+            self.sidebar_shortcut_hint_generation.wrapping_add(1);
+        if self.sidebar_shortcut_hints {
+            self.sidebar_shortcut_hints = false;
+            cx.notify();
+        }
+    }
+
     /// Window deactivation delivers no modifiers-changed event, so ⌘-hold
     /// chips would stay painted while the app sits in the background.
     pub(super) fn sidebar_shortcuts_window_deactivated(&mut self, cx: &mut Context<Self>) {
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
+        self.sidebar_shortcut_hint_chord_used = false;
         if self.sidebar_shortcut_hints {
             self.sidebar_shortcut_hints = false;
             cx.notify();

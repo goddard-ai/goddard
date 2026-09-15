@@ -312,6 +312,7 @@ impl Render for Waku {
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
+                .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
                 .child(self.render_settings(window, cx))
                 .children(toast)
                 .children(command_palette)
@@ -395,6 +396,7 @@ impl Render for Waku {
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
+            .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
             // Type-to-focus: the last listener on every dispatch path through
             // the workspace, so an unclaimed printable keystroke from a
             // focused descendant — or from nothing, on platforms where this
