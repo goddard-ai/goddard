@@ -53,6 +53,21 @@ mod implementation {
 
     impl Global for InspectorUi {}
 
+    use super::InspectorMode;
+
+    /// Inspector session state. `label` stashes the text the floating pill is
+    /// currently showing: the click that ends picking is intercepted by gpui's
+    /// picking layer before app handlers run, so the copy path in
+    /// `render_inspector` can't reach back into the element's inspector state —
+    /// it copies whatever the last picking frame displayed.
+    #[derive(Default)]
+    struct InspectorUi {
+        mode: InspectorMode,
+        label: Option<String>,
+    }
+
+    impl Global for InspectorUi {}
+
     /// Width gpui reserves on the window's right edge for inspector UI whenever
     /// the inspector entity exists (`Window::draw_roots`). The inspector root
     /// is laid out at that x offset, so absolute-positioned children translate
