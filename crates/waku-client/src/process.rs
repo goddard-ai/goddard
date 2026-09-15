@@ -22,6 +22,12 @@ use waku_protocol::{
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const REBUILD_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const PROBE_INTERVAL: Duration = Duration::from_secs(5);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+const RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+const STABLE_UPTIME: Duration = Duration::from_secs(30);
+const UNREACHABLE_AFTER_FAILURES: u32 = 4;
 pub const DEFAULT_EXPOSED_DAEMON_PORT: u16 = 34_123;
 
 /// Desktop-owned launch configuration for the daemon it supervises.
@@ -298,6 +304,19 @@ impl ExecutableStamp {
     }
 }
 
+/// The supervisor's view of daemon reachability. Callers use it to explain
+/// failures (for example when a prompt cannot be delivered); it is not meant
+/// to drive a persistent status surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DaemonStatus {
+    /// The daemon answers requests.
+    Connected,
+    /// A restart or reconnect is under way.
+    Recovering,
+    /// Repeated recovery attempts have failed; retries continue slowly.
+    Unreachable,
+}
+
 struct SupervisorInner {
     executable: Option<PathBuf>,
     target: Mutex<DaemonTarget>,
@@ -307,6 +326,7 @@ struct SupervisorInner {
     persisted_settings: Mutex<Option<DaemonSettings>>,
     settings_updates: Sender<DaemonSettings>,
     client_updates: Mutex<Vec<Sender<DaemonClient>>>,
+    status: Mutex<DaemonStatus>,
     running: AtomicBool,
 }
 
@@ -410,6 +430,7 @@ impl DaemonSupervisor {
             persisted_settings: Mutex::new(None),
             settings_updates,
             client_updates: Mutex::new(Vec::new()),
+            status: Mutex::new(DaemonStatus::Connected),
             running: AtomicBool::new(true),
         });
         let weak_inner = Arc::downgrade(&inner);
@@ -439,6 +460,11 @@ impl DaemonSupervisor {
 
     pub fn is_remote(&self) -> bool {
         self.inner.executable.is_none()
+    }
+
+    /// The supervisor's current view of daemon reachability.
+    pub fn status(&self) -> DaemonStatus {
+        *self.inner.status.lock()
     }
 
     pub fn settings(&self) -> DaemonSettings {
@@ -517,6 +543,11 @@ fn monitor_daemon(
     mut active_stamp: Option<ExecutableStamp>,
     watch_for_rebuilds: bool,
 ) {
+    let mut last_probe = Instant::now();
+    let mut healthy_since = Instant::now();
+    let mut consecutive_failures = 0_u32;
+    let mut next_retry = Instant::now();
+    let mut counted_outage = false;
     loop {
         std::thread::sleep(REBUILD_POLL_INTERVAL);
         let Some(inner) = weak_inner.upgrade() else {
@@ -542,6 +573,9 @@ fn monitor_daemon(
             }
         };
         if let Some((disconnected, address, token, resume_from)) = remote_reconnect {
+            if Instant::now() < next_retry {
+                continue;
+            }
             let _restart = inner.restart.lock();
             let still_current = matches!(
                 &*inner.target.lock(),
@@ -551,54 +585,136 @@ fn monitor_daemon(
             if !still_current {
                 continue;
             }
-            let Ok(replacement) =
-                DaemonClient::connect_with_resume(&address, token.clone(), resume_from)
-            else {
-                continue;
-            };
-            *inner.target.lock() = DaemonTarget::Remote {
-                client: replacement.clone(),
-                address,
-                token,
-            };
-            inner
-                .client_updates
-                .lock()
-                .retain(|subscriber| subscriber.send(replacement.clone()).is_ok());
+            set_status(&inner, DaemonStatus::Recovering);
+            match DaemonClient::connect_with_resume(&address, token.clone(), resume_from) {
+                Ok(replacement) => {
+                    *inner.target.lock() = DaemonTarget::Remote {
+                        client: replacement.clone(),
+                        address,
+                        token,
+                    };
+                    inner
+                        .client_updates
+                        .lock()
+                        .retain(|subscriber| subscriber.send(replacement.clone()).is_ok());
+                    consecutive_failures = 0;
+                    healthy_since = Instant::now();
+                    set_status(&inner, DaemonStatus::Connected);
+                }
+                Err(error) => {
+                    consecutive_failures += 1;
+                    next_retry = Instant::now() + retry_delay(consecutive_failures);
+                    eprintln!("could not reconnect to Goddard daemon: {error:#}");
+                    note_recovery_failure(&inner, consecutive_failures);
+                }
+            }
             continue;
         }
-        let process_exited = match &mut *inner.target.lock() {
-            DaemonTarget::Local(process) => process.has_exited(),
-            DaemonTarget::Restarting(_) => true,
-            DaemonTarget::Remote { .. } => continue,
+        let (daemon_down, client) = {
+            let mut target = inner.target.lock();
+            match &mut *target {
+                DaemonTarget::Local(process) => (
+                    process.has_exited() || process.client().is_disconnected(),
+                    process.client(),
+                ),
+                DaemonTarget::Restarting(client) => (true, client.clone()),
+                DaemonTarget::Remote { client, .. } => (false, client.clone()),
+            }
         };
-        let Some(executable) = inner.executable.as_ref() else {
-            return;
-        };
-        let observed_stamp = ExecutableStamp::read(executable).ok();
-        let executable_changed = watch_for_rebuilds
-            && observed_stamp.is_some_and(|observed| Some(observed) != active_stamp);
-        if !process_exited && !executable_changed {
-            continue;
-        }
-        let _restart = inner.restart.lock();
-        let Some(exposure) = inner.exposure.lock().clone() else {
-            return;
-        };
-        match replace_local_daemon(&inner, executable, &exposure) {
-            Ok(()) => {}
-            Err(error) => {
-                eprintln!("could not restart rebuilt Goddard daemon: {error:#}");
+        if let Some(executable) = inner.executable.as_ref() {
+            let observed_stamp = ExecutableStamp::read(executable).ok();
+            let executable_changed = watch_for_rebuilds
+                && observed_stamp.is_some_and(|observed| Some(observed) != active_stamp);
+            if daemon_down || executable_changed {
+                if Instant::now() < next_retry {
+                    continue;
+                }
+                set_status(&inner, DaemonStatus::Recovering);
+                let _restart = inner.restart.lock();
+                // Re-check under the restart lock: `reconfigure` may have
+                // swapped in a fresh daemon while this thread waited.
+                let still_down = match &mut *inner.target.lock() {
+                    DaemonTarget::Local(process) => {
+                        process.has_exited() || process.client().is_disconnected()
+                    }
+                    DaemonTarget::Restarting(_) => true,
+                    DaemonTarget::Remote { .. } => false,
+                };
+                if !still_down && !executable_changed {
+                    set_status(&inner, DaemonStatus::Connected);
+                    continue;
+                }
+                if still_down && !counted_outage {
+                    counted_outage = true;
+                    // A daemon that dies within STABLE_UPTIME of its own
+                    // launch is crash-looping; an older one had a stable run
+                    // and gets an immediate replacement.
+                    if healthy_since.elapsed() < STABLE_UPTIME {
+                        consecutive_failures += 1;
+                    }
+                    if consecutive_failures > 0 {
+                        next_retry = Instant::now() + retry_delay(consecutive_failures);
+                        note_recovery_failure(&inner, consecutive_failures);
+                        continue;
+                    }
+                }
+                let Some(exposure) = inner.exposure.lock().clone() else {
+                    return;
+                };
+                match replace_local_daemon(&inner, executable, &exposure) {
+                    Ok(()) => {
+                        healthy_since = Instant::now();
+                        set_status(&inner, DaemonStatus::Connected);
+                        queue_settings_refresh(&inner);
+                        if let Some(observed_stamp) = observed_stamp {
+                            active_stamp = Some(observed_stamp);
+                        }
+                    }
+                    Err(error) => {
+                        consecutive_failures += 1;
+                        next_retry = Instant::now() + retry_delay(consecutive_failures);
+                        eprintln!("could not restart the Goddard daemon: {error:#}");
+                        note_recovery_failure(&inner, consecutive_failures);
+                    }
+                }
                 continue;
             }
+            counted_outage = false;
+            if consecutive_failures > 0 && healthy_since.elapsed() > STABLE_UPTIME {
+                consecutive_failures = 0;
+                set_status(&inner, DaemonStatus::Connected);
+            }
         }
-        queue_settings_refresh(&inner);
-        if let Some(observed_stamp) = observed_stamp {
-            active_stamp = Some(observed_stamp);
+        // The socket being open only proves the socket is open. Probe the
+        // request pipeline so a wedged daemon is declared dead and replaced
+        // instead of hanging every request for the full request timeout.
+        if last_probe.elapsed() >= PROBE_INTERVAL && !client.is_disconnected() {
+            last_probe = Instant::now();
+            if !client.probe(PROBE_TIMEOUT) {
+                client.force_disconnect();
+            }
         }
-        drop(_restart);
-        drop(inner);
     }
+}
+
+fn retry_delay(failures: u32) -> Duration {
+    let shift = failures.saturating_sub(1).min(5);
+    (RETRY_BASE_DELAY * 2_u32.pow(shift)).min(RETRY_MAX_DELAY)
+}
+
+fn set_status(inner: &SupervisorInner, status: DaemonStatus) {
+    *inner.status.lock() = status;
+}
+
+fn note_recovery_failure(inner: &SupervisorInner, failures: u32) {
+    set_status(
+        inner,
+        if failures >= UNREACHABLE_AFTER_FAILURES {
+            DaemonStatus::Unreachable
+        } else {
+            DaemonStatus::Recovering
+        },
+    );
 }
 
 fn replace_local_daemon(

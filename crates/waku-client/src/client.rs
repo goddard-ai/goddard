@@ -152,6 +152,48 @@ impl DaemonClient {
         self.inner.disconnected.load(Ordering::Acquire)
     }
 
+    /// Cheap liveness check: any daemon reply — even an error — proves the
+    /// request pipeline is answering. `false` means the daemon is gone or
+    /// unresponsive.
+    pub fn probe(&self, timeout: Duration) -> bool {
+        if self.inner.disconnected.load(Ordering::Acquire) {
+            return false;
+        }
+        let request_id = Uuid::new_v4();
+        let (response, response_rx) = bounded(1);
+        self.inner.pending.lock().insert(request_id, response);
+        if self
+            .inner
+            .outgoing
+            .send(Outgoing::Message(ClientMessage::Request(Request {
+                request_id,
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::GetSettings,
+            })))
+            .is_err()
+        {
+            self.inner.pending.lock().remove(&request_id);
+            return false;
+        }
+        match response_rx.recv_timeout(timeout) {
+            Ok(_) => true,
+            Err(_) => {
+                self.inner.pending.lock().remove(&request_id);
+                false
+            }
+        }
+    }
+
+    /// Mark this connection dead without waiting for the socket to notice:
+    /// pending requests and event subscribers are released exactly as if the
+    /// socket had closed, and the socket thread is asked to shut down. Used
+    /// when the daemon stops answering while keeping the socket open.
+    pub fn force_disconnect(&self) {
+        fail_connection(&self.inner);
+        let _ = self.inner.outgoing.send(Outgoing::Shutdown);
+    }
+
     pub fn unsubscribe(&self, session_id: Uuid, runtime_id: Uuid) {
         self.inner.sessions.lock().remove(&(session_id, runtime_id));
     }
@@ -361,6 +403,10 @@ fn run_client(
         }
     }
 
+    fail_connection(&inner);
+}
+
+fn fail_connection(inner: &ClientInner) {
     inner.disconnected.store(true, Ordering::Release);
     let pending = std::mem::take(&mut *inner.pending.lock());
     for (_, response) in pending {
