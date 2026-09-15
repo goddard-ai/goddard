@@ -310,9 +310,19 @@ pub fn run() {
                 KeyBinding::new("secondary-,", OpenSettings, None),
                 KeyBinding::new("secondary-b", ToggleSidebar, None),
                 KeyBinding::new("secondary-alt-b", ToggleRightPanel, None),
-                // In the terminal ⌘K clears the scrollback instead, matching
-                // what a normal terminal does.
-                KeyBinding::new("secondary-k", ToggleCommandPalette, Some("!Terminal")),
+                // ⌘K opens the palette even in the terminal; ⌘⇧K clears the
+                // scrollback there instead — hand-rolled in the terminal's
+                // `on_key_down`. Elsewhere Ctrl+K is a shell shortcut
+                // (readline kill-line), so it keeps passing through.
+                KeyBinding::new(
+                    "secondary-k",
+                    ToggleCommandPalette,
+                    if cfg!(target_os = "macos") {
+                        None
+                    } else {
+                        Some("!Terminal")
+                    },
+                ),
                 KeyBinding::new("secondary-p", ToggleFileFinder, None),
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
                 KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),

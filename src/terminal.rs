@@ -1004,7 +1004,9 @@ impl TerminalView {
             cx.stop_propagation();
             return;
         }
+        // ⌘K stays with the command palette binding; only ⌘⇧K clears here.
         if terminal_clipboard_modifier_pressed(&keystroke.modifiers)
+            && keystroke.modifiers.shift
             && keystroke.key.eq_ignore_ascii_case("k")
         {
             if let Some(session) = &self.session {
@@ -1960,7 +1962,7 @@ pub(crate) fn localhost_url_rank(url: &str) -> u8 {
     }
 }
 
-/// ⌘K: drop the scrollback and every row above the cursor, moving the line
+/// ⌘⇧K: drop the scrollback and every row above the cursor, moving the line
 /// being edited to the top of the screen — Terminal.app's "Clear Scrollback"
 /// and Zed's `terminal::Clear` behavior. The alt screen has no scrollback and
 /// its rows belong to the running app, so there only the history is dropped.
