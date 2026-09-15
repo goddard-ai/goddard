@@ -1185,7 +1185,6 @@ transcript.review_changes: レビュー
 transcript.show_more_files: "さらに %{count} 個のファイルを表示"
 transcript.show_fewer_files: 表示するファイルを減らす
 transcript.show_more: もっと見る
-transcript.show_less: 折りたたむ
 transcript.showing_first_files: "%{total} 個中、先頭 %{count} 個を表示"
 transcript.scroll_to_bottom: 一番下へスクロール
 transcript.conversation_turns: 会話ターン

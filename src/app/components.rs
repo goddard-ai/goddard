@@ -5,8 +5,8 @@ use std::path::Path;
 
 const USER_MESSAGE_MAX_HEIGHT: f32 = 400.0;
 const USER_MESSAGE_VIEWPORT_MAX_HEIGHT: f32 = USER_MESSAGE_MAX_HEIGHT - 16.0;
-/// Room the "Show more"/"Show less" row takes inside a capped bubble; the
-/// scroll viewport yields it so the whole bubble stays within the cap.
+/// Room the "Show more" row takes inside a capped bubble; the clipped viewport
+/// yields it so the whole bubble stays within the cap.
 const USER_MESSAGE_EXPANDER_HEIGHT: f32 = 24.0;
 
 pub(super) fn pulse_dot(size: f32, color: Hsla) -> AnyElement {
@@ -181,14 +181,10 @@ impl Waku {
         .detach();
     }
 
-    pub(super) fn toggle_user_message_expanded(
-        &mut self,
-        message_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.expanded_user_messages.insert(message_id) {
-            self.expanded_user_messages.remove(&message_id);
-        }
+    /// Expansion is one-way within a session visit: there is no "Show less",
+    /// and `reset_visible_state` re-caps every prompt on the next activation.
+    pub(super) fn expand_user_message(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+        self.expanded_user_messages.insert(message_id);
         cx.notify();
     }
 
@@ -720,7 +716,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     let overflowing = user_message_viewport
                         .map(|viewport| viewport.overflowing.get())
                         .unwrap_or(false);
-                    let show_expander = user_message_expanded || overflowing;
+                    let show_expander = !user_message_expanded && overflowing;
                     let viewport_max = USER_MESSAGE_VIEWPORT_MAX_HEIGHT
                         - if show_expander {
                             USER_MESSAGE_EXPANDER_HEIGHT
@@ -764,17 +760,17 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                             .when(!user_message_expanded, |body| {
                                                 body.max_h(px(viewport_max))
                                             })
+                                            // Track, don't scroll: the handle
+                                            // still reports `max_offset` under
+                                            // `overflow_hidden`, which both the
+                                            // overflow probe and transcript
+                                            // search's set_offset reveal use.
                                             .when_some(user_message_viewport, |body, viewport| {
-                                                let wheel_scroll = viewport.scroll_handle.clone();
-                                                body.overflow_y_scroll()
-                                                    .track_scroll(&viewport.scroll_handle)
-                                                    .on_scroll_wheel(move |_, _, cx| {
-                                                        contain_scroll(&wheel_scroll, cx);
-                                                    })
+                                                body.track_scroll(&viewport.scroll_handle)
                                             })
                                             .child(body),
                                     )
-                                    // The scrollable child records its overflow
+                                    // The clipped child records its overflow
                                     // during prepaint, so a later sibling sees
                                     // this frame's measurement. A flip re-renders
                                     // once, which is when the expander appears
@@ -844,14 +840,10 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         .text_color(theme.text_tertiary)
                                         .hover(|style| style.text_color(theme.text))
                                         .focus_visible(|style| style.text_color(theme.text))
-                                        .child(if user_message_expanded {
-                                            tr!("transcript.show_less")
-                                        } else {
-                                            tr!("transcript.show_more")
-                                        })
+                                        .child(tr!("transcript.show_more"))
                                         .on_click(move |_, _, cx| {
                                             let _ = click_waku.update(cx, |this, cx| {
-                                                this.toggle_user_message_expanded(message_id, cx);
+                                                this.expand_user_message(message_id, cx);
                                             });
                                         })
                                         .on_key_down(move |event: &KeyDownEvent, _, cx| {
@@ -862,19 +854,15 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                                 )
                                             {
                                                 let _ = key_waku.update(cx, |this, cx| {
-                                                    this.toggle_user_message_expanded(
-                                                        message_id, cx,
-                                                    );
+                                                    this.expand_user_message(message_id, cx);
                                                 });
                                                 cx.stop_propagation();
                                             }
                                         }),
                                 )
                             })
-                            .when_some(user_message_viewport, |bubble, viewport| {
-                                let key_scroll = viewport.scroll_handle.clone();
+                            .when_some(user_message_viewport, |bubble, _| {
                                 let key_menu = menu.clone();
-                                let key_owner = waku.entity_id();
                                 bubble
                                     .track_focus(menu.trigger_focus_handle())
                                     .tab_group()
@@ -886,48 +874,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         {
                                             key_menu.open_context_menu(window, cx);
                                             cx.stop_propagation();
-                                            return;
                                         }
-                                        let modifiers = &event.keystroke.modifiers;
-                                        if modifiers.control
-                                            || modifiers.alt
-                                            || modifiers.platform
-                                            || (modifiers.shift && event.keystroke.key != "space")
-                                        {
-                                            return;
-                                        }
-                                        let max_offset = key_scroll.max_offset().y;
-                                        if max_offset <= px(0.5) {
-                                            return;
-                                        }
-                                        let offset = key_scroll.offset();
-                                        let page = key_scroll.bounds().size.height * 0.9;
-                                        let next = match event.keystroke.key.as_str() {
-                                            "up" => offset.y + px(40.0),
-                                            "down" => offset.y - px(40.0),
-                                            "pageup" => offset.y + page,
-                                            "pagedown" => offset.y - page,
-                                            "home" => Pixels::ZERO,
-                                            "end" => -max_offset,
-                                            "space" if modifiers.shift => offset.y + page,
-                                            "space" => offset.y - page,
-                                            _ => return,
-                                        }
-                                        .clamp(-max_offset, Pixels::ZERO);
-                                        if next != offset.y {
-                                            key_scroll.set_offset(point(offset.x, next));
-                                            cx.notify(key_owner);
-                                        }
-                                        cx.stop_propagation();
                                     })
-                                    .child(
-                                        scrollbar::vertical(
-                                            &viewport.scroll_handle,
-                                            &viewport.scrollbar,
-                                        )
-                                        .top(px(8.0))
-                                        .bottom(px(8.0)),
-                                    )
                             }),
                     );
                 }

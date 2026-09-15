@@ -1138,7 +1138,6 @@ transcript.review_changes: 审阅
 transcript.show_more_files: 再显示 %{count} 个文件
 transcript.show_fewer_files: 收起文件列表
 transcript.show_more: 显示更多
-transcript.show_less: 收起
 transcript.showing_first_files: 仅显示前 %{count}/%{total} 个
 transcript.scroll_to_bottom: 滚动到底部
 transcript.conversation_turns: 对话轮次

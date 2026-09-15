@@ -1171,8 +1171,10 @@ struct ActivityScrollViewport {
 
 #[derive(Clone, Default)]
 struct UserMessageScrollViewport {
+    /// Tracked for measurement, not scrolling: the bubble clips at
+    /// `overflow_hidden`, and transcript search shifts this offset to reveal a
+    /// match inside the clipped region.
     scroll_handle: ScrollHandle,
-    scrollbar: Rc<ScrollbarState>,
     /// Whether the capped viewport measured more content than fits as of the
     /// last prepaint; the bubble's "Show more" button renders from this.
     overflowing: Rc<Cell<bool>>,
