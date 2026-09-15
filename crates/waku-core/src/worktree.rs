@@ -16,9 +16,96 @@ use std::process::Output;
 use anyhow::{Context as _, bail};
 use uuid::Uuid;
 
-const DEFAULT_SLUG: &str = "new-worktree";
-const MAX_SLUG_BYTES: usize = 48;
 const MAX_CANDIDATES: usize = 100;
+
+/// The adjective and noun dictionaries generated worktree names draw from:
+/// distinctive, branch-safe words of at most eight letters, easy to spell,
+/// paired at random into `<adjective>-<noun>` slugs like `amber-falcon`.
+/// The lists stay disjoint so a generated pair never repeats a word.
+const SLUG_ADJECTIVES: &[&str] = &[
+    "adept", "agile", "alert", "alive", "ample", "ancient", "apt", "ashen", "astral", "avid",
+    "azure", "balmy", "blithe", "bold", "boreal", "brave", "breezy", "bright", "brisk", "broad",
+    "calm", "candid", "clean", "clear", "clever", "coastal", "compact", "cool", "cosmic", "cozy",
+    "crisp", "curious", "dapper", "daring", "deft", "dewy", "dreamy", "dry", "durable", "dusky",
+    "dusty", "eager", "early", "earnest", "earthy", "elder", "elegant", "even", "exact", "expert",
+    "fabled", "fair", "fancy", "festive", "fierce", "fine", "firm", "fleet", "fluent", "foggy",
+    "frank", "free", "fresh", "frosty", "gentle", "giant", "glad", "glassy", "gleaming", "glossy",
+    "golden", "grand", "gritty", "gusty", "hale", "handy", "happy", "hardy", "hazy", "hearty",
+    "hollow", "honest", "humble", "hushed", "icy", "ideal", "intrepid", "jolly", "jovial",
+    "joyful", "just", "keen", "kind", "kinetic", "leafy", "lean", "lemon", "level", "light",
+    "limber", "little", "lively", "lofty", "lone", "loyal", "lucent", "lucid", "lucky", "lunar",
+    "lush", "magic", "major", "mellow", "merry", "mild", "mint", "minty", "misty", "modest",
+    "molten", "mossy", "motley", "mottled", "muted", "mystic", "native", "neat", "nimble", "noble",
+    "oaken", "olive", "open", "ornate", "oval", "pale", "patient", "pearly", "peppery", "pert",
+    "plaid", "plucky", "plush", "poetic", "polar", "potent", "primal", "prime", "proud", "proven",
+    "pure", "quaint", "quick", "quiet", "quirky", "radiant", "rainy", "rapid", "rare", "ready",
+    "regal", "rich", "ripe", "robust", "rocky", "roomy", "rosy", "round", "rousing", "royal",
+    "ruddy", "rugged", "russet", "rustic", "sandy", "satin", "scenic", "serene", "shaded",
+    "shadowy", "sharp", "shiny", "silken", "silky", "simple", "sleek", "slender", "smart",
+    "smooth", "snappy", "snowy", "snug", "soft", "solar", "solid", "spare", "spicy", "spry",
+    "stalwart", "steady", "stellar", "still", "stoic", "stony", "stormy", "stout", "strong",
+    "sturdy", "summer", "sunlit", "sunny", "supple", "sure", "sweet", "swift", "sylvan", "tall",
+    "tangy", "tart", "tawny", "tender", "thorny", "thrifty", "tidal", "tidy", "timeless", "toasty",
+    "trim", "true", "trusty", "tuneful", "twilit", "uncanny", "upbeat", "valiant", "valid", "vast",
+    "verdant", "vibrant", "vintage", "vital", "vivid", "warm", "wavy", "wild", "willowy", "windy",
+    "winsome", "wintry", "wise", "wispy", "wistful", "witty", "woody", "woolly", "young", "zesty",
+];
+
+const SLUG_NOUNS: &[&str] = &[
+    "acacia", "acorn", "adder", "agate", "agave", "alder", "aloe", "alpaca", "amber", "anchor",
+    "anchovy", "anemone", "antler", "anvil", "arch", "arrow", "aspen", "aster", "atlas", "atoll",
+    "aurora", "axle", "badger", "bamboo", "banner", "basalt", "basin", "bat", "bayou", "beach",
+    "beacon", "beaver", "beech", "beetle", "bell", "berry", "birch", "bison", "blizzard",
+    "bluebird", "bluff", "boar", "bobcat", "bolt", "bonsai", "borax", "boulder", "bramble",
+    "breeze", "briar", "brook", "buoy", "burro", "burrow", "butte", "cactus", "cairn", "camel",
+    "canoe", "canopy", "canyon", "cape", "capybara", "cardinal", "caribou", "cascade", "cave",
+    "cavern", "cedar", "cheetah", "chestnut", "chipmunk", "chisel", "cicada", "cinder", "cirrus",
+    "citadel", "citrus", "clam", "cliff", "cloud", "clover", "coast", "cobalt", "cobra", "cocoon",
+    "cod", "colt", "comet", "compass", "conch", "condor", "copper", "coral", "cosmos", "cove",
+    "coyote", "crab", "crag", "crane", "crater", "creek", "crest", "cricket", "crocus", "crystal",
+    "cub", "cuckoo", "curio", "cypress", "daffodil", "dahlia", "daisy", "dale", "dawn", "daybreak",
+    "decoy", "deer", "dell", "delta", "dew", "diamond", "dingo", "dodo", "dolphin", "dove",
+    "dowel", "dragon", "duck", "dune", "dusk", "eagle", "eclipse", "egret", "elk", "elm", "ember",
+    "emerald", "emu", "equinox", "ermine", "estuary", "falcon", "fen", "fern", "ferret", "fig",
+    "finch", "fir", "firefly", "flamingo", "flare", "flint", "floe", "flume", "flute", "foothill",
+    "ford", "forge", "fox", "foxglove", "frog", "frond", "frost", "furrow", "gable", "galaxy",
+    "gale", "garnet", "gate", "gator", "gazelle", "gecko", "gem", "geyser", "gibbon", "ginger",
+    "ginkgo", "giraffe", "glacier", "glade", "glen", "glow", "glyph", "goat", "goose", "gorge",
+    "gorilla", "gourd", "granite", "grouse", "grove", "halo", "hamster", "harbor", "hare", "harp",
+    "hawk", "hawthorn", "haze", "hazel", "heath", "heather", "hedge", "hedgehog", "helm", "heron",
+    "hickory", "hippo", "holly", "hoodoo", "horn", "hornet", "hound", "husky", "hyacinth", "hyena",
+    "ibex", "ibis", "iceberg", "impala", "indigo", "inlet", "iris", "iron", "isle", "ivory", "ivy",
+    "jackal", "jade", "jaguar", "jasmine", "jasper", "jay", "jet", "jewel", "juniper", "kayak",
+    "keel", "kelp", "kestrel", "keystone", "kiln", "kite", "kitten", "kiwi", "koala", "koi",
+    "krill", "ladybug", "lagoon", "lantern", "larch", "lark", "larkspur", "lathe", "laurel",
+    "lava", "lavender", "ledge", "lemming", "lemur", "lens", "leopard", "lichen", "lilac", "lily",
+    "lime", "lion", "lizard", "llama", "loam", "lodestar", "lodge", "loom", "loon", "lotus",
+    "lumen", "lynx", "magnolia", "magpie", "mahogany", "mallard", "mammoth", "manatee", "mango",
+    "mantis", "maple", "marble", "mare", "marigold", "marlin", "marmot", "marsh", "marten", "mast",
+    "mayfly", "meadow", "meerkat", "merlin", "mesa", "meteor", "mica", "mink", "minnow", "mist",
+    "mole", "mongoose", "monkey", "monsoon", "moor", "moose", "moss", "moth", "mulberry",
+    "mushroom", "mustard", "myrtle", "narwhal", "nettle", "newt", "nimbus", "notch", "nova",
+    "nutmeg", "oak", "oar", "oasis", "obsidian", "ocelot", "octopus", "onyx", "opal", "opossum",
+    "orange", "orca", "orchard", "orchid", "oriole", "osprey", "ostrich", "otter", "owl", "oxbow",
+    "paddle", "palm", "panda", "pansy", "panther", "papaya", "parrot", "peach", "peanut", "pearl",
+    "pebble", "pecan", "pelican", "penguin", "pennant", "peony", "petal", "petunia", "pewter",
+    "pillar", "pine", "pinnacle", "piston", "plateau", "plow", "pond", "poppy", "prairie", "prism",
+    "puffin", "pulley", "puma", "python", "quadrant", "quagmire", "quail", "quarry", "quartz",
+    "quasar", "quill", "quiver", "raccoon", "rainbow", "rapids", "ratchet", "raven", "redwood",
+    "reed", "reef", "relay", "ridge", "riffle", "rime", "river", "rivulet", "rocket", "rook",
+    "rosette", "rowan", "ruby", "rune", "sable", "saddle", "sage", "sail", "sandbar", "sapling",
+    "sapphire", "sardine", "savanna", "scepter", "scroll", "scythe", "seal", "seedling", "serpent",
+    "sextant", "shale", "shell", "shoal", "shore", "sigil", "skiff", "slate", "sloop", "snipe",
+    "snow", "sparrow", "spire", "spring", "sprocket", "spruce", "spur", "squirrel", "starling",
+    "steel", "steppe", "stone", "stork", "storm", "strait", "stratus", "summit", "talon", "tapir",
+    "teak", "teal", "tern", "terrace", "thicket", "thistle", "thorn", "thresher", "thrush", "tide",
+    "tiller", "timber", "toad", "topaz", "tortoise", "toucan", "tower", "trout", "trowel", "tulip",
+    "tundra", "twine", "umbra", "urchin", "vale", "valley", "vault", "vellum", "velvet", "violet",
+    "viper", "vista", "vixen", "volcano", "vole", "vortex", "vulture", "wallaby", "walnut",
+    "walrus", "warbler", "warthog", "wasabi", "weasel", "wedge", "wetland", "whale", "wheat",
+    "wheel", "willow", "wisteria", "wombat", "yak", "yew", "yoke", "yucca", "zebra", "zenith",
+    "zephyr", "zinc", "zinnia", "zircon", "zither",
+];
 
 pub use waku_protocol::git::CreatedWorktree;
 
@@ -45,14 +132,13 @@ pub fn is_linked_worktree(path: &Path) -> bool {
     resolve(&git_dir) != resolve(&common_dir)
 }
 
-/// Create a detached linked worktree named `name` — or named after `prompt`
-/// when `name` is `None` — based on `base_ref` or the repository's default
-/// branch. The returned path is project-relative, preserving a project that
-/// points at a subdirectory of its repository.
+/// Create a detached linked worktree named `name` — or given a generated
+/// name when `name` is `None` — based on `base_ref` or the repository's
+/// default branch. The returned path is project-relative, preserving a
+/// project that points at a subdirectory of its repository.
 pub fn create(
     project_path: &Path,
     name: Option<&str>,
-    prompt: Option<&str>,
     base_ref: Option<&str>,
 ) -> anyhow::Result<CreatedWorktree> {
     let (_, repository, project_relative) = resolve_repository(project_path)?;
@@ -67,14 +153,7 @@ pub fn create(
         &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
     )
     .with_context(|| format!("base ref `{base_ref}` is unavailable"))?;
-    add_named(
-        &repository,
-        &project_relative,
-        name,
-        prompt,
-        &base_ref,
-        None,
-    )
+    add_named(&repository, &project_relative, name, &base_ref, None)
 }
 
 /// Create a detached linked worktree that adopts the checkout's current
@@ -86,7 +165,6 @@ pub fn create(
 pub fn create_from_checkout(
     project_path: &Path,
     name: Option<&str>,
-    prompt: Option<&str>,
 ) -> anyhow::Result<CreatedWorktree> {
     let (_, repository, project_relative) = resolve_repository(project_path)?;
     let head = git_optional_stdout(&repository, &["rev-parse", "--verify", "HEAD^{commit}"])?;
@@ -110,7 +188,6 @@ pub fn create_from_checkout(
         &repository,
         &project_relative,
         name,
-        prompt,
         &base,
         carried.as_deref(),
     )
@@ -139,7 +216,6 @@ fn add_named(
     repository: &Path,
     project_relative: &Path,
     name: Option<&str>,
-    prompt: Option<&str>,
     base_ref: &str,
     carried_state: Option<&str>,
 ) -> anyhow::Result<CreatedWorktree> {
@@ -180,9 +256,10 @@ fn add_named(
             materialized(path, project_relative, name)
         }
         None => {
-            let slug = worktree_slug(prompt.unwrap_or_default());
-            for index in 0..MAX_CANDIDATES {
-                let name = candidate_name(&slug, index);
+            // Each attempt draws a fresh random pair rather than suffixing
+            // one slug, so a collision costs nothing but another roll.
+            for _ in 0..MAX_CANDIDATES {
+                let name = worktree_slug();
                 if taken(&name) {
                     continue;
                 }
@@ -192,7 +269,11 @@ fn add_named(
             }
             // A UUID fallback keeps the last resort independent of
             // human-readable name collisions.
-            let name = format!("{slug}-{}", &Uuid::new_v4().simple().to_string()[..8]);
+            let name = format!(
+                "{}-{}",
+                worktree_slug(),
+                &Uuid::new_v4().simple().to_string()[..8]
+            );
             if taken(&name) {
                 bail!("could not allocate a unique Git worktree name");
             }
@@ -572,28 +653,14 @@ fn command_error(output: &Output) -> String {
     }
 }
 
-fn candidate_name(slug: &str, index: usize) -> String {
-    if index == 0 {
-        slug.to_owned()
-    } else {
-        format!("{slug}-{}", index + 1)
-    }
-}
-
-fn worktree_slug(prompt: &str) -> String {
-    let mut slug = prompt
-        .to_ascii_lowercase()
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .take(6)
-        .collect::<Vec<_>>()
-        .join("-");
-    slug.truncate(MAX_SLUG_BYTES);
-    if slug.is_empty() {
-        DEFAULT_SLUG.to_owned()
-    } else {
-        slug
-    }
+/// A generated worktree name: a dictionary adjective and noun joined by a
+/// hyphen. Entropy comes from a UUID, already this module's source of
+/// last-resort uniqueness.
+fn worktree_slug() -> String {
+    let entropy = Uuid::new_v4().into_bytes();
+    let adjective = SLUG_ADJECTIVES[entropy[0] as usize % SLUG_ADJECTIVES.len()];
+    let noun = SLUG_NOUNS[entropy[1] as usize % SLUG_NOUNS.len()];
+    format!("{adjective}-{noun}")
 }
 
 #[cfg(test)]
@@ -667,7 +734,7 @@ mod tests {
         let repository = repository();
         let project = repository.join("packages/app");
 
-        let named = create(&project, Some("My Worktree"), None, None).unwrap();
+        let named = create(&project, Some("My Worktree"), None).unwrap();
         assert_eq!(named.name, "My Worktree");
         assert_eq!(
             named.path,
@@ -691,23 +758,20 @@ mod tests {
         );
 
         // An explicit name collides with the directory it just made.
-        assert!(create(&project, Some("My Worktree"), None, None).is_err());
+        assert!(create(&project, Some("My Worktree"), None).is_err());
 
-        // Generated names come from the prompt and suffix on collision.
-        let generated = create(
-            &project,
-            None,
-            Some("Build a project selector"),
-            Some("feature"),
-        )
-        .unwrap();
-        assert_eq!(generated.name, "build-a-project-selector");
+        // Generated names are random dictionary pairs; a rolled collision
+        // retries with a fresh pair, so two creates never share a name.
+        let generated = create(&project, None, Some("feature")).unwrap();
+        let (first, second) = generated.name.split_once('-').unwrap();
+        assert!(SLUG_ADJECTIVES.contains(&first));
+        assert!(SLUG_NOUNS.contains(&second));
         assert_eq!(
             fs::read_to_string(generated.path.join("README.md")).unwrap(),
             "feature\n"
         );
-        let second = create(&project, None, Some("Build a project selector"), None).unwrap();
-        assert_eq!(second.name, "build-a-project-selector-2");
+        let other = create(&project, None, None).unwrap();
+        assert_ne!(other.name, generated.name);
 
         // Removal runs in the repository and frees the name.
         remove(&named.path, false).unwrap_err();
@@ -725,7 +789,7 @@ mod tests {
             ],
         );
         remove(&named.path, false).unwrap();
-        let recreated = create(&project, Some("My Worktree"), None, None).unwrap();
+        let recreated = create(&project, Some("My Worktree"), None).unwrap();
         assert_eq!(recreated.name, "My Worktree");
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
@@ -737,7 +801,7 @@ mod tests {
         let project = repository.join("packages/app");
 
         // A clean checkout moves with nothing to carry.
-        let clean = create_from_checkout(&project, Some("Clean Task"), None).unwrap();
+        let clean = create_from_checkout(&project, Some("Clean Task")).unwrap();
         assert_eq!(
             git_stdout(&clean.path, &["rev-parse", "HEAD"]).unwrap(),
             git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap(),
@@ -762,7 +826,7 @@ mod tests {
         run_git(&repository, &["add", "packages/app/staged.txt"]);
         fs::write(project.join("scratch.txt"), "scratch\n").unwrap();
 
-        let moved = create_from_checkout(&project, Some("Moved Task"), None).unwrap();
+        let moved = create_from_checkout(&project, Some("Moved Task")).unwrap();
         assert_eq!(moved.name, "Moved Task");
         assert_eq!(
             fs::read_to_string(moved.path.join("README.md")).unwrap(),
@@ -782,11 +846,8 @@ mod tests {
         assert_eq!(unstaged, "packages/app/README.md");
         let staged = git_stdout(&moved.path, &["diff", "--cached", "--name-only"]).unwrap();
         assert!(staged.is_empty(), "nothing arrives staged: {staged}");
-        let untracked = git_stdout(
-            &moved.path,
-            &["ls-files", "--others", "--exclude-standard"],
-        )
-        .unwrap();
+        let untracked =
+            git_stdout(&moved.path, &["ls-files", "--others", "--exclude-standard"]).unwrap();
         assert!(untracked.contains("staged.txt"), "{untracked}");
         assert!(untracked.contains("scratch.txt"), "{untracked}");
 
@@ -813,7 +874,7 @@ mod tests {
     fn ensure_recreates_a_deleted_worktree() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Restore Me"), None, Some("feature")).unwrap();
+        let created = create(&project, Some("Restore Me"), Some("feature")).unwrap();
         // The stored path is the project subdirectory; the worktree root is
         // its grandparent.
         let worktree_dir = created
@@ -876,7 +937,7 @@ mod tests {
     fn force_removes_a_dirty_worktree() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Dirty"), None, None).unwrap();
+        let created = create(&project, Some("Dirty"), None).unwrap();
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();
         fs::write(created.path.join("scratch.txt"), "untracked\n").unwrap();
 
@@ -884,7 +945,7 @@ mod tests {
         remove(&created.path, true).unwrap();
         assert!(!created.path.exists());
         // The name frees up for reuse.
-        let recreated = create(&project, Some("Dirty"), None, None).unwrap();
+        let recreated = create(&project, Some("Dirty"), None).unwrap();
         assert_eq!(recreated.name, "Dirty");
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
@@ -894,7 +955,7 @@ mod tests {
     fn a_removed_worktree_restores_from_its_archive_ref() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Archived"), None, Some("feature")).unwrap();
+        let created = create(&project, Some("Archived"), Some("feature")).unwrap();
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();
         fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
 
@@ -980,12 +1041,39 @@ mod tests {
     }
 
     #[test]
-    fn slug_is_short_and_branch_safe() {
-        assert_eq!(worktree_slug("你好 👋"), DEFAULT_SLUG);
-        assert_eq!(
-            worktree_slug("Fix Project/Worktree Picker!"),
-            "fix-project-worktree-picker"
+    fn generated_slugs_are_branch_safe_adjective_noun_pairs() {
+        for _ in 0..64 {
+            let slug = worktree_slug();
+            let (first, second) = slug.split_once('-').unwrap();
+            assert!(SLUG_ADJECTIVES.contains(&first), "{slug}");
+            assert!(SLUG_NOUNS.contains(&second), "{slug}");
+            assert_ne!(first, second, "{slug}");
+        }
+    }
+
+    #[test]
+    fn slug_dictionaries_stay_branch_safe_sorted_and_unique() {
+        for (label, words) in [("adjective", SLUG_ADJECTIVES), ("noun", SLUG_NOUNS)] {
+            let mut seen = std::collections::BTreeSet::new();
+            for word in words {
+                assert!(!word.is_empty());
+                assert!(word.len() <= 8, "{label} {word}");
+                assert!(
+                    word.chars().all(|c| c.is_ascii_lowercase()),
+                    "{label} {word}"
+                );
+                assert!(seen.insert(word), "duplicate {label} {word}");
+            }
+            assert!(
+                words.is_sorted(),
+                "{label} list is kept sorted for reviewability"
+            );
+        }
+        // The lists stay disjoint so a pair can never repeat a word.
+        assert!(
+            SLUG_ADJECTIVES
+                .iter()
+                .all(|word| !SLUG_NOUNS.contains(word))
         );
-        assert!(worktree_slug(&"a".repeat(100)).len() <= MAX_SLUG_BYTES);
     }
 }

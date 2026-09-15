@@ -694,12 +694,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           startup = { probe: providerProbe, settings }
         }
 
-        session = await materializeWorktree(
-          client,
-          session,
-          project,
-          prompt || attachments[0]?.name || 'task',
-        )
+        session = await materializeWorktree(client, session, project)
         const turnCount = session.turns.at(-1)?.turn_count
         if (turnCount !== undefined) {
           try {
@@ -935,16 +930,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           provider: providerName(currentSession.provider),
         }))
       }
-      // A fresh worktree task names its branch after the first prompt; when
-      // the goal arrives first, the objective is that intent.
-      const namingPrompt = operation.kind === 'set' && operation.objective
-        ? operation.objective
-        : 'goal'
       let session = await materializeWorktree(
         client,
         optimisticSession ?? currentSession,
         project,
-        namingPrompt,
       )
       session = await persistOrdered(session)
       cacheSession(session)

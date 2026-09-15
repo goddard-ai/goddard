@@ -2112,12 +2112,7 @@ impl WakuBackend {
         session.workspace = match workspace {
             AgentWorkspace::Local => SessionWorkspace::Local,
             AgentWorkspace::Worktree => {
-                let created = crate::worktree::create(
-                    &project_path,
-                    None,
-                    Some(&prompt),
-                    base_branch.as_deref(),
-                )?;
+                let created = crate::worktree::create(&project_path, None, base_branch.as_deref())?;
                 SessionWorkspace::Worktree {
                     path: created.path,
                     name: created.name,

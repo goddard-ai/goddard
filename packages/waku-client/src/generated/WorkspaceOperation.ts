@@ -6,29 +6,20 @@ import type { WorkItemQueryState } from "./WorkItemQueryState";
 
 export type WorkspaceOperation = { "type": "listTree", root: string, expanded_paths: string[], } | { "type": "browseDirectory", path: string | null, } | { "type": "readTextFile", root: string, relative_path: string, } | { "type": "writeTextFile", root: string, relative_path: string, content: string, } | { "type": "listProjectFiles", root: string, cap: number, } | { "type": "discoverSlashCommands", provider: ProviderKind, project_root: string, binary_override?: string | null, } | { "type": "createProjectlessWorkspace", prompt: string | null, } | { "type": "migrateProjectlessWorkspace", path: string, } | { "type": "inspectBranches", cwd: string, } | { "type": "checkoutBranch", cwd: string, branch: string, create: boolean, } | { "type": "createWorktree", project_path: string,
 /**
- * User-chosen worktree name. When `None`, the daemon derives one
- * from `prompt`.
+ * User-chosen worktree name. When `None`, the daemon generates a
+ * random one.
  */
 name?: string | null,
-/**
- * The submitted prompt, used to derive a name when `name` is `None`.
- */
-prompt?: string | null,
 /**
  * Ref the worktree detaches at; `None` resolves the repository's
  * default branch.
  */
 base_ref?: string | null, } | { "type": "createWorktreeFromCheckout", project_path: string,
 /**
- * User-chosen worktree name. When `None`, the daemon derives one
- * from `prompt`.
+ * User-chosen worktree name. When `None`, the daemon generates a
+ * random one.
  */
-name?: string | null,
-/**
- * Text used to derive a name when `name` is `None` — the session's
- * title or first prompt.
- */
-prompt?: string | null, } | { "type": "removeWorktree", path: string,
+name?: string | null, } | { "type": "removeWorktree", path: string,
 /**
  * `false` matches older clients that did not send the field.
  */

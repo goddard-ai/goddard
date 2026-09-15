@@ -557,12 +557,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const project = state.projects.find((item) => item.id === current.project_id);
       if (!project) throw new Error('This task’s project is no longer available on the daemon');
       if (current.workspace?.kind === 'newWorktree') {
-        current = await materializeWorktree(
-          client,
-          current,
-          project.path,
-          prompt || attachments[0]?.name || 'task',
-        );
+        current = await materializeWorktree(client, current, project.path);
         cacheSession(current);
         current = await persistOrdered(current);
       }
@@ -723,10 +718,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const settings = await loadDaemonSettings(client);
       const probe = await probeProvider(client, current.provider, settings);
       if (!probe.installed || !probe.path) throw new Error('Codex is not installed on the daemon host');
-      current = await materializeWorktree(
-        client, current, project.path,
-        operation.kind === 'set' ? operation.objective || 'goal' : 'goal',
-      );
+      current = await materializeWorktree(client, current, project.path);
       cacheSession(current);
       current = await persistOrdered(current);
       const runtimeId = Crypto.randomUUID();

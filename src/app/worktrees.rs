@@ -92,7 +92,6 @@ impl Waku {
                     match workspace.request(waku_client::WorkspaceOperation::CreateWorktree {
                         project_path: project.path,
                         name,
-                        prompt: None,
                         base_ref,
                     })? {
                         waku_client::WorkspaceResult::WorktreeCreated { worktree } => Ok(worktree),
@@ -191,7 +190,7 @@ impl Waku {
     /// Move a local task into a newly created worktree that adopts the
     /// checkout's current state — its HEAD commit plus uncommitted, including
     /// untracked, files. `name` is the picker's optional override; otherwise
-    /// the daemon derives a name from the task. The daemon call runs on the
+    /// the daemon generates a random name. The daemon call runs on the
     /// background executor; [`Self::finish_move_to_worktree`] rebinds the
     /// task when it lands.
     pub(super) fn move_session_to_worktree(
@@ -211,20 +210,6 @@ impl Waku {
         else {
             return;
         };
-        // Name the worktree after the task — an explicit title first, then
-        // the provider's, then the first prompt, before the daemon's
-        // fallback slug.
-        let naming_prompt = (session.title != AgentSession::DEFAULT_TITLE
-            && !session.title.trim().is_empty())
-        .then(|| session.title.clone())
-        .or_else(|| session.auto_title.clone())
-        .or_else(|| {
-            session
-                .messages
-                .iter()
-                .find(|message| message.role == MessageRole::User)
-                .map(|message| message.visible_content().to_owned())
-        });
         let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
         let Some(project_path) = self
             .state
@@ -245,7 +230,6 @@ impl Waku {
                         waku_client::WorkspaceOperation::CreateWorktreeFromCheckout {
                             project_path,
                             name,
-                            prompt: naming_prompt,
                         },
                     )? {
                         waku_client::WorkspaceResult::WorktreeCreated { worktree } => Ok(worktree),

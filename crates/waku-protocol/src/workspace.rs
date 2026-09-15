@@ -297,13 +297,10 @@ pub enum WorkspaceOperation {
     CreateWorktree {
         #[ts(type = "string")]
         project_path: PathBuf,
-        /// User-chosen worktree name. When `None`, the daemon derives one
-        /// from `prompt`.
+        /// User-chosen worktree name. When `None`, the daemon generates a
+        /// random one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
-        /// The submitted prompt, used to derive a name when `name` is `None`.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        prompt: Option<String>,
         /// Ref the worktree detaches at; `None` resolves the repository's
         /// default branch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,14 +315,10 @@ pub enum WorkspaceOperation {
     CreateWorktreeFromCheckout {
         #[ts(type = "string")]
         project_path: PathBuf,
-        /// User-chosen worktree name. When `None`, the daemon derives one
-        /// from `prompt`.
+        /// User-chosen worktree name. When `None`, the daemon generates a
+        /// random one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
-        /// Text used to derive a name when `name` is `None` — the session's
-        /// title or first prompt.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        prompt: Option<String>,
     },
     /// Remove a linked worktree created by `CreateWorktree`. Git refuses to
     /// remove a dirty worktree, making this safe to call on abandonment.

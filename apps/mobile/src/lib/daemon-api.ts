@@ -241,7 +241,6 @@ export async function materializeWorktree(
   client: WakuClient,
   session: AgentSession,
   projectPath: string,
-  prompt: string,
 ): Promise<AgentSession> {
   if (session.workspace?.kind !== 'newWorktree') return session;
   const response = expectResponse(
@@ -251,7 +250,6 @@ export async function materializeWorktree(
         type: 'createWorktree',
         project_path: projectPath,
         name: null,
-        prompt,
         base_ref: session.workspace.baseBranch ?? null,
       },
     }),

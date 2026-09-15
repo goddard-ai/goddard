@@ -167,7 +167,6 @@ fn prepare_submission(
     workspace: SessionWorkspace,
     driver_start: Option<anyhow::Result<DriverStartRequest>>,
     session_id: Uuid,
-    prompt: &str,
     turn_count: usize,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
@@ -180,7 +179,6 @@ fn prepare_submission(
                 match workspace_client.request(waku_client::WorkspaceOperation::CreateWorktree {
                     project_path: project.path.clone(),
                     name: None,
-                    prompt: Some(prompt.to_owned()),
                     base_ref: base_branch,
                 })? {
                     waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
@@ -3006,22 +3004,6 @@ impl Waku {
             cx.notify();
             return;
         };
-        // A fresh worktree task names its branch after the first prompt; when
-        // the goal arrives first, the objective is that intent.
-        let naming_prompt = self
-            .pending_goal_operations
-            .get(&session_id)
-            .into_iter()
-            .flatten()
-            .rev()
-            .find_map(|operation| match operation {
-                crate::model::GoalOperation::Set {
-                    objective: Some(objective),
-                    ..
-                } => Some(objective.clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| tr!("goal.title"));
         self.goal_runtime_starts.insert(session_id);
         cx.notify();
         let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
@@ -3035,7 +3017,6 @@ impl Waku {
                         workspace,
                         Some(driver_start),
                         session_id,
-                        &naming_prompt,
                         next_turn_count,
                     )
                 })
@@ -3593,18 +3574,6 @@ impl Waku {
         }
         cx.notify();
 
-        // A pending NewWorktree names itself after the prompt. A hidden
-        // continue has none worth keeping, so the session title stands in.
-        let preparation_prompt = if hidden {
-            self.state
-                .sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .map(|session| session.display_title().to_owned())
-                .unwrap_or_default()
-        } else {
-            human_prompt
-        };
         let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let prepared = cx
@@ -3616,7 +3585,6 @@ impl Waku {
                         workspace,
                         driver_start,
                         session_id,
-                        &preparation_prompt,
                         next_turn_count,
                     )
                 })

@@ -1396,7 +1396,7 @@ pub struct Waku {
     branch_picker_list_state: ListState,
     branch_picker_row_cache: RefCell<Vec<crate::git_branch::BranchEntry>>,
     /// Name field in the composer worktree picker; empty means the daemon
-    /// derives a name from the prompt.
+    /// generates a random name.
     worktree_name_input: Entity<TextInput>,
     /// Keyboard cursor over the worktree picker's actions. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
