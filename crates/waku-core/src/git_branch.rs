@@ -159,7 +159,7 @@ fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
 /// The fetch URL for `remote`, `None` when the remote is not configured.
 /// `git remote get-url` exits 2 for a missing remote rather than 1, so this
 /// cannot share `optional_stdout`'s exit-code handling.
-fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
+pub(crate) fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
     let output = crate::command_env::plain_command("git")
         .args(["remote", "get-url", remote])
         .current_dir(cwd)

@@ -98,6 +98,8 @@ pub struct GitFileChange {
 pub struct GitPanelSnapshot {
     /// Current branch name, or the short HEAD when detached.
     pub branch: String,
+    /// The fetch URL of the `origin` remote, if one is configured.
+    pub origin_url: Option<String>,
     /// `None` for a detached HEAD or a branch with no upstream configured.
     pub upstream: Option<UpstreamStatus>,
     /// A remote the branch could publish to exists — the same condition the
@@ -117,6 +119,8 @@ pub struct CommitEntry {
     pub body: String,
     /// Author name (`%an`).
     pub author: String,
+    /// Author email (`%ae`); feeds the avatar lookup in the UI.
+    pub author_email: String,
     /// Author date, unix seconds (`%at`).
     pub authored_at: u64,
     /// Lines the commit touched; both zero for merges and binary-only diffs.

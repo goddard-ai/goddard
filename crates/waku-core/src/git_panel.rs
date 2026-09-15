@@ -13,6 +13,7 @@ use waku_protocol::git::{
     UpstreamStatus,
 };
 
+use crate::git_branch::remote_url;
 use crate::git_commit::{
     command_error, ensure_repository, git_capture, git_optional_stdout, git_stdout, git_success,
     push_target, remote_for_branch, upstream,
@@ -105,6 +106,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<GitPanelSnapshot>> {
     }
     Ok(Some(GitPanelSnapshot {
         branch,
+        origin_url: remote_url(cwd, "origin")?,
         upstream: upstream_status,
         can_push,
         staged,
@@ -192,7 +194,7 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
             "log",
             &format!("--skip={skip}"),
             &format!("-n{limit}"),
-            "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%b%x1e",
+            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e",
         ],
     )?;
     let stats = commit_numstats(cwd, skip, limit)?;
@@ -203,6 +205,7 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
             let sha = fields.next()?.trim().to_owned();
             let short_sha = fields.next()?.to_owned();
             let author = fields.next()?.to_owned();
+            let author_email = fields.next()?.to_owned();
             let authored_at = fields
                 .next()
                 .and_then(|value| value.trim().parse::<u64>().ok())
@@ -219,6 +222,7 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
                 subject,
                 body,
                 author,
+                author_email,
                 authored_at,
                 additions,
                 deletions,
@@ -433,6 +437,7 @@ mod tests {
         assert_eq!(page[1].subject, "commit 2");
         assert_eq!(page[0].short_sha.len(), 7);
         assert_eq!(page[0].author, "Test");
+        assert_eq!(page[0].author_email, "test@example.com");
         assert!(page[0].authored_at > 0);
         assert_eq!((page[0].additions, page[0].deletions), (0, 0));
     }

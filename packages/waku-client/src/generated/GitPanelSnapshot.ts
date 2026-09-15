@@ -12,6 +12,10 @@ export type GitPanelSnapshot = {
  */
 branch: string,
 /**
+ * The fetch URL of the `origin` remote, if one is configured.
+ */
+origin_url: string | null,
+/**
  * `None` for a detached HEAD or a branch with no upstream configured.
  */
 upstream: UpstreamStatus | null,

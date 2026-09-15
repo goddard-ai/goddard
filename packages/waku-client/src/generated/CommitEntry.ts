@@ -13,6 +13,10 @@ body: string,
  */
 author: string,
 /**
+ * Author email (`%ae`); feeds the avatar lookup in the UI.
+ */
+author_email: string,
+/**
  * Author date, unix seconds (`%at`).
  */
 authored_at: number,
