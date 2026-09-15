@@ -1035,6 +1035,13 @@ files.file_unavailable: 文件不可用
 files.loading_editor: 正在加载编辑器
 files.preparing_editor: 正在准备编辑器…
 files.preparing_syntax: 正在准备语法高亮。
+files.open_in: 在 %{app} 中打开
+files.open_with: 打开方式
+files.save_as: 另存为…
+files.copy_path: 复制路径
+files.copy_file_contents: 复制文件内容
+files.save_as_failed: "无法保存副本：%{error}"
+files.copy_contents_failed: 无法复制文件内容
 file_picker.open_project: 打开项目
 file_picker.attach: 添加附件
 file_picker.daemon_folders: 守护进程文件夹

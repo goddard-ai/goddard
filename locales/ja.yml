@@ -1075,6 +1075,13 @@ files.file_unavailable: ファイルを利用できません
 files.loading_editor: エディタを読み込み中
 files.preparing_editor: エディタを準備中…
 files.preparing_syntax: シンタックスハイライトを準備しています。
+files.open_in: "%{app} で開く"
+files.open_with: このアプリケーションで開く
+files.save_as: 名前を付けて保存…
+files.copy_path: パスをコピー
+files.copy_file_contents: ファイルの内容をコピー
+files.save_as_failed: "コピーを保存できませんでした: %{error}"
+files.copy_contents_failed: ファイルの内容をコピーできませんでした
 file_picker.open_project: プロジェクトを開く
 file_picker.attach: 添付
 file_picker.daemon_folders: デーモンのフォルダ

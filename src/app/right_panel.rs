@@ -3178,6 +3178,7 @@ impl Waku {
         // Read only. The walk is filesystem I/O, so it happens in
         // `refresh_right_panel_working_tree`, never in a frame.
         let entries = self.right_panel_working_tree.clone();
+        let waku = cx.entity().downgrade();
 
         let mut list = div().flex().flex_col().py(px(6.0));
         for entry in entries {
@@ -3185,6 +3186,10 @@ impl Waku {
             let absolute_path = entry.absolute_path.clone();
             let is_dir = entry.is_dir;
             let selected = selected_path == Some(relative_path.as_str());
+            let menu_id = SharedString::from(format!("file-menu-{relative_path}"));
+            let menu = self.menu_handle(menu_id.clone(), cx);
+            let menu_path = absolute_path.clone();
+            let menu_name = entry.name.clone();
             let row = div()
                 .id(SharedString::from(format!(
                     "right-panel-file-{relative_path}"
@@ -3226,20 +3231,34 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .child(entry.name),
                 );
-            list = if is_dir {
-                list.child(row.on_click(cx.listener(move |this, _, _, cx| {
+            let row = if is_dir {
+                row.on_click(cx.listener(move |this, _, _, cx| {
                     if !this.right_panel_expanded_paths.remove(&absolute_path) {
                         this.right_panel_expanded_paths
                             .insert(absolute_path.clone());
                     }
                     this.refresh_right_panel_working_tree(cx);
                     cx.notify();
-                })))
+                }))
             } else {
-                list.child(row.on_click(cx.listener(move |this, _, _, cx| {
+                row.on_click(cx.listener(move |this, _, _, cx| {
                     this.open_right_panel_file(relative_path.clone(), cx);
-                })))
+                }))
             };
+            let waku_menu = waku.clone();
+            list = list.child(context_menu(
+                div().w_full().child(row),
+                menu_id,
+                &menu,
+                move |cx| {
+                    waku_menu
+                        .read_with(cx, |this, _| {
+                            this.working_tree_row_menu(&waku_menu, &menu_path, &menu_name, is_dir)
+                        })
+                        .ok()
+                        .unwrap_or_default()
+                },
+            ));
         }
 
         div()
@@ -3287,6 +3306,152 @@ impl Waku {
                         &self.right_panel_files_scrollbar,
                     )),
             )
+    }
+
+    /// The right-click menu on a working-tree row.
+    ///
+    /// Every action acts on a local path, so a remote session — whose paths
+    /// live on the daemon host — gets an empty list and the menu never opens.
+    fn working_tree_row_menu(
+        &self,
+        waku: &WeakEntity<Self>,
+        absolute_path: &Path,
+        name: &str,
+        is_dir: bool,
+    ) -> Vec<MenuItem> {
+        if self.daemon.is_remote() {
+            return Vec::new();
+        }
+        let mut items = Vec::new();
+        if let Some(app) = self.preferred_open_in_app() {
+            let (label, image, bundle_id) = (app.label, app.icon.clone(), app.bundle_id);
+            let path = absolute_path.to_path_buf();
+            items.push(
+                MenuItem::new(tr!("files.open_in", app = label), move |_, _| {
+                    crate::platform::open_path_in_app(&path, bundle_id);
+                })
+                .image(image),
+            );
+        }
+        if !self.open_in_apps.is_empty() {
+            let apps = self.open_in_apps.clone();
+            let path = absolute_path.to_path_buf();
+            items.push(MenuItem::Submenu {
+                label: tr!("files.open_with").into(),
+                value: None,
+                items: Rc::new(move |_| {
+                    apps.iter()
+                        .map(|app| {
+                            let path = path.clone();
+                            let bundle_id = app.bundle_id;
+                            MenuItem::new(app.label, move |_, _| {
+                                crate::platform::open_path_in_app(&path, bundle_id);
+                            })
+                            .image(app.icon.clone())
+                        })
+                        .collect()
+                }),
+            });
+        }
+        if !items.is_empty() {
+            items.push(MenuItem::Separator);
+        }
+        if !is_dir {
+            let directory = absolute_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            let suggested = name.to_owned();
+            let source = absolute_path.to_path_buf();
+            let waku = waku.clone();
+            items.push(
+                MenuItem::new(tr!("files.save_as"), move |_, cx| {
+                    let receiver = cx.prompt_for_new_path(&directory, Some(&suggested));
+                    let waku = waku.clone();
+                    let source = source.clone();
+                    cx.spawn(async move |cx| {
+                        let Ok(Ok(Some(destination))) = receiver.await else {
+                            return;
+                        };
+                        let result = cx
+                            .background_executor()
+                            .spawn(async move { std::fs::copy(&source, &destination) })
+                            .await;
+                        waku
+                            .update(cx, |this, cx| {
+                                if let Err(error) = result {
+                                    this.show_toast(tr!(
+                                        "files.save_as_failed",
+                                        error = error.to_string()
+                                    ));
+                                    cx.notify();
+                                }
+                            })
+                            .ok();
+                    })
+                    .detach();
+                })
+                .icon("icons/download.svg"),
+            );
+        }
+        {
+            let path = absolute_path.to_string_lossy().into_owned();
+            let waku = waku.clone();
+            items.push(
+                MenuItem::new(tr!("files.copy_path"), move |_, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+                    waku
+                        .update(cx, |this, cx| {
+                            this.show_toast(tr!("common.copied"));
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .icon("icons/copy.svg"),
+            );
+        }
+        if !is_dir {
+            let path = absolute_path.to_path_buf();
+            let waku = waku.clone();
+            items.push(
+                MenuItem::new(tr!("files.copy_file_contents"), move |_, cx| {
+                    let path = path.clone();
+                    let waku = waku.clone();
+                    cx.spawn(async move |cx| {
+                        let contents = cx
+                            .background_executor()
+                            .spawn(async move { std::fs::read_to_string(&path) })
+                            .await;
+                        waku
+                            .update(cx, |this, cx| {
+                                match contents {
+                                    Ok(contents) => {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(contents));
+                                        this.show_toast(tr!("common.copied"));
+                                    }
+                                    Err(_) => {
+                                        this.show_toast(tr!("files.copy_contents_failed"));
+                                    }
+                                }
+                                cx.notify();
+                            })
+                            .ok();
+                    })
+                    .detach();
+                })
+                .icon("icons/copy.svg"),
+            );
+        }
+        {
+            let path = absolute_path.to_path_buf();
+            items.push(
+                MenuItem::new(tr!("common.reveal_in_finder"), move |_, cx| {
+                    crate::platform::reveal_in_file_manager(&path, cx);
+                })
+                .icon("icons/folder-open.svg"),
+            );
+        }
+        items
     }
 
     fn render_right_panel_file(

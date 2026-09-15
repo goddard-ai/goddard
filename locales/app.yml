@@ -2121,6 +2121,20 @@ files.preparing_editor:
   en: Preparing editor…
 files.preparing_syntax:
   en: Preparing syntax highlighting.
+files.open_in:
+  en: Open in %{app}
+files.open_with:
+  en: Open with
+files.save_as:
+  en: Save as…
+files.copy_path:
+  en: Copy path
+files.copy_file_contents:
+  en: Copy file contents
+files.save_as_failed:
+  en: "Could not save a copy: %{error}"
+files.copy_contents_failed:
+  en: Could not copy file contents
 
 file_picker.open_project:
   en: Open Project

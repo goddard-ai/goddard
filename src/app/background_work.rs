@@ -944,7 +944,7 @@ impl Waku {
 
     /// The app the primary "open in" button targets: the persisted choice
     /// while it is still installed, otherwise the file manager.
-    fn preferred_open_in_app(&self) -> Option<&crate::platform::ExternalApp> {
+    pub(super) fn preferred_open_in_app(&self) -> Option<&crate::platform::ExternalApp> {
         self.state
             .open_in_app
             .as_deref()
