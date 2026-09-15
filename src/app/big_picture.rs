@@ -156,6 +156,27 @@ fn big_picture_tier(session: &AgentSession, unseen: &HashMap<Uuid, u64>) -> u8 {
     }
 }
 
+/// The card an arrow key lands on: the neighbor of the highlighted one,
+/// wrapping at both ends; with nothing highlighted — or a highlight that
+/// fell off the row — the edge the arrow faces.
+fn big_picture_arrow_target(
+    order: &[Uuid],
+    highlighted: Option<Uuid>,
+    reverse: bool,
+) -> Option<Uuid> {
+    if order.is_empty() {
+        return None;
+    }
+    let next = match highlighted.and_then(|id| order.iter().position(|candidate| *candidate == id))
+    {
+        Some(index) if reverse => (index + order.len() - 1) % order.len(),
+        Some(index) => (index + 1) % order.len(),
+        None if reverse => order.len() - 1,
+        None => 0,
+    };
+    order.get(next).copied()
+}
+
 /// The card order for this frame: tier first, then most recently touched.
 /// Waiting sessions rank by `updated_at` — the moment they parked — matching
 /// `next_unread_session`; everything else ranks by sidebar recency, with the
@@ -376,21 +397,12 @@ impl Waku {
     /// confirm step. The docked prompt follows whichever card is highlighted.
     fn move_big_picture_highlight(&mut self, reverse: bool, cx: &mut Context<Self>) {
         let order = self.big_picture_navigable();
-        if order.is_empty() {
+        let Some(next) = big_picture_arrow_target(&order, self.big_picture.highlighted, reverse)
+        else {
             return;
-        }
-        let next = match self
-            .big_picture
-            .highlighted
-            .and_then(|id| order.iter().position(|candidate| *candidate == id))
-        {
-            Some(index) if reverse => (index + order.len() - 1) % order.len(),
-            Some(index) => (index + 1) % order.len(),
-            None if reverse => order.len() - 1,
-            None => 0,
         };
-        self.big_picture.highlighted = order.get(next).copied();
-        self.set_big_picture_target(self.big_picture.highlighted, cx);
+        self.big_picture.highlighted = Some(next);
+        self.set_big_picture_target(Some(next), cx);
     }
 
     /// Escape peels off one layer at a time: an armed target first, the
@@ -963,8 +975,7 @@ impl Waku {
         // the screen-edge margins and the inter-card gaps.
         let count = desired.len().max(1) as f32;
         let row_width = (f32::from(viewport.width) - EDGE_MARGIN * 2.0).max(0.0);
-        let card_width =
-            ((row_width - CARD_GAP * (count - 1.0)) / count).max(CARD_MIN_WIDTH);
+        let card_width = ((row_width - CARD_GAP * (count - 1.0)) / count).max(CARD_MIN_WIDTH);
         self.reconcile_big_picture_slots(&desired, card_width, cx);
         let slots = self.big_picture.slots.clone();
         let cards = slots
@@ -1146,5 +1157,40 @@ mod tests {
             big_picture_order(&sessions, &unseen),
             vec![stale_unread.id, recent_read.id]
         );
+    }
+
+    #[test]
+    fn arrows_walk_the_row_and_wrap_at_both_ends() {
+        let order = (0..3).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+
+        // Nothing highlighted: each arrow starts at the edge it faces.
+        assert_eq!(
+            big_picture_arrow_target(&order, None, false),
+            Some(order[0])
+        );
+        assert_eq!(big_picture_arrow_target(&order, None, true), Some(order[2]));
+
+        assert_eq!(
+            big_picture_arrow_target(&order, Some(order[0]), false),
+            Some(order[1])
+        );
+        assert_eq!(
+            big_picture_arrow_target(&order, Some(order[2]), false),
+            Some(order[0])
+        );
+        assert_eq!(
+            big_picture_arrow_target(&order, Some(order[0]), true),
+            Some(order[2])
+        );
+
+        // A highlight that fell off the row restarts at an edge.
+        let gone = Uuid::new_v4();
+        assert_eq!(
+            big_picture_arrow_target(&order, Some(gone), false),
+            Some(order[0])
+        );
+
+        // An empty row offers nothing to land on.
+        assert_eq!(big_picture_arrow_target(&[], Some(order[0]), false), None);
     }
 }
