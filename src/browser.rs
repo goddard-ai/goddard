@@ -2379,7 +2379,7 @@ fn snapshot_render_image(
 /// undoing. Returns `None` for layouts snapshots never use (fewer than three
 /// samples, undersized buffers) — the caller falls back to no snapshot.
 #[cfg(any(target_os = "macos", test))]
-fn bgra_from_bitmap(
+pub(crate) fn bgra_from_bitmap(
     bytes: &[u8],
     width: usize,
     height: usize,

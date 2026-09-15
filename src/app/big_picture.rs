@@ -101,6 +101,9 @@ pub(super) struct BigPictureUi {
     /// left — which animates width — while an unchanged count means any
     /// geometry delta is a viewport resize and stays instant.
     last_row_count: usize,
+    /// Blurred snapshot of the frame underneath, captured as the overlay
+    /// opens and painted under the scrim.
+    backdrop: Option<Arc<gpui::RenderImage>>,
 }
 
 impl BigPictureUi {
@@ -117,6 +120,7 @@ impl BigPictureUi {
             pending_submission: None,
             hydrate_requested: HashSet::new(),
             last_row_count: 0,
+            backdrop: None,
         }
     }
 
@@ -247,6 +251,26 @@ impl Waku {
                 .first()
                 .copied();
         self.sync_big_picture_placeholder(cx);
+        self.big_picture.backdrop = None;
+        // Snapshot the frame before the scrim covers it — capture, repack,
+        // and blur all run on the background executor.
+        if let Some(window_id) = crate::platform::window_capture_id(window) {
+            cx.spawn(async move |waku, cx| {
+                let backdrop = cx
+                    .background_executor()
+                    .spawn(async move { crate::platform::blurred_window_snapshot(window_id) })
+                    .await;
+                let _ = waku.update(cx, |this, cx| {
+                    if this.big_picture.open
+                        && let Some(backdrop) = backdrop
+                    {
+                        this.big_picture.backdrop = Some(backdrop);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
         let generation = self.big_picture.focus_generation;
         let focus = self.big_picture.focus.clone();
         let weak = cx.entity().downgrade();
@@ -276,6 +300,7 @@ impl Waku {
         self.big_picture.highlighted = None;
         self.big_picture.target = None;
         self.big_picture.pending_submission = None;
+        self.big_picture.backdrop = None;
         self.composer.update(cx, |composer, cx| {
             composer.set_placeholder(tr!("input.do_anything"), cx);
         });
@@ -923,6 +948,7 @@ impl Waku {
             .map(|(session, slot)| self.render_big_picture_card(session, slot, cx))
             .collect::<Vec<_>>();
         let focus = self.big_picture.focus.clone();
+        let backdrop = self.big_picture.backdrop.clone();
         let scrim = if theme.is_dark {
             gpui::hsla(0.0, 0.0, 0.0, 0.45)
         } else {
@@ -935,9 +961,17 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
             .flex()
             .flex_col()
+            // The blurred frame snapshot paints first; the scrim dims it.
+            .children(backdrop.map(|image| {
+                img(image)
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Fill)
+            }))
+            .child(div().absolute().inset_0().bg(scrim))
             .on_action(cx.listener(Self::toggle_big_picture_action))
             .on_action(cx.listener(Self::dismiss_big_picture_action))
             .on_action(cx.listener(Self::big_picture_left_action))

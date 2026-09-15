@@ -682,6 +682,109 @@ pub fn set_sidebar_material_width(window: &Window, width: f32) {
 #[cfg(not(target_os = "macos"))]
 pub fn set_sidebar_material_width(_: &Window, _: f32) {}
 
+/// The window-server id (`-[NSWindow windowNumber]`) used to snapshot this
+/// window's own contents — Big Picture's blurred backdrop.
+#[cfg(target_os = "macos")]
+pub fn window_capture_id(window: &Window) -> Option<u32> {
+    use objc2_app_kit::NSView;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = HasWindowHandle::window_handle(window).ok()?;
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return None;
+    };
+    unsafe {
+        let view = handle.ns_view.cast::<NSView>().as_ref();
+        u32::try_from(view.window()?.windowNumber()).ok()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn window_capture_id(_: &Window) -> Option<u32> {
+    None
+}
+
+/// A heavily blurred snapshot of the window's own contents, for painting
+/// under an overlay's scrim. Pure CPU work — capture, channel repack,
+/// downscale, gaussian — meant for a background executor; the frame only
+/// paints the returned `RenderImage`.
+#[cfg(target_os = "macos")]
+pub fn blurred_window_snapshot(window_id: u32) -> Option<std::sync::Arc<gpui::RenderImage>> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSBitmapFormat, NSBitmapImageRep};
+    use objc2_core_graphics::CGImage;
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    unsafe extern "C" {
+        fn CGWindowListCreateImage(
+            bounds: NSRect,
+            option: u32,
+            window_id: u32,
+            image_option: u32,
+        ) -> *mut CGImage;
+    }
+    const OPTION_INCLUDING_WINDOW: u32 = 1 << 3;
+    const IMAGE_IGNORE_FRAMING: u32 = 1;
+    const IMAGE_NOMINAL_RESOLUTION: u32 = 1 << 4;
+
+    // CGRectNull — the whole window rather than a rect of it.
+    let image = unsafe {
+        let raw = CGWindowListCreateImage(
+            NSRect::new(
+                NSPoint::new(f64::INFINITY, f64::INFINITY),
+                NSSize::new(0.0, 0.0),
+            ),
+            OPTION_INCLUDING_WINDOW,
+            window_id,
+            IMAGE_IGNORE_FRAMING | IMAGE_NOMINAL_RESOLUTION,
+        );
+        objc2::rc::Retained::from_raw(raw)?
+    };
+    let rep = NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), &image);
+    if rep.isPlanar() || rep.bitsPerSample() != 8 {
+        return None;
+    }
+    let width = usize::try_from(rep.pixelsWide()).ok()?;
+    let height = usize::try_from(rep.pixelsHigh()).ok()?;
+    let bytes_per_row = usize::try_from(rep.bytesPerRow()).ok()?;
+    let samples = usize::try_from(rep.samplesPerPixel()).ok()?;
+    let format = rep.bitmapFormat();
+    let data = rep.bitmapData();
+    if data.is_null() {
+        return None;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, bytes_per_row.checked_mul(height)?) };
+    let bgra = crate::browser::bgra_from_bitmap(
+        bytes,
+        width,
+        height,
+        bytes_per_row,
+        samples,
+        format.contains(NSBitmapFormat::AlphaFirst),
+        format.contains(NSBitmapFormat::ThirtyTwoBitLittleEndian),
+    )?;
+    let buffer = image::RgbaImage::from_raw(width as u32, height as u32, bgra)?;
+    // A hard downscale plus a small-radius gaussian on the thumbnail reads as
+    // a deep blur once the image stretches back across the window.
+    let blurred = image::imageops::blur(
+        &image::imageops::resize(
+            &buffer,
+            (width as u32 / 8).max(48),
+            (height as u32 / 8).max(48),
+            image::imageops::FilterType::Triangle,
+        ),
+        3.0,
+    );
+    Some(std::sync::Arc::new(gpui::RenderImage::new(vec![
+        image::Frame::new(blurred),
+    ])))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn blurred_window_snapshot(_: u32) -> Option<std::sync::Arc<gpui::RenderImage>> {
+    None
+}
+
 /// Opt-in three-finger trackpad swipe for back/forward, recognized from the
 /// window's touch stream by the platform layer.
 #[cfg(target_os = "macos")]
