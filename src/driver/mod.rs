@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
@@ -177,6 +178,10 @@ fn connect_remote(
                         remote_events = client.subscribe(session_id, runtime_id);
                     }
                     Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
+                        let _ = forwarding_events.send(DriverEvent::Error(
+                            "the Goddard daemon restarted and this turn could not be reattached"
+                                .into(),
+                        ));
                         let _ = forwarding_events.send(DriverEvent::ProcessExited);
                         break;
                     }
@@ -221,14 +226,67 @@ struct RemoteDriverControl {
     shutdown: Sender<()>,
 }
 
+// A notify that lands mid-restart used to fail instantly even though the
+// supervisor was about to publish a replacement client. The send itself
+// stays fire-and-forget; only a send that found the daemon down retries,
+// off the caller's thread, until the replacement arrives or a short budget
+// expires.
+const REPLACEMENT_WAIT: Duration = Duration::from_secs(2);
+const REPLACEMENT_POLL: Duration = Duration::from_millis(50);
+
 impl RemoteDriverControl {
     fn notify(&self, command: waku_client::Command) {
         let client = self.client.lock().clone();
-        if let Err(error) = client.notify(self.session_id, self.runtime_id, command) {
-            let _ = self.events.send(DriverEvent::Error(format!(
-                "Goddard daemon command failed: {error}"
-            )));
+        match client.notify(self.session_id, self.runtime_id, command.clone()) {
+            Ok(()) => {}
+            Err(_) if client.is_disconnected() => self.retry_with_replacement(command),
+            Err(error) => {
+                let _ = self.events.send(DriverEvent::Error(format!(
+                    "Goddard daemon command failed: {error}"
+                )));
+            }
         }
+    }
+
+    fn retry_with_replacement(&self, command: waku_client::Command) {
+        let client_slot = Arc::clone(&self.client);
+        let events = self.events.clone();
+        let closed = Arc::clone(&self.closed);
+        let session_id = self.session_id;
+        let runtime_id = self.runtime_id;
+        let _ = std::thread::Builder::new()
+            .name("waku-daemon-retry".into())
+            .spawn(move || {
+                let deadline = Instant::now() + REPLACEMENT_WAIT;
+                loop {
+                    if closed.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let client = client_slot.lock().clone();
+                    if !client.is_disconnected() {
+                        match client.notify(session_id, runtime_id, command.clone()) {
+                            Ok(()) => return,
+                            // The replacement died mid-send; keep waiting for
+                            // the next one until the budget expires.
+                            Err(_) if client.is_disconnected() => {}
+                            Err(error) => {
+                                let _ = events.send(DriverEvent::Error(format!(
+                                    "Goddard daemon command failed: {error}"
+                                )));
+                                return;
+                            }
+                        }
+                    }
+                    if Instant::now() >= deadline {
+                        let _ = events.send(DriverEvent::Error(
+                            "the Goddard daemon is unreachable — the command was not delivered"
+                                .into(),
+                        ));
+                        return;
+                    }
+                    std::thread::sleep(REPLACEMENT_POLL);
+                }
+            });
     }
 }
 
