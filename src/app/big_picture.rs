@@ -664,6 +664,20 @@ impl Waku {
         } else {
             Vec::new()
         };
+        // The newest in-flight activity — what the agent is doing right now —
+        // pinned below the message tail like the transcript's live group.
+        let active_tool = session
+            .status
+            .is_busy()
+            .then(|| {
+                session
+                    .transcript_blocks
+                    .iter()
+                    .rev()
+                    .flat_map(|block| block.activities.iter().rev())
+                    .find(|activity| !activity.complete)
+            })
+            .flatten();
         let border = if is_target {
             theme.accent
         } else if is_highlighted {
@@ -677,7 +691,7 @@ impl Waku {
                 .text_color(theme.text_ghost)
                 .child(tr!("big_picture.loading"))
                 .into_any_element()
-        } else if preview.is_empty() {
+        } else if preview.is_empty() && active_tool.is_none() {
             div()
                 .text_size(sp(11.5))
                 .text_color(theme.text_ghost)
@@ -709,6 +723,33 @@ impl Waku {
                         .child(snippet)
                         .into_any_element()
                 }))
+                .when_some(active_tool, |element, activity| {
+                    let title = activity.reasoning.as_ref().map_or_else(
+                        || activity_display_title(activity),
+                        |reasoning| reasoning_activity_title(reasoning, true),
+                    );
+                    element.child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(motion::spin_slow(icon(
+                                "icons/loader-circle.svg",
+                                10.0,
+                                status_color(&theme, status),
+                            )))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(title),
+                            ),
+                    )
+                })
                 .into_any_element()
         };
         let mut card = div()
