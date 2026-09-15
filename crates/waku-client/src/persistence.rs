@@ -340,6 +340,9 @@ pub struct AppSettings {
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
     pub sync_with_merge: bool,
+    /// Fork a planned worktree from the repository's default branch instead
+    /// of reopening the base branch last picked for the project.
+    pub new_worktree_default_branch: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
@@ -384,6 +387,7 @@ impl Default for AppSettings {
             render_math: true,
             open_at_last_prompt: true,
             sync_with_merge: false,
+            new_worktree_default_branch: false,
             sidebar_transparency: true,
             thick_borders: false,
             three_finger_swipe_navigation: false,
@@ -559,6 +563,10 @@ pub struct PersistedState {
     /// task area.
     #[serde(default)]
     pub sync_with_merge: bool,
+    /// Fork a planned worktree from the repository's default branch instead
+    /// of reopening the base branch last picked for the project.
+    #[serde(default)]
+    pub new_worktree_default_branch: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
@@ -677,6 +685,7 @@ impl PersistedState {
             render_math: true,
             open_at_last_prompt: true,
             sync_with_merge: false,
+            new_worktree_default_branch: false,
             sidebar_transparency: true,
             thick_borders: false,
             three_finger_swipe_navigation: false,
@@ -748,8 +757,13 @@ impl PersistedState {
     }
 
     /// Base branch a planned worktree in `project_id` reopens with, when one
-    /// was picked before.
+    /// was picked before. `new_worktree_default_branch` keeps the
+    /// repository's default branch in charge, so a remembered base does not
+    /// apply while it is on.
     pub fn remembered_base_branch(&self, project_id: Uuid) -> Option<String> {
+        if self.new_worktree_default_branch {
+            return None;
+        }
         match self.project_workspaces.get(&project_id) {
             Some(SessionWorkspace::NewWorktree { base_branch }) => base_branch.clone(),
             _ => None,
@@ -768,9 +782,17 @@ impl PersistedState {
             return SessionWorkspace::Local;
         }
         match self.project_workspaces.get(&project_id) {
-            Some(workspace @ (SessionWorkspace::Local | SessionWorkspace::NewWorktree { .. })) => {
-                workspace.clone()
-            }
+            Some(SessionWorkspace::NewWorktree { base_branch }) => SessionWorkspace::NewWorktree {
+                // `None` resolves the repository's default branch on the
+                // daemon; `new_worktree_default_branch` drops the base last
+                // picked so a fresh task always forks from it.
+                base_branch: if self.new_worktree_default_branch {
+                    None
+                } else {
+                    base_branch.clone()
+                },
+            },
+            Some(workspace @ SessionWorkspace::Local) => workspace.clone(),
             _ => SessionWorkspace::Local,
         }
     }
@@ -873,6 +895,7 @@ impl PersistedState {
             render_math: self.render_math,
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
+            new_worktree_default_branch: self.new_worktree_default_branch,
             sidebar_transparency: self.sidebar_transparency,
             thick_borders: self.thick_borders,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
@@ -931,6 +954,7 @@ impl PersistedState {
         self.render_math = settings.render_math;
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
+        self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.thick_borders = settings.thick_borders;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
@@ -1548,6 +1572,26 @@ mod tests {
     }
 
     #[test]
+    fn new_worktree_default_branch_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.new_worktree_default_branch);
+        let mut state = PersistedState::empty();
+        assert!(!state.new_worktree_default_branch);
+        state.new_worktree_default_branch = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["new_worktree_default_branch"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("new_worktree_default_branch")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.new_worktree_default_branch);
+    }
+
+    #[test]
     fn three_finger_swipe_navigation_defaults_off_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!defaults.three_finger_swipe_navigation);
@@ -1742,6 +1786,28 @@ mod tests {
         let session = state.new_session(other_id, ProviderKind::Codex);
         assert_eq!(session.workspace, SessionWorkspace::Local);
         assert_eq!(state.remembered_base_branch(other_id), None);
+    }
+
+    #[test]
+    fn new_worktree_default_branch_skips_the_remembered_base() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        state.remember_workspace(
+            project_id,
+            &SessionWorkspace::NewWorktree {
+                base_branch: Some("develop".to_owned()),
+            },
+        );
+
+        state.new_worktree_default_branch = true;
+
+        // `None` resolves the repository's default branch on the daemon.
+        let session = state.new_session(project_id, ProviderKind::Codex);
+        assert_eq!(
+            session.workspace,
+            SessionWorkspace::NewWorktree { base_branch: None }
+        );
+        assert_eq!(state.remembered_base_branch(project_id), None);
     }
 
     #[test]

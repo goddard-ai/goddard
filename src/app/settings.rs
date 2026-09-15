@@ -808,6 +808,50 @@ impl Waku {
                         },
                     )),
             )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.new_worktree_default_branch")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.new_worktree_default_branch_description")),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        "new-worktree-default-branch-toggle",
+                        self.state.new_worktree_default_branch,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.new_worktree_default_branch;
+                            move |this, _, cx| this.set_new_worktree_default_branch(!enabled, cx)
+                        },
+                    )),
+            )
             .when(cfg!(target_os = "macos"), |element| {
                 // The platform recognizer reads the trackpad's touch stream,
                 // which macOS only hands over when no system gesture claims
@@ -3813,6 +3857,15 @@ impl Waku {
                 self.sidebar_shortcut_hint_generation.wrapping_add(1);
             self.sidebar_shortcut_hints = false;
         }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_new_worktree_default_branch(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.new_worktree_default_branch == enabled {
+            return;
+        }
+        self.state.new_worktree_default_branch = enabled;
         self.save();
         cx.notify();
     }

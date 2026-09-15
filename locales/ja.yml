@@ -286,6 +286,8 @@ settings.open_at_last_prompt: 終了したタスクを最後のプロンプト�
 settings.open_at_last_prompt_description: トランスクリプトの末尾ではなく、最後のメッセージから読み始めます
 settings.sync_with_merge: 変更の同期にマージを使用
 settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
+settings.new_worktree_default_branch: 新しいワークツリーはデフォルトブランチから作成
+settings.new_worktree_default_branch_description: 新規ワークツリーを、最後に使ったベースブランチではなく常にリポジトリのデフォルトブランチから作成します
 settings.three_finger_swipe_navigation: 3本指スワイプでタスク間を移動
 settings.three_finger_swipe_navigation_description: トラックパッドを3本指で左右にスワイプしてタスク間を移動します。システム設定 → トラックパッドで「フルスクリーンアプリケーション間をスワイプ」を4本指に設定してください。
 settings.sidebar_shortcut_tags: サイドバーのショートカットタグ

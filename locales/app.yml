@@ -564,6 +564,10 @@ settings.sync_with_merge:
   en: Merge when syncing changes
 settings.sync_with_merge_description:
   en: Use git merge instead of git pull --rebase when syncing a checkout from the new task area
+settings.new_worktree_default_branch:
+  en: New worktrees use the default branch
+settings.new_worktree_default_branch_description:
+  en: Always fork a new worktree from the repository's default branch instead of the base branch last used
 settings.three_finger_swipe_navigation:
   en: Three-finger swipe navigation
 settings.three_finger_swipe_navigation_description:

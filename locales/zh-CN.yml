@@ -283,6 +283,8 @@ settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提�
 settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
+settings.new_worktree_default_branch: 新工作树始终基于默认分支
+settings.new_worktree_default_branch_description: 创建新工作树时始终从仓库默认分支分叉，而不是沿用上次使用的基准分支
 settings.three_finger_swipe_navigation: 三指轻扫切换任务
 settings.three_finger_swipe_navigation_description: 在触控板上用三指向左或向右轻扫即可在任务之间切换。需在系统设置 → 触控板中将“在全屏 App 之间轻扫”设为四指。
 settings.sidebar_shortcut_tags: 侧边栏快捷键标签
