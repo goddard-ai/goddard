@@ -816,7 +816,7 @@ impl Waku {
             .focus_visible(|style| {
                 style
                     .bg(theme.overlay)
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.accent)
             })
             .hover(|style| style.bg(theme.overlay))
@@ -855,7 +855,7 @@ impl Waku {
                 .focus_visible(|style| {
                     style
                         .bg(theme.overlay)
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.accent)
                 })
                 .hover(|style| style.bg(theme.overlay))
@@ -1013,7 +1013,7 @@ impl Waku {
             .focus_visible(|style| {
                 style
                     .bg(theme.overlay)
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.accent)
             })
             .hover(|style| style.bg(theme.overlay))
@@ -1048,7 +1048,7 @@ impl Waku {
             .focus_visible(|style| {
                 style
                     .bg(theme.overlay)
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.accent)
             })
             .hover(|style| style.bg(theme.overlay))
@@ -1086,13 +1086,13 @@ impl Waku {
             div()
                 .h(px(28.0))
                 .rounded(px(9.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .flex_none()
                 .flex()
                 .items_center()
                 .child(primary)
-                .child(div().w(px(1.0)).h_full().flex_none().bg(theme.border))
+                .child(div().w(hairline()).h_full().flex_none().bg(theme.border))
                 .child(menu)
                 .into_any_element(),
         )
@@ -1165,7 +1165,7 @@ impl Waku {
                     .h(px(26.0))
                     .px(px(9.0))
                     .rounded(px(8.0))
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .flex_none()
                     .flex()
@@ -1203,7 +1203,7 @@ impl Waku {
             .flex()
             .flex_col()
             .rounded(px(11.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border)
             .overflow_hidden()
             .bg(theme.surface)
@@ -1304,7 +1304,7 @@ impl Waku {
         for (label, value) in metadata {
             detail = detail.child(
                 div()
-                    .border_t_1()
+                    .border_t(hairline())
                     .border_color(theme.border)
                     .px(px(10.0))
                     .py(px(7.0))
@@ -1349,7 +1349,7 @@ impl Waku {
         );
         detail.child(
             div()
-                .border_t_1()
+                .border_t(hairline())
                 .border_color(theme.border)
                 .p(px(10.0))
                 .flex()
@@ -1478,7 +1478,7 @@ fn render_background_summary_card(
         ));
     }
     if has_environment && has_background {
-        content = content.child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border));
+        content = content.child(div().mx(px(8.0)).h(hairline()).bg(theme.border));
     }
     if !processes.is_empty() {
         content = content.child(render_background_summary_section(
@@ -1501,7 +1501,7 @@ fn render_background_summary_card(
         ));
     }
     if has_identifiers && (has_environment || has_background) {
-        content = content.child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border));
+        content = content.child(div().mx(px(8.0)).h(hairline()).bg(theme.border));
     }
     if let Some(identifiers) = identifiers {
         content = content.child(render_task_identifiers_section(
@@ -1516,7 +1516,7 @@ fn render_background_summary_card(
         .track_focus(handle.focus_handle())
         .w(px(300.0))
         .rounded(px(15.0))
-        .border_1()
+        .border(hairline())
         .border_color(theme.border_strong)
         .overflow_hidden()
         .bg(theme.raised)
@@ -1602,7 +1602,7 @@ fn render_task_identifier_row(
         .focus_visible(|style| {
             style
                 .bg(theme.overlay)
-                .border_1()
+                .border(hairline())
                 .border_color(theme.accent)
         })
         .hover(|style| style.bg(theme.overlay_strong))
@@ -1777,7 +1777,7 @@ fn render_environment_action_row(
         .items_center()
         .gap(px(10.0))
         .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .when(enabled, |row| {
             row.hover(|style| style.bg(theme.overlay_strong))
         })
@@ -1890,7 +1890,7 @@ fn render_background_summary_row(
                 style
                     .opacity(1.0)
                     .bg(theme.raised)
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.accent)
             })
             .tooltip(Tooltip::text(tr!("background.stop")))
@@ -1942,7 +1942,7 @@ fn render_background_summary_row(
         .items_center()
         .gap(px(9.0))
         .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .hover(|style| style.bg(theme.overlay_strong))
         .child(icon(
             work_kind_icon(item.key.kind),

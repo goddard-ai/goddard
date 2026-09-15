@@ -502,7 +502,7 @@ impl Waku {
             .flex_col()
             .overflow_hidden()
             .rounded(px(MODAL_RADIUS))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .bg(theme.raised)
             .shadow_xl()

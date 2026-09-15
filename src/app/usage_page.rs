@@ -272,7 +272,7 @@ impl Waku {
 
         let mut view_options = div()
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .overflow_hidden();
@@ -289,7 +289,7 @@ impl Waku {
                         label.to_ascii_lowercase()
                     )))
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .h(px(26.0))
                     .px(px(11.0))
                     .flex()
@@ -323,8 +323,8 @@ impl Waku {
                     .label(window_choice_label(selected))
                     .outlined()
                     // Heights here are border-box: the view switcher is its
-                    // 26px options plus 1px of border each side, so every
-                    // control in this row targets 28px total — and the
+                    // 26px options plus a hairline of border each side, so
+                    // every control in this row targets 28px total — and the
                     // chip's raised-card fill would read as a pill on the
                     // page surface.
                     .height(px(28.0))
@@ -364,7 +364,7 @@ impl Waku {
             .h(px(28.0))
             .px(px(8.0))
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -570,7 +570,7 @@ impl Waku {
         let metric = self.usage_metric;
         let mut toggle = div()
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .overflow_hidden();
@@ -583,7 +583,7 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("usage-metric-{label}")))
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .h(px(22.0))
                     .px(px(9.0))
                     .flex()
@@ -894,7 +894,7 @@ impl Waku {
             .min_w(px(0.0))
             .h(px(CHART_HEIGHT))
             .tab_index(0)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
                 let Some(bounds) = this.usage_chart_bounds.get() else {
                     return;
@@ -975,7 +975,7 @@ impl Waku {
         let breakdown = self.usage_breakdown;
         let mut toggle = div()
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .overflow_hidden();
@@ -988,7 +988,7 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("usage-breakdown-{label}")))
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .h(px(22.0))
                     .px(px(9.0))
                     .flex()
@@ -1162,7 +1162,7 @@ impl Waku {
                     .flex_none()
                     .px(px(20.0))
                     .py(px(13.0))
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .flex()
                     .items_center()
@@ -1301,7 +1301,7 @@ impl Waku {
             .w_full()
             .py(px(13.0))
             .when(!last, |element| {
-                element.border_b_1().border_color(theme.border)
+                element.border_b(hairline()).border_color(theme.border)
             })
             .flex()
             .flex_col()
@@ -1402,7 +1402,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.text_tertiary)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .hover(|element| element.bg(theme.overlay))
             .tooltip(Tooltip::text(SharedString::from(tr!(
@@ -1463,7 +1463,7 @@ fn usage_notices(history: &UsageHistory, theme: &Theme) -> Div {
         .px(px(12.0))
         .py(px(8.0))
         .rounded(px(10.0))
-        .border_1()
+        .border(hairline())
         .border_color(theme.border)
         .flex()
         .flex_col()
@@ -1516,7 +1516,7 @@ fn usage_chart_readout(
         .px(px(9.0))
         .py(px(7.0))
         .rounded(px(10.0))
-        .border_1()
+        .border(hairline())
         .border_color(theme.border_strong)
         .bg(theme.raised)
         .shadow_md()
@@ -1562,7 +1562,7 @@ fn usage_chart_readout(
         div()
             .mt(px(2.0))
             .pt(px(4.0))
-            .border_t_1()
+            .border_t(hairline())
             .border_color(theme.border)
             .flex()
             .items_center()
@@ -1653,8 +1653,8 @@ fn usage_metric_strip(history: &UsageHistory, theme: &Theme) -> Div {
 
     let mut strip = div()
         .mt(px(24.0))
-        .border_t_1()
-        .border_b_1()
+        .border_t(hairline())
+        .border_b(hairline())
         .border_color(theme.border)
         .flex();
     for (index, (label, value, detail)) in tiles.into_iter().enumerate() {
@@ -1665,7 +1665,7 @@ fn usage_metric_strip(history: &UsageHistory, theme: &Theme) -> Div {
                 .px(px(14.0))
                 .py(px(11.0))
                 .when(index > 0, |element| {
-                    element.border_l_1().border_color(theme.border)
+                    element.border_l(hairline()).border_color(theme.border)
                 })
                 .flex()
                 .flex_col()
@@ -1722,7 +1722,7 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
     let mut table = div().flex().flex_col().text_size(sp(12.5)).child(
         div()
             .pb(px(7.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .flex()
             .items_center()
@@ -1742,7 +1742,7 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
         table = table.child(
             div()
                 .py(px(8.0))
-                .border_b_1()
+                .border_b(hairline())
                 .border_color(theme.border)
                 .flex()
                 .items_center()
@@ -1788,7 +1788,7 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
 fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
     let mut header = div()
         .pb(px(7.0))
-        .border_b_1()
+        .border_b(hairline())
         .border_color(theme.border)
         .flex()
         .items_center()
@@ -1814,7 +1814,7 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
     for day in history.daily.iter().rev().take(8) {
         let mut row = div()
             .py(px(8.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .flex()
             .items_center()
@@ -1851,7 +1851,7 @@ fn usage_quality_panel(history: &UsageHistory, theme: &Theme) -> Div {
     let row = |label: String, value: String| {
         div()
             .py(px(8.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .flex()
             .items_center()
@@ -2109,7 +2109,7 @@ fn usage_list_header(theme: &Theme, title: String, caption: String, total: Strin
     div()
         .px(px(20.0))
         .py(px(13.0))
-        .border_b_1()
+        .border_b(hairline())
         .border_color(theme.border)
         .flex()
         .items_center()
@@ -2288,7 +2288,7 @@ fn usage_models_menu_items(top_models: Rc<Vec<(String, f64)>>, total_cost: f64) 
                         .min_h(px(34.0))
                         .py(px(6.0))
                         .when(index > 0, |element| {
-                            element.border_t_1().border_color(theme.border)
+                            element.border_t(hairline()).border_color(theme.border)
                         })
                         .flex()
                         .items_center()
@@ -2535,7 +2535,7 @@ fn usage_month_row(
     div()
         .py(px(13.0))
         .when(!last, |element| {
-            element.border_b_1().border_color(theme.border)
+            element.border_b(hairline()).border_color(theme.border)
         })
         .flex()
         .flex_col()
@@ -2630,7 +2630,7 @@ fn usage_empty_month_row(theme: &Theme, first_day: NaiveDate, last: bool) -> Div
     div()
         .py(px(11.0))
         .when(!last, |element| {
-            element.border_b_1().border_color(theme.border)
+            element.border_b(hairline()).border_color(theme.border)
         })
         .flex()
         .items_baseline()

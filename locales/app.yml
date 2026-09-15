@@ -261,7 +261,7 @@ settings.commands:
 settings.general_keywords:
   en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command
 settings.appearance_keywords:
-  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid
+  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel
 settings.providers_keywords:
   en: providers agents models cli version install detect claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills:
@@ -540,6 +540,10 @@ settings.terminal_font_size:
   en: Terminal font size
 settings.terminal_font_size_description:
   en: Text size in the integrated terminal. Follows the code font size while they match
+settings.thick_borders:
+  en: Thick borders
+settings.thick_borders_description:
+  en: Draw borders and separators a full pixel thick instead of a half-pixel hairline
 settings.render_math:
   en: Render math expressions
 settings.render_math_description:

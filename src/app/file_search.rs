@@ -899,7 +899,7 @@ impl Waku {
             )
             .child(
                 div()
-                    .w(px(1.0))
+                    .w(hairline())
                     .h(px(16.0))
                     .flex_none()
                     .bg(theme.border_strong),
@@ -971,7 +971,7 @@ impl Waku {
                 .w_full()
                 .flex_none()
                 .overflow_hidden()
-                .border_b_1()
+                .border_b(hairline())
                 .border_color(theme.border)
                 .bg(theme.surface)
                 .font_family(crate::fonts::current(cx).ui)
@@ -1057,7 +1057,7 @@ impl Waku {
             .px(px(5.0))
             .py(px(2.0))
             .rounded(px(5.0))
-            .border_1()
+            .border(hairline())
             .border_color(if invalid {
                 theme.danger
             } else if focused {
@@ -1102,7 +1102,7 @@ fn find_toggle(
         .justify_center()
         .cursor_default()
         // The border is always present so toggling never shifts the glyph.
-        .border_1()
+        .border(hairline())
         .border_color(if active {
             theme.accent.opacity(0.5)
         } else {

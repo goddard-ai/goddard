@@ -43,7 +43,7 @@ use super::selection::{
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
-use crate::theme::Theme;
+use crate::theme::{Theme, hairline};
 use crate::ui::menu::{ContextMenuHandle, context_menu};
 use crate::ui::tooltip::Tooltip;
 
@@ -1679,7 +1679,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
         } => render_table(header, rows, align, ctx),
         Block::Rule => div()
             .w_full()
-            .h(px(1.0))
+            .h(hairline())
             .my(px(4.0))
             .bg(ctx.palette.border)
             .into_any_element(),
@@ -1762,7 +1762,7 @@ fn checkbox(checked: bool, ctx: &Ctx) -> AnyElement {
         .my(px(((ctx.metrics.line_height - box_size) / 2.0).max(0.0)))
         .flex_none()
         .rounded(px(3.0))
-        .border_1()
+        .border(hairline())
         .border_color(if checked {
             ctx.palette.accent
         } else {
@@ -1913,7 +1913,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .items_center()
         .justify_center()
         .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(ctx.palette.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(ctx.palette.accent))
         .hover(|style| style.bg(ctx.palette.overlay))
         .child(crate::ui::icon(
             if copied {
@@ -1955,7 +1955,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .w_full()
         .min_w_0()
         .rounded(px(10.0))
-        .border_1()
+        .border(hairline())
         .border_color(ctx.palette.border)
         .bg(ctx.palette.inset)
         .overflow_hidden()
@@ -1967,7 +1967,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .pr(px(2.0))
                 .flex()
                 .items_center()
-                .border_b_1()
+                .border_b(hairline())
                 .border_color(ctx.palette.border)
                 .child(
                     div()
@@ -2072,7 +2072,7 @@ fn render_table(
         .w_full()
         .min_w_0()
         .rounded(px(10.0))
-        .border_1()
+        .border(hairline())
         .border_color(ctx.palette.border)
         .overflow_hidden()
         .flex()
@@ -2111,7 +2111,7 @@ fn table_row(
         .flex()
         .items_start()
         .when(divider, |element| {
-            element.border_b_1().border_color(ctx.palette.border)
+            element.border_b(hairline()).border_color(ctx.palette.border)
         });
     for (index, cell) in cells.iter().enumerate() {
         let key = ctx.next_key();

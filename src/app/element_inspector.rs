@@ -19,7 +19,7 @@ mod implementation {
     };
 
     use crate::fonts;
-    use crate::theme::{Theme, sp};
+    use crate::theme::{Theme, hairline, sp};
 
     /// Width gpui reserves on the window's right edge for inspector UI whenever
     /// the inspector entity exists (`Window::draw_roots`). The inspector root
@@ -145,7 +145,7 @@ mod implementation {
             .py(px(3.0))
             .rounded(px(5.0))
             .bg(theme.raised)
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .shadow_lg()
             .font_family(fonts::current(cx).code)

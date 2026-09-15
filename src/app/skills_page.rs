@@ -475,7 +475,7 @@ impl Waku {
             .flex_none()
             .flex()
             .flex_col()
-            .border_r_1()
+            .border_r(hairline())
             .border_color(theme.border)
             .child(
                 div()
@@ -501,7 +501,7 @@ impl Waku {
                     .flex_none()
                     .h(px(26.0))
                     .px(px(12.0))
-                    .border_t_1()
+                    .border_t(hairline())
                     .border_color(theme.border)
                     .flex()
                     .items_center()
@@ -760,7 +760,7 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("skill-item-{}", skill.row_key)))
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .w_full()
                     .px(px(9.0))
                     .py(px(7.0))
@@ -879,7 +879,7 @@ impl Waku {
             .rounded_full()
             .cursor_default()
             .bg(if enabled { theme.inverse } else { theme.inset })
-            .border_1()
+            .border(hairline())
             .border_color(if enabled {
                 theme.inverse
             } else {
@@ -968,7 +968,7 @@ impl Waku {
                 .h(px(26.0))
                 .px(px(10.0))
                 .rounded(px(8.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .flex()
                 .flex_none()
@@ -1050,7 +1050,7 @@ impl Waku {
             .h(px(26.0))
             .px(px(10.0))
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(if armed {
                 theme.danger
             } else {
@@ -1124,7 +1124,7 @@ impl Waku {
             div()
                 .mt(px(18.0))
                 .pt(px(14.0))
-                .border_t_1()
+                .border_t(hairline())
                 .border_color(theme.border)
                 .child(
                     div()
@@ -1355,7 +1355,7 @@ fn skill_info_row(theme: &Theme, label: String, value: AnyElement, last: bool) -
     div()
         .py(px(8.0))
         .when(!last, |element| {
-            element.border_b_1().border_color(theme.border)
+            element.border_b(hairline()).border_color(theme.border)
         })
         .flex()
         .items_baseline()

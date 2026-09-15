@@ -343,6 +343,9 @@ pub struct AppSettings {
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
+    /// Draw borders and separators a full pixel thick instead of the default
+    /// half-pixel hairline.
+    pub thick_borders: bool,
     /// macOS-only: move back and forward between tasks with a three-finger
     /// horizontal trackpad swipe.
     pub three_finger_swipe_navigation: bool,
@@ -382,6 +385,7 @@ impl Default for AppSettings {
             open_at_last_prompt: true,
             sync_with_merge: false,
             sidebar_transparency: true,
+            thick_borders: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             daemon_exposure: DaemonExposureSettings::default(),
@@ -559,6 +563,10 @@ pub struct PersistedState {
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
     pub sidebar_transparency: bool,
+    /// Draw borders and separators a full pixel thick instead of the default
+    /// half-pixel hairline.
+    #[serde(default)]
+    pub thick_borders: bool,
     /// macOS-only, opt-in: move back and forward between tasks with a
     /// three-finger horizontal trackpad swipe.
     #[serde(default)]
@@ -670,6 +678,7 @@ impl PersistedState {
             open_at_last_prompt: true,
             sync_with_merge: false,
             sidebar_transparency: true,
+            thick_borders: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             daemon_exposure: DaemonExposureSettings::default(),
@@ -865,6 +874,7 @@ impl PersistedState {
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
             sidebar_transparency: self.sidebar_transparency,
+            thick_borders: self.thick_borders,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             daemon_exposure: self.daemon_exposure.clone(),
@@ -922,6 +932,7 @@ impl PersistedState {
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
         self.sidebar_transparency = settings.sidebar_transparency;
+        self.thick_borders = settings.thick_borders;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.daemon_exposure = settings.daemon_exposure;

@@ -433,7 +433,7 @@ impl Waku {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .text_size(sp(15.5))
                     .text_color(theme.text)
@@ -497,7 +497,7 @@ impl Waku {
             .h(px(RESULT_ROW_HEIGHT))
             .px(px(11.0))
             .rounded(px(11.0))
-            .border_1()
+            .border(hairline())
             .border_color(if highlighted {
                 theme.border_strong
             } else {

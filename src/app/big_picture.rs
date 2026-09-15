@@ -701,7 +701,7 @@ impl Waku {
             .id(SharedString::from(format!("big-picture-card-{session_id}")))
             .size_full()
             .rounded(px(CARD_RADIUS))
-            .border_1()
+            .border(hairline())
             .border_color(border)
             .when(is_target, |element| element.shadow_md())
             .bg(theme.raised)
@@ -716,7 +716,7 @@ impl Waku {
                     .px(px(14.0))
                     .pt(px(12.0))
                     .pb(px(10.0))
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .rounded_t(px(CARD_RADIUS - 1.0))
                     .bg(theme.surface)
@@ -840,7 +840,7 @@ impl Waku {
             .w(px(COMPOSER_WIDTH))
             .flex_none()
             .rounded(px(16.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border)
             .bg(theme.composer)
             .py(px(10.0))
@@ -882,7 +882,7 @@ impl Waku {
                             .justify_center()
                             .cursor_default()
                             .hover(|element| element.bg(theme.overlay_strong))
-                            .focus_visible(|element| element.border_1().border_color(theme.accent))
+                            .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
                             .child(icon("icons/x.svg", 10.0, theme.accent))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_big_picture_target(None, cx);
@@ -939,7 +939,7 @@ impl Waku {
                                     .hover(|element| element.opacity(0.9))
                                     .active(|element| element.opacity(0.8))
                             })
-                            .focus_visible(|element| element.border_1().border_color(theme.accent))
+                            .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
                             .child(icon(
                                 "icons/arrow-up.svg",
                                 16.0,

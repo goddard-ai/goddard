@@ -1013,7 +1013,7 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .when(menu_open, |element| element.bg(theme.overlay_strong))
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.bg(theme.overlay_strong))
@@ -1095,7 +1095,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text_with_action(
@@ -1148,7 +1148,7 @@ impl Waku {
             .items_center()
             .gap(px(6.0))
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.overlay_strong))
             .child(
@@ -1271,7 +1271,7 @@ impl Waku {
             .when(available, |button| {
                 button
                     .hover(|style| style.opacity(0.92))
-                    .focus_visible(|style| style.border_1().border_color(rgb(0xFFFFFF)))
+                    .focus_visible(|style| style.border(hairline()).border_color(rgb(0xFFFFFF)))
                     .active(|style| style.opacity(0.8))
                     .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
                         this.set_updater_button_hovered(*hovering, cx);
@@ -1362,7 +1362,7 @@ impl Waku {
                 div()
                     .id("open-settings")
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .w(px(26.0))
                     .h(px(26.0))
                     .flex_none()
@@ -1386,7 +1386,7 @@ impl Waku {
                 div()
                     .id("open-shortcuts")
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .w(px(26.0))
                     .h(px(26.0))
                     .flex_none()
@@ -1810,7 +1810,7 @@ impl Waku {
                 .items_center()
                 .gap(px(7.0))
                 .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .hover(|style| style.bg(theme.sidebar_item_background))
                 .active(|style| style.bg(theme.overlay_strong))
                 .when(active, |element| element.bg(theme.sidebar_item_background))
@@ -1950,7 +1950,7 @@ impl Waku {
                                 .top_0()
                                 .left_0()
                                 .w_full()
-                                .h(px(1.0))
+                                .h(hairline())
                                 .bg(theme.border),
                         )
                     }),
@@ -2534,7 +2534,7 @@ impl Waku {
                             style
                                 .w(px(20.0))
                                 .opacity(1.0)
-                                .border_1()
+                                .border(hairline())
                                 .border_color(theme.accent)
                         })
                         .hover(|style| style.bg(theme.overlay))
@@ -2585,7 +2585,7 @@ impl Waku {
             .w_full()
             .rounded(px(8.0))
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|style| style.bg(theme.sidebar_item_background))
             .active(|style| style.bg(theme.overlay_strong))
             .child(
@@ -2623,7 +2623,7 @@ impl Waku {
                             .left(px(SIDEBAR_GROUP_GUIDE_X))
                             .top(px(19.0))
                             .bottom(px(-2.0))
-                            .w(px(1.0))
+                            .w(hairline())
                             .bg(theme.border),
                     )
                 },
@@ -2731,8 +2731,8 @@ impl Waku {
                         - SIDEBAR_GROUP_GUIDE_X
                         - 4.0))
                     .h(px(15.0))
-                    .border_l_1()
-                    .border_b_1()
+                    .border_l(hairline())
+                    .border_b(hairline())
                     .rounded_bl(px(4.0))
                     .border_color(theme.border),
             )
@@ -2991,7 +2991,7 @@ impl Waku {
                 .min_w_0()
                 .px(px(4.0))
                 .rounded(px(4.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.accent)
                 .bg(theme.inset)
                 .flex()
@@ -3101,7 +3101,7 @@ impl Waku {
                 style
                     .w(px(20.0))
                     .opacity(1.0)
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.accent)
             })
             .hover(|style| style.bg(theme.overlay))
@@ -3298,7 +3298,7 @@ impl Waku {
                 element
                     .track_focus(&row_focus)
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if matches!(key, "enter" | "space") {
@@ -3432,7 +3432,7 @@ impl Waku {
                         .left(px(SIDEBAR_GROUP_GUIDE_X))
                         .top_0()
                         .bottom_0()
-                        .w(px(1.0))
+                        .w(hairline())
                         .bg(theme.border),
                 )
             })
@@ -3473,7 +3473,7 @@ impl Waku {
                                         .h(px(18.0))
                                         .px(px(5.0))
                                         .rounded(px(4.0))
-                                        .border_1()
+                                        .border(hairline())
                                         .border_color(theme.border)
                                         .bg(theme.raised)
                                         .flex()
@@ -3696,7 +3696,7 @@ impl Waku {
                                 .id("onboarding-add-project")
                                 .track_focus(&self.onboarding_add_project_focus)
                                 .tab_index(0)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                                 .h(px(32.0))
                                 .px(px(14.0))
                                 .rounded_full()
@@ -3723,7 +3723,7 @@ impl Waku {
                                 .id("onboarding-projectless")
                                 .track_focus(&self.onboarding_projectless_focus)
                                 .tab_index(1)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                                 .h(px(30.0))
                                 .px(px(12.0))
                                 .rounded_full()

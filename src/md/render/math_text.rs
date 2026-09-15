@@ -354,7 +354,7 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
                 .tab_group()
                 .tab_index(0)
                 .when(has_links, |element| {
-                    element.border_1().border_color(gpui::transparent_black())
+                    element.border(hairline()).border_color(gpui::transparent_black())
                 })
                 .focus_visible(|style| {
                     if has_links {

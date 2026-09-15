@@ -83,7 +83,7 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-use crate::theme::{Theme, sp};
+use crate::theme::{Theme, hairline, sp};
 use crate::ui::icon;
 use crate::ui::motion;
 use crate::ui::shortcut::ShortcutHint;
@@ -1195,7 +1195,7 @@ impl RenderOnce for MenuCard {
             .max_w(px(320.0))
             .py(px(4.0))
             .rounded(px(11.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .bg(theme.raised)
             .shadow_lg()
@@ -1250,7 +1250,7 @@ impl RenderOnce for MenuCard {
                 .max_w(px(320.0))
                 .py(px(4.0))
                 .rounded(px(11.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .bg(theme.raised)
                 .shadow_lg()
@@ -1291,7 +1291,7 @@ fn render_menu_item(
         MenuItem::Separator => div()
             .my(px(4.0))
             .mx(px(6.0))
-            .h(px(1.0))
+            .h(hairline())
             .bg(theme.border)
             .into_any_element(),
         MenuItem::Header(label) => div()

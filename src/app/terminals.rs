@@ -624,7 +624,7 @@ impl Waku {
             .active(|element| element.bg(theme.overlay_strong))
             .track_focus(&row_focus)
             .tab_index(0)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .child(
                 div()
                     .flex_none()

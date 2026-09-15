@@ -994,7 +994,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(14.0))
             .text_color(theme.text)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay_strong))
             .child(icon("icons/keyboard.svg", 15.0, theme.text))
             .child(
@@ -1050,7 +1050,7 @@ impl Waku {
                     .child(tr!("shortcuts.title")),
             )
             .child(body)
-            .child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(8.0)).h(hairline()).bg(theme.border))
             .child(div().p(px(8.0)).child(done_row));
 
         let scrim = if theme.is_dark {

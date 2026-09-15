@@ -2360,7 +2360,7 @@ impl Waku {
                                 .h(px(28.0))
                                 .px(px(9.0))
                                 .rounded(px(10.0))
-                                .border_1()
+                                .border(hairline())
                                 .border_color(theme.border)
                                 .flex()
                                 .items_center()
@@ -2448,7 +2448,7 @@ impl Waku {
                         .h(px(command_palette_row_height(item)))
                         .px(px(11.0))
                         .rounded(px(11.0))
-                        .border_1()
+                        .border(hairline())
                         .border_color(if highlighted {
                             theme.border_strong
                         } else {
@@ -2610,7 +2610,7 @@ impl Waku {
                         .flex_none()
                         .flex()
                         .items_center()
-                        .border_b_1()
+                        .border_b(hairline())
                         .border_color(theme.border)
                         .text_size(sp(15.5))
                         .text_color(theme.text)
@@ -2626,7 +2626,7 @@ impl Waku {
                     div()
                         .h(px(FOOTER_HEIGHT))
                         .flex_none()
-                        .border_t_1()
+                        .border_t(hairline())
                         .border_color(theme.border)
                         .px(px(19.0))
                         .flex()

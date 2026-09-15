@@ -257,7 +257,7 @@ impl Waku {
                     .gap(px(10.0))
                     .children(sections),
             )
-            .child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(8.0)).h(hairline()).bg(theme.border))
             .child(
                 div()
                     .p(px(8.0))
@@ -321,7 +321,7 @@ fn render_archive_action_row(
         .cursor_default()
         .text_size(sp(14.0))
         .text_color(theme.text)
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .hover(|style| style.bg(theme.overlay_strong))
         .child(icon(icon_path, 15.0, theme.text))
         .child(div().min_w_0().flex_1().truncate().child(label))

@@ -117,7 +117,7 @@ impl Waku {
                     })
                     .when(!allow, |element| {
                         element
-                            .border_1()
+                            .border(hairline())
                             .border_color(theme.border_strong)
                             .text_color(theme.text_secondary)
                             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
@@ -137,7 +137,7 @@ impl Waku {
                     .mx_auto()
                     .p(px(12.0))
                     .rounded(px(15.0))
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .bg(theme.raised)
                     .shadow_md()
@@ -215,7 +215,7 @@ impl Waku {
                     .px(px(10.0))
                     .py(px(5.0))
                     .rounded(px(10.0))
-                    .border_1()
+                    .border(hairline())
                     .border_color(if is_selected {
                         theme.accent.opacity(0.34)
                     } else {
@@ -296,7 +296,7 @@ impl Waku {
                 .text_size(sp(12.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme.text_tertiary)
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.back"))
@@ -335,7 +335,7 @@ impl Waku {
             })
             .when(can_continue, |button| {
                 button
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .hover(|style| style.opacity(0.9))
                     .active(|style| style.opacity(0.8))
                     .on_click(cx.listener(|this, _, _, cx| this.advance_user_input(cx)))
@@ -380,7 +380,7 @@ impl Waku {
                 .pt(px(12.0))
                 .pb(px(10.0))
                 .rounded(px(16.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border)
                 .bg(theme.composer)
                 .tab_index(0)
@@ -421,7 +421,7 @@ impl Waku {
                         .h(px(34.0))
                         .px(px(10.0))
                         .rounded(px(10.0))
-                        .border_1()
+                        .border(hairline())
                         .border_color(if has_custom {
                             theme.accent.opacity(0.34)
                         } else {
@@ -498,7 +498,7 @@ impl Waku {
                     })
                     .when(!primary, |element| {
                         element
-                            .border_1()
+                            .border(hairline())
                             .border_color(theme.border_strong)
                             .text_color(theme.text_secondary)
                             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
@@ -518,7 +518,7 @@ impl Waku {
                 .mx_auto()
                 .p(px(13.0))
                 .rounded(px(15.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.warning.opacity(0.5))
                 .bg(theme.raised)
                 .shadow_md()
@@ -676,7 +676,7 @@ impl Waku {
                         .h(px(COMPUTER_USE_PREVIEW_HEIGHT))
                         .rounded(px(COMPUTER_USE_PREVIEW_RADIUS))
                         .overflow_hidden()
-                        .border_1()
+                        .border(hairline())
                         .border_color(if is_top {
                             theme.border_strong
                         } else {
@@ -734,7 +734,7 @@ impl Waku {
                         }))
                         .child(
                             // GPUI overflow clipping is rectangular. Round
-                            // each painted layer inside the card's 1px border.
+                            // each painted layer inside the card's hairline border.
                             div()
                                 .absolute()
                                 .inset_0()
@@ -797,7 +797,7 @@ impl Waku {
                                         .size(px(26.0))
                                         .flex_none()
                                         .rounded_full()
-                                        .border_1()
+                                        .border(hairline())
                                         .border_color(gpui::transparent_black())
                                         .focus_visible(|style| style.border_color(gpui::white()))
                                         .flex()
@@ -1080,7 +1080,7 @@ impl Waku {
                     .rounded_tl(px(15.0))
                     .rounded_bl(px(15.0))
                     .bg(theme.canvas)
-                    .border_r_1()
+                    .border_r(hairline())
                     .border_color(theme.border);
 
                 let favorites_selected = selected_tab == ModelPickerTab::Favorites && !searching;
@@ -1118,7 +1118,7 @@ impl Waku {
                                 });
                             }),
                     )
-                    .child(div().w(px(34.0)).h(px(1.0)).my(px(3.0)).bg(theme.border));
+                    .child(div().w(px(34.0)).h(hairline()).my(px(3.0)).bg(theme.border));
 
                 // One predicate with the `tab` cycle, so clicking and cycling
                 // agree on which tabs are usable.
@@ -1263,7 +1263,7 @@ impl Waku {
                             .cursor_default()
                             // Reserved on every row so highlighting one cannot
                             // resize it and shift the list by a pixel.
-                            .border_1()
+                            .border(hairline())
                             .border_color(gpui::transparent_black())
                             .when(is_selected, |element| element.bg(theme.overlay_strong))
                             // The keyboard cursor reads as a ring rather than a
@@ -1368,7 +1368,7 @@ impl Waku {
                     .h(px(390.0))
                     .rounded(px(16.0))
                     .overflow_hidden()
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .bg(theme.raised)
                     .shadow_lg()
@@ -2497,7 +2497,7 @@ impl Waku {
                 .h(px(64.0))
                 .rounded(px(10.0))
                 .overflow_hidden()
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border)
                 .bg(theme.inset)
                 .track_focus(menu.trigger_focus_handle())
@@ -2613,7 +2613,7 @@ impl Waku {
                     .justify_center()
                     .cursor_default()
                     .bg(theme.canvas.opacity(0.8))
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .hover(|element| element.bg(theme.canvas.opacity(0.95)))
                     .active(|element| element.opacity(0.8))
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
@@ -2688,7 +2688,7 @@ impl Waku {
                     .gap(px(5.0))
                     .cursor_default()
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
                     .text_size(sp(12.5))
@@ -2729,7 +2729,7 @@ impl Waku {
                     .items_center()
                     .justify_center()
                     .cursor_default()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .when(menu_open, |element| element.bg(theme.overlay_strong))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
@@ -2761,7 +2761,7 @@ impl Waku {
                     .id(SharedString::from(format!("queued-message-{message_id}")))
                     .min_h(px(30.0))
                     .overflow_hidden()
-                    .when(index > 0, |row| row.border_t_1().border_color(theme.border))
+                    .when(index > 0, |row| row.border_t(hairline()).border_color(theme.border))
                     .pl(px(12.0))
                     .pr(px(6.0))
                     .flex()
@@ -2769,7 +2769,7 @@ impl Waku {
                     .gap(px(9.0))
                     .cursor_default()
                     .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .hover(|element| element.bg(theme.overlay))
                     .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
                     .child(div().h(px(30.0)).flex().items_center().child(icon(
@@ -2812,7 +2812,7 @@ impl Waku {
                                     .cursor_default()
                                     .tab_index(0)
                                     .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
+                                        style.border(hairline()).border_color(theme.accent)
                                     })
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .active(|element| element.opacity(0.8))
@@ -2860,9 +2860,9 @@ impl Waku {
                         div()
                             .rounded_tl(px(15.0))
                             .rounded_tr(px(15.0))
-                            .border_t_1()
-                            .border_l_1()
-                            .border_r_1()
+                            .border_t(hairline())
+                            .border_l(hairline())
+                            .border_r(hairline())
                             .border_color(theme.border)
                             .bg(theme.composer)
                             // Row hover fills are full-width rectangles; clip
@@ -2922,7 +2922,7 @@ impl Waku {
                 .max_w(px(CONTENT_MAX_WIDTH))
                 .mx_auto()
                 .rounded(px(16.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border)
                 .bg(theme.composer)
                 // Horizontal insets live on each row (and inside the field's
@@ -3316,7 +3316,7 @@ impl Waku {
                                 .h(px(36.0))
                                 .px(px(10.0))
                                 .rounded(px(11.0))
-                                .border_1()
+                                .border(hairline())
                                 .border_color(theme.border_strong)
                                 .bg(theme.surface)
                                 .flex()
@@ -3521,7 +3521,7 @@ impl Waku {
                         .child(rows)
                         .when_some(create_row, |element, create_row| {
                             element
-                                .child(div().mx(px(6.0)).my(px(4.0)).h(px(1.0)).bg(theme.border))
+                                .child(div().mx(px(6.0)).my(px(4.0)).h(hairline()).bg(theme.border))
                                 .child(create_row)
                                 .child(div().h(px(4.0)))
                         })
@@ -3533,7 +3533,7 @@ impl Waku {
                     .max_h(px(390.0))
                     .rounded(px(16.0))
                     .overflow_hidden()
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .bg(theme.raised)
                     .shadow_lg()
@@ -3662,7 +3662,7 @@ impl Waku {
                         .cursor_default()
                         .track_focus(&focus)
                         .tab_index(0)
-                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                         .bg(theme.overlay)
                         .hover(|element| element.bg(theme.overlay_strong))
                         .active(|element| element.opacity(0.8))
@@ -4065,7 +4065,7 @@ impl Waku {
                         .w(px(320.0))
                         .rounded(px(16.0))
                         .overflow_hidden()
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.border_strong)
                         .bg(theme.raised)
                         .shadow_lg()
@@ -4471,7 +4471,7 @@ fn model_picker_empty_state(
         .w(px(320.0))
         .rounded(px(16.0))
         .overflow_hidden()
-        .border_1()
+        .border(hairline())
         .border_color(theme.border_strong)
         .bg(theme.raised)
         .shadow_lg()
@@ -4518,7 +4518,7 @@ fn model_picker_empty_state(
                 .h(px(28.0))
                 .px(px(11.0))
                 .rounded(px(9.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .flex()
                 .items_center()

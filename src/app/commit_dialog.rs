@@ -547,7 +547,7 @@ impl Waku {
                 .items_center()
                 .gap(px(10.0))
                 .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .when(include_enabled, |row| {
                     row.hover(|style| style.bg(theme.overlay))
                 })
@@ -555,7 +555,7 @@ impl Waku {
                     div()
                         .size(px(15.0))
                         .rounded(px(4.0))
-                        .border_1()
+                        .border(hairline())
                         .border_color(if include_unstaged {
                             theme.border_strong
                         } else {
@@ -739,7 +739,7 @@ impl Waku {
                         .child(error),
                 )
             })
-            .child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(8.0)).h(hairline()).bg(theme.border))
             .child(
                 div()
                     .p(px(8.0))
@@ -820,7 +820,7 @@ fn render_commit_action_row(
         .cursor_default()
         .text_size(sp(14.0))
         .text_color(foreground)
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .when(enabled, |row| {
             row.hover(|style| style.bg(theme.overlay_strong))
         })

@@ -555,7 +555,7 @@ impl Waku {
                 .items_center()
                 .gap(px(4.0))
                 .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .when(state_menu_open, |element| element.bg(theme.overlay_strong))
                 .hover(|style| style.bg(theme.overlay))
                 .child(
@@ -600,7 +600,7 @@ impl Waku {
                 .cursor_default()
                 .hover(|style| style.bg(theme.overlay))
                 .active(|style| style.bg(theme.overlay_strong))
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .tooltip(Tooltip::text(tr!("github.back_to_list")))
                 .child(icon("icons/arrow-left.svg", 13.0, theme.text_secondary))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -617,7 +617,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .child(icon("icons/github.svg", 15.0, theme.text_secondary))
             .child(
@@ -680,7 +680,7 @@ impl Waku {
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .tooltip(Tooltip::text(tr!("github.refresh")))
                     .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -839,7 +839,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .cursor_default()
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
@@ -1085,7 +1085,7 @@ impl Waku {
                         .cursor_default()
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
-                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                         .tooltip(Tooltip::text(tr!("github.open_external")))
                         .child(icon("icons/external-link.svg", 12.0, theme.text_secondary))
                         .child(
@@ -1117,7 +1117,7 @@ impl Waku {
                 .child(meta_parts.join(" · ")),
         );
 
-        section = section.child(div().w_full().h(px(1.0)).bg(theme.border));
+        section = section.child(div().w_full().h(hairline()).bg(theme.border));
 
         if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
             section = section.child(self.github_markdown_section(
@@ -1192,7 +1192,7 @@ impl Waku {
         div()
             .w_full()
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border)
             .bg(theme.inset)
             .flex()
@@ -1205,7 +1205,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .child(
                         div()
@@ -1434,7 +1434,7 @@ fn github_tab_button(
                 .text_color(theme.text_secondary)
                 .hover(|style| style.text_color(theme.text))
         })
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .text_size(sp(12.0))
         .child(label)
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1493,7 +1493,7 @@ fn github_detail_action(
         .cursor_default()
         .hover(|style| style.bg(theme.overlay))
         .active(|style| style.bg(theme.overlay_strong))
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .child(icon(icon_path, 12.0, theme.text_secondary))
         .child(
             div()

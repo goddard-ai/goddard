@@ -34,7 +34,7 @@ use gpui::{
 use gpui::{AsyncApp, ForegroundExecutor, WeakEntity};
 
 use crate::input::{InputEvent, TextInput};
-use crate::theme::{Theme, sp};
+use crate::theme::{Theme, hairline, sp};
 use crate::ui::icon;
 use crate::ui::text_field::TextField;
 use crate::ui::tooltip::Tooltip;
@@ -2021,7 +2021,7 @@ impl BrowserView {
             .flex()
             .items_center()
             .gap(px(2.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .child(self.toolbar_button(
                 "browser-back",

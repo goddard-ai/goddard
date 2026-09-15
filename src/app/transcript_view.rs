@@ -300,7 +300,7 @@ impl Waku {
                         .tab_index(0)
                         .size(px(32.0))
                         .rounded_full()
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.border_strong)
                         .bg(theme.composer)
                         .shadow_xs()
@@ -673,7 +673,7 @@ impl Render for ConversationNavigationRail {
                 .max_h(px(preview_height))
                 .overflow_hidden()
                 .rounded(px(17.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .bg(theme.raised)
                 .shadow_lg()
@@ -801,7 +801,7 @@ impl ConversationNavigationRail {
                     .rounded(px(4.0))
                     .track_focus(&focus_handle)
                     .tab_index(turn_index as isize)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .on_key_down(cx.listener(move |this, event, window, cx| {
                         this.navigation_rail_key_down(message_id, event, window, cx);
                     }))
@@ -1863,7 +1863,7 @@ impl Waku {
             .h(px(28.0))
             .px(px(10.0))
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -1897,7 +1897,7 @@ impl Waku {
             .w_full()
             .min_w_0()
             .rounded(px(15.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .bg(theme.overlay)
             .tab_index(0)
@@ -1965,7 +1965,7 @@ impl Waku {
             .min_w_0()
             .flex()
             .flex_col()
-            .border_t_1()
+            .border_t(hairline())
             .border_color(theme.border);
         for (index, file) in files.iter().take(visible_count).enumerate() {
             let preview_open = self
@@ -2070,7 +2070,7 @@ impl Waku {
                     .tab_index(0)
                     .h(px(34.0))
                     .px(px(12.0))
-                    .border_t_1()
+                    .border_t(hairline())
                     .border_color(theme.border)
                     .flex()
                     .items_center()
@@ -2157,7 +2157,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
             .child(
@@ -2311,7 +2311,7 @@ impl Waku {
             .flex()
             .flex_col()
             .rounded(px(12.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .bg(theme.raised)
             .shadow_lg()
@@ -2359,7 +2359,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(10.0))
-            .child(div().h(px(1.0)).flex_1().bg(theme.border))
+            .child(div().h(hairline()).flex_1().bg(theme.border))
             .child(
                 div()
                     .id(SharedString::from(format!("turn-fold-{turn_id}")))
@@ -2388,7 +2388,7 @@ impl Waku {
                         this.toggle_turn_fold(turn_id, expanded, cx);
                     })),
             )
-            .child(div().h(px(1.0)).flex_1().bg(theme.border))
+            .child(div().h(hairline()).flex_1().bg(theme.border))
             .into_any_element()
     }
 
@@ -2566,7 +2566,7 @@ impl Waku {
             .ml(px(6.0))
             .pl(px(12.0))
             .pb(px(2.0))
-            .border_l_1()
+            .border_l(hairline())
             .border_color(theme.border)
             .flex()
             .flex_col()
@@ -2592,7 +2592,7 @@ impl Waku {
                     .h(px(20.0))
                     .px(px(6.0))
                     .rounded(px(5.0))
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .flex_none()
                     .flex()
@@ -2664,7 +2664,7 @@ impl Waku {
                 .min_w_0()
                 .overflow_hidden()
                 .rounded(px(11.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .bg(activity_surface)
                 .flex()
@@ -2672,8 +2672,8 @@ impl Waku {
                 .child(
                     div()
                         .id(SharedString::from(format!("activity-item-{id}")))
-                        // The parent owns a 1px border on each edge, so a
-                        // 28px row makes the visible activity header 30px.
+                        // The parent owns a hairline border on each edge, so a
+                        // 28px row makes the visible activity header 29px.
                         .h(px(28.0))
                         .px(px(8.0))
                         .flex()
@@ -2825,7 +2825,7 @@ impl Waku {
                         .relative()
                         .max_h(px(400.0))
                         .overflow_hidden()
-                        .border_t_1()
+                        .border_t(hairline())
                         .border_color(theme.border_strong)
                         .child(
                             div()
@@ -2892,7 +2892,7 @@ impl Waku {
                 let mut detail_card = div()
                     .w_full()
                     .min_w_0()
-                    .border_t_1()
+                    .border_t(hairline())
                     .border_color(theme.border_strong)
                     .px(px(12.0))
                     .py(px(8.0))
@@ -3162,7 +3162,7 @@ impl Waku {
             .relative()
             .max_h(px(ACTIVITY_DIFF_MAX_HEIGHT))
             .overflow_hidden()
-            .border_t_1()
+            .border_t(hairline())
             .border_color(theme.border_strong)
             .child(rows)
             .child(scrollbar::edge_fade(
@@ -3209,7 +3209,7 @@ impl Waku {
                     .items_center()
                     .gap(px(6.0))
                     .bg(theme.overlay)
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .text_color(theme.text_secondary)
                     .font_weight(FontWeight::MEDIUM)
@@ -3345,7 +3345,7 @@ pub(super) fn activity_diff_break_row(
                 .flex()
                 .items_center()
                 .justify_center()
-                .border_r_1()
+                .border_r(hairline())
                 .border_color(theme.border)
                 .child("⋯"),
         )

@@ -32,7 +32,7 @@ use gpui::{
 use parking_lot::Mutex;
 
 use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
-use crate::theme::{Theme, sp};
+use crate::theme::{Theme, hairline, sp};
 use crate::ui::scrollbar::{self, ScrollbarState};
 
 /// Fallback advance width, used only until the font has been measured.
@@ -1577,7 +1577,7 @@ impl Render for TerminalView {
                         .top(px(row as f32 * cell_height))
                         .w(px(cell_width))
                         .h(px(cell_height))
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.text),
                 );
             }
@@ -1700,7 +1700,7 @@ impl Render for TerminalView {
                     .flex()
                     .items_center()
                     .gap(px(7.0))
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .bg(theme.surface)
                     .child(

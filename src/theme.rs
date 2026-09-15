@@ -1,4 +1,9 @@
-use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb, transparent_black};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use gpui::{
+    App, Global, Hsla, Pixels, Rems, Window, WindowAppearance, hsla, px, rems, rgb,
+    transparent_black,
+};
 
 pub use waku_client::theme::{ThemeMode, ThemeName, ThemeSettings};
 
@@ -13,6 +18,27 @@ pub use waku_client::theme::{ThemeMode, ThemeName, ThemeSettings};
 /// twice.
 pub fn sp(value: f32) -> Rems {
     rems(value / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
+}
+
+/// Whether borders draw a full pixel instead of the default hairline. `Styled`
+/// border methods run inside builder chains with no `cx`, so the setting
+/// reaches them through this static — written once at startup and again when
+/// the toggle flips, read on every frame after.
+static THICK_BORDERS: AtomicBool = AtomicBool::new(false);
+
+/// The app-standard border width: a half-pixel hairline, or a full pixel while
+/// the "Thick borders" setting is on.
+pub fn hairline() -> Pixels {
+    px(if THICK_BORDERS.load(Ordering::Relaxed) {
+        1.0
+    } else {
+        0.5
+    })
+}
+
+/// Store the "Thick borders" preference [`hairline`] reads.
+pub fn set_thick_borders(enabled: bool) {
+    THICK_BORDERS.store(enabled, Ordering::Relaxed);
 }
 
 /// A translucent color wash — selection, etc. `rgb()` yields `Rgba`; this

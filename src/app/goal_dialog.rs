@@ -502,7 +502,7 @@ impl Waku {
             ));
         }
         let card = card
-            .child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(8.0)).h(hairline()).bg(theme.border))
             .child(actions_column);
 
         let scrim = if theme.is_dark {
@@ -564,7 +564,7 @@ fn render_goal_action_row(
         .cursor_default()
         .text_size(sp(14.0))
         .text_color(foreground)
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .when(enabled, |row| {
             row.hover(|style| style.bg(theme.overlay_strong))
         })

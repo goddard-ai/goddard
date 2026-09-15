@@ -14,7 +14,7 @@ use gpui::{
     quad, size,
 };
 
-use crate::theme::Theme;
+use crate::theme::{Theme, hairline};
 
 /// Track thickness; the hitbox is the control's full height.
 const TRACK_HEIGHT: f32 = 4.0;
@@ -84,7 +84,7 @@ where
         .h(px(20.0))
         .rounded(px(4.0))
         .cursor_default()
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .child(
             canvas(|_, _, _| (), {
                 let state = state.clone();

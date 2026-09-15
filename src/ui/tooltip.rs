@@ -9,7 +9,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder, px,
 };
 
-use crate::theme::{Theme, sp};
+use crate::theme::{Theme, hairline, sp};
 use crate::ui::shortcut::ShortcutHint;
 
 /// A single-line hint, optionally with the action's shortcut rendered dim
@@ -81,7 +81,7 @@ impl Render for Tooltip {
                 .px(px(7.0))
                 .py(px(4.0))
                 .rounded(px(8.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .bg(theme.raised)
                 .shadow_md()

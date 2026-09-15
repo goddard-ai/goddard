@@ -388,7 +388,7 @@ fn usage_panel(
         .w(px(320.0))
         .p(px(14.0))
         .rounded(px(12.0))
-        .border_1()
+        .border(hairline())
         .border_color(theme.border_strong)
         .bg(theme.raised)
         .shadow_lg()
@@ -436,7 +436,7 @@ fn usage_panel(
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );
     if plan.is_some() || error.is_some() || plan_loading {
-        panel = panel.child(div().h(px(1.0)).flex_none().bg(theme.border));
+        panel = panel.child(div().h(hairline()).flex_none().bg(theme.border));
     }
 
     if let Some(plan) = plan {

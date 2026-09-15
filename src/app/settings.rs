@@ -386,7 +386,7 @@ impl Waku {
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .border_l_1()
+                .border_l(hairline())
                 .border_color(theme.sidebar_border)
                 .bg(theme.surface)
                 .children(right_window_controls.map(|controls| {
@@ -464,7 +464,7 @@ impl Waku {
             .min_w_0()
             .flex()
             .flex_col()
-            .border_l_1()
+            .border_l(hairline())
             .border_color(theme.sidebar_border)
             .bg(theme.surface)
             .child(
@@ -474,7 +474,7 @@ impl Waku {
                     .justify_end()
                     .children(right_window_controls)
                     .when(content_scrolled, |element| {
-                        element.border_b_1().border_color(theme.border)
+                        element.border_b(hairline()).border_color(theme.border)
                     }),
             )
             .child(
@@ -947,7 +947,7 @@ impl Waku {
                             )),
                     )
                     .when(enabled, |card| {
-                        card.child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                        card.child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
                             .child(
                                 div()
                                     .w_full()
@@ -968,7 +968,7 @@ impl Waku {
                                     )
                                     .child(sound_selector),
                             )
-                            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
                             .child(
                                 div()
                                     .w_full()
@@ -1460,7 +1460,7 @@ impl Waku {
                 .h(px(27.0))
                 .px(px(10.0))
                 .rounded(px(8.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .flex()
                 .items_center()
@@ -1575,7 +1575,7 @@ impl Waku {
                             .px(px(8.0))
                             .py(px(6.0))
                             .rounded(px(8.0))
-                            .border_1()
+                            .border(hairline())
                             .border_color(theme.border_strong)
                             .bg(theme.inset)
                             .text_size(sp(12.5))
@@ -1702,7 +1702,7 @@ impl Waku {
             .h(px(29.0))
             .px(px(11.0))
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -1742,7 +1742,7 @@ impl Waku {
             .h(px(27.0))
             .px(px(9.0))
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -1790,7 +1790,7 @@ impl Waku {
             .tab_index(0)
             .size(px(27.0))
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -1833,7 +1833,7 @@ impl Waku {
             .h(px(27.0))
             .px(px(9.0))
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -1877,7 +1877,7 @@ impl Waku {
             .h(px(27.0))
             .px(px(9.0))
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -2128,7 +2128,7 @@ impl Waku {
                         .child(
                             div()
                                 .py(px(8.0))
-                                .border_t_1()
+                                .border_t(hairline())
                                 .border_color(theme.border)
                                 .flex()
                                 .items_center()
@@ -2704,7 +2704,7 @@ impl Waku {
             // same buttons, so focus makes them visible too.
             .opacity(0.0)
             .group_hover(group.clone(), |element| element.opacity(1.0))
-            .focus_visible(|element| element.opacity(1.0).border_1().border_color(theme.accent))
+            .focus_visible(|element| element.opacity(1.0).border(hairline()).border_color(theme.accent))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(tr!("common.unarchive"))
@@ -2736,7 +2736,7 @@ impl Waku {
             .text_color(theme.danger)
             .opacity(0.0)
             .group_hover(group.clone(), |element| element.opacity(1.0))
-            .focus_visible(|element| element.opacity(1.0).border_1().border_color(theme.accent))
+            .focus_visible(|element| element.opacity(1.0).border(hairline()).border_color(theme.accent))
             .hover(|element| element.bg(theme.danger.opacity(0.12)))
             .active(|element| element.bg(theme.danger.opacity(0.18)))
             .child(tr!("common.remove"))
@@ -3114,7 +3114,7 @@ impl Waku {
             ))
             .when(!match_system, |element| {
                 element
-                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
                     .child(settings_row(
                         tr!("settings.appearance"),
                         tr!("settings.appearance_mode_description"),
@@ -3122,14 +3122,14 @@ impl Waku {
                         theme,
                     ))
             })
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(settings_row(
                 tr!("settings.light_theme"),
                 tr!("settings.light_theme_description"),
                 light_theme_selector,
                 theme,
             ))
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(settings_row(
                 tr!("settings.dark_theme"),
                 tr!("settings.dark_theme_description"),
@@ -3142,7 +3142,7 @@ impl Waku {
                 // switch.
                 let transparent = self.state.sidebar_transparency;
                 element
-                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
                     .child(
                         div()
                             .w_full()
@@ -3186,7 +3186,7 @@ impl Waku {
                             )),
                     )
             })
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(
                 div()
                     .w_full()
@@ -3218,21 +3218,21 @@ impl Waku {
                     )
                     .child(language_selector),
             )
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(settings_row(
                 tr!("settings.ui_font"),
                 tr!("settings.ui_font_description"),
                 ui_font_selector,
                 theme,
             ))
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(settings_row(
                 tr!("settings.code_font"),
                 tr!("settings.code_font_description"),
                 code_font_selector,
                 theme,
             ))
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(
                 div()
                     .w_full()
@@ -3264,7 +3264,7 @@ impl Waku {
                     )
                     .child(ui_font_size_selector),
             )
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(
                 div()
                     .w_full()
@@ -3296,7 +3296,7 @@ impl Waku {
                     )
                     .child(code_font_size_selector),
             )
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
             .child(
                 div()
                     .w_full()
@@ -3328,6 +3328,23 @@ impl Waku {
                     )
                     .child(terminal_font_size_selector),
             )
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(settings_row(
+                tr!("settings.thick_borders"),
+                tr!("settings.thick_borders_description"),
+                toggle_switch(
+                    "thick-borders-toggle",
+                    self.state.thick_borders,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.thick_borders;
+                        move |this, _, cx| this.set_thick_borders(!enabled, cx)
+                    },
+                ),
+                theme,
+            ))
             .into_any_element()
     }
 
@@ -3510,7 +3527,7 @@ impl Waku {
                     .w(px(280.0))
                     .rounded(px(16.0))
                     .overflow_hidden()
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .bg(theme.raised)
                     .shadow_lg()
@@ -3546,7 +3563,7 @@ impl Waku {
                             .icon("icons/search.svg", 13.0),
                         ),
                     )
-                    .child(div().mx(px(8.0)).h(px(1.0)).flex_none().bg(theme.border))
+                    .child(div().mx(px(8.0)).h(hairline()).flex_none().bg(theme.border))
                     .child(rows)
                     .child(div().h(px(4.0)))
                     .into_any_element()
@@ -3902,7 +3919,7 @@ impl Waku {
             .h(px(28.0))
             .px(px(11.0))
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -3997,7 +4014,7 @@ impl Waku {
                 theme,
             )
             .tab_index(0)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.toggle_provider_expanded(kind, window, cx);
             }));
@@ -4010,7 +4027,7 @@ impl Waku {
                     .h(px(28.0))
                     .px(px(11.0))
                     .rounded(px(9.0))
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .flex()
                     .flex_none()
@@ -4115,7 +4132,7 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .when(index + 1 != provider_count, |element| {
-                        element.border_b_1().border_color(theme.border)
+                        element.border_b(hairline()).border_color(theme.border)
                     })
                     .child(header)
                     .when(expanded, |element| {
@@ -4210,7 +4227,7 @@ impl Waku {
             .h(px(29.0))
             .px(px(10.0))
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .flex_none()
@@ -4327,7 +4344,7 @@ impl Waku {
                 .h(px(29.0))
                 .px(px(10.0))
                 .rounded(px(9.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .flex()
                 .flex_none()
@@ -4359,7 +4376,7 @@ impl Waku {
             .h(px(29.0))
             .px(px(10.0))
             .rounded(px(9.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .flex_none()
@@ -4406,7 +4423,7 @@ impl Waku {
                     div()
                         .mt(px(4.0))
                         .h(px(280.0))
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.border)
                         .relative()
                         .child(view)
@@ -4421,7 +4438,7 @@ impl Waku {
                                     theme,
                                 )
                                 .tab_index(0)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.dismiss_provider_setup_terminal(kind, cx);
                                 }))
@@ -4742,7 +4759,7 @@ impl Waku {
                         .items_center()
                         .gap(px(10.0))
                         .when(!is_last, |element| {
-                            element.border_b_1().border_color(theme.border)
+                            element.border_b(hairline()).border_color(theme.border)
                         })
                         .child(
                             div()
@@ -4780,7 +4797,7 @@ impl Waku {
                                 .h(px(25.0))
                                 .px(px(9.0))
                                 .rounded(px(8.0))
-                                .border_1()
+                                .border(hairline())
                                 .border_color(theme.border_strong)
                                 .flex()
                                 .items_center()
@@ -4888,7 +4905,7 @@ impl Waku {
                                     .h(px(28.0))
                                     .px(px(11.0))
                                     .rounded(px(9.0))
-                                    .border_1()
+                                    .border(hairline())
                                     .border_color(theme.border_strong)
                                     .text_color(theme.text_secondary)
                                     .flex()
@@ -5187,6 +5204,16 @@ impl Waku {
         self.state.sidebar_transparency
     }
 
+    fn set_thick_borders(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.thick_borders == enabled {
+            return;
+        }
+        self.state.thick_borders = enabled;
+        crate::theme::set_thick_borders(enabled);
+        self.save();
+        cx.notify();
+    }
+
     fn set_sidebar_transparency(
         &mut self,
         transparent: bool,
@@ -5480,7 +5507,7 @@ fn permission_status_row(
             .h(px(25.0))
             .px(px(9.0))
             .rounded(px(8.0))
-            .border_1()
+            .border(hairline())
             .border_color(theme.border_strong)
             .flex()
             .items_center()
@@ -5497,7 +5524,7 @@ fn permission_status_row(
     div()
         .mt(px(10.0))
         .pt(px(10.0))
-        .border_t_1()
+        .border_t(hairline())
         .border_color(theme.border)
         .flex()
         .items_center()

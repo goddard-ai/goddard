@@ -15,7 +15,7 @@ pub mod thinking;
 pub mod tooltip;
 
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
-use crate::theme::{Theme, sp};
+use crate::theme::{Theme, hairline, sp};
 use crate::ui::shortcut::ShortcutHint;
 
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
@@ -152,7 +152,7 @@ where
         .cursor_default()
         .when(disabled, |element| element.opacity(0.55))
         .bg(if on { theme.inverse } else { theme.inset })
-        .border_1()
+        .border(hairline())
         .border_color(if on {
             theme.inverse
         } else {
@@ -439,10 +439,10 @@ impl RenderOnce for MenuChip {
             .text_size(sp(13.0))
             .line_height(sp(16.0))
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .when(self.outlined, |element| {
                 element
-                    .border_1()
+                    .border(hairline())
                     .border_color(theme.border_strong)
                     .bg(self.background.unwrap_or(theme.raised))
             })
@@ -539,7 +539,7 @@ impl RenderOnce for ProjectNameSelector {
             .relative()
             .flex_none()
             .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .child(self.label)
             .child(
                 canvas(
@@ -547,7 +547,7 @@ impl RenderOnce for ProjectNameSelector {
                     move |bounds, _, window, _| {
                         let y = bounds.origin.y + bounds.size.height - px(0.5);
                         let mut builder =
-                            PathBuilder::stroke(px(1.0)).dash_array(&[px(1.0), px(2.0)]);
+                            PathBuilder::stroke(hairline()).dash_array(&[px(1.0), px(2.0)]);
                         builder.move_to(point(bounds.origin.x, y));
                         builder.line_to(point(bounds.origin.x + bounds.size.width, y));
                         if let Ok(line) = builder.build() {

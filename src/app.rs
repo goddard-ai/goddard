@@ -63,7 +63,7 @@ use crate::persistence::{
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use crate::terminal::{TerminalLaunch, TerminalView, TerminalViewEvent};
-use crate::theme::{Theme, ThemeMode, sp};
+use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon,
@@ -924,7 +924,7 @@ fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) 
                         .px(px(5.0))
                         .flex_none()
                         .rounded(px(4.0))
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.border_strong)
                         .bg(theme.overlay)
                         .flex()
@@ -2794,6 +2794,7 @@ impl Waku {
                 window.display(cx).and_then(|display| display.uuid().ok()),
             ));
         }
+        crate::theme::set_thick_borders(state.thick_borders);
         crate::theme::apply_theme_preference(state.theme, state.sidebar_transparency, window, cx);
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         crate::platform::set_trackpad_navigation_swipe_enabled(
