@@ -711,6 +711,7 @@ impl Waku {
                 }
             }));
 
+        let has_detail = detail.as_ref().is_some_and(|lines| !lines.is_empty());
         let detail_block = detail.filter(|lines| !lines.is_empty()).map(|lines| {
             div()
                 .mt(px(6.0))
@@ -819,6 +820,10 @@ impl Waku {
                     .occlude()
                     .max_w(px(560.0))
                     .min_w_0()
+                    // A command's output tail republishes on a ~125ms
+                    // cadence; hold the toast at its max width while detail
+                    // is showing so each refresh doesn't resize it.
+                    .when(has_detail, |element| element.w_full())
                     .px(px(10.0))
                     .py(px(7.0))
                     .rounded(px(12.0))
