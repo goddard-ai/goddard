@@ -9,4 +9,12 @@ import type { PullRequestState } from "./PullRequestState";
  * as a neutral value. Timestamps are unix seconds, matching session and turn
  * times.
  */
-export type PullRequestSummary = { number: number, title: string, url: string, state: PullRequestState, isDraft: boolean, baseBranch: string, createdAt?: number | null, updatedAt?: number | null, reviewDecision?: PullRequestReviewDecision | null, checkStatus?: PullRequestCheckStatus | null, additions?: number | null, deletions?: number | null, };
+export type PullRequestSummary = { number: number, title: string, url: string, state: PullRequestState, isDraft: boolean, baseBranch: string, createdAt?: number | null, updatedAt?: number | null, reviewDecision?: PullRequestReviewDecision | null, checkStatus?: PullRequestCheckStatus | null, additions?: number | null, deletions?: number | null,
+/**
+ * Author login, when the read that produced this row asked for it.
+ */
+author?: string | null,
+/**
+ * Head branch name, when the read that produced this row asked for it.
+ */
+headBranch?: string | null, };

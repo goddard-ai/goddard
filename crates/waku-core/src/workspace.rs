@@ -255,6 +255,24 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
                 entries: crate::pull_requests::list(&cwd, &head_branch)?,
             }
         }
+        WorkspaceOperation::ResolveGitHubRepo { cwd } => {
+            let (repo, availability) = crate::github::resolve_repo(&cwd);
+            WorkspaceResult::GitHubRepo { repo, availability }
+        }
+        WorkspaceOperation::ListIssues { cwd, state, query } => WorkspaceResult::Issues {
+            entries: crate::issues::list(&cwd, state, query.as_deref())?,
+        },
+        WorkspaceOperation::GetIssue { cwd, number } => WorkspaceResult::Issue {
+            detail: crate::issues::view(&cwd, number)?,
+        },
+        WorkspaceOperation::ListRepoPullRequests { cwd, state, query } => {
+            WorkspaceResult::PullRequests {
+                entries: crate::pull_requests::list_for_repo(&cwd, state, query.as_deref())?,
+            }
+        }
+        WorkspaceOperation::GetPullRequest { cwd, number } => WorkspaceResult::PullRequest {
+            detail: crate::pull_requests::view(&cwd, number)?,
+        },
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },

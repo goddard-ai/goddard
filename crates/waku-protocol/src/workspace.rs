@@ -103,6 +103,140 @@ pub struct PullRequestSummary {
     pub additions: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deletions: Option<u64>,
+    /// Author login, when the read that produced this row asked for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Head branch name, when the read that produced this row asked for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_branch: Option<String>,
+}
+
+/// A GitHub repository as `gh` resolves it for a working directory. `host` is
+/// `None` for github.com and names the GitHub Enterprise host otherwise.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubRepoRef {
+    pub owner: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    pub web_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+}
+
+/// Why a repo's GitHub reads cannot be answered. `Ready` pairs with a
+/// resolved repo; the other variants tell the UI whether to hint at
+/// installing `gh`, at authenticating, or to stay hidden (a repo `gh` knows
+/// but that is not on GitHub).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum GitHubAvailability {
+    Ready,
+    MissingCli,
+    Unauthenticated,
+}
+
+/// Open/closed/all filter shared by issue and pull-request list reads.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkItemQueryState {
+    Open,
+    Closed,
+    All,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueState {
+    Open,
+    Closed,
+}
+
+/// One issue as the GitHub browser's list reads it.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueSummary {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: IssueState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
+}
+
+/// One comment on an issue or pull request.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemComment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+}
+
+/// An issue with its body and comment thread.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub summary: IssueSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub comments: Vec<WorkItemComment>,
+}
+
+/// One file changed by a pull request.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestFile {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u64>,
+}
+
+/// One check run or commit status on a pull request's head. `run_id` is the
+/// Actions run the check belongs to — what `gh run view` needs for its log —
+/// recovered from the check's details URL.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub status: PullRequestCheckStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<u64>,
+}
+
+/// A pull request with its body, comment thread, checks, and changed files.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDetail {
+    pub summary: PullRequestSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub comments: Vec<WorkItemComment>,
+    #[serde(default)]
+    pub checks: Vec<PullRequestCheck>,
+    #[serde(default)]
+    pub files: Vec<PullRequestFile>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -322,6 +456,43 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         head_branch: String,
     },
+    /// The GitHub repository `cwd` belongs to, via `gh repo view`. Returns
+    /// `GitHubRepo`; `availability` explains an absent repo so the caller can
+    /// hint at installing or authenticating `gh` rather than guessing.
+    ResolveGitHubRepo {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Repo-wide issue list for the GitHub browser. `query` is passed to
+    /// `gh issue list --search`.
+    ListIssues {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        state: WorkItemQueryState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
+    /// One issue with body and comments.
+    GetIssue {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        number: u64,
+    },
+    /// Repo-wide pull-request list for the GitHub browser. The branch-scoped
+    /// sidebar scan keeps using `ListPullRequests`.
+    ListRepoPullRequests {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        state: WorkItemQueryState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
+    /// One pull request with body, comments, checks, and changed files.
+    GetPullRequest {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        number: u64,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -403,5 +574,23 @@ pub enum WorkspaceResult {
     /// requests".
     PullRequests {
         entries: Option<Vec<PullRequestSummary>>,
+    },
+    /// `repo` is `None` when `cwd` has no GitHub remote `gh` can resolve;
+    /// `availability` says whether that is a `gh` problem or just "not
+    /// GitHub".
+    GitHubRepo {
+        repo: Option<GitHubRepoRef>,
+        availability: GitHubAvailability,
+    },
+    /// `None` when the host could not be read — same "unknown is not empty"
+    /// contract as `PullRequests`.
+    Issues {
+        entries: Option<Vec<IssueSummary>>,
+    },
+    Issue {
+        detail: Option<IssueDetail>,
+    },
+    PullRequest {
+        detail: Option<PullRequestDetail>,
     },
 }

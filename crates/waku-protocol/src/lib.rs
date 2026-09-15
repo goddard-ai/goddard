@@ -60,6 +60,8 @@ pub use protocol::{
 };
 pub use settings::DaemonSettings;
 pub use workspace::{
-    PullRequestCheckStatus, PullRequestReviewDecision, PullRequestState, PullRequestSummary,
-    WorkspaceOperation, WorkspaceResult,
+    GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestDetail, PullRequestFile, PullRequestReviewDecision,
+    PullRequestState, PullRequestSummary, WorkItemComment, WorkItemQueryState, WorkspaceOperation,
+    WorkspaceResult,
 };
