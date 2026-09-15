@@ -1007,7 +1007,7 @@ mod tests {
     fn a_removed_worktree_on_a_branch_restores_its_dirty_state() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Branched"), None, Some("feature")).unwrap();
+        let created = create(&project, Some("Branched"), None).unwrap();
         // The session checked its worktree out onto a branch, then dirtied it.
         run_git(&created.path, &["checkout", "-b", "session-branch"]);
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();
