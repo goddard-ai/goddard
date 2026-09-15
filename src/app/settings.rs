@@ -2572,8 +2572,8 @@ impl Waku {
         );
 
         let weak = cx.entity().downgrade();
-        let restore_preview = Self::theme_preview_restore(cx);
-        let light_handle = self.menu_handle_with("light-theme-selector", cx, restore_preview);
+        let slot_preview = Self::theme_slot_preview(ThemeMode::Light, cx);
+        let light_handle = self.menu_handle_with("light-theme-selector", cx, slot_preview);
         let light_theme_selector = dropdown_menu(
             MenuChip::new("light-theme-selector")
                 .label(theme_settings.light.label())
@@ -2624,8 +2624,8 @@ impl Waku {
         );
 
         let weak = cx.entity().downgrade();
-        let restore_preview = Self::theme_preview_restore(cx);
-        let dark_handle = self.menu_handle_with("dark-theme-selector", cx, restore_preview);
+        let slot_preview = Self::theme_slot_preview(ThemeMode::Dark, cx);
+        let dark_handle = self.menu_handle_with("dark-theme-selector", cx, slot_preview);
         let dark_theme_selector = dropdown_menu(
             MenuChip::new("dark-theme-selector")
                 .label(theme_settings.dark.label())
@@ -4854,6 +4854,31 @@ impl Waku {
                     this.restore_theme_preview(window, cx);
                 });
             }
+        }
+    }
+
+    /// [`Self::theme_preview_restore`] plus an open-time claim on the selector's
+    /// mode slot, so its menu and options are browsable while the other slot
+    /// owns the window — light themes under a dark appearance and vice versa —
+    /// even when "Match system appearance" is on. The claim is a preview: it
+    /// never persists, and a pick only commits the palette, not the slot.
+    fn theme_slot_preview(
+        mode: ThemeMode,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(bool, &mut Window, &mut App) + 'static {
+        let weak = cx.entity().downgrade();
+        move |open, window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                if open {
+                    this.preview_theme_settings(
+                        |settings| settings.mode = mode,
+                        window,
+                        cx,
+                    );
+                } else {
+                    this.restore_theme_preview(window, cx);
+                }
+            });
         }
     }
 
