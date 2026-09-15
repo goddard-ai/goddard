@@ -15,9 +15,12 @@ pub(super) struct TerminalRecord {
     pub opened_at: u64,
 }
 
-/// A terminal row is a single line: title, location.
-pub(super) const SIDEBAR_TERMINAL_ROW_HEIGHT: f32 = 30.0;
+/// A terminal row is two lines — title and status over location and time —
+/// the same card rhythm a session row uses.
+const SIDEBAR_TERMINAL_CARD_HEIGHT: f32 = 51.0;
 const SIDEBAR_TERMINAL_ROW_GAP: f32 = 1.0;
+pub(super) const SIDEBAR_TERMINAL_ROW_HEIGHT: f32 =
+    SIDEBAR_TERMINAL_CARD_HEIGHT + SIDEBAR_TERMINAL_ROW_GAP;
 
 /// The nearest enclosing repository's root — `.git` may be a file in a
 /// linked worktree, so existence rather than `is_dir` is the test.
@@ -513,9 +516,9 @@ impl Waku {
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| tr!("right_panel.terminal"));
         let cwd = self.terminal_cwd(terminal_id, cx);
-        // The leading slot is the command's status: spinning while one
-        // runs, its exit mark after, empty when the shell reports nothing.
-        // The slot is fixed-width so the title never shifts under it.
+        // The title line's trailing slot is the command's status: spinning
+        // while one runs, its exit mark after, empty when the shell
+        // reports nothing.
         let status_icon = terminal.and_then(|terminal| {
             let terminal = terminal.read(cx);
             if terminal.command_running() {
@@ -607,12 +610,14 @@ impl Waku {
                 "sidebar-terminal-{terminal_id}"
             )))
             .w_full()
-            .h(px(SIDEBAR_TERMINAL_ROW_HEIGHT - SIDEBAR_TERMINAL_ROW_GAP))
+            .min_w_0()
+            .h(px(SIDEBAR_TERMINAL_CARD_HEIGHT))
             .pl(px(8.0))
             .pr(px(8.0))
+            .py(px(7.0))
             .flex()
-            .items_center()
-            .gap(px(6.0))
+            .flex_col()
+            .gap(px(4.0))
             .rounded(px(9.0))
             .cursor_default()
             .when(selected, |element| {
@@ -625,46 +630,60 @@ impl Waku {
             .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .child(
                 div()
-                    .flex_none()
-                    .w(px(14.0))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .children(status_icon),
+                    .gap(px(6.0))
+                    .overflow_hidden()
+                    .line_height(sp(18.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text)
+                            .child(SharedString::from(title)),
+                    )
+                    .when_some(status_icon, |element, status_icon| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .size(px(12.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(status_icon),
+                        )
+                    }),
             )
             .child(
                 div()
-                    .min_w_0()
-                    .flex_1()
-                    .truncate()
-                    .text_size(sp(13.0))
-                    .text_color(theme.text)
-                    .child(SharedString::from(title)),
-            )
-            .child(
-                div()
-                    .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(4.0))
-                    .max_w(px(200.0))
+                    .gap(px(5.0))
                     .text_size(sp(12.5))
-                    .text_color(theme.text_tertiary)
+                    .line_height(sp(15.0))
                     .child(icon(detail_icon, 12.5, theme.text_tertiary))
                     // The char budget folds ancestors first; this clip is
                     // only the last resort for a single oversized leaf.
-                    .child(div().min_w_0().truncate().child(SharedString::from(detail))),
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(detail)),
+                    )
+                    .child(div().flex_1())
+                    .when(pinned, |element| {
+                        element.child(icon("icons/pin-filled.svg", 12.0, theme.text_ghost))
+                    })
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(time_label)),
+                    ),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(sp(12.5))
-                    .text_color(theme.text_secondary)
-                    .child(SharedString::from(time_label)),
-            )
-            .when(pinned, |element| {
-                element.child(icon("icons/pin-filled.svg", 12.0, theme.text_ghost))
-            })
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 if matches!(key, "enter" | "space") {
