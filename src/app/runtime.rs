@@ -179,7 +179,7 @@ fn prepare_submission(
                 match workspace_client.request(waku_client::WorkspaceOperation::CreateWorktree {
                     project_path: project.path.clone(),
                     name: None,
-                    base_ref: base_branch,
+                    base_ref: base_branch.clone(),
                 })? {
                     waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
                     _ => anyhow::bail!("the daemon returned an invalid worktree response"),
@@ -188,9 +188,15 @@ fn prepare_submission(
                 path: created.path,
                 name: created.name,
                 branch: None,
+                base_branch,
             }
         }
-        SessionWorkspace::Worktree { path, name, branch } => {
+        SessionWorkspace::Worktree {
+            path,
+            name,
+            branch,
+            base_branch,
+        } => {
             // The directory can vanish between visits — archived tasks
             // outlive their worktrees once archive cleanup removes them.
             // The daemon no-ops while it exists, so this doubles as the
@@ -243,6 +249,7 @@ fn prepare_submission(
                 // A branch that no longer exists comes back detached; the
                 // reported checkout replaces the stale persisted one.
                 branch: if ensured.0 { ensured.1 } else { branch },
+                base_branch,
             }
         }
         workspace => workspace,

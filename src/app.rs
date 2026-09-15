@@ -1596,7 +1596,7 @@ pub struct Waku {
     git_panel_commit_hover: Option<git_panel::GitPanelCommitHover>,
     git_panel_commit_hover_generation: u64,
     /// The conflicted-sync modal: which integration is stopped mid-flight.
-    git_panel_sync_conflict: Option<waku_client::git::SyncInProgress>,
+    git_panel_sync_conflict: Option<git_panel::SyncConflict>,
     /// The "nothing staged" prompt's open flag.
     git_panel_unstaged_prompt: bool,
     /// The commit-diff modal, when a commit row is open.

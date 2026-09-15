@@ -12,4 +12,10 @@ export type SessionWorkspace = { "kind": "local" } | { "kind": "newWorktree", ba
  * Branch last seen checked out in the worktree. `None` while it
  * remains in the detached HEAD state it was created with.
  */
-branch?: string | null, };
+branch?: string | null,
+/**
+ * The base the worktree was created from — where `Land` sends its
+ * commits. `None` for sessions persisted before it was recorded or
+ * for worktrees that adopted a checkout's state.
+ */
+baseBranch?: string | null, };

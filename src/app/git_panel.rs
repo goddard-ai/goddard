@@ -13,7 +13,8 @@ use gpui::{
 };
 
 use waku_client::git::{
-    CommitEntry, GitFileChange, GitPanelSnapshot, PullOutcome, PullStrategy, SyncInProgress,
+    CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
+    PullStrategy, SyncInProgress,
 };
 use waku_client::workspace::{WorkspaceOperation, WorkspaceResult};
 
@@ -70,6 +71,7 @@ pub(super) enum GitPanelPending {
     Committing,
     Pushing,
     Syncing(PullStrategy),
+    Landing,
     AbortingSync,
 }
 
@@ -81,7 +83,43 @@ impl GitPanelPending {
             GitPanelPending::Pushing => tr!("commit.pushing"),
             GitPanelPending::Syncing(PullStrategy::Rebase) => tr!("git_panel.syncing_rebase"),
             GitPanelPending::Syncing(PullStrategy::Merge) => tr!("git_panel.syncing_merge"),
+            GitPanelPending::Landing => tr!("git_panel.landing"),
             GitPanelPending::AbortingSync => tr!("git_panel.aborting"),
+        }
+    }
+}
+
+/// Which integration left the checkout conflicted — a pull the panel
+/// started, or a land that stopped midway. Both carry the workspace so the
+/// modal's actions still work with the panel closed; `/land` can raise the
+/// modal from the composer without the panel open at all.
+#[derive(Clone, Debug)]
+pub(super) enum SyncConflict {
+    Pull {
+        in_progress: SyncInProgress,
+        workspace: PathBuf,
+    },
+    Land {
+        in_progress: SyncInProgress,
+        base: String,
+        workspace: PathBuf,
+    },
+}
+
+impl SyncConflict {
+    fn in_progress(&self) -> SyncInProgress {
+        match self {
+            SyncConflict::Pull { in_progress, .. } | SyncConflict::Land { in_progress, .. } => {
+                *in_progress
+            }
+        }
+    }
+
+    fn workspace(&self) -> PathBuf {
+        match self {
+            SyncConflict::Pull { workspace, .. } | SyncConflict::Land { workspace, .. } => {
+                workspace.clone()
+            }
         }
     }
 }
@@ -97,6 +135,9 @@ pub(super) struct GitPanelOperation {
 pub(super) struct GitPanelState {
     pub id: Uuid,
     pub workspace: PathBuf,
+    /// The session's recorded base branch — forwarded to `InspectGitPanel`
+    /// and `Land` so the daemon resolves the same target.
+    pub base: Option<String>,
     pub invocation: Option<crate::git_commit::AgentInvocation>,
     pub message: Entity<TextInput>,
     pub snapshot: Option<GitPanelSnapshot>,
@@ -112,6 +153,7 @@ pub(super) struct GitPanelState {
     pub commits_scroll: ScrollHandle,
     pub commits_scrollbar: Rc<ScrollbarState>,
     pub action_focus: FocusHandle,
+    pub land_focus: FocusHandle,
 }
 
 /// A file row's hover preview state, tracked per `(path, staged)` pair.
@@ -263,6 +305,7 @@ impl Waku {
         else {
             return;
         };
+        let base = self.selected_session_land_base();
         let invocation = self.git_panel_invocation();
         let message = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -272,6 +315,7 @@ impl Waku {
         self.git_panel = Some(GitPanelState {
             id: Uuid::new_v4(),
             workspace,
+            base,
             invocation,
             message: message.clone(),
             snapshot: None,
@@ -285,6 +329,7 @@ impl Waku {
             commits_scroll: ScrollHandle::new(),
             commits_scrollbar: ScrollbarState::new(),
             action_focus: cx.focus_handle(),
+            land_focus: cx.focus_handle(),
         });
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         self.refresh_git_panel(cx);
@@ -295,6 +340,17 @@ impl Waku {
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         });
+    }
+
+    /// The selected session's recorded base branch — only a materialized
+    /// worktree carries one; anything else lets the daemon resolve the
+    /// repository's default.
+    fn selected_session_land_base(&self) -> Option<String> {
+        self.selected_session()
+            .and_then(|session| match &session.workspace {
+                SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
+                _ => None,
+            })
     }
 
     /// The agent invocation for generated commit messages — the same
@@ -361,6 +417,7 @@ impl Waku {
         panel.snapshot_loading = true;
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
+        let base = panel.base.clone();
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         let generation = self.git_panel_generation;
         let client = waku_client::WorkspaceClient::new(self.daemon.client());
@@ -368,7 +425,10 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    client.request(WorkspaceOperation::InspectGitPanel { cwd: workspace })
+                    client.request(WorkspaceOperation::InspectGitPanel {
+                        cwd: workspace,
+                        base,
+                    })
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -655,19 +715,30 @@ impl Waku {
         pending: GitPanelPending,
         cx: &mut Context<Self>,
     ) -> Option<(Uuid, PathBuf)> {
+        let workspace = self.git_panel.as_ref()?.workspace.clone();
+        self.begin_workspace_op(pending, workspace, cx)
+    }
+
+    /// Same guard and bookkeeping as `begin_git_panel_op`, for operations the
+    /// panel does not have to be open to start — `/land` runs it from the
+    /// composer.
+    fn begin_workspace_op(
+        &mut self,
+        pending: GitPanelPending,
+        workspace: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Option<(Uuid, PathBuf)> {
         if self.git_panel_operation.is_some() {
             return None;
         }
-        let panel = self.git_panel.as_ref()?;
         let id = Uuid::new_v4();
-        let operation = GitPanelOperation {
+        self.git_panel_operation = Some(GitPanelOperation {
             id,
-            workspace: panel.workspace.clone(),
+            workspace: workspace.clone(),
             pending,
-        };
-        self.git_panel_operation = Some(operation);
+        });
         cx.notify();
-        Some((id, panel.workspace.clone()))
+        Some((id, workspace))
     }
 
     /// Generate a message for the pending commit, then commit with it.
@@ -781,10 +852,82 @@ impl Waku {
         .detach();
     }
 
-    /// Merge instead: leave the stopped rebase, then pull as a merge.
+    /// `/land` in the composer: land the session the composer answers to —
+    /// the big-picture target while that overlay is open.
+    pub(super) fn land_composer_session(&mut self, strategy: PullStrategy, cx: &mut Context<Self>) {
+        let Some(session) = self.composer_session() else {
+            self.show_toast(tr!("git_panel.no_task"));
+            return;
+        };
+        let base = match &session.workspace {
+            SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
+            _ => None,
+        };
+        let Some(workspace) = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            self.show_toast(tr!("git_panel.no_task"));
+            return;
+        };
+        self.start_git_panel_land(workspace, base, strategy, cx);
+    }
+
+    /// The panel's land button lands the panel's own workspace and base —
+    /// exactly what its snapshot's land target described.
+    fn land_git_panel_workspace(&mut self, strategy: PullStrategy, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_ref() else {
+            return;
+        };
+        let workspace = panel.workspace.clone();
+        let base = panel.base.clone();
+        self.start_git_panel_land(workspace, base, strategy, cx);
+    }
+
+    /// Rebase `workspace` onto its base — or merge the base in — then
+    /// fast-forward the base to the result. A conflict raises the same modal
+    /// a conflicted pull does.
+    fn start_git_panel_land(
+        &mut self,
+        workspace: PathBuf,
+        base: Option<String>,
+        strategy: PullStrategy,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((op_id, workspace)) =
+            self.begin_workspace_op(GitPanelPending::Landing, workspace, cx)
+        else {
+            return;
+        };
+        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::Land {
+                        cwd: workspace,
+                        base,
+                        strategy,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                waku.finish_git_panel_op(op_id, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Merge instead: leave the stopped rebase, then re-integrate as a merge
+    /// — `pull --no-rebase` for a conflicted pull, `git merge <base>` inside
+    /// the worktree for a land, which keeps the conflicts where the agent
+    /// can resolve them and still lets the base fast-forward afterward.
     fn git_panel_merge_instead(&mut self, cx: &mut Context<Self>) {
-        self.git_panel_sync_conflict = None;
-        let Some((op_id, workspace)) = self.begin_git_panel_op(GitPanelPending::AbortingSync, cx)
+        let Some(conflict) = self.git_panel_sync_conflict.take() else {
+            return;
+        };
+        let Some((op_id, workspace)) =
+            self.begin_workspace_op(GitPanelPending::AbortingSync, conflict.workspace(), cx)
         else {
             return;
         };
@@ -797,11 +940,20 @@ impl Waku {
                         .request(WorkspaceOperation::AbortSync {
                             cwd: workspace.clone(),
                         })
-                        .and_then(|_| {
-                            client.request(WorkspaceOperation::PullUpstream {
-                                cwd: workspace,
-                                strategy: PullStrategy::Merge,
-                            })
+                        .and_then(|_| match conflict {
+                            SyncConflict::Pull { .. } => {
+                                client.request(WorkspaceOperation::PullUpstream {
+                                    cwd: workspace,
+                                    strategy: PullStrategy::Merge,
+                                })
+                            }
+                            SyncConflict::Land { base, .. } => {
+                                client.request(WorkspaceOperation::Land {
+                                    cwd: workspace,
+                                    base: Some(base),
+                                    strategy: PullStrategy::Merge,
+                                })
+                            }
                         })
                 })
                 .await;
@@ -813,8 +965,15 @@ impl Waku {
     }
 
     fn git_panel_abort_sync(&mut self, cx: &mut Context<Self>) {
-        self.git_panel_sync_conflict = None;
-        let Some((op_id, workspace)) = self.begin_git_panel_op(GitPanelPending::AbortingSync, cx)
+        let Some(workspace) = self
+            .git_panel_sync_conflict
+            .take()
+            .map(|conflict| conflict.workspace())
+        else {
+            return;
+        };
+        let Some((op_id, workspace)) =
+            self.begin_workspace_op(GitPanelPending::AbortingSync, workspace, cx)
         else {
             return;
         };
@@ -834,15 +993,31 @@ impl Waku {
     }
 
     /// The conflict modal's Resolve in chat: hand the agent the conflicted
-    /// pull and let it finish the integration.
+    /// integration and let it finish — a pull completes with `rebase
+    /// --continue`, a land still owes the base its fast-forward afterward.
     fn git_panel_resolve_in_chat(&mut self, cx: &mut Context<Self>) {
-        let in_progress = self.git_panel_sync_conflict.take();
-        let prompt = match in_progress {
-            Some(SyncInProgress::Rebase) => tr!("git_panel.resolve_rebase_prompt"),
-            Some(SyncInProgress::Merge) => tr!("git_panel.resolve_merge_prompt"),
+        let prompt = match self.git_panel_sync_conflict.take() {
+            Some(SyncConflict::Pull {
+                in_progress: SyncInProgress::Rebase,
+                ..
+            }) => tr!("git_panel.resolve_rebase_prompt"),
+            Some(SyncConflict::Pull {
+                in_progress: SyncInProgress::Merge,
+                ..
+            }) => tr!("git_panel.resolve_merge_prompt"),
+            Some(SyncConflict::Land {
+                in_progress: SyncInProgress::Rebase,
+                base,
+                ..
+            }) => tr!("git_panel.resolve_land_rebase_prompt", base = base),
+            Some(SyncConflict::Land {
+                in_progress: SyncInProgress::Merge,
+                base,
+                ..
+            }) => tr!("git_panel.resolve_land_merge_prompt", base = base),
             None => return,
         };
-        self.submit_composer_submission(ComposerSubmission::plain(prompt), cx);
+        self.route_composer_submission(ComposerSubmission::plain(prompt), cx);
         cx.notify();
     }
 
@@ -882,10 +1057,30 @@ impl Waku {
             Ok(WorkspaceResult::Pull {
                 outcome: PullOutcome::Conflict { in_progress },
             }) => {
-                self.git_panel_sync_conflict = Some(in_progress);
+                self.git_panel_sync_conflict = Some(SyncConflict::Pull {
+                    in_progress,
+                    workspace: op.workspace.clone(),
+                });
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
             }
+            Ok(WorkspaceResult::Land { outcome }) => match outcome {
+                LandOutcome::Conflict { base, in_progress } => {
+                    self.git_panel_sync_conflict = Some(SyncConflict::Land {
+                        in_progress,
+                        base,
+                        workspace: op.workspace.clone(),
+                    });
+                    self.invalidate_workspace_queries(cx);
+                    cx.notify();
+                }
+                LandOutcome::Landed { base } => {
+                    self.show_success_toast(tr!("git_panel.landed", base = base));
+                    self.invalidate_workspace_queries(cx);
+                    self.refresh_git_panel(cx);
+                    self.refresh_git_panel_commits(cx);
+                }
+            },
             Ok(_) => {
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = None;
@@ -900,8 +1095,12 @@ impl Waku {
                 self.refresh_git_panel_commits(cx);
             }
             Err(error) => {
+                // A composer-started land can fail with the panel closed;
+                // its errors need a surface the panel doesn't provide.
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = Some(error.to_string());
+                } else {
+                    self.show_toast(error.to_string());
                 }
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
@@ -1357,6 +1556,13 @@ impl Waku {
             .border_color(theme.border)
             .child(message_box)
             .child(self.render_git_panel_action_button(cx))
+            .when_some(
+                panel
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.land_target.clone()),
+                |area, target| area.child(self.render_git_panel_land_button(&target, cx)),
+            )
             .when_some(panel.error.clone(), |area, error| {
                 area.child(
                     div()
@@ -1511,6 +1717,75 @@ impl Waku {
                     .child(icon("icons/arrow-down.svg", 11.0, theme.text_tertiary));
             }
             button = button.child(accessory);
+        }
+        button.into_any_element()
+    }
+
+    /// The land affordance under the action button: rebase onto the base
+    /// branch and fast-forward it. Quieter than the primary action — landing
+    /// is deliberate, not the default next step — and disabled while any
+    /// panel operation is in flight.
+    fn render_git_panel_land_button(
+        &self,
+        target: &LandTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let landing = self
+            .git_panel_operation
+            .as_ref()
+            .is_some_and(|operation| operation.pending == GitPanelPending::Landing);
+        let enabled = self.git_panel_operation.is_none();
+        let mut button = div()
+            .id("git-panel-land")
+            .track_focus(
+                &self
+                    .git_panel
+                    .as_ref()
+                    .map(|panel| panel.land_focus.clone())
+                    .unwrap_or_else(|| cx.focus_handle()),
+            )
+            .when(enabled, |button| button.tab_index(0))
+            .h(px(28.0))
+            .w_full()
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .px(px(10.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(if enabled {
+                theme.text_secondary
+            } else {
+                theme.text_ghost
+            })
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .child(if landing {
+                motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
+            } else {
+                icon("icons/git-merge.svg", 12.0, theme.text_tertiary).into_any_element()
+            })
+            .child(if landing {
+                tr!("git_panel.landing")
+            } else {
+                tr!("git_panel.land_onto", base = target.branch.clone())
+            });
+        if enabled {
+            button = button
+                .bg(theme.inset)
+                .hover(|style| style.bg(theme.overlay))
+                .active(|style| style.opacity(0.8))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.land_git_panel_workspace(PullStrategy::Rebase, cx);
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.land_git_panel_workspace(PullStrategy::Rebase, cx);
+                        cx.stop_propagation();
+                    }
+                }));
         }
         button.into_any_element()
     }
@@ -2474,9 +2749,9 @@ impl Waku {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let in_progress = self.git_panel_sync_conflict?;
+        let conflict = self.git_panel_sync_conflict.as_ref()?;
         let theme = Theme::current(cx);
-        let rebase = matches!(in_progress, SyncInProgress::Rebase);
+        let rebase = matches!(conflict.in_progress(), SyncInProgress::Rebase);
         let title = if rebase {
             tr!("git_panel.rebase_conflict")
         } else {
@@ -2486,6 +2761,12 @@ impl Waku {
             tr!("git_panel.abort_rebase")
         } else {
             tr!("git_panel.abort_merge")
+        };
+        let description = match conflict {
+            SyncConflict::Pull { .. } => tr!("git_panel.conflict_description"),
+            SyncConflict::Land { base, .. } => {
+                tr!("git_panel.land_conflict_description", base = base.clone())
+            }
         };
         let resolve = modal_button(
             "git-panel-resolve-in-chat",
@@ -2533,7 +2814,7 @@ impl Waku {
                         .text_size(sp(12.5))
                         .line_height(sp(17.0))
                         .text_color(theme.text_secondary)
-                        .child(tr!("git_panel.conflict_description")),
+                        .child(description),
                 )
                 .child(buttons),
         );

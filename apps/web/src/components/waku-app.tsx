@@ -47,6 +47,7 @@ import {
   daemonKeys,
   displayTitle,
   hydrateSession,
+  landWorkspace,
   loadProviderSessionHistory,
   persistProject,
   removeSession,
@@ -712,6 +713,39 @@ export function WakuApp() {
     }
   }
 
+  /** `/land` on the current session. The web app has no conflict modal, so a
+   * stopped integration surfaces as a toast and preloads the composer's
+   * resolve-in-chat prompt for the user to send. */
+  async function landSessionWorkspace() {
+    if (!client || !current || !currentProject) return
+    const session = current
+    const base = session.workspace?.kind === 'worktree'
+      ? session.workspace.baseBranch ?? null
+      : null
+    try {
+      const outcome = await landWorkspace(client, sessionCwd(session, currentProject), base)
+      if ('landed' in outcome) {
+        toast.success(t('git_panel.landed', { base: outcome.landed.base }))
+        return
+      }
+      const conflict = outcome.conflict
+      toast.error(t('git_panel.land_conflict_description', { base: conflict.base }))
+      const prompt = t(
+        conflict.in_progress === 'rebase'
+          ? 'git_panel.resolve_land_rebase_prompt'
+          : 'git_panel.resolve_land_merge_prompt',
+        { base: conflict.base },
+      )
+      setComposerPrefill((previous) => ({
+        sessionId: session.id,
+        text: prompt,
+        signal: (previous?.signal ?? 0) + 1,
+      }))
+    } catch (error) {
+      toast.error(errorMessage(error))
+    }
+  }
+
   async function renameSession(sessionId: string, title: string) {
     if (!client || !config) throw new Error(t('errors.daemon_disconnected'))
     const stateKey = daemonKeys.taskState(config.address)
@@ -1124,6 +1158,7 @@ export function WakuApp() {
                     value?.sessionId === current.id ? null : value)}
                   onProjectless={() => void createProjectlessTask()}
                   onResume={() => openCommandPalette('resume')}
+                  onLand={landSessionWorkspace}
                   onUsagePanelSignalHandled={() => setUsagePanelSignal(0)}
                   project={currentProject}
                   projects={taskState.data.projects}

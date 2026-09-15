@@ -93,6 +93,13 @@ pub fn is_resume_submission(prompt: &str) -> bool {
     prompt.trim() == "/resume"
 }
 
+/// Whether the composer submitted the land command — rebase the workspace
+/// onto its base branch and fast-forward the base. Reserved daemon-side like
+/// `/resume`, so it never crosses into a provider transport.
+pub fn is_land_submission(prompt: &str) -> bool {
+    prompt.trim() == "/land"
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Goddard bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them

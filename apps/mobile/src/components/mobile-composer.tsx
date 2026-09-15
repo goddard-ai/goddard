@@ -44,6 +44,7 @@ import {
   type LocalAttachmentFile,
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
+import { landWorkspace } from '@/lib/daemon-api';
 import { sessionBusy, sessionCwd } from '@/lib/mobile-runtime';
 import { composerProviderPrompt } from '@/lib/composer-completion';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
@@ -253,6 +254,23 @@ export function MobileComposer({
     contextKey: session.id,
     onServiceTier: (serviceTier) => runtime.updateSessionOptions(session.id, { serviceTier }),
     onGoal: (operation) => runtime.sendGoalOperation(session, operation),
+    onLand: async () => {
+      if (!daemon.client || !project) throw new Error('Select a task to see its Git state');
+      const outcome = await landWorkspace(
+        daemon.client,
+        sessionCwd(session, project),
+        session.workspace?.kind === 'worktree' ? session.workspace.baseBranch ?? null : null,
+      );
+      if ('landed' in outcome) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
+      // Mobile has no conflict modal; the banner carries the way out.
+      const kind = outcome.conflict.in_progress === 'rebase' ? 'rebase' : 'merge';
+      throw new Error(
+        `Landing onto ${outcome.conflict.base} stopped on ${kind} conflicts. Resolve them in the worktree, then run /land again.`,
+      );
+    },
     onClear: () => {
       draftSync.markEdited();
       setDraft('');

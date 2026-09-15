@@ -4,6 +4,7 @@ import type {
   ComposerDraftChange,
   DaemonSettings,
   FileEntry,
+  LandOutcome,
   Project,
   ProviderKind,
   ProviderProbe,
@@ -235,6 +236,27 @@ export async function createProjectlessWorkspace(client: WakuClient): Promise<st
     throw new Error('The daemon returned an unexpected workspace response');
   }
   return response.result.cwd;
+}
+
+/** `/land`: rebase the workspace onto its base branch — or merge it in —
+ * then fast-forward the base to the result. `base` is the session's recorded
+ * base; `null` lets the daemon resolve the repository's default. */
+export async function landWorkspace(
+  client: WakuClient,
+  cwd: string,
+  base: string | null,
+): Promise<LandOutcome> {
+  const response = expectResponse(
+    await client.request({
+      type: 'workspace',
+      operation: { type: 'land', cwd, base, strategy: 'rebase' },
+    }),
+    'workspace',
+  );
+  if (response.result.type !== 'land') {
+    throw new Error('The daemon returned an unexpected land response');
+  }
+  return response.result.outcome;
 }
 
 export async function materializeWorktree(

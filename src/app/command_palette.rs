@@ -1234,7 +1234,7 @@ impl Waku {
                         (String::new(), base_branch.as_deref(), None)
                     }
                     SessionWorkspace::Worktree {
-                        path, name, branch,
+                        path, name, branch, ..
                     } => (
                         path.to_string_lossy().into_owned(),
                         Some(name.as_str()),

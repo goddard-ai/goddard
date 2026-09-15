@@ -2320,6 +2320,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
+            || self.execute_land_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
     }
@@ -2333,6 +2334,18 @@ impl Waku {
         // after that effect returns so the window action can safely re-enter
         // Waku and move focus into the Resume picker.
         cx.defer(|cx| cx.dispatch_action(&OpenResumePicker));
+        true
+    }
+
+    /// `/land` — the same operation the Git panel's land button runs. Unlike
+    /// `/resume` this starts no window action, so it can run inline; errors
+    /// and the conflict modal surface without the panel open.
+    fn execute_land_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        if !crate::composer_complete::is_land_submission(prompt) {
+            return false;
+        }
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
         true
     }
 
@@ -2889,7 +2902,7 @@ impl Waku {
 
     /// A submit click goes where Enter would: the overlay's own routing while
     /// Big Picture is open, the selected session otherwise.
-    fn route_composer_submission(
+    pub(super) fn route_composer_submission(
         &mut self,
         submission: ComposerSubmission,
         cx: &mut Context<Self>,

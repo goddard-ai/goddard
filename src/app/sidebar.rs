@@ -4093,6 +4093,7 @@ mod tests {
             path: PathBuf::from("/tmp/worktree"),
             name: "my-worktree".to_owned(),
             branch: Some("feature/sidebar".to_owned()),
+            base_branch: None,
         };
 
         assert_eq!(persisted_sidebar_branch_label(&local), None);

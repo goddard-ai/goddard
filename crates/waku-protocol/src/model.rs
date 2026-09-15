@@ -766,6 +766,11 @@ pub enum SessionWorkspace {
         /// remains in the detached HEAD state it was created with.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         branch: Option<String>,
+        /// The base the worktree was created from — where `Land` sends its
+        /// commits. `None` for sessions persisted before it was recorded or
+        /// for worktrees that adopted a checkout's state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_branch: Option<String>,
     },
 }
 
@@ -4369,6 +4374,7 @@ mod tests {
             path: PathBuf::from("/tmp/waku-worktrees/task"),
             name: "task".into(),
             branch: None,
+            base_branch: None,
         };
         session.workspace_moved_from = Some(PathBuf::from("/tmp/waku"));
 

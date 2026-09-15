@@ -356,13 +356,21 @@ fn assemble_slash_commands(
     }
     commands.extend(cli_commands);
     let mut commands = dedup_and_sort_commands(commands);
-    // `/resume` belongs to Goddard rather than any one provider. Reserve the
-    // name after provider/project discovery so every composer exposes the
-    // same picker and submitting it can never leak into an agent turn.
-    commands.retain(|command| command.name != "resume");
+    // `/resume` and `/land` belong to Goddard rather than any one provider.
+    // Reserve the names after provider/project discovery so every composer
+    // exposes the same picker and submitting them can never leak into an
+    // agent turn.
+    commands.retain(|command| command.name != "resume" && command.name != "land");
     commands.push(SlashCommand {
         name: "resume".to_owned(),
         description: crate::i18n::translate("commands.resume_description"),
+        scope: CommandScope::Waku,
+        argument_hint: None,
+        template: None,
+    });
+    commands.push(SlashCommand {
+        name: "land".to_owned(),
+        description: crate::i18n::translate("commands.land_description"),
         scope: CommandScope::Waku,
         argument_hint: None,
         template: None,

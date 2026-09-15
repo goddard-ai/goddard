@@ -4,13 +4,13 @@
 //! panel's render path only ever sees the returned snapshots.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 
 use waku_protocol::git::{
-    CommitEntry, GitFileChange, GitPanelSnapshot, PullOutcome, PullStrategy, SyncInProgress,
-    UpstreamStatus,
+    CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
+    PullStrategy, SyncInProgress, UpstreamStatus,
 };
 
 use crate::git_branch::remote_url;
@@ -19,8 +19,10 @@ use crate::git_commit::{
     push_target, remote_for_branch, upstream,
 };
 
-/// The panel's one-shot state read. `Ok(None)` outside a work tree.
-pub fn inspect(cwd: &Path) -> anyhow::Result<Option<GitPanelSnapshot>> {
+/// The panel's one-shot state read. `Ok(None)` outside a work tree. `base`
+/// is the session's recorded base branch, forwarded to [`land_base`] for the
+/// land target.
+pub fn inspect(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<GitPanelSnapshot>> {
     if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
         .is_some_and(|answer| answer == "true")
     {
@@ -104,11 +106,13 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<GitPanelSnapshot>> {
             });
         }
     }
+    let land_target = land_target(cwd, base)?;
     Ok(Some(GitPanelSnapshot {
         branch,
         origin_url: remote_url(cwd, "origin")?,
         upstream: upstream_status,
         can_push,
+        land_target,
         staged,
         unstaged,
     }))
@@ -177,6 +181,180 @@ fn sync_in_progress(cwd: &Path) -> anyhow::Result<Option<SyncInProgress>> {
         return Ok(Some(SyncInProgress::Merge));
     }
     Ok(None)
+}
+
+/// Land the checkout's commits on its base branch: rebase onto it — or merge
+/// it in with `PullStrategy::Merge` — then fast-forward the base to the
+/// result. `base` is the session's recorded base; [`land_base`] resolves the
+/// fallback when it is absent or stale. A stopped integration reports
+/// `Conflict` and leaves the rebase or merge in progress; re-running while
+/// stopped reports the same conflict again rather than erroring.
+pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::Result<LandOutcome> {
+    ensure_repository(cwd)?;
+    let Some(base) = land_base(cwd, base)? else {
+        bail!("could not find a base branch to land on");
+    };
+    if let Some(in_progress) = sync_in_progress(cwd)? {
+        return Ok(LandOutcome::Conflict { base, in_progress });
+    }
+    if is_ancestor(cwd, "HEAD", &base)? {
+        bail!("'{base}' already contains every commit on this checkout");
+    }
+    if !is_ancestor(cwd, &base, "HEAD")? {
+        // Diverged history integrates first. Rebase and merge both require a
+        // clean tree; refuse rather than autostash, whose pop conflicts land
+        // after the integration's own machinery is gone.
+        if has_tracked_changes(cwd)? {
+            bail!("commit or stash your changes before landing");
+        }
+        let output = match strategy {
+            PullStrategy::Rebase => git_capture(cwd, &["rebase", &base])?,
+            PullStrategy::Merge => git_capture(cwd, &["merge", "--no-edit", &base])?,
+        };
+        if !output.status.success() {
+            if let Some(in_progress) = sync_in_progress(cwd)? {
+                return Ok(LandOutcome::Conflict { base, in_progress });
+            }
+            bail!("{}", command_error(&output));
+        }
+    }
+    fast_forward_base(cwd, &base)?;
+    Ok(LandOutcome::Landed { base })
+}
+
+/// The branch a land rebases onto and fast-forwards: the recorded base while
+/// it still exists as a local branch, then the remote's default
+/// (`origin/HEAD`), then the branch the primary checkout holds, then
+/// `main`/`master`. The checkout's own branch never qualifies — being on the
+/// base means there is nothing to land.
+fn land_base(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<String>> {
+    let current = git_optional_stdout(cwd, &["branch", "--show-current"])?
+        .filter(|branch| !branch.is_empty());
+    let usable = |candidate: Option<String>| -> anyhow::Result<Option<String>> {
+        let Some(name) = candidate else {
+            return Ok(None);
+        };
+        if current.as_deref() == Some(name.as_str())
+            || !ref_exists(cwd, &format!("refs/heads/{name}"))?
+        {
+            return Ok(None);
+        }
+        Ok(Some(name))
+    };
+    if let Some(base) = usable(recorded.map(str::to_owned))? {
+        return Ok(Some(base));
+    }
+    let remote_default = git_optional_stdout(
+        cwd,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )?
+    .and_then(|name| name.strip_prefix("origin/").map(str::to_owned));
+    if let Some(base) = usable(remote_default)? {
+        return Ok(Some(base));
+    }
+    if let Some(base) = usable(
+        checkouts(cwd)?
+            .into_iter()
+            .next()
+            .and_then(|entry| entry.branch),
+    )? {
+        return Ok(Some(base));
+    }
+    for candidate in ["main", "master"] {
+        if let Some(base) = usable(Some(candidate.to_owned()))? {
+            return Ok(Some(base));
+        }
+    }
+    Ok(None)
+}
+
+/// Where a land would send this checkout's commits. `None` when no base
+/// resolves or HEAD has no commits the base lacks — landing that checkout is
+/// a no-op the panel never offers.
+fn land_target(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<LandTarget>> {
+    let Some(base) = land_base(cwd, recorded)? else {
+        return Ok(None);
+    };
+    let ahead = git_optional_stdout(cwd, &["rev-list", "--count", &format!("{base}..HEAD")])?
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    Ok((ahead > 0).then_some(LandTarget {
+        branch: base,
+        ahead,
+    }))
+}
+
+/// Move `base` to HEAD. Git refuses a raw ref move on a checked-out branch,
+/// so a base another worktree owns gets a real `--ff-only` merge there — its
+/// index and files advance too. A base checked out nowhere moves with
+/// `branch -f`; HEAD is already known to contain it.
+fn fast_forward_base(cwd: &Path, base: &str) -> anyhow::Result<()> {
+    let head = git_stdout(cwd, &["rev-parse", "HEAD"])?;
+    let checkout = checkouts(cwd)?
+        .into_iter()
+        .find(|entry| entry.branch.as_deref() == Some(base))
+        .map(|entry| entry.path);
+    match checkout {
+        Some(path) => {
+            git_success(&path, &["merge", "--ff-only", &head])?;
+        }
+        None => {
+            git_success(cwd, &["branch", "-f", base, &head])?;
+        }
+    }
+    Ok(())
+}
+
+/// `git merge-base --is-ancestor`: true when `ancestor` is reachable from
+/// `descendant`, including when they name the same commit.
+fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<bool> {
+    Ok(
+        git_capture(cwd, &["merge-base", "--is-ancestor", ancestor, descendant])?
+            .status
+            .success(),
+    )
+}
+
+/// Staged or unstaged changes to tracked files — what `git rebase` refuses
+/// to run on. Untracked files never block it.
+fn has_tracked_changes(cwd: &Path) -> anyhow::Result<bool> {
+    Ok(!git_stdout(cwd, &["status", "--porcelain=v1", "--untracked-files=no"])?.is_empty())
+}
+
+/// One `git worktree list --porcelain` entry: the checkout's path and the
+/// branch it holds — `None` for a detached or bare worktree.
+struct Checkout {
+    path: PathBuf,
+    branch: Option<String>,
+}
+
+/// Every checkout Git knows about; the primary worktree always leads.
+fn checkouts(cwd: &Path) -> anyhow::Result<Vec<Checkout>> {
+    let list = git_stdout(cwd, &["worktree", "list", "--porcelain"])?;
+    let mut entries = Vec::new();
+    let mut path = None;
+    for line in list.lines() {
+        if let Some(worktree) = line.strip_prefix("worktree ") {
+            path = Some(PathBuf::from(worktree));
+        } else if let Some(reference) = line.strip_prefix("branch refs/heads/") {
+            if let Some(path) = path.take() {
+                entries.push(Checkout {
+                    path,
+                    branch: Some(reference.to_owned()),
+                });
+            }
+        } else if (line == "detached" || line == "bare")
+            && let Some(path) = path.take()
+        {
+            entries.push(Checkout { path, branch: None });
+        }
+    }
+    Ok(entries)
 }
 
 /// `git log` on HEAD, paged. A repository with no commits yet reads as an
@@ -367,7 +545,7 @@ mod tests {
         run_git(&cwd, &["add", "file.txt"]);
         std::fs::write(cwd.join("file.txt"), "one\ntwo\nthree\n").unwrap();
 
-        let snapshot = inspect(&cwd).unwrap().unwrap();
+        let snapshot = inspect(&cwd, None).unwrap().unwrap();
         assert_eq!(snapshot.staged.len(), 1);
         assert_eq!(snapshot.unstaged.len(), 1);
         assert_eq!(snapshot.staged[0].path, "file.txt");
@@ -382,7 +560,7 @@ mod tests {
         run_git(&cwd, &["commit", "-qm", "init", "--allow-empty"]);
         std::fs::write(cwd.join("new.txt"), "hello\n").unwrap();
 
-        let snapshot = inspect(&cwd).unwrap().unwrap();
+        let snapshot = inspect(&cwd, None).unwrap().unwrap();
         assert_eq!(snapshot.unstaged.len(), 1);
         assert!(snapshot.unstaged[0].untracked);
         assert_eq!(snapshot.unstaged[0].status, "??");
@@ -395,13 +573,13 @@ mod tests {
         std::fs::write(cwd.join("file.txt"), "hello\n").unwrap();
 
         stage(&cwd, "file.txt").unwrap();
-        let snapshot = inspect(&cwd).unwrap().unwrap();
+        let snapshot = inspect(&cwd, None).unwrap().unwrap();
         assert_eq!(snapshot.staged.len(), 1);
         assert!(snapshot.unstaged.is_empty());
 
         // No HEAD yet: unstage falls back to `git rm --cached`.
         unstage(&cwd, "file.txt").unwrap();
-        let snapshot = inspect(&cwd).unwrap().unwrap();
+        let snapshot = inspect(&cwd, None).unwrap().unwrap();
         assert!(snapshot.staged.is_empty());
         assert!(snapshot.unstaged[0].untracked);
     }
@@ -416,7 +594,7 @@ mod tests {
         run_git(&cwd, &["add", "file.txt"]);
 
         unstage(&cwd, "file.txt").unwrap();
-        let snapshot = inspect(&cwd).unwrap().unwrap();
+        let snapshot = inspect(&cwd, None).unwrap().unwrap();
         assert!(snapshot.staged.is_empty());
         assert_eq!(snapshot.unstaged.len(), 1);
         assert!(!snapshot.unstaged[0].untracked);
@@ -461,5 +639,205 @@ mod tests {
     fn commits_is_empty_before_the_first_commit() {
         let cwd = repository();
         assert!(commits(&cwd, 0, 10).unwrap().is_empty());
+    }
+
+    /// A repository whose primary checkout is on `main` plus a linked
+    /// worktree detached at the initial commit — the shape a task session
+    /// lands from.
+    fn land_repository() -> (PathBuf, PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("waku-git-panel-test-{}", uuid::Uuid::new_v4()));
+        let repository = root.join("primary");
+        std::fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, &["init", "-q", "-b", "main"]);
+        run_git(&repository, &["config", "user.email", "test@example.com"]);
+        run_git(&repository, &["config", "user.name", "Test"]);
+        std::fs::write(repository.join("file.txt"), "base\n").unwrap();
+        run_git(&repository, &["add", "file.txt"]);
+        run_git(&repository, &["commit", "-qm", "init"]);
+        let worktree = root.join("session");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        (root, repository, worktree)
+    }
+
+    /// One commit on top of the worktree's HEAD.
+    fn commit_in(cwd: &Path, name: &str, contents: &str) {
+        std::fs::write(cwd.join(name), contents).unwrap();
+        run_git(cwd, &["add", name]);
+        run_git(cwd, &["commit", "-qm", "session work"]);
+    }
+
+    #[test]
+    fn land_fast_forwards_the_base_inside_its_checkout() {
+        let (root, repository, worktree) = land_repository();
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            LandOutcome::Landed {
+                base: "main".to_owned()
+            }
+        );
+        // The merge ran inside the primary checkout: its files moved too.
+        assert!(repository.join("work.txt").exists());
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            git_stdout(&worktree, &["rev-parse", "HEAD"]).unwrap()
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_rebases_a_diverged_worktree_before_landing() {
+        let (root, repository, worktree) = land_repository();
+        std::fs::write(repository.join("base.txt"), "new base work\n").unwrap();
+        run_git(&repository, &["add", "base.txt"]);
+        run_git(&repository, &["commit", "-qm", "base advances"]);
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            LandOutcome::Landed {
+                base: "main".to_owned()
+            }
+        );
+        assert!(worktree.join("base.txt").exists());
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            git_stdout(&worktree, &["rev-parse", "HEAD"]).unwrap()
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_reports_the_stopped_rebase_and_recovers_on_abort() {
+        let (root, repository, worktree) = land_repository();
+        std::fs::write(repository.join("file.txt"), "base changed\n").unwrap();
+        run_git(&repository, &["commit", "-qam", "base changes"]);
+        std::fs::write(worktree.join("file.txt"), "session changed\n").unwrap();
+        run_git(&worktree, &["commit", "-qam", "session changes"]);
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            LandOutcome::Conflict {
+                base: "main".to_owned(),
+                in_progress: SyncInProgress::Rebase,
+            }
+        );
+        // Re-running while stopped reports the conflict again.
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert!(matches!(outcome, LandOutcome::Conflict { .. }));
+
+        abort_sync(&worktree).unwrap();
+        assert_eq!(
+            git_stdout(&worktree, &["status", "--porcelain"]).unwrap(),
+            ""
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_merge_instead_lands_as_a_merge_commit() {
+        let (root, repository, worktree) = land_repository();
+        std::fs::write(repository.join("base.txt"), "new base work\n").unwrap();
+        run_git(&repository, &["add", "base.txt"]);
+        run_git(&repository, &["commit", "-qm", "base advances"]);
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Merge).unwrap();
+        assert_eq!(
+            outcome,
+            LandOutcome::Landed {
+                base: "main".to_owned()
+            }
+        );
+        // The base fast-forwarded to a merge commit: two parents.
+        git_stdout(&repository, &["rev-parse", "--verify", "main^2"]).unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_moves_the_ref_when_the_base_is_not_checked_out() {
+        let (root, repository, worktree) = land_repository();
+        run_git(&repository, &["switch", "-q", "-c", "other"]);
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            LandOutcome::Landed {
+                base: "main".to_owned()
+            }
+        );
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            git_stdout(&worktree, &["rev-parse", "HEAD"]).unwrap()
+        );
+        // The primary checkout stayed on `other`; no files moved there.
+        assert_eq!(
+            git_stdout(&repository, &["branch", "--show-current"]).unwrap(),
+            "other"
+        );
+        assert!(!repository.join("work.txt").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_refuses_a_dirty_diverged_checkout() {
+        let (root, repository, worktree) = land_repository();
+        std::fs::write(repository.join("base.txt"), "new base work\n").unwrap();
+        run_git(&repository, &["add", "base.txt"]);
+        run_git(&repository, &["commit", "-qm", "base advances"]);
+        commit_in(&worktree, "work.txt", "session\n");
+        std::fs::write(worktree.join("file.txt"), "uncommitted\n").unwrap();
+
+        assert!(land(&worktree, Some("main"), PullStrategy::Rebase).is_err());
+        // Untracked files never block: dropping the tracked change lands.
+        run_git(&worktree, &["checkout", "--", "file.txt"]);
+        std::fs::write(worktree.join("scratch.txt"), "untracked\n").unwrap();
+        assert!(matches!(
+            land(&worktree, Some("main"), PullStrategy::Rebase).unwrap(),
+            LandOutcome::Landed { .. }
+        ));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_errors_when_there_is_nothing_to_land() {
+        let (root, _repository, worktree) = land_repository();
+        assert!(land(&worktree, Some("main"), PullStrategy::Rebase).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn inspect_reports_the_land_target_only_when_ahead() {
+        let (root, repository, worktree) = land_repository();
+        // The primary checkout is on the base itself — no target.
+        assert_eq!(
+            inspect(&repository, None).unwrap().unwrap().land_target,
+            None
+        );
+        commit_in(&worktree, "work.txt", "session\n");
+        let snapshot = inspect(&worktree, Some("main")).unwrap().unwrap();
+        assert_eq!(
+            snapshot.land_target,
+            Some(LandTarget {
+                branch: "main".to_owned(),
+                ahead: 1,
+            })
+        );
+        std::fs::remove_dir_all(root).ok();
     }
 }

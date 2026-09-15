@@ -784,6 +784,7 @@ commands.fast_enabled: 已启用快速模式
 commands.fast_disabled: 已关闭快速模式
 commands.goal_description: 为此任务设定一个持续追求的目标
 commands.resume_description: 恢复终端智能体会话
+commands.land_description: 变基到基础分支并将此任务的提交合入该分支
 goal.title: 目标
 goal.objective_placeholder: 这个任务应该持续朝什么方向努力？
 goal.set: 设定目标
@@ -1391,3 +1392,9 @@ git_panel.resolve_merge_prompt: 此仓库中的 `git pull` 合并因冲突而停
 git_panel.view_on_github: 在 GitHub 上查看
 git_panel.open_file_in: "在 %{app} 中打开"
 git_panel.open_file: 在编辑器中打开文件
+git_panel.land_onto: 合入 %{base}
+git_panel.landing: 正在合入…
+git_panel.landed: 已合入 %{base}
+git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
+git_panel.resolve_land_rebase_prompt: "此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"
+git_panel.resolve_land_merge_prompt: "`%{base}` 合并到此工作区时因冲突而停止。请解决工作区中的冲突并完成合并，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"

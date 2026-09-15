@@ -86,6 +86,7 @@ impl Waku {
         cx.notify();
         let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
+            let base_branch = base_ref.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move {
@@ -115,6 +116,7 @@ impl Waku {
                                 path: created.path.clone(),
                                 name: created.name,
                                 branch: None,
+                                base_branch: base_branch.clone(),
                             };
                             true
                         });
@@ -290,6 +292,9 @@ impl Waku {
                 path: created.path.clone(),
                 name: created.name.clone(),
                 branch: None,
+                // The worktree adopted the source checkout's state; the
+                // primary-checkout fallback resolves that same branch.
+                base_branch: None,
             };
             // A session that never started has no recorded paths to correct;
             // a started one's next prompt carries the move notice.
@@ -511,10 +516,7 @@ impl Waku {
                                 })
                             })
                             .is_ok_and(|result| {
-                                matches!(
-                                    result,
-                                    waku_client::WorkspaceResult::Bool { value: true }
-                                )
+                                matches!(result, waku_client::WorkspaceResult::Bool { value: true })
                             });
                         // The force flag only runs behind a verified snapshot:
                         // a failed capture leaves the worktree on disk rather

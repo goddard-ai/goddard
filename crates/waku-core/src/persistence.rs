@@ -2263,6 +2263,7 @@ mod tests {
             path: PathBuf::from("/tmp/worktrees/investigate"),
             name: "investigate".into(),
             branch: Some("waku/investigate".into()),
+            base_branch: None,
         };
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
@@ -2297,6 +2298,7 @@ mod tests {
                 path: PathBuf::from("/tmp/worktrees/investigate"),
                 name: "investigate".into(),
                 branch: Some("waku/investigate".into()),
+                base_branch: None,
             }
         );
         assert!(

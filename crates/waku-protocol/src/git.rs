@@ -105,8 +105,22 @@ pub struct GitPanelSnapshot {
     /// A remote the branch could publish to exists — the same condition the
     /// commit dialog's push affordance uses.
     pub can_push: bool,
+    /// Where `Land` would send this checkout's commits — `None` when no base
+    /// branch resolves or HEAD has no commits the base lacks.
+    pub land_target: Option<LandTarget>,
     pub staged: Vec<GitFileChange>,
     pub unstaged: Vec<GitFileChange>,
+}
+
+/// The base branch `Land` resolved for a checkout, and how far ahead of it
+/// HEAD is. Only reported while `ahead` is nonzero — landing a checkout with
+/// nothing new is a no-op the panel never offers.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct LandTarget {
+    /// The resolved local branch name.
+    pub branch: String,
+    /// Commits on HEAD the base lacks.
+    pub ahead: u64,
 }
 
 /// One `git log` entry for the panel's commit list.
@@ -152,6 +166,22 @@ pub enum PullOutcome {
     Clean,
     /// The pull stopped on conflicts and an integration is still in progress.
     Conflict { in_progress: SyncInProgress },
+}
+
+/// How a `Land` operation ended. `base` names the branch it resolved, which
+/// the conflict modal and prompts quote back to the user.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum LandOutcome {
+    /// The checkout's commits are on the base, which was fast-forwarded to
+    /// this HEAD.
+    Landed { base: String },
+    /// The rebase or merge stopped on conflicts; the integration is still in
+    /// progress and the checkout owns the conflict markers.
+    Conflict {
+        base: String,
+        in_progress: SyncInProgress,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]

@@ -804,6 +804,7 @@ commands.fast_enabled: 高速モードを有効にしました
 commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
 commands.resume_description: ターミナルのエージェントセッションを再開
+commands.land_description: ベースブランチにリベースしてこのタスクのコミットを取り込む
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？
 goal.set: ゴールを設定
@@ -1433,3 +1434,9 @@ git_panel.resolve_merge_prompt: このリポジトリでの `git pull` マージ
 git_panel.view_on_github: GitHub で見る
 git_panel.open_file_in: "%{app} で開く"
 git_panel.open_file: エディタでファイルを開く
+git_panel.land_onto: "%{base} に取り込む"
+git_panel.landing: 取り込み中…
+git_panel.landed: "%{base} に取り込みました"
+git_panel.land_conflict_description: "%{base} への取り込みが途中で停止しました — 競合は作業ツリーに残っています。"
+git_panel.resolve_land_rebase_prompt: "このワークツリーの `%{base}` へのリベースが競合で停止しました。作業ツリーの競合を解決し、リベースが完了するまで `git rebase --continue` を実行してください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"
+git_panel.resolve_land_merge_prompt: "`%{base}` のこのワークツリーへのマージが競合で停止しました。作業ツリーの競合を解決してマージを完了させてください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"

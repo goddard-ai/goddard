@@ -48,6 +48,8 @@ export type { GoalOperation } from "./GoalOperation";
 export type { IssueDetail } from "./IssueDetail";
 export type { IssueState } from "./IssueState";
 export type { IssueSummary } from "./IssueSummary";
+export type { LandOutcome } from "./LandOutcome";
+export type { LandTarget } from "./LandTarget";
 export type { Message } from "./Message";
 export type { MessageAttachment } from "./MessageAttachment";
 export type { MessageRole } from "./MessageRole";

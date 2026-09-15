@@ -53,6 +53,7 @@ import {
   expandedComposerSubmission,
   isFastModeToggleSubmission,
   isResumeSubmission,
+  isLandSubmission,
   mergeComposerCommands,
   parseGoalSubmission,
   replaceComposerTrigger,
@@ -131,6 +132,7 @@ export function Composer({
   onAddProject,
   onProjectless,
   onResume,
+  onLand,
   onFocusSignalHandled,
   onModelPickerSignalHandled,
   onUsagePanelSignalHandled,
@@ -153,6 +155,7 @@ export function Composer({
   onAddProject?: () => void
   onProjectless?: () => void
   onResume?: () => void
+  onLand?: () => void
   onFocusSignalHandled?: () => void
   onModelPickerSignalHandled?: () => void
   onUsagePanelSignalHandled?: () => void
@@ -372,6 +375,7 @@ export function Composer({
 
   function executeLocalComposerCommand(submittedPrompt = prompt): boolean {
     return executeResumeCommand(submittedPrompt)
+      || executeLandCommand(submittedPrompt)
       || executeFastModeToggle(submittedPrompt)
       || executeGoalCommand(submittedPrompt)
   }
@@ -387,6 +391,20 @@ export function Composer({
     if (!onResume || !isResumeSubmission(submittedPrompt)) return false
     clearComposerDraft()
     onResume()
+    return true
+  }
+
+  /** `/land` — the same operation the native Git panel's land button runs.
+   * Always intercepted, so it can never leak into a provider turn; without a
+   * land handler (a draft composer, say) it errors instead. */
+  function executeLandCommand(submittedPrompt: string): boolean {
+    if (!isLandSubmission(submittedPrompt)) return false
+    clearComposerDraft()
+    if (!onLand) {
+      toast.error(t('git_panel.no_task'))
+      return true
+    }
+    onLand()
     return true
   }
 

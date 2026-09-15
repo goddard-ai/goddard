@@ -8,6 +8,7 @@ import type {
   ComposerDrafts,
   DaemonSettings,
   FileEntry,
+  LandOutcome,
   MessageAttachment,
   PlanUsage,
   Project,
@@ -529,6 +530,19 @@ export async function commitWorkspace(
 export async function pushWorkspace(client: WakuClient, cwd: string): Promise<void> {
   const result = await workspaceRequest(client, { type: 'push', cwd })
   if (result.type !== 'ack') throw new Error('The daemon returned an unexpected push response')
+}
+
+/** `/land`: rebase the workspace onto its base branch — or merge it in —
+ * then fast-forward the base to the result. `base` is the session's recorded
+ * base; `null` lets the daemon resolve the repository's default. */
+export async function landWorkspace(
+  client: WakuClient,
+  cwd: string,
+  base: string | null,
+): Promise<LandOutcome> {
+  const result = await workspaceRequest(client, { type: 'land', cwd, base, strategy: 'rebase' })
+  if (result.type !== 'land') throw new Error('The daemon returned an unexpected land response')
+  return result.outcome
 }
 
 async function workspaceRequest(

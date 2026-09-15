@@ -2117,6 +2117,7 @@ impl WakuBackend {
                     path: created.path,
                     name: created.name,
                     branch: None,
+                    base_branch,
                 }
             }
         };

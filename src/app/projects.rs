@@ -807,7 +807,12 @@ impl Waku {
             && let Some(session) = self.state.session_mut(session_id)
             && !session.has_started()
         {
-            session.workspace = SessionWorkspace::Worktree { path, name, branch };
+            session.workspace = SessionWorkspace::Worktree {
+                path,
+                name,
+                branch,
+                base_branch: None,
+            };
             self.save();
         }
         let focus = self.composer_focus(cx);
@@ -1191,7 +1196,12 @@ impl Waku {
             && let Some(session) = self.state.session_mut(session_id)
             && !session.has_started()
         {
-            session.workspace = SessionWorkspace::Worktree { path, name, branch };
+            session.workspace = SessionWorkspace::Worktree {
+                path,
+                name,
+                branch,
+                base_branch: None,
+            };
             self.save();
         }
         let Some(session_id) = self.state.selected_session else {

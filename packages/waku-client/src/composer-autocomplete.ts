@@ -81,6 +81,13 @@ export function isResumeSubmission(prompt: string): boolean {
   return prompt.trim() === '/resume'
 }
 
+/** Goddard's provider-neutral land command — rebase the workspace onto its
+ * base branch and fast-forward the base. Reserved daemon-side like
+ * `/resume`, so it never crosses into a provider transport. */
+export function isLandSubmission(prompt: string): boolean {
+  return prompt.trim() === '/land'
+}
+
 export type GoalCommand =
   | { kind: 'show' }
   | { kind: 'edit' }

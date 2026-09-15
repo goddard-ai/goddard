@@ -10,6 +10,7 @@ import type {
 } from '@waku/client';
 import {
   isFastModeToggleSubmission,
+  isLandSubmission,
   isResumeSubmission,
   parseGoalSubmission,
   toggledFastServiceTier,
@@ -47,6 +48,7 @@ export function useComposerLocalCommands({
   contextKey,
   onServiceTier,
   onGoal,
+  onLand,
   onClear,
 }: {
   provider: ProviderKind | null;
@@ -57,6 +59,7 @@ export function useComposerLocalCommands({
   contextKey: string;
   onServiceTier: (tier: string) => void | Promise<void>;
   onGoal: (operation: GoalOperation) => Promise<void>;
+  onLand?: () => Promise<void>;
   onClear: () => void;
 }) {
   const daemon = useDaemon();
@@ -71,6 +74,11 @@ export function useComposerLocalCommands({
     if (!provider) return false;
     if (isResumeSubmission(prompt)) {
       setResumeOpen(true);
+    } else if (isLandSubmission(prompt)) {
+      // `/land` is always intercepted so it never leaks into a turn; a
+      // composer without a session workspace reports instead.
+      if (!onLand) throw new Error('Select a task to land its workspace');
+      await onLand();
     } else if (isFastModeToggleSubmission(provider, prompt, commands)) {
       const tier = toggledFastServiceTier(serviceTier, model?.service_tiers ?? []);
       if (!tier) throw new Error('Fast mode is unavailable for this model');

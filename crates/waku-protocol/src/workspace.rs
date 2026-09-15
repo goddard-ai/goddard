@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
     AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot,
-    CreatedWorktree, GitPanelSnapshot, PullOutcome, PullStrategy,
+    CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -499,10 +499,14 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
     },
     /// The Git panel's one-pass working-tree read: branch, upstream counts,
-    /// and both change lists. `None` outside a work tree.
+    /// and both change lists. `None` outside a work tree. `base` is the
+    /// session's recorded base branch — the snapshot's land target falls back
+    /// to the repository's default branch when it is absent or stale.
     InspectGitPanel {
         #[ts(type = "string")]
         cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
     },
     StageFile {
         #[ts(type = "string")]
@@ -527,6 +531,18 @@ pub enum WorkspaceOperation {
     AbortSync {
         #[ts(type = "string")]
         cwd: PathBuf,
+    },
+    /// Land the checkout's commits on its base branch: rebase onto it — or
+    /// merge it in with `PullStrategy::Merge` — then fast-forward the base to
+    /// the result. `base` is the session's recorded base branch; `None`
+    /// resolves the repository's default branch. `Conflict` means the
+    /// integration is still in progress and owns the conflicted working tree.
+    Land {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
+        strategy: PullStrategy,
     },
     /// `git log` for HEAD, paged: `skip` leading entries are skipped and at
     /// most `limit` are returned.
@@ -729,6 +745,9 @@ pub enum WorkspaceResult {
     },
     Pull {
         outcome: PullOutcome,
+    },
+    Land {
+        outcome: LandOutcome,
     },
     Commits {
         entries: Vec<CommitEntry>,

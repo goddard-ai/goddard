@@ -203,8 +203,8 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::git_commit::push(&cwd)?;
             WorkspaceResult::Ack
         }
-        WorkspaceOperation::InspectGitPanel { cwd } => WorkspaceResult::GitPanel {
-            snapshot: crate::git_panel::inspect(&cwd)?,
+        WorkspaceOperation::InspectGitPanel { cwd, base } => WorkspaceResult::GitPanel {
+            snapshot: crate::git_panel::inspect(&cwd, base.as_deref())?,
         },
         WorkspaceOperation::StageFile { cwd, path } => {
             crate::git_panel::stage(&cwd, &path)?;
@@ -221,6 +221,13 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::git_panel::abort_sync(&cwd)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::Land {
+            cwd,
+            base,
+            strategy,
+        } => WorkspaceResult::Land {
+            outcome: crate::git_panel::land(&cwd, base.as_deref(), strategy)?,
+        },
         WorkspaceOperation::ListCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::commits(&cwd, skip, limit)?,
         },
