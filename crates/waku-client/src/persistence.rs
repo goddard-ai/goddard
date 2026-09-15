@@ -126,6 +126,10 @@ fn default_sidebar_transparency() -> bool {
     true
 }
 
+fn default_sidebar_shortcut_tags() -> bool {
+    true
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -342,6 +346,9 @@ pub struct AppSettings {
     /// macOS-only: move back and forward between tasks with a three-finger
     /// horizontal trackpad swipe.
     pub three_finger_swipe_navigation: bool,
+    /// Tag the sidebar's first tasks with their ⌘n chords while the shortcut
+    /// modifier is held. The chords keep working with the tags off.
+    pub sidebar_shortcut_tags: bool,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -376,6 +383,7 @@ impl Default for AppSettings {
             sync_with_merge: false,
             sidebar_transparency: true,
             three_finger_swipe_navigation: false,
+            sidebar_shortcut_tags: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -555,6 +563,10 @@ pub struct PersistedState {
     /// three-finger horizontal trackpad swipe.
     #[serde(default)]
     pub three_finger_swipe_navigation: bool,
+    /// Whether holding the shortcut modifier tags the sidebar's first tasks
+    /// with their ⌘n chords. The chords keep working with the tags off.
+    #[serde(default = "default_sidebar_shortcut_tags")]
+    pub sidebar_shortcut_tags: bool,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -659,6 +671,7 @@ impl PersistedState {
             sync_with_merge: false,
             sidebar_transparency: true,
             three_finger_swipe_navigation: false,
+            sidebar_shortcut_tags: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -853,6 +866,7 @@ impl PersistedState {
             sync_with_merge: self.sync_with_merge,
             sidebar_transparency: self.sidebar_transparency,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
+            sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -909,6 +923,7 @@ impl PersistedState {
         self.sync_with_merge = settings.sync_with_merge;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
+        self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -1539,6 +1554,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.three_finger_swipe_navigation);
+    }
+
+    #[test]
+    fn sidebar_shortcut_tags_default_on_and_persist_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.sidebar_shortcut_tags);
+        let mut state = PersistedState::empty();
+        assert!(state.sidebar_shortcut_tags);
+        state.sidebar_shortcut_tags = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["sidebar_shortcut_tags"], false);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_shortcut_tags")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.sidebar_shortcut_tags);
     }
 
     #[test]

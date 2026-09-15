@@ -259,7 +259,7 @@ settings.computer_use:
 settings.commands:
   en: Commands
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid
 settings.providers_keywords:
@@ -560,6 +560,10 @@ settings.three_finger_swipe_navigation:
   en: Three-finger swipe navigation
 settings.three_finger_swipe_navigation_description:
   en: Swipe left or right with three fingers on the trackpad to move between tasks. Requires "Swipe between full-screen apps" to use four fingers in System Settings → Trackpad.
+settings.sidebar_shortcut_tags:
+  en: Sidebar shortcut tags
+settings.sidebar_shortcut_tags_description:
+  en: Show %{keys} tags on the sidebar's first tasks while %{modifier} is held
 settings.completion_sound:
   en: Play sound on completed turn
 settings.completion_sound_description:

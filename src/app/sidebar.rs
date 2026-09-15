@@ -2004,7 +2004,9 @@ impl Waku {
         if !event.modifiers.secondary() {
             self.sidebar_shortcut_hint_chord_used = false;
         }
-        if event.modifiers != gpui::Modifiers::secondary_key() {
+        if event.modifiers != gpui::Modifiers::secondary_key()
+            || !self.state.sidebar_shortcut_tags
+        {
             if self.sidebar_shortcut_hints {
                 self.sidebar_shortcut_hints = false;
                 cx.notify();

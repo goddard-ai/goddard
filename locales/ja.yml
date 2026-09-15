@@ -132,7 +132,7 @@ settings.usage: 使用状況
 settings.daemon: デーモン
 settings.computer_use: コンピュータ操作
 settings.commands: コマンド
-settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン 数学 数式 math latex markdown プレビュー ファイル レンダリング ソース preview サウンド 音 通知 完了 ターン sound audio notification トラックパッド スワイプ 3本指 ジェスチャー ナビゲーション 戻る 進む trackpad swipe gesture
+settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン 数学 数式 math latex markdown プレビュー ファイル レンダリング ソース preview サウンド 音 通知 完了 ターン sound audio notification トラックパッド スワイプ 3本指 ジェスチャー ナビゲーション 戻る 進む trackpad swipe gesture サイドバー ショートカット タグ 数字 sidebar shortcut tags
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント 等幅 サイズ 文字 エディタ サイドバー 透明
 settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: スキル
@@ -284,6 +284,8 @@ settings.sync_with_merge: 変更の同期にマージを使用
 settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
 settings.three_finger_swipe_navigation: 3本指スワイプでタスク間を移動
 settings.three_finger_swipe_navigation_description: トラックパッドを3本指で左右にスワイプしてタスク間を移動します。システム設定 → トラックパッドで「フルスクリーンアプリケーション間をスワイプ」を4本指に設定してください。
+settings.sidebar_shortcut_tags: サイドバーのショートカットタグ
+settings.sidebar_shortcut_tags_description: "%{modifier} を押している間、サイドバーの先頭タスクに %{keys} タグを表示します"
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
