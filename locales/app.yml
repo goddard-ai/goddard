@@ -161,9 +161,13 @@ command_palette.show_right_panel:
 command_palette.hide_right_panel:
   en: Hide right panel
 command_palette.inspect_elements:
-  en: Inspect elements
+  en: "Goddard: Inspect elements"
+command_palette.inspect_colors:
+  en: "Goddard: Inspect colors"
 element_inspector.copied:
   en: Element label copied
+element_inspector.colors_copied:
+  en: Element colors copied
 command_palette.current:
   en: Current
 command_palette.you:

@@ -179,6 +179,7 @@ enum PaletteAction {
     RunCustomCommand(Uuid),
     NewCustomCommand,
     InspectElements,
+    InspectColors,
     OpenRunScript,
     ChooseRunScriptProject(Uuid),
     RunScript {
@@ -1080,7 +1081,16 @@ impl Waku {
                 "icons/cursor-spark.svg",
                 None,
                 PaletteAction::InspectElements,
-                "inspect elements ui label source location identify pick hover",
+                "goddard inspect elements ui label source location identify pick hover",
+                next(),
+            ));
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.inspect_colors"),
+                "icons/eye.svg",
+                None,
+                PaletteAction::InspectColors,
+                "goddard inspect colors theme token hsla pick hover",
                 next(),
             ));
         }
@@ -2167,7 +2177,10 @@ impl Waku {
                 });
             }
             PaletteAction::InspectElements => {
-                element_inspector::start(window, cx);
+                element_inspector::start(element_inspector::InspectorMode::Elements, window, cx);
+            }
+            PaletteAction::InspectColors => {
+                element_inspector::start(element_inspector::InspectorMode::Colors, window, cx);
             }
             PaletteAction::RunScript { project, script } => {
                 self.settings_page = None;
