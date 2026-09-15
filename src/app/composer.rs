@@ -2889,7 +2889,11 @@ impl Waku {
 
     /// A submit click goes where Enter would: the overlay's own routing while
     /// Big Picture is open, the selected session otherwise.
-    fn route_composer_submission(&mut self, submission: ComposerSubmission, cx: &mut Context<Self>) {
+    fn route_composer_submission(
+        &mut self,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
         if self.big_picture.is_open() {
             self.submit_big_picture_submission(submission, cx);
         } else {

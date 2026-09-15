@@ -696,12 +696,8 @@ impl Waku {
                             if !preview.files.is_empty()
                                 || !preview.unpushed_commits.is_empty() =>
                         {
-                            let focus = waku.open_archive_dialog(
-                                session_id,
-                                preview,
-                                sidebar_position,
-                                cx,
-                            );
+                            let focus =
+                                waku.open_archive_dialog(session_id, preview, sidebar_position, cx);
                             Some(focus)
                         }
                         _ => None,
@@ -719,12 +715,7 @@ impl Waku {
                     }
                     None => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_archive_session(
-                                session_id,
-                                sidebar_position,
-                                window,
-                                cx,
-                            )
+                            waku.finish_archive_session(session_id, sidebar_position, window, cx)
                         });
                     }
                 }
@@ -792,16 +783,12 @@ impl Waku {
         }
         self.queue_archived_worktree_cleanup(session_id, cx);
         if was_selected {
-            if let Some(next_id) = sidebar_position
-                .and_then(|position| self.next_sidebar_session_from_row(position))
+            if let Some(next_id) =
+                sidebar_position.and_then(|position| self.next_sidebar_session_from_row(position))
             {
                 self.state.selected_session = None;
                 self.settings_page = None;
-                self.request_session_activation(
-                    next_id,
-                    SessionActivationTransition::Visit,
-                    cx,
-                );
+                self.request_session_activation(next_id, SessionActivationTransition::Visit, cx);
             } else {
                 self.select_session_fallback(project_id, projectless, window, cx);
             }

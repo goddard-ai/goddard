@@ -520,11 +520,8 @@ impl Render for Waku {
                             && self.projects_page.is_none(),
                         |element| {
                             if self.big_picture.is_open() {
-                                element.child(
-                                    div()
-                                        .flex_none()
-                                        .h(px(self.composer_lane_height.get())),
-                                )
+                                element
+                                    .child(div().flex_none().h(px(self.composer_lane_height.get())))
                             } else {
                                 let lane_height = self.composer_lane_height.clone();
                                 element.child(
@@ -534,8 +531,7 @@ impl Render for Waku {
                                         .child(
                                             canvas(
                                                 move |bounds, _, _| {
-                                                    lane_height
-                                                        .set(f32::from(bounds.size.height))
+                                                    lane_height.set(f32::from(bounds.size.height))
                                                 },
                                                 |_, _, _, _| (),
                                             )

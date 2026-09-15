@@ -2835,12 +2835,7 @@ impl Waku {
             })
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.sidebar_item_background))
-            .child(self.render_session_row_body(
-                session_id,
-                grouped_by_project,
-                shortcut_hint,
-                cx,
-            ))
+            .child(self.render_session_row_body(session_id, grouped_by_project, shortcut_hint, cx))
             .when(!renaming, |element| {
                 element
                     .track_focus(&row_focus)
@@ -3172,20 +3167,26 @@ impl Waku {
         } else {
             match session.status {
                 SessionStatus::Background => Some(
-                    icon("icons/hourglass.svg", 12.0, status_color(&theme, session.status))
-                        .into_any_element(),
+                    icon(
+                        "icons/hourglass.svg",
+                        12.0,
+                        status_color(&theme, session.status),
+                    )
+                    .into_any_element(),
                 ),
                 SessionStatus::Waiting => Some(
-                    icon("icons/alert.svg", 12.0, status_color(&theme, session.status))
-                        .into_any_element(),
+                    icon(
+                        "icons/alert.svg",
+                        12.0,
+                        status_color(&theme, session.status),
+                    )
+                    .into_any_element(),
                 ),
                 SessionStatus::Failed => Some(
                     icon("icons/x.svg", 12.0, status_color(&theme, session.status))
                         .into_any_element(),
                 ),
-                SessionStatus::Idle
-                    if self.state.unseen_completions.contains_key(&session_id) =>
-                {
+                SessionStatus::Idle if self.state.unseen_completions.contains_key(&session_id) => {
                     Some(
                         div()
                             .flex_none()
@@ -3223,9 +3224,7 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .opacity(0.0)
-            .group_hover(group_name.clone(), |style| {
-                style.w(px(20.0)).opacity(1.0)
-            })
+            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
             .focus_visible(|style| {
                 style
                     .w(px(20.0))
