@@ -268,6 +268,20 @@ impl Waku {
                 return;
             }
         };
+        // The local workspace ran in the project checkout; that path is what
+        // the resumed thread's context still names.
+        let checkout_path = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == session.project_id)
+                    .map(|project| project.path.clone())
+            });
         let rebound = self.state.session_mut(session_id).is_some_and(|session| {
             if !session.workspace.is_local() || session.is_busy() {
                 return false;
@@ -277,6 +291,11 @@ impl Waku {
                 name: created.name.clone(),
                 branch: None,
             };
+            // A session that never started has no recorded paths to correct;
+            // a started one's next prompt carries the move notice.
+            if session.has_started() {
+                session.workspace_moved_from = checkout_path;
+            }
             true
         });
         if !rebound {

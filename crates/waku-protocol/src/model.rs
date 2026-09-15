@@ -1103,6 +1103,12 @@ pub struct AgentSession {
     /// Local project checkout or an isolated Git worktree for this task.
     #[serde(default, skip_serializing_if = "SessionWorkspace::is_local")]
     pub workspace: SessionWorkspace,
+    /// The checkout the session ran in before moving into a worktree. While
+    /// `Some`, the next outbound prompt prepends a one-shot note that the
+    /// working directory changed — the resumed thread's context still names
+    /// the old checkout's paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_moved_from: Option<PathBuf>,
     pub provider: ProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -1209,6 +1215,7 @@ impl AgentSession {
             auto_title: None,
             project_id,
             workspace: SessionWorkspace::Local,
+            workspace_moved_from: None,
             provider,
             model: None,
             runtime_mode: RuntimeMode::FullAccess,
@@ -1248,6 +1255,7 @@ impl AgentSession {
             auto_title: self.auto_title.clone(),
             project_id: self.project_id,
             workspace: SessionWorkspace::Local,
+            workspace_moved_from: None,
             provider: self.provider,
             model: self.model.clone(),
             runtime_mode: RuntimeMode::default(),
@@ -1300,6 +1308,23 @@ impl AgentSession {
             || !self.turns.is_empty()
             || !self.messages.is_empty()
             || self.provider_cursor.is_some()
+    }
+
+    /// The one-shot working-directory note for the first prompt sent after a
+    /// move into a worktree, or `None` when nothing is pending — or when the
+    /// session is somehow not on a worktree, in which case the flag stays so
+    /// a later, valid send still announces the move it recorded.
+    pub fn take_workspace_move_notice(&mut self) -> Option<String> {
+        let to = self.workspace.path()?.to_path_buf();
+        let from = self.workspace_moved_from.take()?;
+        Some(format!(
+            "The working directory for this session moved to {}. The checkout \
+             it ran in before, {}, still exists but is now a stale copy — \
+             absolute paths recorded earlier in this conversation point \
+             there. Read and write files only under the new directory.",
+            to.display(),
+            from.display()
+        ))
     }
 
     /// Drops the loaded transcript so the session returns to its skeleton
@@ -4334,6 +4359,40 @@ mod tests {
         assert_eq!(session.display_title(), "My title");
         assert!(!session.set_title("   "));
         assert_eq!(session.display_title(), "My title");
+    }
+
+    #[test]
+    fn workspace_move_notice_fires_once_and_names_both_paths() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.workspace = SessionWorkspace::Worktree {
+            path: PathBuf::from("/tmp/waku-worktrees/task"),
+            name: "task".into(),
+            branch: None,
+        };
+        session.workspace_moved_from = Some(PathBuf::from("/tmp/waku"));
+
+        let notice = session.take_workspace_move_notice().unwrap();
+        assert!(notice.contains("/tmp/waku-worktrees/task"));
+        assert!(notice.contains("/tmp/waku"));
+        assert_eq!(session.workspace_moved_from, None);
+        assert_eq!(session.take_workspace_move_notice(), None);
+    }
+
+    #[test]
+    fn workspace_move_notice_waits_for_a_worktree() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.workspace_moved_from = Some(PathBuf::from("/tmp/waku"));
+
+        // Still bound to the local checkout: nothing to announce, and the
+        // pending flag survives for a later, valid send.
+        assert_eq!(session.take_workspace_move_notice(), None);
+        assert_eq!(
+            session.workspace_moved_from,
+            Some(PathBuf::from("/tmp/waku"))
+        );
+        assert_eq!(session.take_workspace_move_notice(), None);
     }
 
     #[test]

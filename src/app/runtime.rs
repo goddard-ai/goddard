@@ -3800,7 +3800,21 @@ impl Waku {
             .unwrap_or((None, None));
         let mut failed_to_start = false;
         match driver {
-            Ok(driver) => driver.prompt(driver_prompt, turn_id, message_id, submission.hidden),
+            Ok(driver) => {
+                // The first prompt after a move into a worktree warns the
+                // resumed thread that its recorded paths now name a stale
+                // checkout. Provider-facing only — the transcript keeps the
+                // user's text.
+                let driver_prompt = match self
+                    .state
+                    .session_mut(session_id)
+                    .and_then(AgentSession::take_workspace_move_notice)
+                {
+                    Some(notice) => format!("{notice}\n\n{driver_prompt}"),
+                    None => driver_prompt,
+                };
+                driver.prompt(driver_prompt, turn_id, message_id, submission.hidden);
+            }
             Err(error) => {
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);

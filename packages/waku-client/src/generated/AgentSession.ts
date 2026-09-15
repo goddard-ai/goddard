@@ -27,7 +27,14 @@ auto_title?: string | null, project_id: string,
 /**
  * Local project checkout or an isolated Git worktree for this task.
  */
-workspace?: SessionWorkspace, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode, reasoning_effort?: string | null, service_tier?: string | null,
+workspace?: SessionWorkspace,
+/**
+ * The checkout the session ran in before moving into a worktree. While
+ * `Some`, the next outbound prompt prepends a one-shot note that the
+ * working directory changed — the resumed thread's context still names
+ * the old checkout's paths.
+ */
+workspace_moved_from?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode, reasoning_effort?: string | null, service_tier?: string | null,
 /**
  * Selected context window, when the provider exposes more than one.
  */

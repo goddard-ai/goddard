@@ -1575,6 +1575,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         auto_title,
         project_id: Uuid::parse_str(&project_id).ok()?,
         workspace: SessionWorkspace::Local,
+        workspace_moved_from: None,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
         // Hydration replaces these; the list never reads them.
