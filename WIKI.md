@@ -11,6 +11,9 @@ Cursor, OpenCode, and nine other agent CLIs** side by side from one interface �
 each task gets a real transcript, a diff view, a terminal, a file browser, and
 Git tooling, while the agent CLI does the actual work underneath.
 
+(If you knew it as **Waku** — same app, renamed. That's why download URLs say
+`waku.sh` and internal pieces are named `waku-*`.)
+
 It is written in Rust on top of [GPUI](https://github.com/zed-industries/zed)
 (the framework that powers the Zed editor), which is why it stays smooth on
 long transcripts and high-refresh displays where Electron and web clients tend
@@ -57,6 +60,45 @@ Cursor, or other agent subscription is what you pay with.
   runs agents on your machine or a daemon host you control).
 - Rely on a specific agent's IDE extension features (inline completions in an
   editor, etc.) — Goddard is a task-and-transcript app, not a code editor.
+
+## Recently shipped
+
+The app is under heavy development — the last four days alone landed ~220
+commits. Highlights, grouped by area:
+
+- **GitHub:** an in-app pull-request and issue browser per project, PR state
+  with check/review status on sidebar rows, and starting a task straight from
+  a PR or issue (including "fix failing checks").
+- **Git and worktrees:** a Git panel (stage, commit, push, sync with
+  rebase-or-merge), moving a local task into a named worktree, worktree state
+  preserved across archiving, and a sync notice when a new task's checkout
+  trails upstream.
+- **Terminals:** a sidebar Terminals group with repo-named rows, live cwd and
+  command status from shell integration, ⌘J focus, ⌘⇧K scrollback clear, a
+  separate terminal font size, and ⌘K palette access even from the terminal.
+- **Composer:** Markdown highlighting with list continuation and ordered-list
+  renumbering, file drops anywhere in the session column, transcript
+  annotations (⌘L or ⌥-click), an empty-prompt Continue for interrupted
+  turns, and per-row queued follow-ups.
+- **Navigation:** Big Picture (⌘0), ⌘1–9 sidebar jumps with hold-to-reveal
+  chips, Ctrl+Tab task switching with status glyphs, a ⌘N project switcher in
+  New Task drafts, ⌘⌥-arrow turn navigation, ⌘D to the latest unseen
+  completion, ⌘⇧D mark-unread-and-next, and optional three-finger swipe.
+- **Transcript:** clipped long prompts with Show more, shift-click selection
+  extension, changed-file cards that open files and preview diffs on hover,
+  and "Annotation N" citation resolution.
+- **Customization:** fourteen new theme palettes (Gruvbox, Everforest,
+  Kanagawa, Zenburn, Poimandres, GitHub light/dark, Dracula, Rosé Pine
+  Dawn/Moon, Kansō Zen/Pearl), split light/dark theme slots with a
+  match-system toggle, UI and code font pickers, a completion-sound picker
+  with audition and volume, and a sidebar-transparency toggle.
+- **Providers and daemon:** Devin CLI support, install/sign-in actions on the
+  Providers page, the `waku-agent` agent-tools setting, and daemon resilience
+  (unresponsive-daemon detection, provider-process guarding, automatic
+  remote-session reconnect).
+- **Polish:** menus and dialogs that reveal from their anchor, shortcut hints
+  on tooltips and menu items, an in-app shortcut cheatsheet, smoothed
+  (squircle) corners throughout, and ⌘H to hide on macOS.
 
 ## Getting started
 
@@ -147,27 +189,37 @@ days.
 
 When creating a task you choose where it works: the project's ordinary
 checkout (**Local**) or a **new Git worktree** created from the default branch
-or any ref. Worktree tasks get isolated working directories, so parallel tasks
-never collide over the same files. An existing local task can be **moved to a
-worktree** later, carrying its uncommitted state with it.
+or any ref. Worktree tasks get isolated working directories — named after
+random adjective-noun pairs and placed beside the repository — so parallel
+tasks never collide over the same files. Goddard remembers your last
+workspace mode and worktree branch per project, warns in the new-task area
+when a checkout trails its upstream (with a one-click sync), and recreates a
+worktree that went missing on submit. An existing local task can be **moved
+to a worktree** later, carrying its uncommitted state with it — and the agent
+is told its working directory changed.
 
 ### The window layout
 
 - **Sidebar (left):** projects and tasks, grouped by project or date, ordered
   by last-updated or last-created, with collapsible sections. Task rows show
   live status (working, waiting for input, waiting for background tasks,
-  failed, unread), linked pull-request state with check/review status, and
-  shortcut tags (⌘1–⌘9) when the modifier is held.
+  failed, unread), dirty/unpushed Git markers, a worktree icon when the task
+  runs in one, linked pull-request state with check/review status, and
+  shortcut tags (⌘1–⌘9) when the modifier is held. Hover a row to archive;
+  double-click its title to rename.
 - **Transcript (center):** the conversation — your messages, agent replies
   rendered as Markdown, and every tool call as a normalized activity row
   (commands, file edits, reads, searches, plans, web browsing, subagents).
 - **Composer (bottom):** where you type prompts.
 - **Right panel:** tabbed surfaces — Review (diff), Files, Terminal, Browser —
-  plus panels for background work and environment info.
+  plus panels for background work and environment info. Any tab can maximize
+  to fill the window, and Markdown files get a fullscreen reading mode.
 - **Big Picture (⌘0):** an overlay of the tasks most worth a glance — waiting
   on input, unread completions, running work — each with a live tail of its
   transcript and a docked composer you can reply from without leaving the
   overlay.
+- An **unseen-completion bell** in the top bar collects finished turns you
+  haven't looked at yet.
 
 ## Working with agents
 
@@ -188,19 +240,29 @@ worktree** later, carrying its uncommitted state with it.
 - **Slash commands** — provider-native commands and skills the agent CLI
   advertises (invoked with the provider's own syntax), plus Goddard's own
   (`/resume`, `/goal`, `/fast`).
-- **Attachments** — drop or paste files, folders, and images onto the
-  composer; they're uploaded to the daemon and shown as chips.
+- **Attachments** — drop or paste files, folders, and images anywhere in the
+  session column (not just the composer); they're uploaded to the daemon and
+  shown as chips.
 - **Drafts** — unsent composer text (and its attachments) is preserved per
-  task, so switching tasks never loses a half-typed prompt.
+  task, so switching tasks never loses a half-typed prompt. Typing with
+  nothing focused lands in the composer automatically.
+- **Markdown-aware editing** — the composer highlights Markdown, continues
+  lists on Enter, renumbers ordered lists, and lets Backspace delete an empty
+  list item.
+- **Continue** — if a turn fails or was interrupted, an empty composer offers
+  to continue the session without typing a prompt.
 - **Annotations** — select text inside an agent message and choose "Add to
-  chat" to pin a highlighted comment on the passage. The composer shows an
-  "N annotations" chip; your next message carries the quoted passages and
-  comments to the agent.
+  chat" (⌘L), or ⌥-click a transcript line, to pin a highlighted comment on
+  the passage. The composer shows an "N annotations" chip; your next message
+  carries the quoted passages and comments to the agent, and the sent bubble
+  echoes them. References like "Annotation 1" inside a comment resolve into
+  hover citations. A draft made only of annotations still sends.
 
 ### Models and effort
 
 The model picker lists every model the provider reports, with a **Favorites**
-tab for starred models. Where the provider exposes them, you also get:
+tab for starred models — and it remembers which tab you used last. Where the
+provider exposes them, you also get:
 
 - **Reasoning effort** — None through Max, including provider-specific tiers
   like Ultracode.
@@ -277,8 +339,11 @@ stalled, usage-limited, budget-exhausted, and complete.
   time.
 - **Find in page** (Cmd/Ctrl+F) searches the whole transcript with match-case,
   whole-word, and regex toggles.
+- Long user prompts are clipped with a **Show more** control instead of
+  scrolling; Shift-click extends a text selection.
 - Each response keeps a changed-files summary and a **Review** action that
-  opens its diff.
+  opens its diff — files in the summary open directly, and hovering one
+  previews its diff inline.
 - Every user message supports edit, and every response supports fork/revert —
   the transcript is the control surface, not just a log.
 
@@ -328,9 +393,11 @@ multiple per task, plus global terminals in the sidebar's Terminals group
 (pinnable). macOS/Linux run your login shell; Windows prefers PowerShell 7,
 falls back to Windows PowerShell, then `COMSPEC`. A shell-integration script
 sourced into each PTY reports the live working directory and per-command
-boundaries, so tabs track `cd` and show command status icons. Scrollback
-clear, terminal font sizing, and copy/paste that doesn't steal Ctrl+C from
-the shell (Ctrl+Shift+C/V on Windows).
+boundaries, so sidebar rows are named after the repo (falling back to the
+shell), track `cd`, show last-activity times and command status icons, and
+close themselves when the shell exits. Scrollback clear, terminal font
+sizing, and copy/paste that doesn't steal Ctrl+C from the shell
+(Ctrl+Shift+C/V on Windows).
 
 ### Embedded browser
 
@@ -356,8 +423,11 @@ Goddard is designed to be driven without a mouse:
 - **History navigation:** back/forward across where you've been, plus
   three-finger trackpad swipe between tasks on macOS (optional setting).
 - **Find in transcript:** Cmd/Ctrl+F.
-- The full cheatsheet lives in the app — the keyboard button in the sidebar
-  opens a shortcuts dialog whose chords are resolved from the live keymap.
+- Shortcuts are surfaced where you need them: menus, tooltips on composer
+  selectors and sidebar actions, and the command palette all show their
+  chords. The full cheatsheet lives in the app — the keyboard button beside
+  the sidebar's settings icon opens a shortcuts dialog resolved from the live
+  keymap.
 
 ## Customization
 
@@ -396,11 +466,12 @@ enabled, disabled, revealed, or deleted, and are invoked in the composer as
 ## Custom commands
 
 Settings → Commands defines named shell scripts that appear in the command
-palette. Each runs in a new terminal tab in the current task's directory,
-inside an interactive shell (so aliases, pipes, and interactive programs work),
-with an optional icon, a custom shell, and a close-on-success option. Agents
-can add commands too (a daemon setting, on by default; agent-added commands are
-badged).
+palette (including a "New custom command" palette action). Each runs in a new
+terminal tab in the current task's directory, inside an interactive shell (so
+aliases, pipes, and interactive programs work), with an optional icon, a
+custom shell, and a close-on-success option. Runs report through a toast that
+mirrors the command's output tail. Agents can add commands too (a daemon
+setting, on by default; agent-added commands are badged).
 
 ## Usage and cost tracking
 
@@ -416,8 +487,12 @@ badged).
 ## Notifications
 
 When a task you're not viewing finishes its turn, Goddard can play a
-completion sound and posts a native system notification; clicking it opens the
-task. The sidebar marks unseen completions as unread until you look at them.
+completion sound — the picker lets you audition each option (including a
+Retro chime) and set its volume — and posts a native system notification;
+clicking it opens the task. The sound stays quiet while a follow-up is still
+queued, since the task isn't done waiting on you. The sidebar marks unseen
+completions as unread until you look at them, and those unread stamps survive
+restarts.
 
 ## Architecture: daemon, web, and mobile
 
@@ -443,6 +518,11 @@ split is what makes the other clients possible:
   host, VM, container): files, diffs, Git, skills, usage, and attachments all
   work over RPC. The local folder picker and PTY terminal are the current
   exceptions until the protocol gains daemon-host equivalents.
+- The connection is built to fail well: an unresponsive daemon is detected and
+  retried with backoff, remote sessions reconnect automatically after
+  interruptions, provider processes are guarded against daemon death, and
+  daemon failures surface in the UI where they would otherwise cause silent
+  damage.
 
 ## Privacy and data storage
 
