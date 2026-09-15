@@ -11,6 +11,7 @@ pub mod scrollbar;
 pub mod shortcut;
 pub mod slider;
 pub mod text_field;
+pub mod thinking;
 pub mod tooltip;
 
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};

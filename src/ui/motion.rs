@@ -133,26 +133,32 @@ fn pulse_lease_with_stride(view: EntityId, stride: u32, cx: &mut App) {
     .detach();
 }
 
-/// Phase `[0,1)` of a repeating cycle of `period`, plus a lease keeping `view`
+/// Seconds since the shared clock's epoch, plus a lease keeping `view`
 /// re-rendering while its loader stays mounted. Under reduce-motion this is a
-/// constant 0 — the cycle's first frame, matching what a repeating
+/// constant 0 — every animation's first frame, matching what a repeating
 /// `with_animation` held — and nothing is scheduled.
-fn pulse_phase(period: Duration, stride: u32, view: EntityId, cx: &mut App) -> f32 {
+fn pulse_elapsed_secs(stride: u32, view: EntityId, cx: &mut App) -> f32 {
     if cx.reduce_motion() {
         return 0.0;
     }
     let clock = cx.default_global::<PulseClock>();
-    let phase = (clock.epoch.elapsed().as_secs_f32() / period.as_secs_f32()).fract();
+    let elapsed = clock.epoch.elapsed().as_secs_f32();
     pulse_lease_with_stride(view, stride, cx);
-    phase
+    elapsed
 }
 
 /// A loader element styled from the shared clock's phase. Resolving the phase
 /// is deferred to render, where the owning view is known, so call sites need
 /// neither a `Window` nor an `EntityId` in scope.
 pub fn pulse(period: Duration, render: impl FnOnce(f32) -> AnyElement + 'static) -> Pulse {
+    let period = period.as_secs_f32();
+    pulse_elapsed(move |elapsed| render((elapsed / period).fract()))
+}
+
+/// A loader element styled from the shared clock's elapsed seconds — for
+/// animations layering several periods that a single phase can't express.
+pub fn pulse_elapsed(render: impl FnOnce(f32) -> AnyElement + 'static) -> Pulse {
     Pulse {
-        period,
         stride: PULSE_STRIDE,
         render: Box::new(render),
     }
@@ -182,7 +188,6 @@ fn spin_with(icon: Svg, period: Duration, stride: u32) -> AnyElement {
 
 #[derive(IntoElement)]
 pub struct Pulse {
-    period: Duration,
     stride: u32,
     render: Box<dyn FnOnce(f32) -> AnyElement>,
 }
@@ -200,8 +205,8 @@ impl Pulse {
 
 impl RenderOnce for Pulse {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let phase = pulse_phase(self.period, self.stride, window.current_view(), cx);
-        (self.render)(phase)
+        let elapsed = pulse_elapsed_secs(self.stride, window.current_view(), cx);
+        (self.render)(elapsed)
     }
 }
 

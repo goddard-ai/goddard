@@ -2392,7 +2392,7 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The live turn's closing row: pulsing dots and "Working for Ns". It is
+    /// The live turn's closing row: the thinking mark and "Working for Ns". It is
     /// on screen from the moment the prompt lands — before the provider has
     /// produced a single chunk — and stays below whatever streams in until
     /// the turn settles into its "Worked for N" fold.
@@ -2417,7 +2417,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .child(working_wave_dots(theme.text_tertiary))
+            .child(thinking::goddard_thinking(theme.text_tertiary))
             .child(
                 div()
                     .text_size(sp(13.5))
