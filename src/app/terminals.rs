@@ -51,7 +51,7 @@ impl Waku {
 
     /// Drop every trace of a terminal: the view entity, its launch state,
     /// the group record, and any selection pointing at it.
-    pub(super) fn drop_terminal(&mut self, terminal_id: Uuid) {
+    pub(super) fn drop_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
         self.right_panel_terminals.remove(&terminal_id);
         self.right_panel_terminal_commands.remove(&terminal_id);
         self.custom_command_runs.remove(&terminal_id);
@@ -62,6 +62,12 @@ impl Waku {
         }
         if self.last_visible_terminal == Some(terminal_id) {
             self.last_visible_terminal = None;
+        }
+        if self.terminal_order.is_empty() {
+            // Closing the last terminal folds the group — expanding an
+            // empty group is how a new global terminal is made, so a row of
+            // nothing adds nothing.
+            self.set_sidebar_group_collapsed(SidebarGroup::Terminals, true, cx);
         }
         self.sidebar_rows_fingerprint.set(None);
     }
@@ -311,7 +317,7 @@ impl Waku {
             });
             break;
         }
-        self.drop_terminal(terminal_id);
+        self.drop_terminal(terminal_id, cx);
         cx.notify();
     }
 

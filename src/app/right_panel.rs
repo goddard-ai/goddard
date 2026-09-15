@@ -1831,7 +1831,11 @@ impl Waku {
         }
     }
 
-    pub(super) fn remove_right_panel_session_state(&mut self, session_id: Uuid) {
+    pub(super) fn remove_right_panel_session_state(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
         let state = if self.state.selected_session == Some(session_id) {
             let state = self.take_active_right_panel_state();
             self.replace_active_right_panel_state(RightPanelSessionState::empty(false));
@@ -1842,7 +1846,7 @@ impl Waku {
         if let Some(state) = state {
             for surface in &state.surfaces {
                 if let Some(terminal_id) = surface.terminal_id() {
-                    self.drop_terminal(terminal_id);
+                    self.drop_terminal(terminal_id, cx);
                 }
                 if let Some(browser_id) = surface.browser_id() {
                     self.right_panel_browsers.remove(&browser_id);
@@ -2180,7 +2184,7 @@ impl Waku {
             return;
         }
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
-            self.drop_terminal(terminal_id);
+            self.drop_terminal(terminal_id, cx);
         }
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
             self.right_panel_browsers.remove(&browser_id);

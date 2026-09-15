@@ -1185,7 +1185,7 @@ impl Waku {
             self.runtime_attach_misses.remove(session_id);
             self.runtimes.remove(session_id);
             self.background_work.remove(session_id);
-            self.remove_right_panel_session_state(*session_id);
+            self.remove_right_panel_session_state(*session_id, cx);
             self.task_switcher.remove(*session_id);
             self.project_switcher.session_removed(*session_id);
             self.transcript_scroll_positions.remove(session_id);
