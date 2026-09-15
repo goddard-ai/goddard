@@ -22,11 +22,11 @@ use anyhow::{Context as _, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
     App, AppContext, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable,
-    FontFallbacks, FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement, KeyDownEvent,
-    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta,
-    ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText, Subscription, Task,
-    TextRun, UnderlineStyle, Window, canvas, div, font, px, rgb,
+    FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement, IntoElement,
+    KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render,
+    ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
+    Subscription, Task, TextRun, UnderlineStyle, Window, canvas, div, font, px, rgb,
 };
 use parking_lot::Mutex;
 
@@ -36,8 +36,31 @@ use crate::ui::scrollbar::{self, ScrollbarState};
 
 /// Fallback advance width, used only until the font has been measured.
 const TERMINAL_CELL_WIDTH: f32 = 7.8;
+/// Startup row height — render replaces it with the scaled value below.
 const TERMINAL_CELL_HEIGHT: f32 = 18.0;
-const TERMINAL_FONT_SIZE: f32 = 12.5;
+/// Rows lead the font at the ratio the shipped 12.5px / 18px pairing set.
+const TERMINAL_FONT_LEADING: f32 = TERMINAL_CELL_HEIGHT / 12.5;
+
+fn terminal_cell_height(font_size: f32) -> f32 {
+    font_size * TERMINAL_FONT_LEADING
+}
+
+/// The resolved terminal font size, published by the app when settings load
+/// or change.
+struct ActiveTerminalFontSize(f32);
+impl Global for ActiveTerminalFontSize {}
+
+/// The size terminal views draw at — the code font's default until
+/// `install_font_size` runs.
+pub fn font_size(cx: &App) -> f32 {
+    cx.try_global::<ActiveTerminalFontSize>()
+        .map_or(crate::persistence::DEFAULT_CODE_FONT_SIZE, |size| size.0)
+}
+
+/// Publish the resolved terminal font size so every terminal view tracks it.
+pub fn install_font_size(size: f32, cx: &mut App) {
+    cx.set_global(ActiveTerminalFontSize(size));
+}
 
 #[inline]
 fn primary_modifier_pressed(modifiers: &Modifiers) -> bool {
@@ -211,6 +234,9 @@ struct TerminalSession {
     ui_events: Receiver<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
     grid_size: (usize, usize),
+    /// Last pixel cell size reported to the PTY — drives pointer and scroll
+    /// math so it stays in step with the drawn grid.
+    cell_size: (f32, f32),
     palette: Arc<Mutex<Theme>>,
     url_regex: RegexSearch,
 }
@@ -309,6 +335,7 @@ impl TerminalSession {
             ui_events,
             window_size: shared_window_size,
             grid_size: (columns, rows),
+            cell_size: (TERMINAL_CELL_WIDTH, TERMINAL_CELL_HEIGHT),
             palette,
             url_regex,
         })
@@ -321,21 +348,22 @@ impl TerminalSession {
         }
     }
 
-    fn resize(&mut self, columns: usize, rows: usize, cell_width: f32) {
+    fn resize(&mut self, columns: usize, rows: usize, cell_width: f32, cell_height: f32) {
         let columns = columns.max(TERMINAL_MIN_COLUMNS);
         let rows = rows.max(TERMINAL_MIN_ROWS);
-        if self.grid_size == (columns, rows) {
+        if self.grid_size == (columns, rows) && self.cell_size == (cell_width, cell_height) {
             return;
         }
 
         self.grid_size = (columns, rows);
+        self.cell_size = (cell_width, cell_height);
         let dimensions = TerminalDimensions { columns, rows };
         self.term.lock().resize(dimensions);
         let size = WindowSize {
             num_lines: rows.min(u16::MAX as usize) as u16,
             num_cols: columns.min(u16::MAX as usize) as u16,
             cell_width: cell_width.round() as u16,
-            cell_height: TERMINAL_CELL_HEIGHT.round() as u16,
+            cell_height: cell_height.round() as u16,
         };
         *self.window_size.lock() = size;
         let _ = self.sender.send(Msg::Resize(size));
@@ -505,28 +533,29 @@ struct TerminalScrollbarTarget {
     term: Arc<FairMutex<Term<TerminalEventProxy>>>,
     dirty: Arc<AtomicBool>,
     viewport_rows: usize,
+    cell_height: f32,
 }
 
 impl scrollbar::Scrollable for TerminalScrollbarTarget {
     fn viewport_height(&self) -> Pixels {
-        px(self.viewport_rows as f32 * TERMINAL_CELL_HEIGHT)
+        px(self.viewport_rows as f32 * self.cell_height)
     }
 
     fn max_offset(&self) -> Pixels {
-        px(self.term.lock().grid().history_size() as f32 * TERMINAL_CELL_HEIGHT)
+        px(self.term.lock().grid().history_size() as f32 * self.cell_height)
     }
 
     fn scrolled(&self) -> Pixels {
         let term = self.term.lock();
         let grid = term.grid();
         let lines_above = grid.history_size().saturating_sub(grid.display_offset());
-        px(lines_above as f32 * TERMINAL_CELL_HEIGHT)
+        px(lines_above as f32 * self.cell_height)
     }
 
     fn scroll_to(&self, offset: Pixels) {
         let mut term = self.term.lock();
         let target_offset = (term.grid().history_size() as f32
-            - f32::from(offset) / TERMINAL_CELL_HEIGHT)
+            - f32::from(offset) / self.cell_height)
             .round()
             .max(0.0) as usize;
         let delta = target_offset as i32 - term.grid().display_offset() as i32;
@@ -701,9 +730,9 @@ pub struct TerminalView {
     panel_width: f32,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
-    /// Keyed by family so a code-font change re-measures instead of wrapping
-    /// the grid at the old face's advance.
-    measured_cell_width: Option<(SharedString, f32)>,
+    /// Keyed by family and size so a font change re-measures instead of
+    /// wrapping the grid at the old face's advance.
+    measured_cell_width: Option<(SharedString, f32, f32)>,
     scrollbar_state: Rc<ScrollbarState>,
     grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     selecting: bool,
@@ -904,7 +933,7 @@ impl TerminalView {
     fn cell_width(&self) -> f32 {
         self.measured_cell_width
             .as_ref()
-            .map(|(_, width)| *width)
+            .map(|(_, _, width)| *width)
             .unwrap_or(TERMINAL_CELL_WIDTH)
     }
 
@@ -920,6 +949,7 @@ impl TerminalView {
             bounds,
             position,
             self.cell_width(),
+            session.cell_size.1,
             session.grid_size.0,
             session.grid_size.1,
             display_offset,
@@ -1114,7 +1144,7 @@ impl TerminalView {
             return;
         };
         let delta = match event.delta {
-            ScrollDelta::Pixels(delta) => f32::from(delta.y) / TERMINAL_CELL_HEIGHT,
+            ScrollDelta::Pixels(delta) => f32::from(delta.y) / session.cell_size.1,
             ScrollDelta::Lines(delta) => delta.y,
         };
         self.scroll_accumulator += delta;
@@ -1183,23 +1213,25 @@ impl Render for TerminalView {
         // The rows are laid out by `StyledText` at the font's own advance, so
         // the grid must be sized from that same measured advance or the text
         // wraps short of (or past) the panel edge.
+        let font_size = font_size(cx);
+        let cell_height = terminal_cell_height(font_size);
         let code_family = crate::fonts::current(cx).code;
         let cell_width = match &self.measured_cell_width {
-            Some((family, width)) if *family == code_family => *width,
+            Some((family, size, width)) if *family == code_family && *size == font_size => *width,
             _ => {
                 let text_system = cx.text_system();
                 let font_id = text_system.resolve_font(&terminal_font(&code_family));
                 let width = text_system
-                    .advance(font_id, px(TERMINAL_FONT_SIZE), 'm')
+                    .advance(font_id, px(font_size), 'm')
                     .map_or(TERMINAL_CELL_WIDTH, |advance| f32::from(advance.width));
-                self.measured_cell_width = Some((code_family.clone(), width));
+                self.measured_cell_width = Some((code_family.clone(), font_size, width));
                 width
             }
         };
         let columns = ((panel_width - TERMINAL_PADDING_X * 2.0) / cell_width)
             .floor()
             .max(TERMINAL_MIN_COLUMNS as f32) as usize;
-        let rows = ((body_height - TERMINAL_PADDING_Y * 2.0) / TERMINAL_CELL_HEIGHT)
+        let rows = ((body_height - TERMINAL_PADDING_Y * 2.0) / cell_height)
             .floor()
             .max(TERMINAL_MIN_ROWS as f32) as usize;
 
@@ -1207,7 +1239,7 @@ impl Render for TerminalView {
         let cursor_style =
             terminal_cursor_style(terminal_focused, self.cursor_blink.read(cx).visible());
         if let Some(session) = self.session.as_mut() {
-            session.resize(columns, rows, cell_width);
+            session.resize(columns, rows, cell_width, cell_height);
         }
         if self.selecting {
             self.set_hovered_link(None);
@@ -1290,12 +1322,12 @@ impl Render for TerminalView {
                     .collect::<Vec<_>>();
                 screen = screen.child(
                     div()
-                        .h(px(TERMINAL_CELL_HEIGHT))
+                        .h(px(cell_height))
                         .flex_none()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .text_size(px(TERMINAL_FONT_SIZE))
-                        .line_height(px(TERMINAL_CELL_HEIGHT))
+                        .text_size(px(font_size))
+                        .line_height(px(cell_height))
                         .child(StyledText::new(row.text).with_runs(runs)),
                 );
             }
@@ -1304,9 +1336,9 @@ impl Render for TerminalView {
                     div()
                         .absolute()
                         .left(px(column as f32 * cell_width))
-                        .top(px(row as f32 * TERMINAL_CELL_HEIGHT))
+                        .top(px(row as f32 * cell_height))
                         .w(px(cell_width))
-                        .h(px(TERMINAL_CELL_HEIGHT))
+                        .h(px(cell_height))
                         .border_1()
                         .border_color(theme.text),
                 );
@@ -1392,6 +1424,7 @@ impl Render for TerminalView {
                     term: session.term.clone(),
                     dirty: session.dirty.clone(),
                     viewport_rows: session.grid_size.1,
+                    cell_height,
                 },
                 &self.scrollbar_state,
             )
@@ -1480,6 +1513,7 @@ fn terminal_grid_point(
     bounds: Bounds<Pixels>,
     position: Point<Pixels>,
     cell_width: f32,
+    cell_height: f32,
     columns: usize,
     rows: usize,
     display_offset: usize,
@@ -1492,11 +1526,11 @@ fn terminal_grid_point(
     let x = f32::from(position.x - bounds.origin.x);
     let y = f32::from(position.y - bounds.origin.y);
     let max_x = columns as f32 * cell_width;
-    let max_y = rows as f32 * TERMINAL_CELL_HEIGHT;
+    let max_y = rows as f32 * cell_height;
     let x = x.clamp(0.0, max_x);
     let y = y.clamp(0.0, max_y);
     let column = ((x / cell_width).floor() as usize).min(columns - 1);
-    let viewport_row = ((y / TERMINAL_CELL_HEIGHT).floor() as usize).min(rows - 1) as i32;
+    let viewport_row = ((y / cell_height).floor() as usize).min(rows - 1) as i32;
     let side = if x >= max_x || x % cell_width >= cell_width / 2.0 {
         Side::Right
     } else {
@@ -2129,7 +2163,16 @@ mod tests {
         );
 
         assert_eq!(
-            terminal_grid_point(bounds, position, TERMINAL_CELL_WIDTH, 10, 4, 3, false),
+            terminal_grid_point(
+                bounds,
+                position,
+                TERMINAL_CELL_WIDTH,
+                TERMINAL_CELL_HEIGHT,
+                10,
+                4,
+                3,
+                false
+            ),
             Some((TerminalPoint::new(Line(-2), Column(2)), Side::Right))
         );
         assert_eq!(
@@ -2137,6 +2180,7 @@ mod tests {
                 bounds,
                 point(px(0.0), px(0.0)),
                 TERMINAL_CELL_WIDTH,
+                TERMINAL_CELL_HEIGHT,
                 10,
                 4,
                 3,
@@ -2155,6 +2199,7 @@ mod tests {
                 bounds,
                 point(px(500.0), px(500.0)),
                 TERMINAL_CELL_WIDTH,
+                TERMINAL_CELL_HEIGHT,
                 10,
                 4,
                 0,
@@ -2167,6 +2212,7 @@ mod tests {
                 bounds,
                 point(px(-50.0), px(-50.0)),
                 TERMINAL_CELL_WIDTH,
+                TERMINAL_CELL_HEIGHT,
                 10,
                 4,
                 3,

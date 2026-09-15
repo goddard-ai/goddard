@@ -143,6 +143,30 @@ pub struct SelectSidebarSession {
     pub index: usize,
 }
 
+/// Step a surface's font size one preset in `direction`. The same ⌘= / ⌘-
+/// chords bind it once per key context — Terminal, the code surfaces, or
+/// everywhere else for the interface — so the chord resizes whatever the
+/// user is looking at.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct AdjustFontSize {
+    pub target: FontSizeTarget,
+    pub direction: FontSizeDirection,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum FontSizeTarget {
+    Ui,
+    Code,
+    Terminal,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum FontSizeDirection {
+    Increase,
+    Decrease,
+}
+
 const DEFAULT_WINDOW_WIDTH: f32 = 1380.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 880.0;
 const MIN_WINDOW_WIDTH: f32 = 980.0;
@@ -369,6 +393,84 @@ pub fn run() {
                 KeyBinding::new("secondary-shift-t", ToggleWorkspace, None),
                 KeyBinding::new("secondary-u", ToggleUsagePanel, None),
                 KeyBinding::new("secondary-s", SaveFile, None),
+                // Font-size zoom follows focus: in the terminal it sizes the
+                // terminal, on a code surface the code setting, and anywhere
+                // else the interface. `secondary-=` covers ⌘= while
+                // `secondary-shift-=` catches the ⌘+ spelling on layouts
+                // where + is shift-=.
+                KeyBinding::new(
+                    "secondary-=",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Terminal,
+                        direction: FontSizeDirection::Increase,
+                    },
+                    Some("Terminal"),
+                ),
+                KeyBinding::new(
+                    "secondary-shift-=",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Terminal,
+                        direction: FontSizeDirection::Increase,
+                    },
+                    Some("Terminal"),
+                ),
+                KeyBinding::new(
+                    "secondary--",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Terminal,
+                        direction: FontSizeDirection::Decrease,
+                    },
+                    Some("Terminal"),
+                ),
+                KeyBinding::new(
+                    "secondary-=",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Code,
+                        direction: FontSizeDirection::Increase,
+                    },
+                    Some("ReviewDiff || FileEditorPane"),
+                ),
+                KeyBinding::new(
+                    "secondary-shift-=",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Code,
+                        direction: FontSizeDirection::Increase,
+                    },
+                    Some("ReviewDiff || FileEditorPane"),
+                ),
+                KeyBinding::new(
+                    "secondary--",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Code,
+                        direction: FontSizeDirection::Decrease,
+                    },
+                    Some("ReviewDiff || FileEditorPane"),
+                ),
+                // The browser webview keeps ⌘± for its own page zoom.
+                KeyBinding::new(
+                    "secondary-=",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Ui,
+                        direction: FontSizeDirection::Increase,
+                    },
+                    Some("!Browser"),
+                ),
+                KeyBinding::new(
+                    "secondary-shift-=",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Ui,
+                        direction: FontSizeDirection::Increase,
+                    },
+                    Some("!Browser"),
+                ),
+                KeyBinding::new(
+                    "secondary--",
+                    AdjustFontSize {
+                        target: FontSizeTarget::Ui,
+                        direction: FontSizeDirection::Decrease,
+                    },
+                    Some("!Browser"),
+                ),
                 KeyBinding::new("escape", CancelTurn, Some("Waku")),
                 KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Waku")),
                 KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Waku")),

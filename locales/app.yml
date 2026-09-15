@@ -475,6 +475,10 @@ settings.code_font_size:
   en: Code font size
 settings.code_font_size_description:
   en: Text size in the file editor, diffs, code blocks, and tool output
+settings.terminal_font_size:
+  en: Terminal font size
+settings.terminal_font_size_description:
+  en: Text size in the integrated terminal. Follows the code font size while they match
 settings.render_math:
   en: Render math expressions
 settings.render_math_description:

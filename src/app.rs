@@ -2289,6 +2289,7 @@ impl Waku {
             state.code_font_family.as_deref(),
             cx,
         );
+        crate::terminal::install_font_size(state.terminal_font_size(), cx);
         let analytics = crate::analytics::Analytics::new(
             state.language.locale(),
             state.analytics_id,

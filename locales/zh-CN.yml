@@ -239,6 +239,8 @@ settings.ui_font_size: 界面字号
 settings.ui_font_size_description: 整个界面与消息的文字大小
 settings.code_font_size: 代码字号
 settings.code_font_size_description: 文件编辑器、差分视图、代码块与工具输出的文字大小
+settings.terminal_font_size: 终端字号
+settings.terminal_font_size_description: 内置终端的文字大小。与代码字号相同时随之变化
 settings.render_math: 渲染数学公式
 settings.render_math_description: 在 Markdown 中显示排版后的公式。关闭后显示 LaTeX 源码。
 settings.markdown_preview: 预览 Markdown 文件

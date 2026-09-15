@@ -3965,6 +3965,10 @@ impl Waku {
             .relative()
             .flex()
             .flex_col()
+            // Anything focusable inside the review surface — the file tree,
+            // its filter field, the toolbar controls — resolves here, so the
+            // ⌘± chords know to move the code font size.
+            .key_context("ReviewDiff")
             .child(md::render::frame_reset(
                 self.right_panel_diff_selection.clone(),
             ))

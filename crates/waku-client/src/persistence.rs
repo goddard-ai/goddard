@@ -313,6 +313,12 @@ pub struct AppSettings {
     /// and tool output — in pixels. Hand-edited values are clamped when
     /// applied.
     pub code_font_size: f32,
+    /// Text size for the integrated terminal, in pixels. `None` — and any
+    /// value equal to `code_font_size` — follows the code size; the terminal
+    /// keeps its own size only once the two differ. Hand-edited values are
+    /// clamped when applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_font_size: Option<f32>,
     /// Family name for the interface face: chrome and markdown prose.
     /// `None` keeps the platform's system UI font.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -362,6 +368,7 @@ impl Default for AppSettings {
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
+            terminal_font_size: None,
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
@@ -398,6 +405,12 @@ pub fn sanitized_ui_font_size(size: f32) -> f32 {
 
 pub fn sanitized_code_font_size(size: f32) -> f32 {
     sanitized_font_size(size, DEFAULT_CODE_FONT_SIZE)
+}
+
+/// `None` stays unset — the terminal then follows the code font size.
+pub fn sanitized_terminal_font_size(size: Option<f32>) -> Option<f32> {
+    size.filter(|size| size.is_finite())
+        .map(|size| size.clamp(9.0, 24.0))
 }
 
 /// Bounds a possibly hand-edited volume to the 0–1 range NSSound expects.
@@ -512,6 +525,10 @@ pub struct PersistedState {
     pub ui_font_size: f32,
     #[serde(default = "default_code_font_size")]
     pub code_font_size: f32,
+    /// `None` — and any value equal to `code_font_size` — follows the code
+    /// size; a different value is the terminal's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_font_size: Option<f32>,
     /// Family name for the interface face; `None` is the system UI font.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui_font_family: Option<String>,
@@ -591,6 +608,12 @@ impl PersistedState {
         Some(session)
     }
 
+    /// The terminal's effective text size — its own once it differs from
+    /// `code_font_size`, the code size while they match.
+    pub fn terminal_font_size(&self) -> f32 {
+        self.terminal_font_size.unwrap_or(self.code_font_size)
+    }
+
     pub fn mark_session_dirty(&mut self, id: Uuid) {
         self.dirty_sessions.insert(id);
     }
@@ -623,6 +646,7 @@ impl PersistedState {
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
+            terminal_font_size: None,
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
@@ -811,6 +835,7 @@ impl PersistedState {
             language: self.language,
             ui_font_size: self.ui_font_size,
             code_font_size: self.code_font_size,
+            terminal_font_size: self.terminal_font_size,
             ui_font_family: self.ui_font_family.clone(),
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
@@ -860,6 +885,12 @@ impl PersistedState {
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
+        self.terminal_font_size = sanitized_terminal_font_size(settings.terminal_font_size);
+        // Equal means linked: a stored override matching the code size would
+        // silently stop following it.
+        if self.terminal_font_size == Some(self.code_font_size) {
+            self.terminal_font_size = None;
+        }
         self.ui_font_family = sanitized_font_family(settings.ui_font_family);
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
@@ -1486,6 +1517,36 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.three_finger_swipe_navigation);
+    }
+
+    #[test]
+    fn terminal_font_size_follows_code_size_until_it_differs() {
+        // Settings files written before the terminal size existed carry no
+        // value, and the resolved size is the code size.
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.terminal_font_size, None);
+        let state = PersistedState::empty();
+        assert_eq!(state.terminal_font_size, None);
+        assert_eq!(state.terminal_font_size(), DEFAULT_CODE_FONT_SIZE);
+
+        // A distinct size round-trips through app.json as an override.
+        let mut state = PersistedState::empty();
+        state.terminal_font_size = Some(16.0);
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["terminal_font_size"], 16.0);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.terminal_font_size(), 16.0);
+
+        // A stored value equal to the code size collapses back to the linked
+        // `None`, so it keeps following later code-size changes.
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(
+            serde_json::from_str(r#"{"code_font_size": 15.0, "terminal_font_size": 15.0}"#).unwrap(),
+        );
+        assert_eq!(restored.terminal_font_size, None);
+        restored.code_font_size = 18.0;
+        assert_eq!(restored.terminal_font_size(), 18.0);
     }
 
     #[test]

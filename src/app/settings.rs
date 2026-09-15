@@ -2736,6 +2736,35 @@ impl Waku {
             },
         );
 
+        let selected_terminal_font_size = self.state.terminal_font_size();
+        let weak = cx.entity().downgrade();
+        let terminal_font_size_handle = self.menu_handle("terminal-font-size-selector", cx);
+        let terminal_font_size_selector = dropdown_menu(
+            MenuChip::new("terminal-font-size-selector")
+                .label(font_size_label(selected_terminal_font_size))
+                .outlined()
+                .selected(terminal_font_size_handle.is_open())
+                .w(px(116.0))
+                .justify_between(),
+            "terminal-font-size-selector-menu",
+            &terminal_font_size_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                FONT_SIZES
+                    .into_iter()
+                    .map(|size| {
+                        let weak = weak.clone();
+                        MenuItem::new(font_size_label(size), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_terminal_font_size(size, cx);
+                            });
+                        })
+                        .selected(size == selected_terminal_font_size)
+                    })
+                    .collect()
+            },
+        );
+
         let weak = cx.entity().downgrade();
         let language_handle = self.menu_handle("language-selector", cx);
         let language_selector = dropdown_menu(
@@ -2980,6 +3009,38 @@ impl Waku {
                             ),
                     )
                     .child(code_font_size_selector),
+            )
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(
+                div()
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.terminal_font_size")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.terminal_font_size_description")),
+                            ),
+                    )
+                    .child(terminal_font_size_selector),
             )
             .into_any_element()
     }
@@ -3457,10 +3518,55 @@ impl Waku {
         if self.state.code_font_size == size {
             return;
         }
+        // The terminal follows the code size only while the two match; `None`
+        // keeps it resolving to whatever the code size becomes.
+        let terminal_follows = self.state.terminal_font_size() == self.state.code_font_size;
         self.state.code_font_size = size;
+        if terminal_follows {
+            self.state.terminal_font_size = None;
+            crate::terminal::install_font_size(size, cx);
+        }
         self.remeasure_font_sized_surfaces();
         self.save();
         cx.notify();
+    }
+
+    fn set_terminal_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let Some(size) = waku_client::persistence::sanitized_terminal_font_size(Some(size)) else {
+            return;
+        };
+        // Picking the code size re-links the two: `None` resolves to the code
+        // size, so the terminal keeps following future code-size changes.
+        let stored = (size != self.state.code_font_size).then_some(size);
+        if self.state.terminal_font_size == stored {
+            return;
+        }
+        self.state.terminal_font_size = stored;
+        crate::terminal::install_font_size(size, cx);
+        self.save();
+        cx.notify();
+    }
+
+    /// `secondary-=` / `secondary--`: step one `FONT_SIZES` preset in the
+    /// direction given, against whichever surface the binding's key context
+    /// routed the chord to.
+    pub(super) fn adjust_font_size_action(
+        &mut self,
+        action: &crate::AdjustFontSize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = match action.target {
+            crate::FontSizeTarget::Ui => self.state.ui_font_size,
+            crate::FontSizeTarget::Code => self.state.code_font_size,
+            crate::FontSizeTarget::Terminal => self.state.terminal_font_size(),
+        };
+        let size = stepped_font_size(current, action.direction);
+        match action.target {
+            crate::FontSizeTarget::Ui => self.set_ui_font_size(size, window, cx),
+            crate::FontSizeTarget::Code => self.set_code_font_size(size, cx),
+            crate::FontSizeTarget::Terminal => self.set_terminal_font_size(size, cx),
+        }
     }
 
     /// Drop every cached row height that a font size participates in. The
@@ -4496,6 +4602,22 @@ impl Waku {
 /// hold values outside this list; they render as-is and simply select
 /// nothing here.
 const FONT_SIZES: [f32; 8] = [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 20.0];
+
+/// Next `FONT_SIZES` preset in the direction given — a between-presets value
+/// lands on the first step past it, and the list ends hold their ground.
+fn stepped_font_size(current: f32, direction: crate::FontSizeDirection) -> f32 {
+    match direction {
+        crate::FontSizeDirection::Increase => FONT_SIZES
+            .into_iter()
+            .find(|size| *size > current)
+            .unwrap_or(current),
+        crate::FontSizeDirection::Decrease => FONT_SIZES
+            .into_iter()
+            .rev()
+            .find(|size| *size < current)
+            .unwrap_or(current),
+    }
+}
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {
