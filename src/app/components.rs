@@ -29,6 +29,17 @@ pub(super) fn format_message_time(created_at: u64) -> String {
     format_message_time_at(created_at, Local::now())
 }
 
+/// Rough output-rate estimate for a settled response: ~4 chars per token
+/// over the seconds between the message's first delta and `completed_at`.
+fn response_tokens_per_second(message: &Message, completed_at: u64) -> Option<u64> {
+    if message.role != MessageRole::Assistant || message.content.is_empty() {
+        return None;
+    }
+    let estimated_tokens = message.content.chars().count().div_ceil(4) as u64;
+    let elapsed_seconds = completed_at.saturating_sub(message.created_at).max(1);
+    Some(estimated_tokens / elapsed_seconds)
+}
+
 fn format_message_time_at(created_at: u64, now: DateTime<Local>) -> String {
     let Ok(seconds) = i64::try_from(created_at) else {
         return String::new();
@@ -182,6 +193,7 @@ pub(super) fn render_message_footer(
     footer_time: u64,
     copy_content: SharedString,
     copied: bool,
+    show_token_speed: bool,
     group_name: SharedString,
     force_visible: bool,
     align_right: bool,
@@ -201,7 +213,13 @@ pub(super) fn render_message_footer(
         .text_size(sp(12.5))
         .line_height(sp(14.0))
         .text_color(footer_color)
-        .child(format_message_time(footer_time));
+        .child(format_message_time(footer_time))
+        .when_some(
+            show_token_speed
+                .then(|| response_tokens_per_second(message, footer_time))
+                .flatten(),
+            |element, tps| element.child(" • ").child(format!("{tps} tok/s")),
+        );
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
         .w(px(27.0))
@@ -330,6 +348,7 @@ pub(super) struct MessageRender<'a> {
     pub(super) assistant_footer_copy_content: Option<SharedString>,
     pub(super) assistant_footer_time: Option<u64>,
     pub(super) copied: bool,
+    pub(super) show_response_token_speed: bool,
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
     pub(super) user_message_viewport: Option<&'a UserMessageScrollViewport>,
@@ -530,6 +549,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         assistant_footer_copy_content,
         assistant_footer_time,
         copied,
+        show_response_token_speed,
         assistant_message_action,
         user_message_action,
         user_message_viewport,
@@ -854,6 +874,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     message.created_at,
                     SharedString::from(content.clone()),
                     copied,
+                    false,
                     group_name,
                     false,
                     true,
@@ -888,6 +909,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     assistant_footer_time.unwrap_or(message.created_at),
                     copy_content,
                     copied,
+                    show_response_token_speed,
                     group_name,
                     false,
                     false,
@@ -1637,6 +1659,18 @@ mod message_time_tests {
             .timestamp()
             .try_into()
             .expect("test date should have a positive Unix timestamp")
+    }
+
+    #[test]
+    fn response_footer_shows_estimated_tokens_per_second() {
+        let mut message = Message::new(MessageRole::Assistant, "a".repeat(40));
+        message.created_at = 10;
+        assert_eq!(response_tokens_per_second(&message, 12), Some(5));
+        assert_eq!(response_tokens_per_second(&message, 10), Some(10));
+        assert_eq!(
+            response_tokens_per_second(&Message::new(MessageRole::User, "a".repeat(40)), 12),
+            None
+        );
     }
 
     #[test]

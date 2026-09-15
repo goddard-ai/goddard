@@ -127,7 +127,7 @@ settings.usage: 使用状況
 settings.daemon: デーモン
 settings.computer_use: コンピュータ操作
 settings.commands: コマンド
-settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン 数学 数式 math latex markdown プレビュー ファイル レンダリング ソース preview サウンド 音 通知 完了 ターン sound audio notification トラックパッド スワイプ 3本指 ジェスチャー ナビゲーション 戻る 進む trackpad swipe gesture サイドバー ショートカット タグ 数字 sidebar shortcut tags
+settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン 数学 数式 math latex markdown プレビュー ファイル レンダリング ソース preview サウンド 音 通知 完了 ターン sound audio notification トラックパッド スワイプ 3本指 ジェスチャー ナビゲーション 戻る 進む trackpad swipe gesture サイドバー ショートカット タグ 数字 sidebar shortcut tags トークン 速度 token speed footer
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント 等幅 サイズ 文字 エディタ サイドバー 透明 境界線 区切り線 太い 細い
 settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: スキル
@@ -273,6 +273,8 @@ settings.thick_borders: 太い境界線
 settings.thick_borders_description: 境界線と区切り線を0.5ピクセルのヘアラインではなく1ピクセルで描画します
 settings.render_math: 数式を描画
 settings.render_math_description: Markdown の数式を整形して表示します。オフにすると LaTeX ソースを表示します。
+settings.show_response_token_speed: 応答のトークン速度を表示
+settings.show_response_token_speed_description: 各応答のフッターに推定トークン/秒を表示します
 settings.markdown_preview: Markdown ファイルをプレビュー
 settings.markdown_preview_description: Markdown ファイルをソースではなくレンダリング済みのプレビューで開きます
 settings.open_at_last_prompt: 終了したタスクを最後のプロンプトから開く

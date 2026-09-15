@@ -248,7 +248,7 @@ settings.computer_use:
 settings.commands:
   en: Commands
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command token speed tokens per second rate footer
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel
 settings.providers_keywords:
@@ -537,6 +537,10 @@ settings.render_math:
   en: Render math expressions
 settings.render_math_description:
   en: Show formatted math in Markdown. Turn off to show LaTeX source.
+settings.show_response_token_speed:
+  en: Show response token speed
+settings.show_response_token_speed_description:
+  en: Show an estimated tokens-per-second rate in each response's footer
 settings.markdown_preview:
   en: Preview Markdown files
 settings.markdown_preview_description:

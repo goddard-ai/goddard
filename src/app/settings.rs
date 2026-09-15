@@ -645,6 +645,50 @@ impl Waku {
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
+                                    .child(tr!("settings.show_response_token_speed")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.show_response_token_speed_description")),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        "response-token-speed-toggle",
+                        self.state.show_response_token_speed,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.show_response_token_speed;
+                            move |this, _, cx| this.set_show_response_token_speed(!enabled, cx)
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
                                     .child(tr!("settings.markdown_preview")),
                             )
                             .child(
@@ -3874,6 +3918,15 @@ impl Waku {
         cx.notify();
     }
 
+    fn set_show_response_token_speed(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.show_response_token_speed == enabled {
+            return;
+        }
+        self.state.show_response_token_speed = enabled;
+        self.save();
+        cx.notify();
+    }
+
     pub(super) fn set_markdown_preview(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.markdown_preview == enabled {
             return;
@@ -5311,11 +5364,7 @@ impl Waku {
         move |open, window, cx| {
             let _ = weak.update(cx, |this, cx| {
                 if open {
-                    this.preview_theme_settings(
-                        |settings| settings.mode = mode,
-                        window,
-                        cx,
-                    );
+                    this.preview_theme_settings(|settings| settings.mode = mode, window, cx);
                 } else {
                     this.restore_theme_preview(window, cx);
                 }

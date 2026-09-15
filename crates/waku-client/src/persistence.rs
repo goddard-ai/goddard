@@ -333,6 +333,8 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_font_family: Option<String>,
     pub render_math: bool,
+    /// Append an estimated "N tok/s" readout to settled response footers.
+    pub show_response_token_speed: bool,
     /// Open a task that is not mid-turn scrolled to its last prompt instead
     /// of the end of the transcript.
     pub open_at_last_prompt: bool,
@@ -385,6 +387,7 @@ impl Default for AppSettings {
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
+            show_response_token_speed: false,
             open_at_last_prompt: true,
             sync_with_merge: false,
             new_worktree_default_branch: false,
@@ -556,6 +559,9 @@ pub struct PersistedState {
     pub code_font_family: Option<String>,
     #[serde(default = "default_render_math")]
     pub render_math: bool,
+    /// Append an estimated "N tok/s" readout to settled response footers.
+    #[serde(default)]
+    pub show_response_token_speed: bool,
     #[serde(default = "default_open_at_last_prompt")]
     pub open_at_last_prompt: bool,
     /// Integrate upstream changes with `git pull --no-rebase` (a merge)
@@ -687,6 +693,7 @@ impl PersistedState {
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
+            show_response_token_speed: false,
             open_at_last_prompt: true,
             sync_with_merge: false,
             new_worktree_default_branch: false,
@@ -900,6 +907,7 @@ impl PersistedState {
             ui_font_family: self.ui_font_family.clone(),
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
+            show_response_token_speed: self.show_response_token_speed,
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
             new_worktree_default_branch: self.new_worktree_default_branch,
@@ -959,6 +967,7 @@ impl PersistedState {
         self.ui_font_family = sanitized_font_family(settings.ui_font_family);
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
+        self.show_response_token_speed = settings.show_response_token_speed;
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
@@ -1556,6 +1565,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.render_math);
+    }
+
+    #[test]
+    fn response_token_speed_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.show_response_token_speed);
+        let mut state = PersistedState::empty();
+        assert!(!state.show_response_token_speed);
+        state.show_response_token_speed = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["show_response_token_speed"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("show_response_token_speed")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.show_response_token_speed);
     }
 
     #[test]
