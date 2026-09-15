@@ -823,7 +823,11 @@ impl PersistedState {
     /// replaces the local mirror — including an empty list after another
     /// client or an agent removed the last one.
     pub fn apply_daemon_settings(&mut self, settings: DaemonSettings) {
-        self.computer_use_enabled = settings.computer_use_enabled;
+        // Computer Use is experimental, so a release build must not let a
+        // setting written by a development build leave this client believing
+        // it is on.
+        self.computer_use_enabled =
+            crate::computer_use::resolve_enabled(settings.computer_use_enabled);
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;

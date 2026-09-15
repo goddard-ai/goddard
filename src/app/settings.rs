@@ -4670,7 +4670,10 @@ impl Waku {
     }
 
     pub(super) fn request_computer_permissions(&mut self, prompt: bool, cx: &mut Context<Self>) {
-        if !cfg!(target_os = "macos") || self.computer_permission_request_pending {
+        if !cfg!(target_os = "macos")
+            || !crate::computer_use::is_available()
+            || self.computer_permission_request_pending
+        {
             return;
         }
         self.computer_permission_request_pending = true;
