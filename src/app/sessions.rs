@@ -247,6 +247,17 @@ impl Waku {
         self.state.selected_session = Some(session_id);
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
+        // Picking a task hands the main area back to the transcript; the
+        // project's GitHub browser keeps its state for the next visit.
+        if let Some(project_id) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id)
+        {
+            self.deactivate_github_browser(project_id);
+        }
         if let Some((
             project_id,
             provider,

@@ -1730,6 +1730,15 @@ pub struct Waku {
         RefCell<HashMap<Uuid, Rc<Vec<waku_protocol::workspace::PullRequestSummary>>>>,
     sidebar_pull_request_scan_fingerprint: Cell<Option<u64>>,
     sidebar_pull_request_scan_generation: Cell<u64>,
+    /// Whether each project's GitHub sidebar entry shows — resolved in the
+    /// background; absent means "not known yet" and the row stays hidden.
+    sidebar_github_repos: RefCell<HashMap<Uuid, bool>>,
+    sidebar_github_scan_fingerprint: Cell<Option<u64>>,
+    sidebar_github_scan_generation: Cell<u64>,
+    sidebar_github_row_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
+    /// Open GitHub browsers keyed by project id — state survives the view
+    /// toggling back to the transcript.
+    github_browsers: HashMap<Uuid, github::GitHubBrowser>,
     transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
@@ -1898,6 +1907,7 @@ mod drafts;
 mod element_inspector;
 mod file_finder;
 mod file_search;
+mod github;
 mod goal_dialog;
 mod image_preview;
 mod project_switcher;
@@ -3504,6 +3514,11 @@ impl Waku {
                 sidebar_pull_requests: RefCell::new(HashMap::new()),
                 sidebar_pull_request_scan_fingerprint: Cell::new(None),
                 sidebar_pull_request_scan_generation: Cell::new(0),
+                sidebar_github_repos: RefCell::new(HashMap::new()),
+                sidebar_github_scan_fingerprint: Cell::new(None),
+                sidebar_github_scan_generation: Cell::new(0),
+                sidebar_github_row_focuses: RefCell::new(HashMap::new()),
+                github_browsers: HashMap::new(),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),

@@ -394,6 +394,35 @@ sidebar.pull_request_checks_failing: チェック失敗
 sidebar.pull_request_review_approved: 承認済み
 sidebar.pull_request_review_changes: 変更リクエストあり
 sidebar.pull_request_review_required: レビュー待ち
+sidebar.github_entry: GitHub
+
+github.tab_pull_requests: プルリクエスト
+github.tab_issues: Issue
+github.state_open: オープン
+github.state_closed: クローズ済み
+github.state_all: すべて
+github.filter_placeholder: フィルター
+github.refresh: 更新
+github.back_to_list: 一覧に戻る
+github.open_repo: GitHub でリポジトリを開く
+github.open_external: GitHub で開く
+github.resolving_repo: リポジトリを解決中…
+github.install_gh: このリポジトリを見るには GitHub CLI をインストールしてください
+github.auth_gh: "`gh auth login` を実行するとこのリポジトリを見られます"
+github.not_a_repo: このプロジェクトは GitHub リポジトリではありません
+github.loading: 読み込み中…
+github.unavailable: "GitHub に接続できません — `gh` を確認してください"
+github.no_matches: 一致する項目がありません
+github.no_pull_requests: プルリクエストはありません
+github.no_issues: Issue はありません
+github.pr_open: オープン
+github.pr_draft: 下書き
+github.pr_closed: クローズ済み
+github.pr_merged: マージ済み
+github.issue_open: オープン
+github.issue_closed: クローズ済み
+github.no_description: 説明はありません。
+github.unknown_author: 不明
 
 project.new_project: 新規プロジェクト…
 project.no_project: プロジェクトを使用しない

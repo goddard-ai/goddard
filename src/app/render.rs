@@ -333,6 +333,9 @@ impl Render for Waku {
 
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
+        let github_project = self
+            .active_github_browser()
+            .map(|(project_id, _)| *project_id);
         let permission = self.render_permission(cx);
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -457,7 +460,9 @@ impl Render for Waku {
                             }))
                     })
                     .child(self.render_header(window, cx))
-                    .child(if empty {
+                    .child(if let Some(project_id) = github_project {
+                        self.render_github_browser(project_id, window, cx)
+                    } else if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
                         self.transcript_pane

@@ -382,6 +382,35 @@ sidebar.pull_request_checks_failing: 检查失败
 sidebar.pull_request_review_approved: 已批准
 sidebar.pull_request_review_changes: 请求更改
 sidebar.pull_request_review_required: 待审查
+sidebar.github_entry: GitHub
+
+github.tab_pull_requests: 拉取请求
+github.tab_issues: 问题
+github.state_open: 开放
+github.state_closed: 已关闭
+github.state_all: 全部
+github.filter_placeholder: 筛选
+github.refresh: 刷新
+github.back_to_list: 返回列表
+github.open_repo: 在 GitHub 上打开仓库
+github.open_external: 在 GitHub 上打开
+github.resolving_repo: 正在解析仓库…
+github.install_gh: 安装 GitHub CLI 以浏览此仓库
+github.auth_gh: "运行 `gh auth login` 以浏览此仓库"
+github.not_a_repo: 此项目不是 GitHub 仓库
+github.loading: 加载中…
+github.unavailable: "无法访问 GitHub — 请检查 `gh`"
+github.no_matches: 无匹配项
+github.no_pull_requests: 没有拉取请求
+github.no_issues: 没有问题
+github.pr_open: 开放
+github.pr_draft: 草稿
+github.pr_closed: 已关闭
+github.pr_merged: 已合并
+github.issue_open: 开放
+github.issue_closed: 已关闭
+github.no_description: 无描述。
+github.unknown_author: 未知用户
 
 project.new_project: 新建项目…
 project.no_project: 不使用项目

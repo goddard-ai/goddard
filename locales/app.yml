@@ -770,6 +770,63 @@ sidebar.pull_request_review_changes:
   en: changes requested
 sidebar.pull_request_review_required:
   en: review required
+sidebar.github_entry:
+  en: GitHub
+
+github.tab_pull_requests:
+  en: Pull requests
+github.tab_issues:
+  en: Issues
+github.state_open:
+  en: Open
+github.state_closed:
+  en: Closed
+github.state_all:
+  en: All
+github.filter_placeholder:
+  en: Filter
+github.refresh:
+  en: Refresh
+github.back_to_list:
+  en: Back to list
+github.open_repo:
+  en: Open repository on GitHub
+github.open_external:
+  en: Open on GitHub
+github.resolving_repo:
+  en: Resolving repository…
+github.install_gh:
+  en: Install the GitHub CLI to browse this repo
+github.auth_gh:
+  en: "Run `gh auth login` to browse this repo"
+github.not_a_repo:
+  en: This project is not a GitHub repository
+github.loading:
+  en: Loading…
+github.unavailable:
+  en: "Couldn't reach GitHub — check `gh`"
+github.no_matches:
+  en: No matches
+github.no_pull_requests:
+  en: No pull requests
+github.no_issues:
+  en: No issues
+github.pr_open:
+  en: Open
+github.pr_draft:
+  en: Draft
+github.pr_closed:
+  en: Closed
+github.pr_merged:
+  en: Merged
+github.issue_open:
+  en: Open
+github.issue_closed:
+  en: Closed
+github.no_description:
+  en: No description.
+github.unknown_author:
+  en: someone
 
 project.new_project:
   en: New project…

@@ -161,6 +161,7 @@ fn append_sidebar_group_rows(
     sessions: &[Uuid],
     collapsed: bool,
     show_more: bool,
+    github_entry: Option<Uuid>,
 ) {
     if sessions.is_empty() && !show_more {
         return;
@@ -168,6 +169,9 @@ fn append_sidebar_group_rows(
 
     rows.push(SidebarRow::Header(group));
     if !collapsed {
+        if let Some(project_id) = github_entry {
+            rows.push(SidebarRow::GitHub(project_id));
+        }
         rows.extend(sessions.iter().copied().map(SidebarRow::Session));
         if show_more {
             rows.push(SidebarRow::ShowMore(group));
@@ -218,6 +222,8 @@ const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
+/// A GitHub entry row plus the same trailing gap session rows carry.
+const SIDEBAR_GITHUB_ROW_HEIGHT: f32 = SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
@@ -344,7 +350,7 @@ fn sidebar_status_rank(status: SessionStatus) -> u64 {
 /// The state a sidebar pull-request badge reports. `Draft` is its own shape
 /// because the glyph carries the state — color only reinforces it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SidebarPullRequestState {
+pub(super) enum SidebarPullRequestState {
     Open,
     Draft,
     Merged,
@@ -361,7 +367,7 @@ struct SidebarPullRequestBadge {
     review_decision: Option<waku_client::PullRequestReviewDecision>,
 }
 
-fn pull_request_class(
+pub(super) fn pull_request_class(
     entry: &waku_client::PullRequestSummary,
 ) -> SidebarPullRequestState {
     match (entry.state, entry.is_draft) {
@@ -449,7 +455,7 @@ fn sidebar_pull_request_badge(
     })
 }
 
-fn sidebar_pull_request_icon(state: SidebarPullRequestState) -> &'static str {
+pub(super) fn sidebar_pull_request_icon(state: SidebarPullRequestState) -> &'static str {
     match state {
         SidebarPullRequestState::Open => "icons/git-pull-request-arrow.svg",
         SidebarPullRequestState::Draft => "icons/git-pull-request-draft.svg",
@@ -458,7 +464,7 @@ fn sidebar_pull_request_icon(state: SidebarPullRequestState) -> &'static str {
     }
 }
 
-fn sidebar_pull_request_color(theme: &Theme, state: SidebarPullRequestState) -> Hsla {
+pub(super) fn sidebar_pull_request_color(theme: &Theme, state: SidebarPullRequestState) -> Hsla {
     match state {
         SidebarPullRequestState::Open => theme.success,
         SidebarPullRequestState::Draft => theme.text_tertiary,
@@ -467,7 +473,7 @@ fn sidebar_pull_request_color(theme: &Theme, state: SidebarPullRequestState) -> 
     }
 }
 
-fn sidebar_pull_request_state_label(state: SidebarPullRequestState) -> String {
+pub(super) fn sidebar_pull_request_state_label(state: SidebarPullRequestState) -> String {
     match state {
         SidebarPullRequestState::Open => tr!("sidebar.pull_request_open"),
         SidebarPullRequestState::Draft => tr!("sidebar.pull_request_draft"),
@@ -479,7 +485,9 @@ fn sidebar_pull_request_state_label(state: SidebarPullRequestState) -> String {
 /// The checks glyph sits after the PR number; the hourglass stays static —
 /// the badge already refreshes on a scan cadence, so spinning adds motion
 /// without adding information.
-fn sidebar_check_status_icon(status: waku_client::PullRequestCheckStatus) -> &'static str {
+pub(super) fn sidebar_check_status_icon(
+    status: waku_client::PullRequestCheckStatus,
+) -> &'static str {
     match status {
         waku_client::PullRequestCheckStatus::Passing => "icons/check.svg",
         waku_client::PullRequestCheckStatus::Pending => "icons/hourglass.svg",
@@ -487,7 +495,10 @@ fn sidebar_check_status_icon(status: waku_client::PullRequestCheckStatus) -> &'s
     }
 }
 
-fn sidebar_check_status_color(theme: &Theme, status: waku_client::PullRequestCheckStatus) -> Hsla {
+pub(super) fn sidebar_check_status_color(
+    theme: &Theme,
+    status: waku_client::PullRequestCheckStatus,
+) -> Hsla {
     match status {
         waku_client::PullRequestCheckStatus::Passing => theme.success,
         waku_client::PullRequestCheckStatus::Pending => theme.warning,
@@ -509,7 +520,9 @@ fn sidebar_check_status_label(status: waku_client::PullRequestCheckStatus) -> St
     }
 }
 
-fn sidebar_review_decision_icon(decision: waku_client::PullRequestReviewDecision) -> &'static str {
+pub(super) fn sidebar_review_decision_icon(
+    decision: waku_client::PullRequestReviewDecision,
+) -> &'static str {
     match decision {
         waku_client::PullRequestReviewDecision::Approved => "icons/check.svg",
         waku_client::PullRequestReviewDecision::ChangesRequested => "icons/alert.svg",
@@ -517,7 +530,7 @@ fn sidebar_review_decision_icon(decision: waku_client::PullRequestReviewDecision
     }
 }
 
-fn sidebar_review_decision_color(
+pub(super) fn sidebar_review_decision_color(
     theme: &Theme,
     decision: waku_client::PullRequestReviewDecision,
 ) -> Hsla {
@@ -592,6 +605,8 @@ pub(super) enum SidebarRow {
     Header(SidebarGroup),
     /// A started session.
     Session(Uuid),
+    /// A project's GitHub browser entry, under its expanded group header.
+    GitHub(Uuid),
     /// Reveals the next batch of older sessions in a project section.
     ShowMore(SidebarGroup),
     /// Spacing between date groups.
@@ -627,6 +642,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
+        SidebarRow::GitHub(_) => SIDEBAR_GITHUB_ROW_HEIGHT,
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
     })
@@ -1630,6 +1646,135 @@ impl Waku {
         .detach();
     }
 
+    /// Resolve each project's GitHub repo once per project set, on the
+    /// background executor — the GitHub sidebar entry only appears for
+    /// projects `gh` can read (or would read once authenticated).
+    fn ensure_sidebar_github_repos(&self, cx: &mut Context<Self>) {
+        const RESCAN_BUCKET_SECONDS: u64 = 300;
+
+        let mut fingerprint = 0x9d3f_21a7_c05b_e611;
+        let mut targets: Vec<(Uuid, PathBuf)> = Vec::new();
+        for project in &self.state.projects {
+            if project.is_projectless() {
+                continue;
+            }
+            fingerprint = mix_uuid(fingerprint, project.id);
+            targets.push((project.id, project.path.clone()));
+        }
+        fingerprint = mix(fingerprint, unix_time() / RESCAN_BUCKET_SECONDS);
+        if self.sidebar_github_scan_fingerprint.get() == Some(fingerprint) {
+            return;
+        }
+        self.sidebar_github_scan_fingerprint.set(Some(fingerprint));
+        let generation = self.sidebar_github_scan_generation.get().wrapping_add(1);
+        self.sidebar_github_scan_generation.set(generation);
+        if targets.is_empty() {
+            self.sidebar_github_repos.borrow_mut().clear();
+            return;
+        }
+
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let resolved = cx
+                .background_executor()
+                .spawn(async move {
+                    targets
+                        .into_iter()
+                        .map(|(project_id, cwd)| {
+                            // The row shows when the repo resolves — and also
+                            // when gh cannot tell (missing auth), so the
+                            // browser's hint state stays reachable.
+                            let show = matches!(
+                                workspace.request(
+                                    waku_client::WorkspaceOperation::ResolveGitHubRepo { cwd },
+                                ),
+                                Ok(waku_client::WorkspaceResult::GitHubRepo { repo: Some(_), .. })
+                                    | Ok(waku_client::WorkspaceResult::GitHubRepo {
+                                        repo: None,
+                                        availability: waku_client::GitHubAvailability::MissingCli
+                                            | waku_client::GitHubAvailability::Unauthenticated,
+                                    })
+                            );
+                            (project_id, show)
+                        })
+                        .collect::<HashMap<_, _>>()
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.sidebar_github_scan_generation.get() != generation {
+                    return;
+                }
+                *waku.sidebar_github_repos.borrow_mut() = resolved;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The "GitHub" entry under a project group header — opens the browser in
+    /// the main area, keyboard-reachable like every other sidebar row.
+    fn render_sidebar_github_row(&self, project_id: Uuid, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let active = self
+            .github_browsers
+            .get(&project_id)
+            .is_some_and(|browser| browser.active);
+        let focus = self
+            .sidebar_github_row_focuses
+            .borrow_mut()
+            .entry(project_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        div().h(px(SIDEBAR_GITHUB_ROW_HEIGHT)).child(
+            div()
+                .id(SharedString::from(format!("sidebar-github-{project_id}")))
+                .track_focus(&focus)
+                .tab_index(0)
+                .tab_stop(true)
+                .w_full()
+                .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+                .pl(px(SIDEBAR_GROUP_CHILD_PADDING))
+                .pr(px(8.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(7.0))
+                .cursor_default()
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|style| style.bg(theme.sidebar_item_background))
+                .active(|style| style.bg(theme.overlay_strong))
+                .when(active, |element| element.bg(theme.sidebar_item_background))
+                .child(icon(
+                    "icons/github.svg",
+                    13.0,
+                    if active {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    },
+                ))
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(if active {
+                            theme.text
+                        } else {
+                            theme.text_secondary
+                        })
+                        .child(tr!("sidebar.github_entry")),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_github_browser(project_id, window, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.open_github_browser(project_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                })),
+        )
+    }
+
     pub(super) fn render_sidebar(
         &self,
         width: f32,
@@ -1638,6 +1783,7 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
+        self.ensure_sidebar_github_repos(cx);
         self.ensure_sidebar_checkout_statuses(cx);
         self.ensure_sidebar_pull_requests(cx);
         let is_resizing = self
@@ -1945,6 +2091,7 @@ impl Waku {
             self.sidebar_collapsed_groups
                 .contains(&SidebarGroup::Pinned),
             false,
+            None,
         );
         sorted_sessions.retain(|session| session.pinned_at.is_none());
 
@@ -1967,6 +2114,7 @@ impl Waku {
                         &grouped_sessions[date_group.index()],
                         self.sidebar_collapsed_groups.contains(&group),
                         false,
+                        None,
                     );
                 }
             }
@@ -2005,12 +2153,26 @@ impl Waku {
                         recent_cutoff,
                         revealed_older_sessions,
                     );
+                    let github_entry = match group {
+                        SidebarGroup::Project(project_id)
+                            if self
+                                .sidebar_github_repos
+                                .borrow()
+                                .get(&project_id)
+                                .copied()
+                                .unwrap_or(false) =>
+                        {
+                            Some(project_id)
+                        }
+                        _ => None,
+                    };
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
                         &visible_sessions,
                         self.sidebar_collapsed_groups.contains(&group),
                         show_more,
+                        github_entry,
                     );
                 }
             }
@@ -2090,7 +2252,10 @@ impl Waku {
             SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
-                    matches!(row, SidebarRow::Session(_) | SidebarRow::ShowMore(_))
+                    matches!(
+                        row,
+                        SidebarRow::Session(_) | SidebarRow::GitHub(_) | SidebarRow::ShowMore(_)
+                    )
                 });
                 self.render_sidebar_group_header(group, index == 1, has_expanded_children, cx)
                     .into_any_element()
@@ -2107,6 +2272,9 @@ impl Waku {
                 self.render_sidebar_session_item(session_id, shortcut_index, cx)
                     .into_any_element()
             }
+            SidebarRow::GitHub(project_id) => self
+                .render_sidebar_github_row(project_id, cx)
+                .into_any_element(),
             SidebarRow::ShowMore(group) => {
                 self.render_sidebar_show_more(group, cx).into_any_element()
             }
@@ -3478,7 +3646,7 @@ mod tests {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let group = SidebarGroup::Date(SessionDateGroup::Today);
         let mut expanded = Vec::new();
-        append_sidebar_group_rows(&mut expanded, group, &sessions, false, false);
+        append_sidebar_group_rows(&mut expanded, group, &sessions, false, false, None);
         assert_eq!(
             expanded,
             vec![
@@ -3490,7 +3658,47 @@ mod tests {
         );
 
         let mut collapsed = Vec::new();
-        append_sidebar_group_rows(&mut collapsed, group, &sessions, true, false);
+        append_sidebar_group_rows(&mut collapsed, group, &sessions, true, false, None);
+        assert_eq!(
+            collapsed,
+            vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
+        );
+    }
+
+    #[test]
+    fn github_entry_sits_under_the_project_header_only_when_expanded() {
+        let project_id = Uuid::from_u128(7);
+        let group = SidebarGroup::Project(project_id);
+        let sessions = [Uuid::from_u128(1)];
+
+        let mut expanded = Vec::new();
+        append_sidebar_group_rows(
+            &mut expanded,
+            group,
+            &sessions,
+            false,
+            false,
+            Some(project_id),
+        );
+        assert_eq!(
+            expanded,
+            vec![
+                SidebarRow::Header(group),
+                SidebarRow::GitHub(project_id),
+                SidebarRow::Session(sessions[0]),
+                SidebarRow::GroupSpacer,
+            ]
+        );
+
+        let mut collapsed = Vec::new();
+        append_sidebar_group_rows(
+            &mut collapsed,
+            group,
+            &sessions,
+            true,
+            false,
+            Some(project_id),
+        );
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
@@ -3517,7 +3725,14 @@ mod tests {
     fn collapsed_groups_contribute_no_shortcut_targets() {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let mut rows = Vec::new();
-        append_sidebar_group_rows(&mut rows, SidebarGroup::Pinned, &sessions, true, false);
+        append_sidebar_group_rows(
+            &mut rows,
+            SidebarGroup::Pinned,
+            &sessions,
+            true,
+            false,
+            None,
+        );
         assert_eq!(sidebar_shortcut_target_ids(&rows).count(), 0);
     }
 
@@ -3525,7 +3740,7 @@ mod tests {
     fn hidden_project_sessions_keep_a_keyboard_reveal_row() {
         let group = SidebarGroup::Project(Uuid::from_u128(1));
         let mut expanded = Vec::new();
-        append_sidebar_group_rows(&mut expanded, group, &[], false, true);
+        append_sidebar_group_rows(&mut expanded, group, &[], false, true, None);
         assert_eq!(
             expanded,
             vec![
@@ -3536,7 +3751,7 @@ mod tests {
         );
 
         let mut collapsed = Vec::new();
-        append_sidebar_group_rows(&mut collapsed, group, &[], true, true);
+        append_sidebar_group_rows(&mut collapsed, group, &[], true, true, None);
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer]
@@ -3722,6 +3937,8 @@ mod tests {
                 check_status: None,
                 additions: None,
                 deletions: None,
+                author: None,
+                head_branch: None,
             }
         }
 
@@ -3814,6 +4031,8 @@ mod tests {
                 check_status: None,
                 additions: None,
                 deletions: None,
+                author: None,
+                head_branch: None,
             }
         }
 
