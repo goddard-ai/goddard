@@ -20,6 +20,8 @@ menu.new_task:
   en: New Task
 menu.new_project:
   en: New Project…
+menu.run_project_script:
+  en: Run Project Script…
 menu.edit:
   en: Edit
 menu.undo:
@@ -110,6 +112,28 @@ command_palette.current_provider:
   en: Current provider
 command_palette.open_project:
   en: Open project…
+command_palette.run_script:
+  en: Run project script…
+command_palette.run_script_remote:
+  en: Project scripts need a local daemon
+command_palette.projects:
+  en: Projects
+command_palette.scripts:
+  en: Scripts
+command_palette.run_script_project_placeholder:
+  en: Select a project…
+command_palette.run_script_placeholder:
+  en: Select a script to run…
+command_palette.loading_scripts:
+  en: Looking for scripts…
+command_palette.no_projects:
+  en: No projects
+command_palette.no_projects_hint:
+  en: Open a project to run its scripts
+command_palette.no_scripts:
+  en: No scripts found
+command_palette.no_scripts_hint:
+  en: No package.json, makefile, or justfile at the project root
 command_palette.open_on_github:
   en: Open on GitHub
 command_palette.new_custom_command:

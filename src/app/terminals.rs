@@ -272,11 +272,14 @@ impl Waku {
 
     /// Create a terminal rooted at `working_directory`. With `session` set
     /// it joins that task's right-panel surfaces; `None` makes it global —
-    /// listed in the Terminals group but in no tab strip.
+    /// listed in the Terminals group but in no tab strip. A `command`
+    /// replaces the plain shell launch: the PTY sources its script and the
+    /// tab wears its icon.
     pub(super) fn create_terminal(
         &mut self,
         working_directory: PathBuf,
         session: Option<Uuid>,
+        command: Option<CustomCommand>,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
         if self.daemon.is_remote() {
@@ -290,6 +293,10 @@ impl Waku {
         });
         let terminal_id = Uuid::new_v4();
         self.register_terminal(terminal_id, session, Some(working_directory.clone()));
+        if let Some(command) = command {
+            self.right_panel_terminal_commands
+                .insert(terminal_id, command);
+        }
         if let Some(session_id) = session {
             let surface = RightPanelSurface::Terminal(terminal_id);
             if self.state.selected_session == Some(session_id) {
@@ -381,7 +388,7 @@ impl Waku {
             });
         let terminal_id = match target {
             Some(terminal_id) => Some(terminal_id),
-            None => dirs::home_dir().and_then(|home| self.create_terminal(home, None, cx)),
+            None => dirs::home_dir().and_then(|home| self.create_terminal(home, None, None, cx)),
         };
         if let Some(terminal_id) = terminal_id {
             self.select_terminal(terminal_id, window, cx);
@@ -413,7 +420,8 @@ impl Waku {
                 .get(&terminal_id)
                 .and_then(|record| record.session);
             if let Some(working_directory) = working_directory
-                && let Some(new_terminal) = self.create_terminal(working_directory, session, cx)
+                && let Some(new_terminal) =
+                    self.create_terminal(working_directory, session, None, cx)
             {
                 self.select_terminal(new_terminal, window, cx);
             }

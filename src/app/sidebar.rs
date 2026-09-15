@@ -2572,7 +2572,7 @@ impl Waku {
             SidebarGroup::Terminals => {
                 self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
                 if let Some(home) = dirs::home_dir()
-                    && let Some(terminal_id) = self.create_terminal(home, None, cx)
+                    && let Some(terminal_id) = self.create_terminal(home, None, None, cx)
                 {
                     self.select_terminal(terminal_id, window, cx);
                 }

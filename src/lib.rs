@@ -111,6 +111,7 @@ actions!(
         ArchiveSession,
         ToggleSessionPin,
         ToggleTerminals,
+        RunProjectScript,
         CopySelection,
         CopyWorkingDirectory,
         AddToChat,
@@ -422,6 +423,9 @@ pub fn run() {
                 // meaning everywhere else.
                 KeyBinding::new("secondary-l", AddToChat, Some("Transcript")),
                 KeyBinding::new("secondary-j", FocusTerminal, None),
+                // ⌘R opens the run-a-script picker everywhere except the
+                // browser surface, whose deeper context keeps it as reload.
+                KeyBinding::new("secondary-r", RunProjectScript, None),
                 // ⌘T is the Terminals group chord: it expands the sidebar
                 // section (selecting the last-shown terminal, or spawning one
                 // in ~ when none exists), and once a full-width terminal is
@@ -718,6 +722,7 @@ pub(crate) fn set_app_menus(cx: &mut App, updater_available: bool) {
             items: vec![
                 MenuItem::action(tr!("menu.new_task"), NewSession),
                 MenuItem::action(tr!("menu.new_project"), NewProject),
+                MenuItem::action(tr!("menu.run_project_script"), RunProjectScript),
             ],
         },
         Menu {

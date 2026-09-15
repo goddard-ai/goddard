@@ -77,6 +77,9 @@ enum PaletteSection {
     Commands,
     CustomCommands,
     Settings,
+    // Run-script drill-in sections; they never appear in Commands view.
+    Projects,
+    Scripts,
 }
 
 impl PaletteSection {
@@ -89,6 +92,8 @@ impl PaletteSection {
             Self::Commands => "command_palette.commands",
             Self::CustomCommands => "command_palette.custom_commands",
             Self::Settings => "command_palette.settings",
+            Self::Projects => "command_palette.projects",
+            Self::Scripts => "command_palette.scripts",
         })
     }
 
@@ -98,6 +103,7 @@ impl PaletteSection {
             Self::CustomCommands => 1,
             Self::Tasks => 2,
             Self::Settings => 3,
+            Self::Projects | Self::Scripts => 4,
         }
     }
 }
@@ -173,6 +179,12 @@ enum PaletteAction {
     RunCustomCommand(Uuid),
     NewCustomCommand,
     InspectElements,
+    OpenRunScript,
+    ChooseRunScriptProject(Uuid),
+    RunScript {
+        project: Uuid,
+        script: run_script::ProjectScript,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -181,6 +193,8 @@ enum CommandPaletteView {
     Commands,
     Resume,
     ResumeProviders,
+    RunScriptProjects,
+    RunScripts,
 }
 
 #[derive(Clone, Debug)]
@@ -407,6 +421,12 @@ pub(super) struct CommandPaletteUi {
     provider_session_import: Option<ProviderResumeCursor>,
     provider_session_error: Option<String>,
     provider_session_generation: u64,
+    /// The project the run-script drill-in scoped to, and the scan it
+    /// produced.
+    run_script_project: Option<Uuid>,
+    run_scripts: Vec<run_script::ProjectScript>,
+    run_scripts_pending: bool,
+    run_script_generation: u64,
     selected: usize,
     scroll: ScrollHandle,
     matcher: Matcher,
@@ -432,6 +452,10 @@ impl CommandPaletteUi {
             provider_session_import: None,
             provider_session_error: None,
             provider_session_generation: 0,
+            run_script_project: None,
+            run_scripts: Vec::new(),
+            run_scripts_pending: false,
+            run_script_generation: 0,
             selected: 0,
             scroll: ScrollHandle::new(),
             // Plain config: `match_paths` biases toward path basenames, which
@@ -456,6 +480,25 @@ impl Waku {
             self.open_command_palette(window, cx);
         }
         self.open_command_palette_resume_view(None, cx);
+    }
+
+    /// ⌘R — the run-a-script drill-in opens straight onto its project step.
+    /// A remote daemon has no local PTY, so the flow stops before the modal.
+    pub(super) fn run_project_script_action(
+        &mut self,
+        _: &RunProjectScript,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.daemon.is_remote() {
+            self.show_toast(tr!("command_palette.run_script_remote"));
+            cx.notify();
+            return;
+        }
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.open_command_palette_run_script_projects_view(cx);
     }
 
     pub(super) fn toggle_command_palette_action(
@@ -511,6 +554,11 @@ impl Waku {
             .command_palette
             .provider_session_generation
             .wrapping_add(1);
+        self.command_palette.run_script_project = None;
+        self.command_palette.run_scripts.clear();
+        self.command_palette.run_scripts_pending = false;
+        self.command_palette.run_script_generation =
+            self.command_palette.run_script_generation.wrapping_add(1);
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
@@ -561,6 +609,9 @@ impl Waku {
             .command_palette
             .provider_session_generation
             .wrapping_add(1);
+        self.command_palette.run_scripts_pending = false;
+        self.command_palette.run_script_generation =
+            self.command_palette.run_script_generation.wrapping_add(1);
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -595,12 +646,94 @@ impl Waku {
         cx.notify();
     }
 
+    fn open_command_palette_run_script_projects_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::RunScriptProjects;
+        self.command_palette.run_script_project = None;
+        self.command_palette.run_scripts.clear();
+        self.command_palette.run_scripts_pending = false;
+        self.command_palette.run_script_generation =
+            self.command_palette.run_script_generation.wrapping_add(1);
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.run_script_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    /// The project is picked: swap the picker to its scripts and scan its
+    /// root off the UI thread, generation-guarded like the resume fetch.
+    fn open_command_palette_run_scripts_view(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+        else {
+            return;
+        };
+        let root = project.path.clone();
+        self.command_palette.view = CommandPaletteView::RunScripts;
+        self.command_palette.run_script_project = Some(project_id);
+        self.command_palette.run_scripts.clear();
+        self.command_palette.run_scripts_pending = true;
+        self.command_palette.run_script_generation =
+            self.command_palette.run_script_generation.wrapping_add(1);
+        let generation = self.command_palette.run_script_generation;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.run_script_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+
+        cx.spawn(async move |waku, cx| {
+            let scripts = cx
+                .background_executor()
+                .spawn(async move { run_script::discover_project_scripts(&root) })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open
+                    || waku.command_palette.run_script_generation != generation
+                    || waku.command_palette.run_script_project != Some(project_id)
+                {
+                    return;
+                }
+                waku.command_palette.run_scripts_pending = false;
+                waku.command_palette.run_scripts = scripts;
+                if waku.command_palette.view == CommandPaletteView::RunScripts {
+                    let query = waku.command_palette.search.read(cx).content().to_owned();
+                    waku.refresh_command_palette_results(&query, false, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Esc on the entry step lands on the regular palette, matching the
+    /// resume picker's drill-out.
+    fn leave_command_palette_run_script_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Commands;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.command_palette.view {
             CommandPaletteView::Commands => self.close_command_palette(window, cx),
             CommandPaletteView::Resume => self.leave_command_palette_resume_view(cx),
             CommandPaletteView::ResumeProviders => {
                 self.leave_command_palette_resume_provider_view(cx)
+            }
+            CommandPaletteView::RunScriptProjects => self.leave_command_palette_run_script_view(cx),
+            // Esc on the scripts step backs up to the project step.
+            CommandPaletteView::RunScripts => {
+                self.open_command_palette_run_script_projects_view(cx)
             }
         }
     }
@@ -612,6 +745,10 @@ impl Waku {
             CommandPaletteView::ResumeProviders => {
                 tr!("command_palette.resume_provider_placeholder")
             }
+            CommandPaletteView::RunScriptProjects => {
+                tr!("command_palette.run_script_project_placeholder")
+            }
+            CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
         };
         self.command_palette
             .search
@@ -628,7 +765,10 @@ impl Waku {
         }
         if matches!(
             self.command_palette.view,
-            CommandPaletteView::Resume | CommandPaletteView::ResumeProviders
+            CommandPaletteView::Resume
+                | CommandPaletteView::ResumeProviders
+                | CommandPaletteView::RunScriptProjects
+                | CommandPaletteView::RunScripts
         ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
@@ -765,6 +905,15 @@ impl Waku {
                 Some(ShortcutHint::action(&NewProject)),
                 PaletteAction::OpenProject,
                 "open add folder project workspace repository repo",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.run_script"),
+                "icons/terminal.svg",
+                Some(ShortcutHint::action(&RunProjectScript)),
+                PaletteAction::OpenRunScript,
+                "run project script npm make just package makefile build dev test target recipe",
                 next(),
             ),
         ];
@@ -1208,6 +1357,176 @@ impl Waku {
             .collect()
     }
 
+    fn command_palette_run_script_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        let projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .collect::<Vec<_>>();
+        let current = self
+            .selected_session()
+            .map(|session| session.project_id)
+            .filter(|id| projects.iter().any(|project| project.id == *id));
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        run_script::run_script_project_order(current, &recent, &projects)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(order, project_id)| {
+                let project = projects.iter().find(|project| project.id == project_id)?;
+                let mut detail =
+                    settings::abbreviate_home_path(&project.path, self.home_directory.as_deref());
+                if current == Some(project_id) {
+                    detail = format!("{detail} · {}", tr!("command_palette.current"));
+                }
+                let label = project.display_name();
+                Some(CommandPaletteItem {
+                    section: PaletteSection::Projects,
+                    search_text: format!("{label} {} project", project.path.to_string_lossy()),
+                    label,
+                    detail: Some(detail),
+                    icon: PaletteIcon::Asset("icons/folder.svg"),
+                    shortcut: None,
+                    action: PaletteAction::ChooseRunScriptProject(project_id),
+                    content_match: None,
+                    order,
+                    recency: 0,
+                })
+            })
+            .collect()
+    }
+
+    fn command_palette_run_script_candidates(&self) -> Vec<CommandPaletteItem> {
+        let Some(project_id) = self.command_palette.run_script_project else {
+            return Vec::new();
+        };
+        self.command_palette
+            .run_scripts
+            .iter()
+            .enumerate()
+            .map(|(order, script)| CommandPaletteItem {
+                section: PaletteSection::Scripts,
+                label: script.name.clone(),
+                detail: Some(format!(
+                    "{} · {}",
+                    script.source.label(),
+                    script.detail_or_command()
+                )),
+                icon: PaletteIcon::Asset(script.source.icon()),
+                shortcut: None,
+                action: PaletteAction::RunScript {
+                    project: project_id,
+                    script: script.clone(),
+                },
+                content_match: None,
+                search_text: format!(
+                    "{} {} {} {} script run",
+                    script.name,
+                    script.command,
+                    script.detail,
+                    script.source.label()
+                ),
+                order,
+                recency: 0,
+            })
+            .collect()
+    }
+
+    /// The fuzzy pass the run-script steps share: score `search_text`, then
+    /// order by score with listing order as the tiebreak.
+    fn score_run_script_items(
+        &mut self,
+        candidates: Vec<CommandPaletteItem>,
+        query: &str,
+    ) -> Vec<CommandPaletteItem> {
+        let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+        let mut utf32 = Vec::new();
+        let mut scored = candidates
+            .into_iter()
+            .filter_map(|item| {
+                pattern
+                    .score(
+                        Utf32Str::new(&item.search_text, &mut utf32),
+                        &mut self.command_palette.matcher,
+                    )
+                    .map(|score| ScoredPaletteItem { score, item })
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|a, b| b.score.cmp(&a.score).then(a.item.order.cmp(&b.item.order)));
+        scored.into_iter().map(|scored| scored.item).collect()
+    }
+
+    /// Keep the selection the same action occupied. On the project step the
+    /// fallback is the selected task's project so Enter needs no extra step;
+    /// on the scripts step it is simply the first row.
+    fn finish_run_script_refresh(
+        &mut self,
+        selected_action: Option<PaletteAction>,
+        default_to_current_project: bool,
+    ) {
+        self.command_palette.selected = selected_action
+            .and_then(|action| {
+                self.command_palette
+                    .results
+                    .iter()
+                    .position(|item| item.action == action)
+            })
+            .or_else(|| {
+                if !default_to_current_project {
+                    return None;
+                }
+                let current = self.selected_session().map(|session| session.project_id)?;
+                self.command_palette
+                    .results
+                    .iter()
+                    .position(|item| item.action == PaletteAction::ChooseRunScriptProject(current))
+            })
+            .unwrap_or(0);
+        self.command_palette
+            .scroll
+            .scroll_to_item(self.command_palette_scroll_index(self.command_palette.selected));
+    }
+
+    fn refresh_command_palette_run_script_project_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_run_script_project_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_run_script_refresh(selected_action.flatten(), true);
+    }
+
+    fn refresh_command_palette_run_script_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_run_script_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_run_script_refresh(selected_action.flatten(), false);
+    }
+
     fn refresh_command_palette_resume_results(&mut self, query: &str, preserve_selection: bool) {
         let query = query.trim();
         let selected_action = preserve_selection.then(|| {
@@ -1328,6 +1647,14 @@ impl Waku {
             }
             CommandPaletteView::ResumeProviders => {
                 self.refresh_command_palette_resume_provider_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::RunScriptProjects => {
+                self.refresh_command_palette_run_script_project_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::RunScripts => {
+                self.refresh_command_palette_run_script_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::Commands => {}
@@ -1738,6 +2065,14 @@ impl Waku {
                 self.load_command_palette_provider_session(summary, window, cx);
                 return;
             }
+            PaletteAction::OpenRunScript => {
+                self.open_command_palette_run_script_projects_view(cx);
+                return;
+            }
+            PaletteAction::ChooseRunScriptProject(project_id) => {
+                self.open_command_palette_run_scripts_view(project_id, cx);
+                return;
+            }
             _ => {}
         }
 
@@ -1831,11 +2166,17 @@ impl Waku {
             PaletteAction::InspectElements => {
                 element_inspector::start(window, cx);
             }
+            PaletteAction::RunScript { project, script } => {
+                self.settings_page = None;
+                self.run_project_script(project, script, window, cx);
+            }
             PaletteAction::Resume
             | PaletteAction::ChooseResumeProvider
             | PaletteAction::SelectResumeProvider(_)
-            | PaletteAction::ResumeProviderSession(_) => {
-                unreachable!("resume actions are handled before closing the palette")
+            | PaletteAction::ResumeProviderSession(_)
+            | PaletteAction::OpenRunScript
+            | PaletteAction::ChooseRunScriptProject(_) => {
+                unreachable!("view-navigation actions are handled before closing the palette")
             }
         }
     }
@@ -1859,17 +2200,20 @@ impl Waku {
             .selected
             .min(self.command_palette.results.len().saturating_sub(1));
         let search_query = self.command_palette.search.read(cx).content().to_owned();
-        let resume_view = self.command_palette.view == CommandPaletteView::Resume;
+        let view = self.command_palette.view;
+        let resume_view = view == CommandPaletteView::Resume;
+        let run_scripts_view = view == CommandPaletteView::RunScripts;
         let resume_session_count = self
             .command_palette
             .results
             .iter()
             .filter(|item| matches!(&item.action, PaletteAction::ResumeProviderSession(_)))
             .count();
-        let results_pending = match self.command_palette.view {
+        let results_pending = match view {
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
-            CommandPaletteView::ResumeProviders => false,
+            CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
+            CommandPaletteView::ResumeProviders | CommandPaletteView::RunScriptProjects => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
             if resume_view {
@@ -1879,9 +2223,12 @@ impl Waku {
             },
             results_pending,
         );
-        let show_loading_state = resume_view
+        let show_loading_state = (resume_view
             && resume_session_count == 0
-            && self.command_palette.provider_sessions_pending;
+            && self.command_palette.provider_sessions_pending)
+            || (run_scripts_view
+                && self.command_palette.results.is_empty()
+                && self.command_palette.run_scripts_pending);
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
@@ -1904,7 +2251,11 @@ impl Waku {
             let (icon_path, title, hint, spinning) = if show_loading_state {
                 (
                     "icons/loader-circle.svg",
-                    tr!("command_palette.loading_sessions"),
+                    if run_scripts_view {
+                        tr!("command_palette.loading_scripts")
+                    } else {
+                        tr!("command_palette.loading_sessions")
+                    },
                     None,
                     true,
                 )
@@ -1920,6 +2271,20 @@ impl Waku {
                     "icons/search.svg",
                     tr!("command_palette.no_resume_sessions"),
                     Some(tr!("command_palette.no_resume_sessions_hint")),
+                    false,
+                )
+            } else if view == CommandPaletteView::RunScriptProjects {
+                (
+                    "icons/folder.svg",
+                    tr!("command_palette.no_projects"),
+                    Some(tr!("command_palette.no_projects_hint")),
+                    false,
+                )
+            } else if run_scripts_view {
+                (
+                    "icons/terminal.svg",
+                    tr!("command_palette.no_scripts"),
+                    Some(tr!("command_palette.no_scripts_hint")),
                     false,
                 )
             } else {
@@ -1961,7 +2326,7 @@ impl Waku {
                                 .child(hint),
                         )
                     })
-                    .when(show_loading_state, |empty| {
+                    .when(show_loading_state && resume_view, |empty| {
                         let provider = self.command_palette.resume_provider;
                         empty.child(
                             div()

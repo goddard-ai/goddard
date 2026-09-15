@@ -76,8 +76,8 @@ use crate::{
     ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
     GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, MarkUnreadAndGoToNextUnseen,
     NavigateBack, NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace,
-    OpenResumePicker, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstProject,
-    SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
+    OpenResumePicker, OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile,
+    SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
     ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder,
     ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
@@ -2006,6 +2006,7 @@ mod image_preview;
 mod project_switcher;
 mod render;
 mod right_panel;
+mod run_script;
 mod runtime;
 mod sessions;
 mod settings;
