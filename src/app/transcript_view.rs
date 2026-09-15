@@ -365,6 +365,7 @@ impl Waku {
             )
         });
         let transcript_focus = self.transcript_focus.clone();
+        let theme = Theme::current(cx);
         div()
             .flex_1()
             .min_h_0()
@@ -393,6 +394,13 @@ impl Waku {
                 .size_full()
                 .pb(anchor_end_space),
             )
+            // Rows dissolve into the column surface just above the composer
+            // while more content waits below the fold.
+            .child(scrollbar::edge_fade(
+                scrollbar_handle.clone(),
+                scrollbar::FadeEdge::Bottom,
+                theme.surface,
+            ))
             .children(navigation_rail)
             .children(scroll_to_bottom)
             .child(scrollbar::vertical(

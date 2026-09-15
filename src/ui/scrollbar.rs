@@ -229,11 +229,15 @@ pub enum FadeEdge {
 
 /// A paint-only cue at an edge with content outside the viewport. Place after
 /// the scrollable child so its freshly laid-out bounds decide visibility.
-pub fn edge_fade(scroll: ScrollHandle, side: FadeEdge, surface: Hsla) -> impl IntoElement {
+pub fn edge_fade(
+    scroll: impl Scrollable + 'static,
+    side: FadeEdge,
+    surface: Hsla,
+) -> impl IntoElement {
     canvas(
         move |bounds, _, _| {
-            let scrolled = -scroll.offset().y;
-            let max_offset = scroll.max_offset().y;
+            let scrolled = scroll.scrolled();
+            let max_offset = scroll.max_offset();
             let visible = match side {
                 FadeEdge::Top => scrolled > px(0.5),
                 FadeEdge::Bottom => max_offset - scrolled > px(0.5),
