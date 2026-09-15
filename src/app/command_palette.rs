@@ -2104,6 +2104,9 @@ impl Waku {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(SettingsPage::Commands, cx);
                 self.open_custom_command_editor(None, window, cx);
+                if let Some(editor) = self.custom_command_editor.as_mut() {
+                    editor.exit_settings_on_save = true;
+                }
             }
             PaletteAction::SelectTask(session_id) => {
                 self.settings_page = None;

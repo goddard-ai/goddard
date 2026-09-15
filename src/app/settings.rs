@@ -119,6 +119,9 @@ pub(super) struct CustomCommandEditor {
     previous_script: Option<String>,
     /// Set when Save was pressed with an empty script.
     script_required: bool,
+    /// A new-command editor opened from the command palette leaves Settings
+    /// on save instead of landing back on the Commands page.
+    pub(super) exit_settings_on_save: bool,
 }
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
@@ -1149,13 +1152,14 @@ impl Waku {
             close_on_success: command.is_some_and(|command| command.close_on_success),
             previous_script: command.map(|command| command.script.clone()),
             script_required: false,
+            exit_settings_on_save: false,
         });
         let focus = name.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         cx.notify();
     }
 
-    fn save_custom_command_editor(&mut self, cx: &mut Context<Self>) {
+    fn save_custom_command_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = &self.custom_command_editor else {
             return;
         };
@@ -1168,6 +1172,7 @@ impl Waku {
         let name = editor.name.read(cx).content().trim().to_owned();
         let shell = editor.shell.read(cx).content().trim().to_owned();
         let previous_script = editor.previous_script.clone();
+        let exit_settings_on_save = editor.exit_settings_on_save;
         let command = CustomCommand {
             id: editor.id.unwrap_or_else(Uuid::new_v4),
             name: (!name.is_empty()).then_some(name),
@@ -1206,6 +1211,11 @@ impl Waku {
             );
         }
         self.save();
+        if exit_settings_on_save {
+            self.settings_page = None;
+            let focus = self.composer_focus(cx);
+            window.focus(&focus, cx);
+        }
         cx.notify();
     }
 
@@ -1624,7 +1634,9 @@ impl Waku {
                     )
                     .child(
                         ghost_button("custom-command-save", tr!("commands.save"))
-                            .on_activation(cx, |this, _, cx| this.save_custom_command_editor(cx)),
+                            .on_activation(cx, |this, window, cx| {
+                                this.save_custom_command_editor(window, cx)
+                            }),
                     ),
             )
     }
