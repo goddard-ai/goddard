@@ -183,6 +183,33 @@ file_finder.no_results_hint:
 task_switcher.recently_viewed:
   en: Recently viewed
 
+big_picture.new_task_placeholder:
+  en: Start a new task…
+big_picture.follow_up_placeholder:
+  en: "Reply to %{title}…"
+big_picture.replying_to:
+  en: "Replying to %{title}"
+big_picture.hint:
+  en: ← → choose · enter to target · esc to close
+big_picture.loading:
+  en: Loading…
+big_picture.empty_transcript:
+  en: No messages yet
+big_picture.status.waiting:
+  en: Needs input
+big_picture.status.unread:
+  en: Unread
+big_picture.status.working:
+  en: Working
+big_picture.status.starting:
+  en: Starting
+big_picture.status.background:
+  en: In background
+big_picture.status.idle:
+  en: Idle
+big_picture.status.failed:
+  en: Failed
+
 project_switcher.recently_used:
   en: Recently used
 

@@ -55,9 +55,10 @@ pub(super) enum ComposerSubmitAction {
 /// see [`composer_submit_action`].
 pub(super) fn session_awaits_continue(session: &AgentSession) -> bool {
     !session.status.is_busy()
-        && session.turns.last().is_some_and(|turn| {
-            matches!(turn.status, TurnStatus::Interrupted | TurnStatus::Failed)
-        })
+        && session
+            .turns
+            .last()
+            .is_some_and(|turn| matches!(turn.status, TurnStatus::Interrupted | TurnStatus::Failed))
 }
 
 pub(super) fn composer_submit_action(
@@ -2473,7 +2474,7 @@ impl Waku {
     /// The staged-attachment chips above the input: a thumbnail tile per
     /// image, a file-type icon and basename for everything else, each with a
     /// floating remove button — T3 Code's attachment row in graphite.
-    fn render_composer_attachments(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_composer_attachments(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let mut row = div()
             .px(px(14.0))

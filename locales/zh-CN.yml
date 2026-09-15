@@ -91,6 +91,19 @@ file_finder.no_results: 没有匹配的文件
 file_finder.no_results_hint: 试试其他文件名或路径
 
 task_switcher.recently_viewed: 最近查看的任务
+big_picture.new_task_placeholder: 开始新任务…
+big_picture.follow_up_placeholder: "回复 %{title}…"
+big_picture.replying_to: "正在回复 %{title}"
+big_picture.hint: ← → 选择 · enter 设定目标 · esc 关闭
+big_picture.loading: 加载中…
+big_picture.empty_transcript: 暂无消息
+big_picture.status.waiting: 需要输入
+big_picture.status.unread: 未读
+big_picture.status.working: 运行中
+big_picture.status.starting: 正在启动
+big_picture.status.background: 后台
+big_picture.status.idle: 空闲
+big_picture.status.failed: 失败
 
 project_switcher.recently_used: 最近使用的项目
 

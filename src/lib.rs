@@ -77,6 +77,7 @@ actions!(
         ToggleGitPanel,
         ToggleCommandPalette,
         ToggleFileFinder,
+        ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
         NavigateBack,
@@ -277,6 +278,7 @@ pub fn run() {
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
+            crate::app::init_big_picture_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
             crate::app::init_image_preview_keys(cx);
@@ -340,6 +342,9 @@ pub fn run() {
                 KeyBinding::new("secondary-7", SelectSidebarSession { index: 6 }, None),
                 KeyBinding::new("secondary-8", SelectSidebarSession { index: 7 }, None),
                 KeyBinding::new("secondary-9", SelectSidebarSession { index: 8 }, None),
+                // ⌘0 zooms out to Big Picture mode: the sessions most worth a
+                // glance, side by side, with the composer docked underneath.
+                KeyBinding::new("secondary-0", ToggleBigPicture, None),
                 // Step between turn prompts — the navigation rail's
                 // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
                 // pair works with the composer focused; in the terminal the

@@ -2434,6 +2434,10 @@ impl Waku {
                     let project_id = project.id;
                     waku.state.projects.push(project);
                     waku.create_session_for(project_id, waku.state.last_provider, cx);
+                    // A Big Picture new-task submit stashes its prompt while
+                    // the workspace is provisioned; the fresh draft is now
+                    // selected, so it can land.
+                    waku.drain_big_picture_pending_submission(cx);
                 }
                 Err(error) => {
                     waku.show_toast(tr!("errors.create_projectless_task", error = error));

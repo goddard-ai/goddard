@@ -283,6 +283,7 @@ impl Render for Waku {
         let image_preview = self.render_image_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
         let project_switcher = self.render_project_switcher(window, cx);
+        let big_picture = self.render_big_picture(window, cx);
         if self.settings_page.is_some() {
             let command_palette = self.render_command_palette(window, cx);
             let file_finder = self.render_file_finder(window, cx);
@@ -295,6 +296,7 @@ impl Render for Waku {
                 .size_full()
                 .on_action(cx.listener(Self::toggle_command_palette_action))
                 .on_action(cx.listener(Self::toggle_file_finder_action))
+                .on_action(cx.listener(Self::toggle_big_picture_action))
                 .on_action(cx.listener(Self::open_resume_picker_action))
                 .on_action(cx.listener(Self::switch_task_forward_action))
                 .on_action(cx.listener(Self::switch_task_backward_action))
@@ -327,6 +329,7 @@ impl Render for Waku {
                 .children(image_preview)
                 .children(task_switcher)
                 .children(project_switcher)
+                .children(big_picture)
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -359,6 +362,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_git_panel_action))
             .on_action(cx.listener(Self::toggle_command_palette_action))
             .on_action(cx.listener(Self::toggle_file_finder_action))
+            .on_action(cx.listener(Self::toggle_big_picture_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
             .on_action(cx.listener(Self::toggle_fps_counter_action))
             .on_action(cx.listener(Self::navigate_back_action))
@@ -495,8 +499,12 @@ impl Render for Waku {
                         },
                     )
                     .children(permission)
+                    // Big Picture remounts the one composer entity inside its
+                    // own layer; mounting it here too would collide.
                     .when(
-                        self.selected_project().is_some() && self.selected_terminal.is_none(),
+                        self.selected_project().is_some()
+                            && self.selected_terminal.is_none()
+                            && !self.big_picture.is_open(),
                         |element| {
                             element
                                 .children(self.render_queued_messages(cx))
@@ -587,6 +595,7 @@ impl Render for Waku {
             .children(image_preview)
             .children(task_switcher)
             .children(project_switcher)
+            .children(big_picture)
             .into_any_element();
 
         self.render_window_frame(content, window, cx)

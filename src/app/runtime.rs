@@ -3192,6 +3192,40 @@ impl Waku {
         self.submit_submission_for_session(session.id, submission, cx);
     }
 
+    /// `submit_composer_submission` for an explicit session, used by Big
+    /// Picture's targeted composer where the destination is a card rather
+    /// than whatever the workspace has selected.
+    pub(super) fn submit_composer_submission_to(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            self.restore_composer_submission(submission, cx);
+            return;
+        };
+        if self.response_fork_preparations.contains_key(&session.id) {
+            self.restore_composer_submission(submission, cx);
+            return;
+        }
+        if session.status == SessionStatus::Background {
+            self.steer_session_submission(session.id, submission, cx);
+            return;
+        }
+        if session.is_busy() {
+            self.enqueue_follow_up_submission(session.id, submission, cx);
+            return;
+        }
+        self.submit_submission_for_session(session.id, submission, cx);
+    }
+
     /// Deliver a steering message into the running turn. Providers without a
     /// live-turn transport (or a session that is not actively working) fall
     /// back to queueing a follow-up.
@@ -3200,11 +3234,31 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self.selected_session().cloned() else {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        self.steer_session_submission(session_id, submission, cx);
+    }
+
+    /// [`Self::steer_composer_submission`] for an explicit session.
+    pub(super) fn steer_session_submission(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            self.restore_composer_submission(submission, cx);
             return;
         };
         if !session.is_busy() {
-            self.submit_composer_submission(submission, cx);
+            self.submit_composer_submission_to(session.id, submission, cx);
             return;
         }
         // A turn that has not reached the provider yet cannot be steered; the

@@ -79,10 +79,10 @@ use crate::{
     OpenResumePicker, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstProject,
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
-    ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleModelPicker,
-    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
-    ToggleUsagePanel, ToggleWorkspace,
+    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder,
+    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
+    ToggleGitPanel, ToggleModelPicker, ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin,
+    ToggleSidebar, ToggleTerminals, ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1252,6 +1252,7 @@ pub struct Waku {
     file_finder: file_finder::FileFinderUi,
     task_switcher: task_switcher::TaskSwitcherUi,
     project_switcher: project_switcher::ProjectSwitcherUi,
+    big_picture: big_picture::BigPictureUi,
     model_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     /// The Appearance page's two font pickers — one per configurable face.
@@ -1982,6 +1983,7 @@ mod annotations;
 mod archive_dialog;
 mod autocomplete;
 mod background_work;
+mod big_picture;
 mod branches;
 mod command_palette;
 mod commit_dialog;
@@ -2020,6 +2022,7 @@ pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
+pub use big_picture::init as init_big_picture_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
@@ -2980,6 +2983,7 @@ impl Waku {
             )
             .detach();
             let project_switcher = project_switcher::ProjectSwitcherUi::new(project_switcher_focus);
+            let big_picture = big_picture::BigPictureUi::new(cx.focus_handle());
 
             cx.on_focus(&updater_button_focus, window, |this: &mut Self, _, cx| {
                 this.set_updater_button_focused(true, cx);
@@ -3070,11 +3074,22 @@ impl Waku {
                 &composer,
                 |this: &mut Self, _, event: &ComposerEvent, cx| match event {
                     ComposerEvent::Submit(prompt) => {
-                        if let Some(session_id) = this.selected_session().and_then(|session| {
-                            this.response_fork_preparations
-                                .contains_key(&session.id)
-                                .then_some(session.id)
-                        }) {
+                        if this.big_picture.is_open() {
+                            // Big Picture routes by its own target — a card's
+                            // session or a new task — not the selection.
+                            if !prompt.trim().is_empty()
+                                && let Some(submission) =
+                                    this.submission_with_attachments(prompt, cx)
+                            {
+                                this.submit_big_picture_submission(submission, cx);
+                            }
+                        } else if let Some(session_id) =
+                            this.selected_session().and_then(|session| {
+                                this.response_fork_preparations
+                                    .contains_key(&session.id)
+                                    .then_some(session.id)
+                            })
+                        {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
                         } else if prompt.trim().is_empty()
                             && this.composer_attachments.is_empty()
@@ -3098,11 +3113,20 @@ impl Waku {
                         }
                     }
                     ComposerEvent::SubmitSteer(prompt) => {
-                        if let Some(session_id) = this.selected_session().and_then(|session| {
-                            this.response_fork_preparations
-                                .contains_key(&session.id)
-                                .then_some(session.id)
-                        }) {
+                        if this.big_picture.is_open() {
+                            if !prompt.trim().is_empty()
+                                && let Some(submission) =
+                                    this.submission_with_attachments(prompt, cx)
+                            {
+                                this.steer_big_picture_submission(submission, cx);
+                            }
+                        } else if let Some(session_id) =
+                            this.selected_session().and_then(|session| {
+                                this.response_fork_preparations
+                                    .contains_key(&session.id)
+                                    .then_some(session.id)
+                            })
+                        {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)
@@ -3485,6 +3509,7 @@ impl Waku {
                 file_finder: file_finder::FileFinderUi::new(file_finder_search),
                 task_switcher,
                 project_switcher,
+                big_picture,
                 model_search,
                 branch_search,
                 branch_create_input,
