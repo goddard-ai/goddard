@@ -76,7 +76,7 @@ pub fn parse_command_exit(title: &str) -> Option<i32> {
 }
 
 /// `'…'` quoting for the path inside a shell command line.
-fn shell_quote(path: &Path) -> String {
+pub(crate) fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
 }
 

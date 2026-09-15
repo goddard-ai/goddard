@@ -42,6 +42,7 @@ mod md;
 mod platform;
 mod query;
 mod review_diff;
+mod shell_integration;
 mod terminal;
 mod theme;
 mod ui;

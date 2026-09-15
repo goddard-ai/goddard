@@ -194,6 +194,10 @@ impl Waku {
                 TerminalViewEvent::LocalhostUrl(url) => {
                     this.on_localhost_url_detected(&view, url.clone(), cx);
                 }
+                // Command status or cwd changed — the sidebar row reads
+                // both straight off the view; the cwd fingerprint makes
+                // the repo scan re-run on its own.
+                TerminalViewEvent::ActivityChanged => cx.notify(),
             }
         })
         .detach();
@@ -445,6 +449,25 @@ impl Waku {
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| tr!("right_panel.terminal"));
         let cwd = self.terminal_cwd(terminal_id, cx);
+        // The leading slot is the command's status: spinning while one
+        // runs, its exit mark after, empty when the shell reports nothing.
+        // The slot is fixed-width so the title never shifts under it.
+        let status_icon = terminal.and_then(|terminal| {
+            let terminal = terminal.read(cx);
+            if terminal.command_running() {
+                Some(motion::spin_slow(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_tertiary,
+                )))
+            } else {
+                match terminal.last_command_exit() {
+                    Some(0) => Some(icon("icons/check.svg", 12.0, theme.success).into_any_element()),
+                    Some(_) => Some(icon("icons/x.svg", 12.0, theme.danger).into_any_element()),
+                    None => None,
+                }
+            }
+        });
         let shell_name = terminal
             .map(|terminal| terminal.read(cx).shell_name().to_owned())
             .filter(|name| !name.is_empty())
@@ -516,6 +539,15 @@ impl Waku {
             .track_focus(&row_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(14.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .children(status_icon),
+            )
             .child(
                 div()
                     .min_w_0()

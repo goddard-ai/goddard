@@ -1052,6 +1052,16 @@ pub fn custom_command_scripts_directory() -> PathBuf {
     }
 }
 
+/// Where the bundled shell-integration scripts live once materialized —
+/// one file per supported shell, rewritten when the bundled text changes.
+pub fn shell_integration_scripts_directory() -> PathBuf {
+    if cfg!(debug_assertions) {
+        StateStore::default_path().with_file_name("shell-integration")
+    } else {
+        configuration_directory().join("shell-integration")
+    }
+}
+
 fn read_app_state_file(path: &Path) -> Option<AppState> {
     let bytes = fs::read(path).ok()?;
     let app_state = serde_json::from_slice::<AppState>(&bytes).ok()?;

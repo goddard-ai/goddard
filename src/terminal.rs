@@ -137,6 +137,12 @@ enum TerminalUiEvent {
     /// A custom command's launch line reported the script's exit code
     /// through its title sentinel.
     CommandExit(i32),
+    /// Shell integration reported the start of an interactive command.
+    CommandBegan,
+    /// Shell integration reported a command's exit status.
+    CommandEnded(i32),
+    /// Shell integration reported the shell's working directory.
+    Cwd(PathBuf),
     /// The shell process is gone. The code rides along when the OS reported
     /// one, which doubles as a completion signal for scripts that exit the
     /// shell themselves instead of reaching the sentinel.
@@ -156,6 +162,9 @@ pub enum TerminalViewEvent {
     /// A localhost URL appeared in freshly printed output — a dev server
     /// announcing its port. Carries the normalized, openable URL.
     LocalhostUrl(String),
+    /// The shell's command state or working directory changed — sidebar
+    /// rows showing status or location need a repaint.
+    ActivityChanged,
 }
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
@@ -193,11 +202,20 @@ impl EventListener for TerminalEventProxy {
                 self.dirty.store(true, Ordering::Release);
             }
             Event::Title(title) => {
-                // A custom command's sentinel reports its exit code as an
-                // OSC 2 title; swallow it so it can never rename the tab.
+                // Sentinels ride the OSC 2 title channel: a custom
+                // command's exit code and the shell-integration reports
+                // are swallowed so they can never rename the surface.
+                use crate::shell_integration::ShellReport;
                 let event = match crate::custom_commands::parse_command_exit(&title) {
                     Some(code) => TerminalUiEvent::CommandExit(code),
-                    None => TerminalUiEvent::Title(title),
+                    None => match crate::shell_integration::parse_report(&title) {
+                        Some(ShellReport::CommandBegin) => TerminalUiEvent::CommandBegan,
+                        Some(ShellReport::CommandEnd(code)) => {
+                            TerminalUiEvent::CommandEnded(code)
+                        }
+                        Some(ShellReport::Cwd(cwd)) => TerminalUiEvent::Cwd(cwd),
+                        None => TerminalUiEvent::Title(title),
+                    },
                 };
                 let _ = self.ui_events.send(event);
             }
@@ -311,7 +329,11 @@ impl TerminalSession {
         )));
 
         let (shell, startup_line) = match launch {
-            TerminalLaunch::Shell => (crate::command_env::default_terminal_shell(), None),
+            TerminalLaunch::Shell => {
+                let shell = crate::command_env::default_terminal_shell();
+                let startup_line = crate::shell_integration::launch_line(&shell);
+                (shell, startup_line)
+            }
             TerminalLaunch::CustomCommand(command) => {
                 let shell = crate::custom_commands::command_shell(command);
                 let script_path = crate::custom_commands::ensure_script(&command.script)
@@ -760,6 +782,11 @@ pub struct TerminalView {
     /// Basename of the PTY's shell — "zsh", "bash" — what a sidebar row
     /// reports when the terminal sits outside any repository.
     shell_name: String,
+    /// An interactive command is in flight — reported by shell
+    /// integration, or assumed while a custom command's launch line runs.
+    command_running: bool,
+    /// Exit status of the most recent command — `None` until one reports.
+    last_command_exit: Option<i32>,
     title: String,
     /// What `ResetTitle` restores — the localized "Terminal" for a plain
     /// shell, the command's display name for a custom command.
@@ -810,6 +837,7 @@ impl TerminalView {
             .and_then(|name| name.to_str())
             .unwrap_or_default()
             .to_owned();
+        let runs_a_command = matches!(launch, TerminalLaunch::CustomCommand(_));
         let terminal_cwd = working_directory.clone();
         cx.spawn(async move |this, cx| {
             let started = cx
@@ -864,6 +892,10 @@ impl TerminalView {
             default_title,
             working_directory,
             shell_name,
+            // A custom command's launch line is the terminal's first
+            // command — running from spawn until its sentinel reports.
+            command_running: runs_a_command,
+            last_command_exit: None,
             exited: false,
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
@@ -902,6 +934,18 @@ impl TerminalView {
     /// outside any repository.
     pub fn shell_name(&self) -> &str {
         &self.shell_name
+    }
+
+    /// Whether an interactive command is in flight — shell-integration
+    /// begin without its end, or a custom command's launch line.
+    pub fn command_running(&self) -> bool {
+        self.command_running
+    }
+
+    /// Exit status of the most recent command — `None` until one reports
+    /// (a shell without integration reports nothing at all).
+    pub fn last_command_exit(&self) -> Option<i32> {
+        self.last_command_exit
     }
 
     /// The last `count` non-blank lines on the terminal's screen — empty
@@ -967,10 +1011,38 @@ impl TerminalView {
                     session.write(formatter(&text).into_bytes());
                 }
                 TerminalUiEvent::CommandExit(code) => {
+                    self.command_running = false;
+                    self.last_command_exit = Some(code);
+                    cx.emit(TerminalViewEvent::ActivityChanged);
                     cx.emit(TerminalViewEvent::CommandFinished(Some(code)));
+                }
+                TerminalUiEvent::CommandBegan => {
+                    self.command_running = true;
+                    cx.emit(TerminalViewEvent::ActivityChanged);
+                }
+                TerminalUiEvent::CommandEnded(code) => {
+                    // An end only counts when a begin announced a run —
+                    // bash emits one at every prompt regardless, and the
+                    // first prompt's status is the rc file's, not a
+                    // command's.
+                    if self.command_running {
+                        self.command_running = false;
+                        self.last_command_exit = Some(code);
+                        cx.emit(TerminalViewEvent::ActivityChanged);
+                    }
+                }
+                TerminalUiEvent::Cwd(path) => {
+                    if path != self.working_directory {
+                        self.working_directory = path;
+                        cx.emit(TerminalViewEvent::ActivityChanged);
+                    }
                 }
                 TerminalUiEvent::Exited(code) => {
                     self.exited = true;
+                    // A shell that dies mid-command can never report the
+                    // end — stop the spinner.
+                    self.command_running = false;
+                    cx.emit(TerminalViewEvent::ActivityChanged);
                     // The completion event goes first: a script that exits
                     // the shell itself still resolves its run before the
                     // exit event can close the surface out from under it.
