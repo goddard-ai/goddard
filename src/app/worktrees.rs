@@ -474,35 +474,76 @@ impl Waku {
         self.pending_worktree_cleanups = deferred;
         for (session_id, path) in ready {
             let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-            cx.background_executor()
-                .spawn(async move {
-                    let git_ref = checkpoint::archive_ref(session_id);
-                    let verified = workspace
-                        .request(waku_client::WorkspaceOperation::CaptureRef {
-                            cwd: path.clone(),
-                            git_ref: git_ref.clone(),
-                        })
-                        .and_then(|_| {
-                            workspace.request(waku_client::WorkspaceOperation::HasRef {
+            cx.spawn(async move |waku, cx| {
+                let worktree_path = path.clone();
+                let removed = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let git_ref = checkpoint::archive_ref(session_id);
+                        let verified = workspace
+                            .request(waku_client::WorkspaceOperation::CaptureRef {
                                 cwd: path.clone(),
-                                git_ref,
+                                git_ref: git_ref.clone(),
                             })
-                        })
-                        .is_ok_and(|result| {
-                            matches!(result, waku_client::WorkspaceResult::Bool { value: true })
-                        });
-                    // The force flag only runs behind a verified snapshot:
-                    // a failed capture leaves the worktree on disk rather
-                    // than destroying unsaved work.
-                    if verified {
-                        let _ =
-                            workspace.request(waku_client::WorkspaceOperation::RemoveWorktree {
-                                path,
-                                force: true,
+                            .and_then(|_| {
+                                workspace.request(waku_client::WorkspaceOperation::HasRef {
+                                    cwd: path.clone(),
+                                    git_ref,
+                                })
+                            })
+                            .is_ok_and(|result| {
+                                matches!(
+                                    result,
+                                    waku_client::WorkspaceResult::Bool { value: true }
+                                )
                             });
-                    }
-                })
-                .detach();
+                        // The force flag only runs behind a verified snapshot:
+                        // a failed capture leaves the worktree on disk rather
+                        // than destroying unsaved work.
+                        verified
+                            && (workspace
+                                .request(waku_client::WorkspaceOperation::RemoveWorktree {
+                                    path: path.clone(),
+                                    force: true,
+                                })
+                                .is_ok()
+                                || !path.exists())
+                    })
+                    .await;
+                if removed {
+                    let _ = waku.update(cx, move |waku, cx| {
+                        waku.close_worktree_terminals(session_id, &worktree_path, cx);
+                    });
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// Close every terminal whose PTY ran inside a removed worktree — the
+    /// session's own, wherever their surfaces live, plus any global terminal
+    /// spawned into the directory. A surviving shell would keep running
+    /// against a deleted cwd.
+    fn close_worktree_terminals(
+        &mut self,
+        session_id: Uuid,
+        worktree_path: &Path,
+        cx: &mut Context<Self>,
+    ) {
+        let terminal_ids = self
+            .terminal_records
+            .iter()
+            .filter_map(|(terminal_id, record)| {
+                (record.session == Some(session_id)
+                    || record
+                        .working_directory
+                        .as_ref()
+                        .is_some_and(|dir| dir.starts_with(worktree_path)))
+                .then_some(*terminal_id)
+            })
+            .collect::<Vec<_>>();
+        for terminal_id in terminal_ids {
+            self.close_terminal(terminal_id, cx);
         }
     }
 

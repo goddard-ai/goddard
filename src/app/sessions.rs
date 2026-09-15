@@ -649,7 +649,8 @@ impl Waku {
     /// working. A worktree-based task is then snapshotted into its archive
     /// ref and its worktree removed, so archived chats stop costing a full
     /// checkout of disk; the daemon purges archives once they outlive the
-    /// retention window.
+    /// retention window. Terminals that ran inside the worktree are closed
+    /// once the removal lands.
     pub(super) fn archive_session(
         &mut self,
         session_id: Uuid,
