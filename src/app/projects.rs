@@ -280,12 +280,14 @@ impl ProjectsPageState {
         ) -> Entity<TextInput> {
             cx.new(|cx| {
                 TextInput::new(window, cx)
+                    .accessibility_label(placeholder.clone())
                     .placeholder(placeholder)
                     .clear_on_escape()
             })
         }
         let composer = cx.new(|cx| {
             TextInput::new(window, cx)
+                .accessibility_label(tr!("a11y.task_description"))
                 .placeholder(tr!("projects.composer_placeholder"))
                 .multi_line()
                 .auto_height()

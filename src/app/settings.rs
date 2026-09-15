@@ -1159,6 +1159,7 @@ impl Waku {
         let name = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .tab_index(0)
+                .accessibility_label(tr!("commands.name"))
                 .placeholder(tr!("commands.name_placeholder"));
             if let Some(name) = command.and_then(|command| command.name.as_deref()) {
                 input.set_content(name, cx);
@@ -1168,6 +1169,7 @@ impl Waku {
         let shell = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .tab_index(0)
+                .accessibility_label(tr!("commands.shell"))
                 .placeholder(tr!("commands.shell_placeholder"));
             if let Some(shell) = command.and_then(|command| command.shell.as_deref()) {
                 input.set_content(shell, cx);
@@ -1181,6 +1183,7 @@ impl Waku {
                 .auto_height()
                 .max_lines(10)
                 .syntax(Some("shell"))
+                .accessibility_label(tr!("commands.script"))
                 .placeholder(tr!("commands.script_placeholder"));
             if let Some(command) = command {
                 input.set_content(command.script.clone(), cx);
@@ -5311,39 +5314,71 @@ impl Waku {
         crate::i18n::set_language(language);
 
         self.composer.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("a11y.composer"), cx);
             input.set_placeholder(tr!("input.do_anything"), cx)
         });
         self.model_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.search_models"), cx);
             input.set_placeholder(tr!("input.search_models"), cx)
         });
         self.branch_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.search_branches"), cx);
             input.set_placeholder(tr!("input.search_branches"), cx)
         });
         self.branch_create_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.new_branch_name"), cx);
             input.set_placeholder(tr!("input.new_branch_name"), cx)
         });
         self.worktree_name_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.worktree_name"), cx);
             input.set_placeholder(tr!("input.worktree_name"), cx)
         });
         self.settings_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("settings.search"), cx);
             input.set_placeholder(tr!("settings.search"), cx)
         });
         self.archived_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("settings.archived_search"), cx);
             input.set_placeholder(tr!("settings.archived_search"), cx)
         });
         for selector in [&self.ui_font_selector, &self.code_font_selector] {
             selector.search.update(cx, |input, cx| {
+                input.set_accessibility_label(tr!("input.search_fonts"), cx);
                 input.set_placeholder(tr!("input.search_fonts"), cx)
             });
         }
         self.skills_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("skills.search"), cx);
             input.set_placeholder(tr!("skills.search"), cx)
         });
         self.provider_path_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("providers.binary_path"), cx);
             input.set_placeholder(tr!("input.detected_automatically"), cx)
         });
         self.usage_project_filter.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.filter_projects"), cx);
             input.set_placeholder(tr!("input.filter_projects"), cx)
+        });
+        self.user_input_answer.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("a11y.answer"), cx);
+            input.set_placeholder(tr!("user_input.other_placeholder"), cx)
+        });
+        self.annotation_comment_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("a11y.comment"), cx);
+            input.set_placeholder(tr!("annotations.comment_placeholder"), cx)
+        });
+        self.session_rename_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("a11y.task_name"), cx)
+        });
+        self.daemon_port_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("daemon.port"), cx)
+        });
+        self.daemon_origins_input.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("daemon.allowed_origins"), cx)
+        });
+        self.right_panel_diff_filter.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("diff.filter_files"), cx);
+            input.set_placeholder(tr!("diff.filter_files"), cx)
         });
         self.refresh_command_palette_localized_text(cx);
         self.refresh_file_finder_localized_text(cx);
@@ -5448,6 +5483,7 @@ impl FontSelector {
             search: cx.new(|cx| {
                 TextInput::new(window, cx)
                     .clear_on_escape()
+                    .accessibility_label(tr!("input.search_fonts"))
                     .placeholder(tr!("input.search_fonts"))
             }),
             list: ListState::new(0, ListAlignment::Top, px(64.0)),

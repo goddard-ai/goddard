@@ -86,6 +86,7 @@ impl Waku {
         let objective = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .accessibility_label(tr!("goal.title"))
                 .placeholder(tr!("goal.objective_placeholder"))
         });
         if let Some(content) = content {

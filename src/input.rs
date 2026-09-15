@@ -11,7 +11,8 @@ use gpui::{
     Focusable, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding, LayoutId,
     Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
-    UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, size,
+    UTF16Selection, UnderlineStyle, Window, accesskit, actions, div, fill, point, prelude::*, px,
+    size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -671,6 +672,7 @@ pub struct TextInput {
     active_search_match: Option<usize>,
     content: SharedString,
     placeholder: SharedString,
+    accessibility_label: Option<SharedString>,
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
@@ -758,6 +760,7 @@ impl TextInput {
             active_search_match: None,
             content: "".into(),
             placeholder: "".into(),
+            accessibility_label: None,
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -840,6 +843,28 @@ impl TextInput {
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
+    }
+
+    /// Name exposed to macOS accessibility clients such as dictation tools.
+    /// The placeholder remains a separate accessibility property so it can be
+    /// announced as a hint rather than being used as the control's identity.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
+    }
+
+    /// Update the accessibility name after construction, alongside
+    /// [`set_placeholder`](Self::set_placeholder) on a language switch.
+    pub fn set_accessibility_label(
+        &mut self,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        let label = label.into();
+        if self.accessibility_label.as_ref() != Some(&label) {
+            self.accessibility_label = Some(label);
+            cx.notify();
+        }
     }
 
     /// Put the field in the surrounding surface's tab order.
@@ -2958,6 +2983,8 @@ impl Render for TextInput {
         let theme = Theme::current(cx);
         let input = cx.entity();
         let context_menu_input = input.clone();
+        let accessibility_replace_input = input.clone();
+        let accessibility_set_input = input.clone();
         let scroll_handle = self.scroll_handle.clone();
         let padding_x = self.padding_x;
         let scrollbar = self
@@ -2965,7 +2992,15 @@ impl Render for TextInput {
             .then(|| scrollbar::vertical(&self.scroll_handle, &self.scrollbar_state));
         let field = div()
             .key_context("TextInput")
-            .id("composer-field")
+            // Every TextInput needs its own stable node. A shared id
+            // collapses multiple fields into one accessibility element.
+            .id(("text-input", input.entity_id()))
+            .role(accesskit::Role::TextInput)
+            .when_some(self.accessibility_label.clone(), |field, label| {
+                field.aria_label(label)
+            })
+            .aria_value(self.content.clone())
+            .aria_placeholder(self.placeholder.clone())
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
@@ -3014,6 +3049,30 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::submit_steer))
             .on_action(cx.listener(Self::clear_field))
+            .when(!self.read_only, |field| {
+                field
+                    .on_a11y_action(
+                        accesskit::Action::ReplaceSelectedText,
+                        move |data, _, cx| {
+                            let Some(accesskit::ActionData::Value(value)) = data else {
+                                return;
+                            };
+                            let value = value.to_string();
+                            accessibility_replace_input.update(cx, |input, cx| {
+                                let selected_range = input.selected_range();
+                                input.replace_range(selected_range, &value, cx);
+                            });
+                        },
+                    )
+                    .on_a11y_action(accesskit::Action::SetValue, move |data, _, cx| {
+                        let Some(accesskit::ActionData::Value(value)) = data else {
+                            return;
+                        };
+                        accessibility_set_input.update(cx, |input, cx| {
+                            input.set_content(value.to_string(), cx);
+                        });
+                    })
+            })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::on_context_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -3181,6 +3240,7 @@ impl ComposerInput {
                 .media_paste()
                 .list_continuation()
                 .syntax(Some("markdown"))
+                .accessibility_label(tr!("a11y.composer"))
                 .placeholder(tr!("input.do_anything"))
         });
         let focus_handle = input.read(cx).focus();
@@ -3249,6 +3309,17 @@ impl ComposerInput {
     ) {
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
+    }
+
+    /// Forwarded [`TextInput::set_accessibility_label`], for a language
+    /// switch after construction.
+    pub fn set_accessibility_label(
+        &mut self,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.input
+            .update(cx, |input, cx| input.set_accessibility_label(label, cx));
     }
 
     /// Splice `text` over `range`, as the `@`/`/` autocomplete accepts a row.

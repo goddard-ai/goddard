@@ -751,9 +751,10 @@ impl Waku {
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
         };
-        self.command_palette
-            .search
-            .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("a11y.command_palette"), cx);
+            input.set_placeholder(placeholder, cx);
+        });
         if self.command_palette.open {
             let query = self.command_palette.search.read(cx).content().to_owned();
             self.refresh_command_palette_results(&query, true, cx);

@@ -310,6 +310,7 @@ impl Waku {
         let message = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .accessibility_label(tr!("commit.message"))
                 .placeholder(tr!("commit.message_placeholder"))
         });
         self.git_panel = Some(GitPanelState {

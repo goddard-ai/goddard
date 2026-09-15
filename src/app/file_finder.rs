@@ -200,6 +200,7 @@ impl Waku {
 
     pub(super) fn refresh_file_finder_localized_text(&mut self, cx: &mut Context<Self>) {
         self.file_finder.search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("a11y.file_finder"), cx);
             input.set_placeholder(tr!("file_finder.placeholder"), cx)
         });
     }

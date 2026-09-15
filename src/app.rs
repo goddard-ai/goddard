@@ -2674,54 +2674,66 @@ impl Waku {
         });
 
         let composer = cx.new(|cx| ComposerInput::new(window, cx).padding_x(px(14.0), cx));
-        let user_input_answer = cx
-            .new(|cx| TextInput::new(window, cx).placeholder(tr!("user_input.other_placeholder")));
+        let user_input_answer = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("a11y.answer"))
+                .placeholder(tr!("user_input.other_placeholder"))
+        });
         let annotation_comment_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
                 .submit_on_enter()
                 .auto_height()
                 .max_lines(8)
+                .accessibility_label(tr!("a11y.comment"))
                 .placeholder(tr!("annotations.comment_placeholder"))
         });
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("a11y.command_palette"))
                 .placeholder(tr!("command_palette.placeholder"))
         });
         let file_finder_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("a11y.file_finder"))
                 .placeholder(tr!("file_finder.placeholder"))
         });
         let model_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("input.search_models"))
                 .placeholder(tr!("input.search_models"))
         });
         let branch_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("input.search_branches"))
                 .placeholder(tr!("input.search_branches"))
         });
         let branch_create_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("input.new_branch_name"))
                 .placeholder(tr!("input.new_branch_name"))
         });
         let worktree_name_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("input.worktree_name"))
                 .placeholder(tr!("input.worktree_name"))
         });
         let settings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("settings.search"))
                 .placeholder(tr!("settings.search"))
         });
         let archived_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("settings.archived_search"))
                 .placeholder(tr!("settings.archived_search"))
         });
         let ui_font_selector = settings::FontSelector::new(window, cx);
@@ -2731,6 +2743,7 @@ impl Waku {
         let daemon_port_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .select_all_on_focus_click()
+                .accessibility_label(tr!("daemon.port"))
                 .placeholder(tr!("daemon.port_placeholder"));
             input.set_content(daemon_port, cx);
             input
@@ -2738,6 +2751,7 @@ impl Waku {
         let daemon_origins_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .select_all_on_focus_click()
+                .accessibility_label(tr!("daemon.allowed_origins"))
                 .placeholder(tr!("daemon.allowed_origins_placeholder"));
             input.set_content(daemon_origins, cx);
             input
@@ -2745,18 +2759,27 @@ impl Waku {
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
+                .accessibility_label(tr!("skills.search"))
                 .placeholder(tr!("skills.search"))
         });
-        let session_rename_input = cx.new(|cx| TextInput::new(window, cx));
+        let session_rename_input =
+            cx.new(|cx| TextInput::new(window, cx).accessibility_label(tr!("a11y.task_name")));
         let provider_path_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .select_all_on_focus_click()
+                .accessibility_label(tr!("providers.binary_path"))
                 .placeholder(tr!("input.detected_automatically"))
         });
-        let usage_project_filter =
-            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
-        let right_panel_diff_filter =
-            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
+        let usage_project_filter = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("input.filter_projects"))
+                .placeholder(tr!("input.filter_projects"))
+        });
+        let right_panel_diff_filter = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("diff.filter_files"))
+                .placeholder(tr!("diff.filter_files"))
+        });
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);

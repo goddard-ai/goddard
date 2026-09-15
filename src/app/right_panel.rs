@@ -3641,6 +3641,7 @@ impl Waku {
                 .multi_line()
                 .syntax(Some(language))
                 .read_only(true)
+                .accessibility_label(relative_path.to_owned())
         });
 
         self.right_panel_file_editors.insert(

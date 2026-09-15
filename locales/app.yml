@@ -597,6 +597,23 @@ input.find:
 input.replace:
   en: Replace
 
+a11y.composer:
+  en: Composer
+a11y.address_bar:
+  en: Address bar
+a11y.command_palette:
+  en: Command palette
+a11y.file_finder:
+  en: File finder
+a11y.task_name:
+  en: Task name
+a11y.task_description:
+  en: Task description
+a11y.answer:
+  en: Your answer
+a11y.comment:
+  en: Comment
+
 common.checking:
   en: Checking…
 common.refresh:

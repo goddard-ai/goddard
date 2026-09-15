@@ -64,9 +64,10 @@ impl Waku {
         let Some(search) = &self.transcript_search else {
             return;
         };
-        search
-            .query
-            .update(cx, |input, cx| input.set_placeholder(tr!("input.find"), cx));
+        search.query.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.find"), cx);
+            input.set_placeholder(tr!("input.find"), cx)
+        });
     }
 
     pub(super) fn transcript_search_open(&self) -> bool {
@@ -79,7 +80,11 @@ impl Waku {
         if self.transcript_search.is_some() {
             return;
         }
-        let query = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.find")));
+        let query = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("input.find"))
+                .placeholder(tr!("input.find"))
+        });
         cx.subscribe(
             &query,
             |this: &mut Self, _, event: &InputEvent, cx| match event {

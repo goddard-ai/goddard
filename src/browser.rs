@@ -1194,6 +1194,7 @@ impl BrowserView {
         let address = cx.new(|cx| {
             TextInput::new(window, cx)
                 .select_all_on_focus_click()
+                .accessibility_label(tr!("a11y.address_bar"))
                 .placeholder(tr!("input.search_or_enter_address"))
         });
 
@@ -1292,6 +1293,7 @@ impl BrowserView {
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
         self.address.update(cx, |address, cx| {
+            address.set_accessibility_label(tr!("a11y.address_bar"), cx);
             address.set_placeholder(tr!("input.search_or_enter_address"), cx)
         });
         cx.notify();

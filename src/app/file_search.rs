@@ -217,10 +217,12 @@ impl Waku {
         let Some(search) = &self.file_search else {
             return;
         };
-        search
-            .query
-            .update(cx, |input, cx| input.set_placeholder(tr!("input.find"), cx));
+        search.query.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.find"), cx);
+            input.set_placeholder(tr!("input.find"), cx)
+        });
         search.replace.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("input.replace"), cx);
             input.set_placeholder(tr!("input.replace"), cx)
         });
     }
@@ -254,7 +256,11 @@ impl Waku {
         if self.file_search.is_some() {
             return;
         }
-        let query = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.find")));
+        let query = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("input.find"))
+                .placeholder(tr!("input.find"))
+        });
         cx.subscribe(
             &query,
             |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -265,7 +271,11 @@ impl Waku {
             },
         )
         .detach();
-        let replace = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.replace")));
+        let replace = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("input.replace"))
+                .placeholder(tr!("input.replace"))
+        });
         cx.subscribe(&replace, |this: &mut Self, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Submit(_)) {
                 this.file_search_replace_current(cx);

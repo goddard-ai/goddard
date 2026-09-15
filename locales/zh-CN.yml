@@ -1398,3 +1398,11 @@ git_panel.landed: 已合入 %{base}
 git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
 git_panel.resolve_land_rebase_prompt: "此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"
 git_panel.resolve_land_merge_prompt: "`%{base}` 合并到此工作区时因冲突而停止。请解决工作区中的冲突并完成合并，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"
+a11y.composer: 输入框
+a11y.address_bar: 地址栏
+a11y.command_palette: 命令面板
+a11y.file_finder: 文件查找器
+a11y.task_name: 任务名称
+a11y.task_description: 任务描述
+a11y.answer: 你的回答
+a11y.comment: 评论
