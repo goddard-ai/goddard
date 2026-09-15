@@ -2322,7 +2322,8 @@ impl Waku {
         } else {
             gpui::hsla(0.0, 0.0, 0.0, 0.16)
         };
-        deferred(
+        deferred(motion::fade_in(
+            SharedString::from(format!("{id}-scrim-enter")),
             div()
                 .id(id)
                 .absolute()
@@ -2337,8 +2338,11 @@ impl Waku {
                     MouseButton::Left,
                     cx.listener(|this, _, _, cx| this.dismiss_git_panel_modal(cx)),
                 )
-                .child(card),
-        )
+                .child(motion::modal_enter(
+                    SharedString::from(format!("{id}-card-enter")),
+                    card,
+                )),
+        ))
         .with_priority(4)
         .into_any_element()
     }

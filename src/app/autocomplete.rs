@@ -459,13 +459,15 @@ impl Waku {
             }
         }
 
+        let anchor = point(card_bounds.origin.x, card_bounds.origin.y - px(6.0));
         Some((
             deferred(
                 anchored()
-                    .position(point(card_bounds.origin.x, card_bounds.origin.y - px(6.0)))
+                    .position(anchor)
                     .anchor(Anchor::BottomLeft)
                     .snap_to_window_with_margin(px(8.0))
-                    .child(
+                    .child(motion::surface_enter(
+                        "composer-autocomplete-enter",
                         div()
                             .occlude()
                             .w(card_bounds.size.width)
@@ -482,7 +484,8 @@ impl Waku {
                                 this.dismiss_autocomplete(cx);
                             }))
                             .child(list),
-                    ),
+                        anchor,
+                    )),
             )
             .with_priority(1)
             .into_any_element(),

@@ -281,8 +281,12 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|waku, _, window, cx| waku.close_archive_dialog(window, cx)),
             )
-            .child(card);
-        Some(gpui::deferred(layer).with_priority(4).into_any_element())
+            .child(motion::modal_enter("archive-dialog-card-enter", card));
+        Some(
+            gpui::deferred(motion::fade_in("archive-dialog-layer-enter", layer))
+                .with_priority(4)
+                .into_any_element(),
+        )
     }
 }
 

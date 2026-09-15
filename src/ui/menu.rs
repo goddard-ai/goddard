@@ -85,6 +85,7 @@ pub fn init(cx: &mut App) {
 
 use crate::theme::{Theme, sp};
 use crate::ui::icon;
+use crate::ui::motion;
 use crate::ui::shortcut::ShortcutHint;
 
 /// One row of a menu.
@@ -523,7 +524,7 @@ impl MenuAlign {
     }
 
     /// The point on the trigger the card's corner attaches to.
-    fn anchor_point(self, bounds: gpui::Bounds<Pixels>, gap: Pixels) -> Point<Pixels> {
+    pub(crate) fn anchor_point(self, bounds: gpui::Bounds<Pixels>, gap: Pixels) -> Point<Pixels> {
         let x = if self.right_aligned() {
             bounds.right()
         } else {
@@ -809,14 +810,21 @@ where
 {
     let id: ElementId = id.into();
     let items = Rc::new(items);
-    anchored_surface(trigger, handle, align, SurfaceFocus::Card, move |handle| {
-        MenuCard {
-            id: id.clone(),
-            handle: handle.clone(),
-            items: items.clone(),
-        }
-        .into_any_element()
-    })
+    anchored_surface(
+        trigger,
+        handle,
+        align,
+        SurfaceFocus::Card,
+        move |handle, anchor| {
+            MenuCard {
+                id: id.clone(),
+                handle: handle.clone(),
+                items: items.clone(),
+                anchor,
+            }
+            .into_any_element()
+        },
+    )
 }
 
 /// A [`dropdown_menu`] whose trigger also opens after the pointer rests on it
@@ -892,10 +900,11 @@ where
         handle,
         align,
         SurfaceFocus::Content,
-        move |handle| {
+        move |handle, anchor| {
             PopoverCard {
                 handle: handle.clone(),
                 content: content.clone(),
+                anchor,
             }
             .into_any_element()
         },
@@ -950,13 +959,15 @@ fn toggle_keyboard_anchored(
 }
 
 /// The shared half of both dropdown surfaces: a trigger that records its bounds
-/// and toggles the handle, plus the open card deferred and anchored to it.
+/// and toggles the handle, plus the open card deferred and anchored to it. The
+/// card builder also receives the anchor point — the spot on the trigger the
+/// card attaches to — so its entrance can grow out of it.
 fn anchored_surface<E>(
     trigger: E,
     handle: &ContextMenuHandle,
     align: MenuAlign,
     focus_target: SurfaceFocus,
-    card: impl Fn(&ContextMenuHandle) -> AnyElement + 'static,
+    card: impl Fn(&ContextMenuHandle, Point<Pixels>) -> AnyElement + 'static,
 ) -> AnyElement
 where
     E: ParentElement + Styled + InteractiveElement + IntoElement + 'static,
@@ -994,7 +1005,7 @@ where
     trigger
         .child(
             deferred(FloatingSurface::new(
-                card(handle),
+                card(handle, position),
                 trigger_bounds,
                 align,
                 px(TRIGGER_GAP),
@@ -1031,26 +1042,33 @@ struct PopoverCard {
     handle: ContextMenuHandle,
     #[allow(clippy::type_complexity)]
     content: Rc<dyn Fn(&ContextMenuHandle, &mut Window, &mut App) -> AnyElement>,
+    /// The point on the trigger the card attaches to — the entrance grows
+    /// out of it.
+    anchor: Point<Pixels>,
 }
 
 impl RenderOnce for PopoverCard {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let body = (self.content)(&self.handle, window, cx);
-        div()
-            .occlude()
-            .key_context(MENU_CONTEXT)
-            .on_action({
-                let handle = self.handle.clone();
-                move |_: &DismissMenu, window, cx| {
-                    handle.close(window, cx);
-                    window.refresh();
-                }
-            })
-            .on_mouse_down_out({
-                let handle = self.handle.clone();
-                move |event, window, cx| handle.dismiss_on_down_out(event, window, cx)
-            })
-            .child(body)
+        motion::surface_enter(
+            "popover-enter",
+            div()
+                .occlude()
+                .key_context(MENU_CONTEXT)
+                .on_action({
+                    let handle = self.handle.clone();
+                    move |_: &DismissMenu, window, cx| {
+                        handle.close(window, cx);
+                        window.refresh();
+                    }
+                })
+                .on_mouse_down_out({
+                    let handle = self.handle.clone();
+                    move |event, window, cx| handle.dismiss_on_down_out(event, window, cx)
+                })
+                .child(body),
+            self.anchor,
+        )
     }
 }
 
@@ -1116,6 +1134,7 @@ where
                         id,
                         handle: handle.clone(),
                         items,
+                        anchor: position,
                     }),
             )
             .with_priority(1),
@@ -1129,6 +1148,9 @@ struct MenuCard {
     handle: ContextMenuHandle,
     #[allow(clippy::type_complexity)]
     items: Rc<dyn Fn(&mut App) -> Vec<MenuItem>>,
+    /// The window-space point the card grows out of — the click for a context
+    /// menu, the trigger's attach corner for a dropdown.
+    anchor: Point<Pixels>,
 }
 
 impl RenderOnce for MenuCard {
@@ -1159,6 +1181,7 @@ impl RenderOnce for MenuCard {
             };
             Some((index, items(cx)))
         });
+        let enter_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "enter".into());
 
         let mut root_card = div()
             .id(self.id)
@@ -1239,9 +1262,12 @@ impl RenderOnce for MenuCard {
                     cx,
                 ));
             }
-            surface = surface.child(submenu_card);
+            surface = surface.child(motion::fade_in(
+                SharedString::from(format!("submenu-{parent_index}-enter")),
+                submenu_card,
+            ));
         }
-        surface
+        motion::surface_enter(enter_id, surface, self.anchor)
     }
 }
 

@@ -615,7 +615,7 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.cancel_task_switcher(window, cx)),
             )
-            .child(card);
+            .child(motion::modal_enter("task-switcher-card-enter", card));
         Some(gpui::deferred(layer).with_priority(6).into_any_element())
     }
 }

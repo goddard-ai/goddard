@@ -1078,7 +1078,11 @@ impl Waku {
                             .child(tr!("big_picture.hint")),
                     ),
             );
-        Some(gpui::deferred(layer).with_priority(7).into_any_element())
+        Some(
+            gpui::deferred(motion::fade_in("big-picture-layer-enter", layer))
+                .with_priority(7)
+                .into_any_element(),
+        )
     }
 }
 

@@ -770,8 +770,12 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|waku, _, window, cx| waku.close_commit_dialog(window, cx)),
             )
-            .child(card);
-        Some(gpui::deferred(layer).with_priority(4).into_any_element())
+            .child(motion::modal_enter("commit-dialog-card-enter", card));
+        Some(
+            gpui::deferred(motion::fade_in("commit-dialog-layer-enter", layer))
+                .with_priority(4)
+                .into_any_element(),
+        )
     }
 }
 

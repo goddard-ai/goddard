@@ -533,7 +533,7 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.cancel_project_switcher(window, cx)),
             )
-            .child(card);
+            .child(motion::modal_enter("project-switcher-card-enter", card));
         Some(gpui::deferred(layer).with_priority(6).into_any_element())
     }
 }

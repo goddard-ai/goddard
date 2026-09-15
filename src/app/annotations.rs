@@ -489,7 +489,12 @@ impl Waku {
             });
         Some(
             deferred(FloatingSurface::new(
-                button.into_any_element(),
+                motion::surface_enter(
+                    "annotate-selection-enter",
+                    button,
+                    MenuAlign::AboveLeft.anchor_point(anchor, px(6.0)),
+                )
+                .into_any_element(),
                 anchor,
                 MenuAlign::AboveLeft,
                 px(6.0),
@@ -555,7 +560,12 @@ impl Waku {
             );
         Some(
             deferred(FloatingSurface::new(
-                card.into_any_element(),
+                motion::surface_enter(
+                    "annotation-editor-enter",
+                    card,
+                    MenuAlign::BelowLeft.anchor_point(anchor, px(6.0)),
+                )
+                .into_any_element(),
                 anchor,
                 MenuAlign::BelowLeft,
                 px(6.0),
