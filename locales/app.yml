@@ -1744,6 +1744,12 @@ annotations.count_many:
   en: "%{count} annotations"
 composer.remove_attachment:
   en: Remove %{name}
+composer.pasted_block:
+  en: Pasted text
+composer.pasted_block_expand:
+  en: Show in text field
+composer.remove_pasted_block:
+  en: Remove pasted text
 
 branches.detached_head:
   en: Detached HEAD
@@ -1921,6 +1927,8 @@ errors.prepare_task_project_not_found:
   en: "Could not prepare the task: project not found"
 errors.store_pasted_image:
   en: "Could not attach the pasted image: %{error}"
+errors.store_pasted_text:
+  en: "Could not attach the pasted text: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
 errors.move_to_worktree:

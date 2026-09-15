@@ -1,6 +1,7 @@
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, supports_reasoning_default_reset, visible_branch_entries,
+    next_picker_highlight, prompt_with_pasted_blocks, supports_reasoning_default_reset,
+    visible_branch_entries,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::next_unread_session;
@@ -363,6 +364,25 @@ fn submissions_append_attachment_mentions_after_the_prompt() {
     );
     assert_eq!(merged_submission(" plain ", &[]).as_deref(), Some("plain"));
     assert_eq!(merged_submission("   ", &[]), None);
+}
+
+#[test]
+fn collapsed_paste_blocks_follow_the_typed_text_in_order() {
+    let blocks = vec!["first\nblock".to_owned(), " second\nblock ".to_owned()];
+    assert_eq!(
+        prompt_with_pasted_blocks("fix this", &blocks),
+        "fix this\n\nfirst\nblock\n\nsecond\nblock"
+    );
+    // A blocks-only draft still sends; a blank block contributes nothing.
+    assert_eq!(
+        prompt_with_pasted_blocks("  ", &blocks),
+        "first\nblock\n\nsecond\nblock"
+    );
+    assert_eq!(prompt_with_pasted_blocks("fix this", &[]), "fix this");
+    assert_eq!(
+        prompt_with_pasted_blocks("fix this", &["  ".to_owned()]),
+        "fix this"
+    );
 }
 
 #[test]

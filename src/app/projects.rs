@@ -1180,6 +1180,7 @@ impl Waku {
             display_content: Some(display),
             human_content: Some(typed),
             attachments: Vec::new(),
+            pasted_blocks: Vec::new(),
             annotations: Vec::new(),
             hidden: false,
         };

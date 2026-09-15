@@ -2,6 +2,7 @@ use super::annotations::{
     annotation_bubble_content, annotation_display_content, annotation_prompt_prefix,
 };
 use super::*;
+use crate::ui::ActivationExt;
 
 use anyhow::Context as _;
 use base64::Engine as _;
@@ -10,6 +11,11 @@ use base64::Engine as _;
 /// `group_drag_over` so it lights up wherever over the column an OS file drag
 /// is held, and the column itself accepts the drop for the same staging.
 pub(super) const SESSION_DROP_GROUP: &str = "session-file-drop";
+
+/// A collapsed text paste past this size stops being a composer card and is
+/// stored as a durable `.txt` blob instead — a real file attachment the agent
+/// opens itself, rather than a block of bytes folded into every draft sync.
+const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
 
 const COMPUTER_USE_PREVIEW_WIDTH: f32 = 304.0;
 const COMPUTER_USE_PREVIEW_HEIGHT: f32 = 172.0;
@@ -2214,6 +2220,91 @@ impl Waku {
         .detach();
     }
 
+    /// A text paste the field refused to splice. Past
+    /// [`PASTED_TEXT_FILE_BYTES`] the text takes the same durable route as a
+    /// pasted image — a `.txt` blob that submits as an ordinary file
+    /// attachment; under it the paste becomes a collapsible block that still
+    /// joins the submission verbatim.
+    pub(super) fn stage_pasted_text(&mut self, text: String, cx: &mut Context<Self>) {
+        if text.len() <= PASTED_TEXT_FILE_BYTES {
+            self.composer_pasted_blocks.push(text);
+            self.schedule_composer_draft_save(cx);
+            cx.notify();
+            return;
+        }
+        let daemon = self.daemon.clone();
+        let draft_owner = self.selected_composer_draft_key();
+        cx.spawn(async move |waku, cx| {
+            let stored = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = daemon
+                        .client()
+                        .request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::StoreBlob {
+                                mime_type: "text/plain".to_owned(),
+                                bytes: text.into_bytes(),
+                            },
+                        )
+                        .map_err(|error| error.to_string())?;
+                    let waku_client::ResponsePayload::BlobStored { reference, path } = response
+                    else {
+                        return Err("the daemon returned an invalid blob response".into());
+                    };
+                    Ok::<_, String>((path, reference))
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| match stored {
+                Ok((path, reference)) => {
+                    if waku.selected_composer_draft_key() != draft_owner {
+                        return;
+                    }
+                    if waku.stage_daemon_attachment(
+                        path,
+                        "paste.txt".to_owned(),
+                        false,
+                        false,
+                        reference,
+                        None,
+                    ) {
+                        waku.schedule_composer_draft_save(cx);
+                        cx.notify();
+                    }
+                }
+                Err(error) => {
+                    waku.show_toast(tr!("errors.store_pasted_text", error = error));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Splice a collapsed paste back into the field at the caret, as though
+    /// it had never left. The card is consumed.
+    fn expand_pasted_block(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.composer_pasted_blocks.len() {
+            return;
+        }
+        let text = self.composer_pasted_blocks.remove(index);
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+        self.composer
+            .update(cx, |composer, cx| composer.insert_text(&text, cx));
+        self.schedule_composer_draft_save(cx);
+        cx.notify();
+    }
+
+    fn remove_pasted_block(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.composer_pasted_blocks.len() {
+            self.composer_pasted_blocks.remove(index);
+            self.schedule_composer_draft_save(cx);
+            cx.notify();
+        }
+    }
+
     /// The text and attachment presentation accepted from the composer. The
     /// stored prompt keeps its `@` mentions and visible command syntax, while
     /// sent-message UI uses `display_content` and retained attachment metadata.
@@ -2251,8 +2342,12 @@ impl Waku {
             .iter()
             .map(|attachment| attachment.mention.clone())
             .collect::<Vec<_>>();
+        let pasted_blocks = std::mem::take(&mut self.composer_pasted_blocks);
+        // Typed text leads; collapsed paste blocks follow in paste order,
+        // ahead of the `@` mentions `merged_submission` still trails.
+        let body = prompt_with_pasted_blocks(prompt, &pasted_blocks);
         let annotations = self.drain_annotations();
-        let submission = match merged_submission(prompt, &mentions) {
+        let submission = match merged_submission(&body, &mentions) {
             Some(body) => {
                 // Resolve command syntax while the body's leading `/` is
                 // still visible — the annotation header would hide it from
@@ -2279,18 +2374,21 @@ impl Waku {
         // draft keep the user's own words — the comments when nothing was
         // typed.
         let typed = prompt.trim();
-        let human_content = (!annotations.is_empty()).then(|| {
+        let human_content = (!annotations.is_empty() || !pasted_blocks.is_empty()).then(|| {
             if typed.is_empty() {
                 annotation_display_content(&annotations)
             } else {
                 typed.to_owned()
             }
         });
-        let display_content = (!attachments.is_empty() || !annotations.is_empty()).then(|| {
+        let display_content = (!attachments.is_empty()
+            || !annotations.is_empty()
+            || !pasted_blocks.is_empty())
+        .then(|| {
             if annotations.is_empty() {
-                typed.to_owned()
+                body.clone()
             } else {
-                annotation_bubble_content(&annotations, typed)
+                annotation_bubble_content(&annotations, &body)
             }
         });
         self.discard_current_composer_draft(cx);
@@ -2299,6 +2397,7 @@ impl Waku {
             display_content,
             human_content,
             attachments,
+            pasted_blocks,
             annotations,
             hidden: false,
         })
@@ -2455,6 +2554,7 @@ impl Waku {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        self.composer_pasted_blocks = submission.pasted_blocks;
         if !submission.annotations.is_empty() {
             // The drain consumed the highlights; hand them back so the
             // restored draft still carries its comments — file annotations
@@ -2485,6 +2585,121 @@ impl Waku {
             .update(cx, |input, cx| input.set_content(content, cx));
         self.schedule_composer_draft_save(cx);
         cx.notify();
+    }
+
+    /// Collapsed paste blocks above the input: one full-width card per block,
+    /// titled by its first line, expanding back into the field on click —
+    /// the same affordance other agent clients give a large paste.
+    pub(super) fn render_pasted_blocks(&self, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let mut column = div()
+            .px(px(14.0))
+            .pt(px(2.0))
+            .pb(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0));
+        for (index, block) in self.composer_pasted_blocks.iter().enumerate() {
+            let title = block
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| tr!("composer.pasted_block"));
+            let card = div()
+                .id(SharedString::from(format!("composer-pasted-block-{index}")))
+                .relative()
+                .w_full()
+                .rounded(px(10.0))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .pl(px(8.0))
+                .pr(px(30.0))
+                .py(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .cursor_default()
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(34.0))
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.canvas)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon("icons/file.svg", 15.0, theme.text_tertiary)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .w_full()
+                                .truncate()
+                                .text_size(sp(13.0))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.0))
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_secondary)
+                                .child(div().underline().child(tr!("composer.pasted_block_expand")))
+                                .child(icon("icons/chevron-right.svg", 10.0, theme.text_tertiary)),
+                        ),
+                )
+                .on_activation(cx, move |this, window, cx| {
+                    this.expand_pasted_block(index, window, cx);
+                })
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "backspace" | "delete") {
+                        this.remove_pasted_block(index, cx);
+                        cx.stop_propagation();
+                    }
+                }));
+            column = column.child(
+                card.child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "composer-pasted-block-remove-{index}"
+                        )))
+                        .absolute()
+                        .top(px(6.0))
+                        .right(px(6.0))
+                        .size(px(18.0))
+                        .rounded(px(5.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .hover(|element| element.bg(theme.overlay_strong))
+                        .active(|element| element.opacity(0.8))
+                        .child(icon("icons/x.svg", 9.0, theme.text_secondary))
+                        .tooltip(Tooltip::text(tr!("composer.remove_pasted_block")))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.remove_pasted_block(index, cx);
+                        }),
+                ),
+            );
+        }
+        column
     }
 
     /// The staged-attachment chips above the input: a thumbnail tile per
@@ -2929,6 +3144,7 @@ impl Waku {
         });
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
             || !self.composer_attachments.is_empty()
+            || !self.composer_pasted_blocks.is_empty()
             || !self
                 .transcript_selection
                 .annotations
@@ -3019,6 +3235,9 @@ impl Waku {
                 .children(autocomplete)
                 // Big Picture's "replying to" chip; absent everywhere else.
                 .children(self.render_big_picture_target_chip(cx))
+                .when(!self.composer_pasted_blocks.is_empty(), |card| {
+                    card.child(self.render_pasted_blocks(cx))
+                })
                 .when(!self.composer_attachments.is_empty(), |card| {
                     card.child(self.render_composer_attachments(cx))
                 })
@@ -4426,6 +4645,22 @@ fn is_image_attachment_path(path: &Path) -> bool {
                     | "pgm"
                     | "ppm"
             )
+        })
+}
+
+/// Typed text first, then each collapsed paste block in paste order, split
+/// by a blank line — blocks are almost always many lines themselves.
+pub(super) fn prompt_with_pasted_blocks(prompt: &str, pasted_blocks: &[String]) -> String {
+    pasted_blocks
+        .iter()
+        .map(|block| block.trim())
+        .filter(|block| !block.is_empty())
+        .fold(prompt.trim().to_owned(), |mut body, block| {
+            if !body.is_empty() {
+                body.push_str("\n\n");
+            }
+            body.push_str(block);
+            body
         })
 }
 

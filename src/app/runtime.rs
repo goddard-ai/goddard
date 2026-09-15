@@ -2386,6 +2386,7 @@ impl Waku {
                 display_content,
                 human_content: None,
                 attachments: edit.attachments,
+                pasted_blocks: Vec::new(),
                 annotations: Vec::new(),
                 hidden: false,
             },

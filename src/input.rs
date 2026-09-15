@@ -570,6 +570,12 @@ pub enum InputEvent {
 #[derive(Clone)]
 pub struct MediaPaste(pub Vec<ClipboardEntry>);
 
+/// A text paste too large to splice into the field, emitted by fields that
+/// opted in via [`TextInput::set_collapsed_paste`]. The owner holds the text
+/// beside the composer — a collapsible block — instead of as field content.
+#[derive(Clone)]
+pub struct CollapsedPaste(pub String);
+
 /// Respect the representation priority chosen by the source application.
 /// Finder puts paths first (and a text fallback second), while screenshots put
 /// an image first. Text-first clipboard content remains ordinary text paste.
@@ -621,6 +627,21 @@ fn pasted_text_for_mode(mode: FieldMode, text: &str) -> String {
     }
 }
 
+/// Pasted text at either bound leaves the field: enough breaks to scroll the
+/// composer, or enough bytes to bury a one-line thought — minified JSON,
+/// logs, a stack trace. The owner presents it as a [`CollapsedPaste`] block.
+const COLLAPSED_PASTE_MIN_NEWLINES: usize = 3;
+const COLLAPSED_PASTE_MIN_BYTES: usize = 500;
+
+/// Whether a paste surfaces as [`CollapsedPaste`] instead of splicing. Only a
+/// multi-line field collapses — a single-line field already flattens breaks,
+/// and nothing behind one renders blocks.
+fn collapsible_paste(mode: FieldMode, text: &str) -> bool {
+    mode == FieldMode::MultiLine
+        && (text.len() > COLLAPSED_PASTE_MIN_BYTES
+            || text.matches('\n').count() >= COLLAPSED_PASTE_MIN_NEWLINES)
+}
+
 /// Tallest an [`auto_height`](TextInput::auto_height) field grows before
 /// its text scrolls under an overlay scrollbar instead of growing the card.
 const AUTO_HEIGHT_MAX: Pixels = px(300.);
@@ -649,6 +670,9 @@ pub struct TextInput {
     /// Image and file pastes surface as [`MediaPaste`] instead of being
     /// swallowed by the text path.
     accepts_media_paste: bool,
+    /// Large text pastes surface as [`CollapsedPaste`] instead of splicing
+    /// into the field.
+    accepts_collapsed_paste: bool,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -756,6 +780,7 @@ impl TextInput {
             auto_height: false,
             max_lines: None,
             accepts_media_paste: false,
+            accepts_collapsed_paste: false,
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -947,6 +972,13 @@ impl TextInput {
     pub fn media_paste(mut self) -> Self {
         self.accepts_media_paste = true;
         self
+    }
+
+    /// Opt the field into [`CollapsedPaste`]: large text pastes surface as an
+    /// event for the owner to stage instead of splicing inline. Off by
+    /// default — an unheard event would drop the paste entirely.
+    pub fn set_collapsed_paste(&mut self, accepts: bool) {
+        self.accepts_collapsed_paste = accepts;
     }
 
     /// Make Escape clear the field first, the filter-field convention: only
@@ -2009,6 +2041,10 @@ impl TextInput {
         // A paste is its own undo step, never part of the typing around it —
         // the native NSTextView boundary, stricter than Zed's time grouping.
         self.history.seal();
+        if self.accepts_collapsed_paste && collapsible_paste(self.mode, &text) {
+            cx.emit(CollapsedPaste(text));
+            return;
+        }
         self.replace_text_in_range(None, &text, window, cx);
         self.history.seal();
     }
@@ -2321,6 +2357,7 @@ fn word_range_at(content: &str, offset: usize) -> Range<usize> {
 
 impl EventEmitter<InputEvent> for TextInput {}
 impl EventEmitter<MediaPaste> for TextInput {}
+impl EventEmitter<CollapsedPaste> for TextInput {}
 
 impl EntityInputHandler for TextInput {
     fn text_for_range(
@@ -3329,6 +3366,12 @@ pub enum ComposerEvent {
 #[derive(Clone)]
 pub struct ComposerAttachmentPaste(pub Vec<ClipboardEntry>);
 
+/// A large text paste, re-emitted from the embedded field's
+/// [`CollapsedPaste`]. The owning view presents it as a collapsible block
+/// above the composer rather than as field content.
+#[derive(Clone)]
+pub struct ComposerTextPaste(pub String);
+
 /// The prompt composer, built on [`TextInput`]: a self-sizing multi-line
 /// field where Enter submits the trimmed prompt and clears, the primary
 /// modifier + Enter steers it into the running turn instead, and image or
@@ -3376,6 +3419,9 @@ impl ComposerInput {
             cx.subscribe(&input, |_, _, event: &MediaPaste, cx| {
                 cx.emit(ComposerAttachmentPaste(event.0.clone()));
             }),
+            cx.subscribe(&input, |_, _, event: &CollapsedPaste, cx| {
+                cx.emit(ComposerTextPaste(event.0.clone()));
+            }),
         ];
         Self {
             input,
@@ -3389,6 +3435,15 @@ impl ComposerInput {
     pub fn padding_x(self, padding: Pixels, cx: &mut Context<Self>) -> Self {
         self.input
             .update(cx, |input, _| input.set_padding_x(padding));
+        self
+    }
+
+    /// Opt the embedded field into [`CollapsedPaste`] and re-emit it as
+    /// [`ComposerTextPaste`]. Only surfaces that stage the blocks should
+    /// enable it — an unheard event drops the paste entirely.
+    pub fn collapsed_paste(self, cx: &mut Context<Self>) -> Self {
+        self.input
+            .update(cx, |input, _| input.set_collapsed_paste(true));
         self
     }
 
@@ -3503,6 +3558,7 @@ impl Focusable for ComposerInput {
 
 impl EventEmitter<ComposerEvent> for ComposerInput {}
 impl EventEmitter<ComposerAttachmentPaste> for ComposerInput {}
+impl EventEmitter<ComposerTextPaste> for ComposerInput {}
 
 #[cfg(test)]
 mod tests {
@@ -3521,7 +3577,8 @@ mod tests {
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, SearchPaint, TextInput, UNDO_GROUP_INTERVAL,
-        UNDO_HISTORY_CAP, cursor_should_be_visible, input_text_runs, media_paste_entries,
+        UNDO_HISTORY_CAP, collapsible_paste, cursor_should_be_visible, input_text_runs,
+        media_paste_entries,
         next_word_boundary, pasted_text_for_mode, previous_word_boundary, single_line_scroll,
         trimmed_splice, visual_row_count, word_range_at,
     };
@@ -4226,6 +4283,19 @@ mod tests {
             ],
         };
         assert!(media_paste_entries(&clipboard).is_none());
+    }
+
+    #[test]
+    fn large_pastes_collapse() {
+        // Three breaks is enough to scroll the composer; so is a long
+        // unbroken run like minified JSON.
+        assert!(collapsible_paste(FieldMode::MultiLine, "a\nb\nc\nd"));
+        assert!(collapsible_paste(FieldMode::MultiLine, &"x".repeat(501)));
+        assert!(!collapsible_paste(FieldMode::MultiLine, "a\nb\nc"));
+        assert!(!collapsible_paste(FieldMode::MultiLine, &"x".repeat(500)));
+        // Single-line fields flatten breaks and never collapse.
+        assert!(!collapsible_paste(FieldMode::SingleLine, "a\nb\nc\nd"));
+        assert!(!collapsible_paste(FieldMode::SingleLine, &"x".repeat(501)));
     }
 
     #[test]

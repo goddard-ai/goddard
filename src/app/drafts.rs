@@ -73,7 +73,13 @@ impl Waku {
 
     fn current_composer_draft(&self, cx: &App) -> crate::persistence::ComposerDraft {
         crate::persistence::ComposerDraft {
-            text: self.composer.read(cx).content(cx).to_owned(),
+            // Collapsed paste blocks have no draft slot of their own — the
+            // shared schema is just text — so they fold in here and come back
+            // as ordinary inline text on restore.
+            text: super::composer::prompt_with_pasted_blocks(
+                self.composer.read(cx).content(cx),
+                &self.composer_pasted_blocks,
+            ),
             attachments: self
                 .composer_attachments
                 .iter()
@@ -170,6 +176,9 @@ impl Waku {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        // The previous target's blocks already folded into its draft text;
+        // a restored draft carries them inline, not as cards.
+        self.composer_pasted_blocks.clear();
         self.composer
             .update(cx, |input, cx| input.set_content(draft.text, cx));
         cx.notify();

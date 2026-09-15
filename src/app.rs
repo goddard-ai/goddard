@@ -27,7 +27,9 @@ use crate::computer_use::{
 };
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::git_branch::BranchSnapshot;
-use crate::input::{ComposerAttachmentPaste, ComposerEvent, ComposerInput, InputEvent, TextInput};
+use crate::input::{
+    ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerTextPaste, InputEvent, TextInput,
+};
 use crate::md;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, BackgroundWorkEvent, BackgroundWorkItem,
@@ -436,6 +438,9 @@ struct ComposerSubmission {
     /// `display_content` when annotations put quote blocks in the bubble.
     human_content: Option<String>,
     attachments: Vec<MessageAttachment>,
+    /// Collapsed paste blocks already folded into `prompt`, kept so a failed
+    /// submission can restore them as composer cards rather than inline text.
+    pasted_blocks: Vec<String>,
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
     annotations: Vec<TranscriptAnnotation>,
@@ -455,6 +460,7 @@ impl ComposerSubmission {
             display_content: None,
             human_content: None,
             attachments: Vec::new(),
+            pasted_blocks: Vec::new(),
             annotations: Vec::new(),
             hidden: false,
         }
@@ -480,6 +486,9 @@ impl ComposerSubmission {
             display_content: message.display_content,
             human_content: None,
             attachments: message.attachments,
+            // A queued message carries no block split — the paste text is
+            // already inside `content`, so editing pulls it back inline.
+            pasted_blocks: Vec::new(),
             // The annotation header already lives inside `content`; the
             // structured set rides `queued_annotations` and the caller
             // reattaches it. Queueing counts as sent, so the highlights stay
@@ -1502,6 +1511,10 @@ pub struct Waku {
     /// Files dropped onto the composer, drawn as chips above the input and
     /// drained into the next submission.
     composer_attachments: Vec<ComposerAttachment>,
+    /// Text pastes too large for the field, held as collapsible cards above
+    /// the input and spliced back into the next submission verbatim. Purely
+    /// view state: drafts capture their text inline instead.
+    composer_pasted_blocks: Vec<String>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
@@ -2718,7 +2731,11 @@ impl Waku {
                 .count(),
         });
 
-        let composer = cx.new(|cx| ComposerInput::new(window, cx).padding_x(px(14.0), cx));
+        let composer = cx.new(|cx| {
+            ComposerInput::new(window, cx)
+                .padding_x(px(14.0), cx)
+                .collapsed_paste(cx)
+        });
         let user_input_answer = cx.new(|cx| {
             TextInput::new(window, cx)
                 .accessibility_label(tr!("a11y.answer"))
@@ -3209,10 +3226,12 @@ impl Waku {
                 &composer,
                 |this: &mut Self, _, event: &ComposerEvent, cx| match event {
                     ComposerEvent::Submit(prompt) => {
+                        let typed_only =
+                            prompt.trim().is_empty() && this.composer_pasted_blocks.is_empty();
                         if this.big_picture.is_open() {
                             // Big Picture routes by its own target — a card's
                             // session or a new task — not the selection.
-                            if !prompt.trim().is_empty()
+                            if !typed_only
                                 && let Some(submission) =
                                     this.submission_with_attachments(prompt, cx)
                             {
@@ -3228,6 +3247,7 @@ impl Waku {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
                         } else if prompt.trim().is_empty()
                             && this.composer_attachments.is_empty()
+                            && this.composer_pasted_blocks.is_empty()
                             && !this.has_annotations()
                             && this
                                 .selected_session()
@@ -3244,7 +3264,7 @@ impl Waku {
                     }
                     ComposerEvent::SubmitSteer(prompt) => {
                         if this.big_picture.is_open() {
-                            if !prompt.trim().is_empty()
+                            if !(prompt.trim().is_empty() && this.composer_pasted_blocks.is_empty())
                                 && let Some(submission) =
                                     this.submission_with_attachments(prompt, cx)
                             {
@@ -3265,11 +3285,14 @@ impl Waku {
                         }
                     }
                     ComposerEvent::SteerQueued => {
-                        // Staged attachments and annotations make this a
-                        // real draft even when the text field is empty.
-                        // Preserve the shortcut's previous no-op behavior
-                        // until that draft is sent or cleared.
-                        if this.composer_attachments.is_empty() && !this.has_annotations() {
+                        // Staged attachments, pasted blocks, and annotations
+                        // make this a real draft even when the text field is
+                        // empty. Preserve the shortcut's previous no-op
+                        // behavior until that draft is sent or cleared.
+                        if this.composer_attachments.is_empty()
+                            && this.composer_pasted_blocks.is_empty()
+                            && !this.has_annotations()
+                        {
                             if this
                                 .selected_session()
                                 .is_some_and(composer::session_awaits_continue)
@@ -3289,7 +3312,9 @@ impl Waku {
                     }
                     ComposerEvent::Focus => {}
                     ComposerEvent::BackspaceOnEmpty => {
-                        if this.composer_attachments.pop().is_some() {
+                        if this.composer_pasted_blocks.pop().is_some()
+                            || this.composer_attachments.pop().is_some()
+                        {
                             this.schedule_composer_draft_save(cx);
                             cx.notify();
                         }
@@ -3329,6 +3354,16 @@ impl Waku {
                 &composer,
                 |this: &mut Self, _, event: &ComposerAttachmentPaste, cx| {
                     this.stage_pasted_attachments(event.0.clone(), cx);
+                },
+            )
+            .detach();
+
+            // A text paste too large for the field collapses into a card;
+            // the composer's text stays the user's own typing.
+            cx.subscribe(
+                &composer,
+                |this: &mut Self, _, event: &ComposerTextPaste, cx| {
+                    this.stage_pasted_text(event.0.clone(), cx);
                 },
             )
             .detach();
@@ -3754,6 +3789,7 @@ impl Waku {
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,
+                composer_pasted_blocks: Vec::new(),
                 image_preview: None,
                 image_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),
