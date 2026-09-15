@@ -150,9 +150,9 @@ fn session_date_group_for_dates(session_date: NaiveDate, today: NaiveDate) -> Se
     SessionDateGroup::More
 }
 
-fn session_group_header(theme: &Theme) -> Div {
+fn session_group_header(theme: &Theme, height: f32) -> Div {
     div()
-        .h(px(SIDEBAR_GROUP_HEADER_HEIGHT))
+        .h(px(height))
         .px(px(8.0))
         .flex()
         .items_center()
@@ -224,7 +224,6 @@ const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
 const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
-const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
@@ -649,7 +648,10 @@ fn sidebar_shortcut_chip_label(index: usize) -> String {
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Header(SidebarGroup::Terminals) => {
+            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+        }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::GitHub(_) => SIDEBAR_GITHUB_ROW_HEIGHT,
@@ -1202,7 +1204,7 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
             .flex_none()
             .child(search)
     }
@@ -2460,7 +2462,17 @@ impl Waku {
                 )
         });
 
-        let header = session_group_header(&theme)
+        // The Terminals group reads as a third action row, so it stands
+        // flush with the search field at the action rows' height; every
+        // other group keeps the section-header size.
+        let header = session_group_header(
+            &theme,
+            if group == SidebarGroup::Terminals {
+                SIDEBAR_ACTION_ROW_HEIGHT
+            } else {
+                SIDEBAR_GROUP_HEADER_HEIGHT
+            },
+        )
             .id(SharedString::from(format!(
                 "sidebar-group-toggle-{group_key}"
             )))
