@@ -260,6 +260,24 @@ fn assemble_slash_commands(
                 scan_skill_files(provider, &path, &mut commands);
             }
         }
+        // Copilot reads project skills from `.github/skills` and `.claude/skills`,
+        // and personal skills from `~/.copilot/skills`. The shared
+        // `.agents/skills` layer below covers its third documented root.
+        ProviderKind::Copilot => {
+            scan_skill_files(
+                provider,
+                &project_root.join(".github/skills"),
+                &mut commands,
+            );
+            scan_skill_files(
+                provider,
+                &project_root.join(".claude/skills"),
+                &mut commands,
+            );
+            if let Some(home) = home.as_deref() {
+                scan_skill_files(provider, &home.join(".copilot/skills"), &mut commands);
+            }
+        }
         ProviderKind::Fx => {
             // Fx discovers plain `skills/` plus compatibility roots from the
             // workspace, and keeps managed installs under ~/.fx/skills.

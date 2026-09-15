@@ -84,6 +84,10 @@ pub fn user_skill_locations() -> Vec<SkillLocation> {
         dirs::config_dir().map(|dir| dir.join("devin/skills")),
     );
     push(
+        SkillSource::Provider(ProviderKind::Copilot),
+        home_join(".copilot/skills"),
+    );
+    push(
         SkillSource::Provider(ProviderKind::Fx),
         home_join(".fx/skills"),
     );
@@ -120,6 +124,10 @@ pub fn project_skill_locations(project_root: &Path, project_name: &str) -> Vec<S
             ".cursor/skills",
         ),
         (SkillSource::Provider(ProviderKind::Devin), ".devin/skills"),
+        (
+            SkillSource::Provider(ProviderKind::Copilot),
+            ".github/skills",
+        ),
         (SkillSource::Provider(ProviderKind::Fx), "skills"),
         (SkillSource::Provider(ProviderKind::Pi), ".pi/skills"),
         (SkillSource::Provider(ProviderKind::OhMyPi), ".omp/skills"),

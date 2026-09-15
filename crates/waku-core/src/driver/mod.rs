@@ -229,10 +229,11 @@ pub(crate) fn start_local(
         ProviderKind::OhMyPi => {
             Arc::new(pi::PiDriver::start(pi::PiFlavor::OhMyPi, options, events)?)
         }
-        // Cursor, Devin, Fx, Grok, and Kimi Code all serve a long-lived ACP session,
-        // which is the only way their Supervised mode can actually ask the user
-        // rather than silently forcing or denying.
-        ProviderKind::Cursor
+        // Copilot, Cursor, Devin, Fx, Grok, and Kimi Code all serve a
+        // long-lived ACP session, which is the only way their Supervised mode
+        // can actually ask the user rather than silently forcing or denying.
+        ProviderKind::Copilot
+        | ProviderKind::Cursor
         | ProviderKind::Devin
         | ProviderKind::Fx
         | ProviderKind::Grok

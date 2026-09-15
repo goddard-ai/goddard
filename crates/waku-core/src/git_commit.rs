@@ -352,6 +352,27 @@ fn agent_arguments(
                 push(&mut args, model);
             }
         }
+        // `-p` carries the prompt as its value like Grok and Kimi. `-s`
+        // leaves only the answer on stdout, `--no-ask-user` turns interactive
+        // questions into refusals, and an empty `--available-tools` exposes
+        // no tools at all.
+        ProviderKind::Copilot => {
+            push(&mut args, "-p");
+            push(&mut args, prompt);
+            push(&mut args, "-s");
+            push(&mut args, "--no-ask-user");
+            push(&mut args, "--available-tools");
+            push(&mut args, "");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            if let Some(effort) = reasoning_effort {
+                push(&mut args, "--reasoning-effort");
+                push(&mut args, effort);
+            }
+            return args;
+        }
         ProviderKind::DeepSeek => {
             // The headless profile is Harness's one-shot, stdout-only client.
             // The commit prompt embeds all context and explicitly forbids tools.
@@ -984,6 +1005,14 @@ mod tests {
                     assert!(has(&args, "--print"));
                     assert!(has_pair(&args, "--mode", "ask"));
                     assert!(has_pair(&args, "--sandbox", "enabled"));
+                }
+                ProviderKind::Copilot => {
+                    assert!(has_pair(&args, "-p", prompt));
+                    assert!(has(&args, "-s"));
+                    assert!(has(&args, "--no-ask-user"));
+                    assert!(has_pair(&args, "--available-tools", ""));
+                    assert!(has_pair(&args, "--model", "model"));
+                    assert!(has_pair(&args, "--reasoning-effort", "low"));
                 }
                 ProviderKind::DeepSeek => {
                     assert!(has_pair(&args, "--profile", "headless"));

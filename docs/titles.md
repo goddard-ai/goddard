@@ -85,6 +85,7 @@ title near when the provider writes it, and long enough to survive a slow start.
 | DeepSeek | Harness | stream + projections | `session/title`, projection replay | [deepseek.rs:782](../crates/waku-core/src/driver/deepseek.rs#L782), [deepseek.rs:1139](../crates/waku-core/src/driver/deepseek.rs#L1139) |
 | Devin CLI | Devin | ACP stream + `sessions.db` poll | `session_info_update` when the title is distinct; poll from first prompt and turn end | [acp.rs](../crates/waku-core/src/driver/acp.rs), [devin_session.rs](../crates/waku-core/src/devin_session.rs) |
 | Kimi Code | Kimi (placeholder) | ACP stream | `session_info_update` | [acp.rs:1879](../crates/waku-core/src/driver/acp.rs#L1879) |
+| Copilot CLI | Copilot | ACP stream | `session_info_update` when it sends one | shares the generic handler; fallback only if absent |
 | Cursor CLI | — | — | — | none; fallback only |
 
 ### Claude Code

@@ -78,6 +78,20 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
             args: vec!["acp".into()],
             env: Vec::new(),
         }),
+        // `session/new` cannot carry a reasoning level; `--reasoning-effort`
+        // at server start is Copilot's documented way to apply one to every
+        // session the server creates or loads.
+        ProviderKind::Copilot => {
+            let mut args = vec!["--acp".into(), "--stdio".into()];
+            if let Some(effort) = reasoning_effort.filter(|effort| !effort.is_empty()) {
+                args.push("--reasoning-effort".into());
+                args.push(effort.to_owned());
+            }
+            Ok(AcpLaunch {
+                args,
+                env: Vec::new(),
+            })
+        }
         ProviderKind::Grok => {
             let mut args = vec!["agent".into()];
             if let Some(effort) = reasoning_effort.filter(|effort| !effort.is_empty()) {
@@ -873,19 +887,20 @@ fn desired_access_mode(
         // Sessions created before the interaction toggle was removed may
         // retain the provider's read-only mode. Return only those sessions to
         // the provider's ordinary execution mode; otherwise leave externally
-        // selected native modes untouched.
-        if !modes
-            .current_mode_id
-            .to_string()
-            .eq_ignore_ascii_case("plan")
-        {
+        // selected native modes untouched. Copilot's ids are URIs ending in a
+        // `#fragment`, so the comparison strips the fragment off.
+        let bare_mode_id = |id: &SessionModeId| {
+            let id = id.to_string();
+            id.rsplit('#').next().unwrap_or(&id).to_owned()
+        };
+        if !bare_mode_id(&modes.current_mode_id).eq_ignore_ascii_case("plan") {
             return None;
         }
         modes
             .available_modes
             .iter()
             .find(|mode| {
-                let id = mode.id.to_string();
+                let id = bare_mode_id(&mode.id);
                 id.eq_ignore_ascii_case("agent") || id.eq_ignore_ascii_case("default")
             })?
             .id
@@ -903,6 +918,7 @@ fn desired_access_mode(
 fn reasoning_effort_config_id(provider: ProviderKind) -> &'static str {
     match provider {
         ProviderKind::Kimi => "thinking",
+        ProviderKind::Copilot => "reasoning_effort",
         _ => "mode",
     }
 }

@@ -16,7 +16,7 @@ session that spans the whole conversation**:
 | Transport | File | Providers |
 | --- | --- | --- |
 | Codex app-server (JSON-RPC over stdio) | [driver/codex.rs](../crates/waku-core/src/driver/codex.rs) | Codex CLI |
-| Agent Client Protocol (JSON-RPC over stdio) | [driver/acp.rs](../crates/waku-core/src/driver/acp.rs) | Cursor CLI, Devin CLI, Fx, Grok Build, Kimi Code |
+| Agent Client Protocol (JSON-RPC over stdio) | [driver/acp.rs](../crates/waku-core/src/driver/acp.rs) | GitHub Copilot CLI, Cursor CLI, Devin CLI, Fx, Grok Build, Kimi Code |
 | OpenCode server (HTTP + server-sent events) | [driver/opencode.rs](../crates/waku-core/src/driver/opencode.rs) | OpenCode |
 | Pi RPC mode (NDJSON request/response over stdio) | [driver/pi.rs](../crates/waku-core/src/driver/pi.rs) | Pi, Oh My Pi |
 | Claude streaming-input session (NDJSON over stdio) | [driver/claude.rs](../crates/waku-core/src/driver/claude.rs) | Claude Code |
@@ -93,7 +93,7 @@ the transport absorbed the change or wants to be restarted:
 
 | Change | Codex | Pi | ACP | OpenCode | Claude | Amp |
 | --- | --- | --- | --- | --- | --- | --- |
-| Model, reasoning effort, service tier | in session — they ride on every `turn/start` | in session — `set_model`, `set_thinking_level` | in session — `session/set_model`, Cursor's parameterized `configOptions`, Fx's advertised `model` option, or Devin's `session/set_config_option` | in session — the model rides on each prompt | in session — a `set_model` control request | restart — all three are launch arguments |
+| Model, reasoning effort, service tier | in session — they ride on every `turn/start` | in session — `set_model`, `set_thinking_level` | in session — `session/set_model`, Cursor's parameterized `configOptions`, Fx's advertised `model` option, or Devin's `session/set_config_option`; Copilot's effort rides on its `reasoning_effort` config option and `--reasoning-effort` at launch | in session — the model rides on each prompt | in session — a `set_model` control request | restart — all three are launch arguments |
 | Access mode | restart | restart | restart | restart | restart | restart |
 | Provider | restart | restart | restart | restart | restart | restart |
 
@@ -149,22 +149,22 @@ OpenCode server itself, whose driver kills it explicitly on drop.
 
 ## At a glance
 
-| | Codex CLI | Pi | Oh My Pi | Claude Code | Amp | Cursor CLI | Fx | OpenCode | Grok Build | Kimi Code | Devin CLI |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Binary | `codex` | `pi` | `omp` | `claude` | `amp` | `cursor-agent` | `fx` | `opencode` | `grok` | `kimi` | `devin` |
-| Wire protocol | JSON-RPC over stdio | NDJSON RPC over stdio | NDJSON RPC over stdio | stream-json over stdio | stream-json over stdio | ACP over stdio | ACP over stdio | HTTP + SSE | ACP over stdio | ACP over stdio | ACP over stdio |
-| Process spans the whole session | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Process spawned per turn | no | no | no | no | no | no | no | no | no | no | no |
-| Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approvals | yes | no | no (has them; Goddard runs `--yolo`) | yes | no | yes | yes | yes | yes | yes | yes |
-| Mid-turn steering | yes | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) | yes (transport) |
-| Model discovery | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes | yes |
-| Computer Use | yes | yes | no (ships its own) | no | no | no | no | yes | yes | no | no |
-| Restricted to Full access | no | yes | yes | no | yes | no | no | no | no | no | no |
-| Rewind and branch at a turn | yes | yes | yes | yes | yes | yes | **no** | yes | yes | **no** | **no** |
+| | Codex CLI | Pi | Oh My Pi | Claude Code | Amp | Copilot CLI | Cursor CLI | Fx | OpenCode | Grok Build | Kimi Code | Devin CLI |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Binary | `codex` | `pi` | `omp` | `claude` | `amp` | `copilot` | `cursor-agent` | `fx` | `opencode` | `grok` | `kimi` | `devin` |
+| Wire protocol | JSON-RPC over stdio | NDJSON RPC over stdio | NDJSON RPC over stdio | stream-json over stdio | stream-json over stdio | ACP over stdio | ACP over stdio | ACP over stdio | HTTP + SSE | ACP over stdio | ACP over stdio | ACP over stdio |
+| Process spans the whole session | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Process spawned per turn | no | no | no | no | no | no | no | no | no | no | no | no |
+| Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approvals | yes | no | no (has them; Goddard runs `--yolo`) | yes | no | yes | yes | yes | yes | yes | yes | yes |
+| Mid-turn steering | yes | yes | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) | yes (transport) |
+| Model discovery | yes | yes | yes | no (fixed) | no (modes) | no (fixed) | yes | yes | yes | yes | yes | yes |
+| Computer Use | yes | yes | no (ships its own) | no | no | no | no | no | yes | yes | no | no |
+| Restricted to Full access | no | yes | yes | no | yes | no | no | no | no | no | no | no |
+| Rewind and branch at a turn | yes | yes | yes | yes | yes | **no** | yes | **no** | yes | yes | **no** | **no** |
 
-Kimi Code's and Devin CLI's steering is the transport's, not a probed policy:
+Copilot's, Kimi Code's, and Devin CLI's steering is the transport's, not a probed policy:
 the ACP driver sends the second `session/prompt` for every agent it drives, but
 neither agent's superseded-prompt behaviour has been observed against a live
 turn the way Cursor's and Grok's were.
@@ -579,7 +579,7 @@ received them.
 
 ## Agent Client Protocol
 
-**Launch** — `cursor-agent acp`, `devin acp`, `fx acp`, `grok agent [--reasoning-effort E] stdio`, `kimi acp`
+**Launch** — `copilot --acp [--reasoning-effort E] --stdio`, `cursor-agent acp`, `devin acp`, `fx acp`, `grok agent [--reasoning-effort E] stdio`, `kimi acp`
 ([driver/acp.rs](../crates/waku-core/src/driver/acp.rs)).
 
 **Protocol** — newline-delimited JSON-RPC over stdio, bidirectional. One agent
@@ -589,7 +589,8 @@ to. Alongside Codex's app-server, this is the only transport where Goddard's
 Supervised mode means what it says.
 
 **Lifetime** — long-lived, like Codex and Pi. Cursor and Grok previously spawned
-a process per turn; Devin, Fx, and Kimi Code arrived on this transport directly.
+a process per turn; Copilot, Devin, Fx, and Kimi Code arrived on this transport
+directly.
 
 **Handshake** — `initialize` (advertising **no** `fs` or `terminal` client
 capability, since Goddard does not proxy the agent's file or terminal access — an
@@ -718,15 +719,17 @@ mode when it attaches.
 
 **Model and reasoning effort** — `session/set_model` after the session opens,
 then the effort as a session config option. **The config id is the agent's to
-name**, and the two disagree: Goddard sends `mode` by default, but Kimi's `mode` is
+name**, and the agents disagree: Goddard sends `mode` by default, but Kimi's `mode` is
 its permission mode and its effort lives on
-`thinking`. `reasoning_effort_config_id` resolves that per provider — sending
+`thinking`, while Copilot names its effort option `reasoning_effort`.
+`reasoning_effort_config_id` resolves that per provider — sending
 the default id to Kimi would silently set nothing, or worse, move the permission
 mode. The call is non-fatal either way, since an agent may expose no effort at
 all. Grok is the exception: effort rides on `session/set_model` as
 `_meta.reasoningEffort` (and as `--reasoning-effort` at launch), not as a
-session config option. Devin is skipped on that path too: its `mode` option is
-a permission mode, not effort.
+session config option. Copilot also takes `--reasoning-effort` at launch, since
+its `session/new` cannot carry an effort; Devin is skipped on that path too: its
+`mode` option is a permission mode, not effort.
 
 Cursor is another exception. Its parameterized picker exposes effort, fast
 mode, thinking, and context as per-model `configOptions` rather than a single
@@ -764,6 +767,15 @@ send. Model selection stays in-session via `session/set_config_option`;
 `adaptive` / `auto` map to the advertised current value when they are not
 themselves advertised. Goddard does not pass `--model` at `devin acp` launch.
 
+Copilot's catalog is a single documented fallback, `auto`: the ACP handshake
+advertises no model option or listing method, so inventing ids would surface
+names the CLI rejects. `session/set_model` accepts whatever `copilot --model`
+or `COPILOT_MODEL` would, and its `reasoning_effort` session config option —
+observed with `none` through `max` — takes the same values the
+`--reasoning-effort` launch flag does. Session history comes from the generic
+`session/list` / `session/load` path; `session/load` replays the transcript
+like the other ACP agents that lack `session/resume`.
+
 **Cancel** — `session/cancel`, a notification; the open `session/prompt` reports
 the cancellation.
 
@@ -773,8 +785,9 @@ resolves early — Cursor answers it `cancelled` the moment the steer lands and
 re-plans with the message in context, Grok finishes the current work first
 and answers the message before settling — and only the last open prompt's
 response settles the merged turn. Both policies probed against the real
-agents; T3 Code runs the same last-prompt-settles bookkeeping for both. Kimi
-Code and Devin take the same path by virtue of the transport, but their
+agents; T3 Code runs the same last-prompt-settles bookkeeping for both.
+Copilot, Kimi
+Code, and Devin take the same path by virtue of the transport, but their
 superseded-prompt policy has not been probed against a live turn.
 
 Fx allows only one active prompt per connection, so its driver does not
@@ -786,12 +799,12 @@ own ACP server plus on-disk truncation
 ([grok_session.rs](../crates/waku-core/src/grok_session.rs)), Cursor re-seeds a
 fresh session ([cursor_session.rs](../crates/waku-core/src/cursor_session.rs)).
 
-**Kimi Code, Fx, and Devin have neither, deliberately.** Kimi advertises a `fork` session
+**Copilot, Kimi Code, Fx, and Devin have neither, deliberately.** Kimi advertises a `fork` session
 capability, but `session/fork` takes only `{sessionId, cwd}` and copies the
 whole conversation — there is no turn count, so "drop the last N turns" cannot
-be expressed. Fx and Devin expose no turn-aware fork or truncation method.
+be expressed. Copilot, Fx, and Devin expose no turn-aware fork or truncation method.
 `ProviderKind::supports_conversation_fork` and
-`supports_conversation_rollback` are therefore false for all three, which hides the
+`supports_conversation_rollback` are therefore false for all four, which hides the
 rewind and branch affordances rather than offering a control that would silently
 keep history the user asked to discard. The daemon and desktop match arms for it
 exist only to keep the matches exhaustive; reaching them means the UI gate was
@@ -812,12 +825,12 @@ which its `--print` transport did not emit at all.
 Goddard's `RuntimeMode` (Supervised / Auto-accept edits / Auto / Full access)
 maps into each CLI's own vocabulary.
 
-| Goddard | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Cursor | Devin | Fx | OpenCode | Grok | Kimi Code |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user |
-| Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
-| Auto | `on-request` / `workspace-write` / `auto_review` | `auto` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
-| Full access | `never` / `danger-full-access` / `user` | `bypassPermissions` + `--dangerously-skip-permissions` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
+| Goddard | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Copilot | Cursor | Devin | Fx | OpenCode | Grok | Kimi Code |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user |
+| Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | auto-answered | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
+| Auto | `on-request` / `workspace-write` / `auto_review` | `auto` | auto-answered | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
+| Full access | `never` / `danger-full-access` / `user` | `bypassPermissions` + `--dangerously-skip-permissions` | auto-answered | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
 
 Amp, Pi, and Oh My Pi accept Full access only and always run wide open
 (`--dangerously-allow-all`, `--approve`, `--yolo`).
@@ -843,6 +856,7 @@ persisted with the session and is what makes a Goddard task outlive its process:
 | Claude | `session_id`, `resume_at` | `resume_at` is the transcript message uuid used for forking |
 | Amp | `thread_id`, `fork_context` | `fork_context` is the seeded history for a branch |
 | Cursor | `session_id`, `fork_context` | id is empty until a seeded branch streams one |
+| Copilot | `session_id` | `session/load`; no fork or rewind, see above |
 | Devin CLI | `session_id` | `session/resume`; no fork, see above |
 | Fx | `session_id` | `session/resume`; no fork or rewind, see above |
 | OpenCode | `session_id` | `--session` / server fork |

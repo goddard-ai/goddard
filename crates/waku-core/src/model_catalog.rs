@@ -75,6 +75,18 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             )),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
         ],
+        // Copilot enumerates no catalog anywhere: `session/set_model` accepts
+        // an id but nothing lists them, so the documented `auto` route is the
+        // only safe pick. Its `--reasoning-effort` ladder is global, not
+        // per-model, so it can ride on `auto`.
+        ProviderKind::Copilot => vec![
+            ProviderModel::new("auto", tr!("model_option.auto"))
+                .reasoning(
+                    reasoning_options(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+                    "medium",
+                )
+                .default(),
+        ],
         // Cursor's full catalog is account-specific and comes from ACP
         // `cursor/list_available_models`. Auto remains the provider-owned
         // default and keeps older CLIs selectable if discovery is unavailable.
@@ -135,6 +147,7 @@ pub fn discover_catalog(
         ProviderKind::Amp => (Vec::new(), None),
         ProviderKind::Codex => (discover_codex_models(binary), None),
         ProviderKind::Claude => (discover_claude_models(binary), None),
+        ProviderKind::Copilot => (Vec::new(), None),
         ProviderKind::Cursor => (discover_cursor_models(binary), None),
         ProviderKind::DeepSeek => discover_deepseek_catalog(binary),
         ProviderKind::Devin => (discover_devin_models(binary), None),

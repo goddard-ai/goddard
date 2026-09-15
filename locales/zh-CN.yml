@@ -131,9 +131,9 @@ settings.computer_use: 电脑操作
 settings.commands: 命令
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex markdown 预览 文件 渲染 源码 preview 声音 提示音 通知 完成 回合 sound audio notification 触控板 轻扫 三指 手势 导航 后退 前进 trackpad swipe gesture 侧边栏 快捷键 标签 数字 sidebar shortcut tags
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 等宽 大小 编辑器 侧边栏 透明 边框 分隔线 粗 细
-settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
+settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex copilot cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: 技能
-settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex cursor opencode pi amp 共享 fx devin
+settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex copilot cursor opencode pi amp 共享 fx devin
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
 settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex

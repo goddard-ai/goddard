@@ -55,6 +55,18 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             )),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
         ],
+        // Copilot enumerates no catalog anywhere: `session/set_model` accepts
+        // an id but nothing lists them, so the documented `auto` route is the
+        // only safe pick. Its `--reasoning-effort` ladder is global, not
+        // per-model, so it can ride on `auto`.
+        ProviderKind::Copilot => vec![
+            ProviderModel::new("auto", tr!("model_option.auto"))
+                .reasoning(
+                    reasoning_options(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+                    "medium",
+                )
+                .default(),
+        ],
         ProviderKind::Cursor => {
             vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
         }
