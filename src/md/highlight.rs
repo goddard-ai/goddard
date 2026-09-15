@@ -1207,6 +1207,84 @@ fn markdown_fenced_line(line: &str, fence: FenceCarry) -> (Vec<Token>, Carry) {
     )
 }
 
+/// A Markdown list marker's anatomy on one line — `- `, `* `, `+ `,
+/// `12. `, `3) ` — after optional indent, with an optional `[ ]`/`[x]`
+/// task checkbox. Shared by the highlighter, which paints the spans, and by
+/// text fields, which continue or exit the item on a newline: the two must
+/// agree on what counts as a marker.
+pub(crate) struct ListItem {
+    /// Leading-space indent length, for reproducing the item's nesting.
+    pub indent: usize,
+    /// End of the marker run from the line start — `line[indent..marker_end]`
+    /// is the bullet or `12.`/`3)`; the separating whitespace is excluded.
+    pub marker_end: usize,
+    /// A `[ ]`/`[x]`/`[X]` checkbox span from the line start, when one
+    /// directly follows the marker.
+    pub checkbox: Option<Range<usize>>,
+    /// Start of the item's text from the line start — past the marker, its
+    /// separating whitespace, and any checkbox. A line that is only marker
+    /// and whitespace is an empty item.
+    pub body_start: usize,
+    /// The marker a continued item opens with, without the indent: the same
+    /// bullet or the next ordered number, one space, and `[ ] ` for a task.
+    pub next_marker: String,
+}
+
+/// Parse a list marker at `line`'s start: a bullet or an up-to-nine-digit
+/// number followed by whitespace or the end of the line.
+pub(crate) fn list_item(line: &str) -> Option<ListItem> {
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    while bytes.get(index) == Some(&b' ') {
+        index += 1;
+    }
+    let indent = index;
+    let (marker_end, mut next_marker) = match bytes.get(index) {
+        Some(b'-' | b'*' | b'+') if matches!(bytes.get(index + 1), None | Some(b' ' | b'\t')) => {
+            (index + 1, format!("{} ", &line[index..index + 1]))
+        }
+        Some(b'0'..=b'9') => {
+            let digits = line[index..].bytes().take_while(u8::is_ascii_digit).count();
+            if !(digits <= 9
+                && matches!(bytes.get(index + digits), Some(b'.' | b')'))
+                && matches!(bytes.get(index + digits + 1), None | Some(b' ' | b'\t')))
+            {
+                return None;
+            }
+            let number: u64 = line[index..index + digits].parse().ok()?;
+            (
+                index + digits + 1,
+                format!("{}{} ", number + 1, bytes[index + digits] as char),
+            )
+        }
+        _ => return None,
+    };
+    let mut body_start = marker_end;
+    while bytes.get(body_start) == Some(&b' ') {
+        body_start += 1;
+    }
+    // A task checkbox directly after the marker.
+    let rest = &line[body_start..];
+    let mut checkbox = None;
+    if (rest.starts_with("[ ]") || rest.starts_with("[x]") || rest.starts_with("[X]"))
+        && matches!(bytes.get(body_start + 3), None | Some(b' ' | b'\t'))
+    {
+        checkbox = Some(body_start..body_start + 3);
+        body_start += 3;
+        while bytes.get(body_start) == Some(&b' ') {
+            body_start += 1;
+        }
+        next_marker += "[ ] ";
+    }
+    Some(ListItem {
+        indent,
+        marker_end,
+        checkbox,
+        body_start,
+        next_marker,
+    })
+}
+
 /// Colours leading blockquote `>`s and one list marker, returning the byte
 /// offset where inline content starts.
 fn markdown_container_markers(line: &str, tokens: &mut Vec<Token>) -> usize {
@@ -1228,32 +1306,20 @@ fn markdown_container_markers(line: &str, tokens: &mut Vec<Token>) -> usize {
 
     // One list marker: `- `, `* `, `+ `, `1. `, `1) `. Nested lists mark one
     // level per line anyway — deeper levels are indentation.
-    let marker_end = match bytes.get(index) {
-        Some(b'-' | b'*' | b'+') if matches!(bytes.get(index + 1), None | Some(b' ' | b'\t')) => {
-            Some(index + 1)
-        }
-        Some(b'0'..=b'9') => {
-            let digits = line[index..].bytes().take_while(u8::is_ascii_digit).count();
-            (digits <= 9
-                && matches!(bytes.get(index + digits), Some(b'.' | b')'))
-                && matches!(bytes.get(index + digits + 1), None | Some(b' ' | b'\t')))
-            .then_some(index + digits + 1)
-        }
-        _ => None,
-    };
-    if let Some(marker_end) = marker_end {
-        push(tokens, index..marker_end, TokenClass::Meta);
-        index = marker_end;
+    if let Some(item) = list_item(&line[index..]) {
+        let base = index;
+        push(tokens, base..base + item.marker_end, TokenClass::Meta);
+        index = base + item.marker_end;
         while bytes.get(index) == Some(&b' ') {
             index += 1;
         }
-        // A task checkbox directly after the marker.
-        let rest = &line[index..];
-        if (rest.starts_with("[ ]") || rest.starts_with("[x]") || rest.starts_with("[X]"))
-            && matches!(bytes.get(index + 3), None | Some(b' ' | b'\t'))
-        {
-            push(tokens, index..index + 3, TokenClass::Literal);
-            index += 3;
+        if let Some(checkbox) = item.checkbox {
+            push(
+                tokens,
+                base + checkbox.start..base + checkbox.end,
+                TokenClass::Literal,
+            );
+            index = base + checkbox.end;
         }
     }
     index

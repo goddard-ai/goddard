@@ -635,6 +635,9 @@ pub struct TextInput {
     /// Enter submits this multi-line field instead of inserting a newline;
     /// Shift+Enter still breaks the line. (One-line fields always submit.)
     submit_on_enter: bool,
+    /// A newline inside a Markdown list item continues the list rather than
+    /// breaking the line plainly — see [`TextInput::list_continuation`].
+    list_continuation: bool,
     /// The field owns its height and text metrics, growing with its content
     /// up to [`AUTO_HEIGHT_MAX`] before it scrolls; otherwise a
     /// multi-line field inherits the embedding view's metrics.
@@ -742,6 +745,7 @@ impl TextInput {
             mode: FieldMode::SingleLine,
             read_only: false,
             submit_on_enter: false,
+            list_continuation: false,
             auto_height: false,
             max_lines: None,
             accepts_media_paste: false,
@@ -878,6 +882,17 @@ impl TextInput {
     /// newline; Shift+Enter still breaks the line.
     pub fn submit_on_enter(mut self) -> Self {
         self.submit_on_enter = true;
+        self
+    }
+
+    /// A newline inside a Markdown list item — `- `, `* `, `+ `, `1. `,
+    /// `1) `, optionally a `[ ]`/`[x]` task checkbox — opens the next item:
+    /// the marker repeats, an ordered number increments, a task comes back
+    /// unchecked, and text after the caret moves into the new item. On a
+    /// line that is only its marker the marker is stripped instead, leaving
+    /// the caret on the blank line that steps out of the list.
+    pub fn list_continuation(mut self) -> Self {
+        self.list_continuation = true;
         self
     }
 
@@ -1695,7 +1710,7 @@ impl TextInput {
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
         if self.mode == FieldMode::MultiLine && !self.submit_on_enter {
-            self.replace_text_in_range(None, "\n", window, cx);
+            self.insert_newline(window, cx);
             return;
         }
         // The content survives its own submission — a find bar's Enter means
@@ -1710,6 +1725,35 @@ impl TextInput {
             // Find bars and picker fields assign Shift+Enter their own meaning.
             cx.propagate();
             return;
+        }
+        self.insert_newline(window, cx);
+    }
+
+    /// A `\n` at the caret — or, with
+    /// [`list_continuation`](Self::list_continuation), the next Markdown list
+    /// item when the caret's line is one. What counts as a marker is the
+    /// highlighter's own rule, [`highlight::list_item`].
+    fn insert_newline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.list_continuation && self.selected_range.is_empty() {
+            let line_start = self.hard_line_start();
+            let line_end = self.hard_line_end();
+            let line = &self.content[line_start..line_end];
+            if let Some(item) = highlight::list_item(line) {
+                if line[item.body_start..].trim().is_empty() {
+                    // A marker-only line sheds the marker, leaving the blank
+                    // line the caret lands on — the way out of the list.
+                    self.select_range(line_start..line_end, cx);
+                    self.replace_text_in_range(None, "", window, cx);
+                } else if self.cursor_offset() - line_start >= item.body_start {
+                    // The text after the caret flows into the new item.
+                    let prefix = format!("\n{}{}", &line[..item.indent], item.next_marker);
+                    self.replace_text_in_range(None, &prefix, window, cx);
+                } else {
+                    // A caret inside the marker itself breaks plainly.
+                    self.replace_text_in_range(None, "\n", window, cx);
+                }
+                return;
+            }
         }
         self.replace_text_in_range(None, "\n", window, cx);
     }
@@ -3012,6 +3056,7 @@ impl ComposerInput {
                 .submit_on_enter()
                 .auto_height()
                 .media_paste()
+                .list_continuation()
                 .placeholder(tr!("input.do_anything"))
         });
         let focus_handle = input.read(cx).focus();
@@ -3290,6 +3335,114 @@ mod tests {
         cx.read_entity(&input, |input, _| {
             assert_eq!(input.content(), "hello\n world");
             assert_eq!(input.cursor(), 6);
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_continues_a_bullet_item(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("- one", cx));
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one\n- ");
+            assert_eq!(composer.cursor(cx), "- one\n- ".len());
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_continues_a_numbered_item(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("3. three", cx));
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "3. three\n4. ");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_splits_an_item_at_the_caret(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("- one two", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(5..5, cx));
+        });
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one\n-  two");
+            assert_eq!(composer.cursor(cx), "- one\n- ".len());
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_on_an_empty_item_exits_the_list(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("- one\n- ", cx));
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one\n");
+            assert_eq!(composer.cursor(cx), "- one\n".len());
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_continues_a_task_item_unchecked(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("- [x] done", cx));
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- [x] done\n- [ ] ");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_keeps_a_nested_items_indent(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("  - sub", cx));
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "  - sub\n  - ");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_inside_the_marker_breaks_plainly(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("- one", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(0..0, cx));
+        });
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "\n- one");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_without_list_continuation_breaks_plainly(cx: &mut TestAppContext) {
+        let (input, cx) = setup_input(cx, "- one", px(300.));
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "- one\n");
         });
     }
 
