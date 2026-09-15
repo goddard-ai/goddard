@@ -262,7 +262,8 @@ pub(super) fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
     session.last_reply_at.unwrap_or(session.created_at)
 }
 
-/// The timestamp the ordering preference sorts and date-groups by.
+/// The ordering preference's sort key. Date groups bucket by
+/// `sidebar_session_timestamp` instead; see `date_sidebar_groups`.
 fn sidebar_ordering_timestamp(session: &AgentSession, ordering: SidebarOrdering) -> u64 {
     match ordering {
         SidebarOrdering::LastUpdated => sidebar_session_timestamp(session),
@@ -273,6 +274,18 @@ fn sidebar_ordering_timestamp(session: &AgentSession, ordering: SidebarOrdering)
 fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrdering) {
     sessions
         .sort_by_key(|session| std::cmp::Reverse(sidebar_ordering_timestamp(session, ordering)));
+}
+
+/// Date buckets always follow last-updated recency, independent of the
+/// ordering preference: a task created last week but replied to today still
+/// lands under Today, sorted within the group by the ordering's key.
+fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uuid>; 6] {
+    let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
+    for &session in sessions {
+        grouped_sessions[session_date_group(sidebar_session_timestamp(session), today).index()]
+            .push(session.id);
+    }
+    grouped_sessions
 }
 
 fn project_sidebar_groups(
@@ -2119,15 +2132,7 @@ impl Waku {
 
         match self.state.sidebar_grouping {
             SidebarGrouping::Date => {
-                let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
-                for session in sorted_sessions {
-                    grouped_sessions[session_date_group(
-                        sidebar_ordering_timestamp(session, self.state.sidebar_ordering),
-                        today,
-                    )
-                    .index()]
-                    .push(session.id);
-                }
+                let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
                     append_sidebar_group_rows(
@@ -3933,6 +3938,47 @@ mod tests {
 
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastCreated);
         assert_eq!(sessions[0].id, newer_unanswered_session.id);
+    }
+
+    #[test]
+    fn date_groups_follow_last_updated_under_last_created_ordering() {
+        use chrono::TimeZone;
+
+        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+        let local_epoch = |date: NaiveDate, hour: u32| -> u64 {
+            Local
+                .from_local_datetime(&date.and_hms_opt(hour, 0, 0).unwrap())
+                .earliest()
+                .unwrap()
+                .timestamp() as u64
+        };
+        let yesterday = today.pred_opt().unwrap();
+
+        let project_id = Uuid::new_v4();
+        let mut replied_today = AgentSession::new(project_id, ProviderKind::Codex);
+        replied_today.created_at = local_epoch(yesterday, 12);
+        replied_today.last_reply_at = Some(local_epoch(today, 15));
+
+        let mut newcomer = AgentSession::new(project_id, ProviderKind::Codex);
+        newcomer.created_at = local_epoch(today, 14);
+        newcomer.last_reply_at = None;
+
+        let mut quiet_yesterday = AgentSession::new(project_id, ProviderKind::Codex);
+        quiet_yesterday.created_at = local_epoch(yesterday, 11);
+        quiet_yesterday.last_reply_at = None;
+
+        let mut sessions = vec![&replied_today, &newcomer, &quiet_yesterday];
+        sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastCreated);
+
+        let groups = date_sidebar_groups(&sessions, today);
+        assert_eq!(
+            groups[SessionDateGroup::Today.index()],
+            vec![newcomer.id, replied_today.id]
+        );
+        assert_eq!(
+            groups[SessionDateGroup::Yesterday.index()],
+            vec![quiet_yesterday.id]
+        );
     }
 
     #[test]
