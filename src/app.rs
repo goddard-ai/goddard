@@ -2039,7 +2039,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
-use sidebar::{SidebarGroup, SidebarRow, mix_str};
+use sidebar::{SidebarGroup, SidebarRow, format_time_ago, mix_str};
 pub use skills_page::init as init_skills_keys;
 use streaming::*;
 use terminals::TerminalRecord;
@@ -2454,6 +2454,13 @@ impl Waku {
     fn schedule_time_label_wake(&self, cx: &mut Context<Self>) {
         let now = unix_time();
         let target = next_time_label_change(&self.state.sessions, now).map(|seconds| now + seconds);
+        // Terminal rows carry the same "…ago" labels; fold their next
+        // boundary in so the shared wake covers them.
+        let target = self
+            .next_terminal_time_label_change(now, cx)
+            .map_or(target, |seconds| {
+                Some(target.map_or(now + seconds, |t| t.min(now + seconds)))
+            });
         if self.time_label_wake.get() == target {
             return;
         }

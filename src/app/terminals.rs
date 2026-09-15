@@ -10,6 +10,9 @@ pub(super) struct TerminalRecord {
     /// Where the PTY starts — resolved at creation from the owning
     /// session's workspace or the requested directory for global ones.
     pub working_directory: Option<PathBuf>,
+    /// When the terminal opened (unix seconds) — the row's "…ago" label
+    /// until the view reports a command's start.
+    pub opened_at: u64,
 }
 
 /// A terminal row is a single line: title, location.
@@ -109,6 +112,32 @@ impl Waku {
         .detach();
     }
 
+    /// The next "…ago" boundary any terminal row crosses, in seconds from
+    /// `now` — the same cadence contract `next_time_label_change` keeps
+    /// for session rows, so the shared wake re-renders when a label flips.
+    pub(super) fn next_terminal_time_label_change(&self, now: u64, cx: &App) -> Option<u64> {
+        let mut next: Option<u64> = None;
+        for terminal_id in self.sidebar_terminal_ids() {
+            let Some(record) = self.terminal_records.get(&terminal_id) else {
+                continue;
+            };
+            let started_at = self
+                .right_panel_terminals
+                .get(&terminal_id)
+                .and_then(|view| view.read(cx).last_command_started_at())
+                .unwrap_or(record.opened_at);
+            let elapsed = now.saturating_sub(started_at);
+            let step = match elapsed {
+                0..=3_599 => 60,
+                3_600..=86_399 => 3_600,
+                _ => 86_400,
+            };
+            let remaining = (step - elapsed % step).max(1);
+            next = Some(next.map_or(remaining, |next| next.min(remaining)));
+        }
+        next
+    }
+
     /// Register a terminal surface with the group. Called wherever a
     /// terminal surface is created; records carry what the surface lists
     /// cannot — creation order, pin state, and the spawn directory.
@@ -127,6 +156,7 @@ impl Waku {
                 session,
                 pinned: false,
                 working_directory,
+                opened_at: unix_time(),
             },
         );
         self.terminal_order.push(terminal_id);
@@ -513,6 +543,12 @@ impl Waku {
                     .unwrap_or_else(|| shell_name.clone()),
             ),
         };
+        // "…ago" marks the latest command's start while one runs; before
+        // the first command it is the terminal's own open time.
+        let started_at = terminal
+            .and_then(|terminal| terminal.read(cx).last_command_started_at())
+            .unwrap_or(record.opened_at);
+        let time_label = format_time_ago(unix_time().saturating_sub(started_at));
         let selected = self.selected_terminal == Some(terminal_id);
         let menu = self.menu_handle(format!("terminal-{terminal_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
@@ -567,6 +603,13 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(icon(detail_icon, 12.5, theme.text_tertiary))
                     .child(SharedString::from(detail)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(time_label)),
             )
             .when(pinned, |element| {
                 element.child(icon("icons/pin-filled.svg", 12.0, theme.text_ghost))

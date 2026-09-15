@@ -787,6 +787,9 @@ pub struct TerminalView {
     command_running: bool,
     /// Exit status of the most recent command — `None` until one reports.
     last_command_exit: Option<i32>,
+    /// When the most recent command started (unix seconds) — the row's
+    /// "…ago" label while a run is in flight.
+    last_command_started_at: Option<u64>,
     title: String,
     /// What `ResetTitle` restores — the localized "Terminal" for a plain
     /// shell, the command's display name for a custom command.
@@ -896,6 +899,7 @@ impl TerminalView {
             // command — running from spawn until its sentinel reports.
             command_running: runs_a_command,
             last_command_exit: None,
+            last_command_started_at: runs_a_command.then(crate::model::unix_time),
             exited: false,
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
@@ -946,6 +950,12 @@ impl TerminalView {
     /// (a shell without integration reports nothing at all).
     pub fn last_command_exit(&self) -> Option<i32> {
         self.last_command_exit
+    }
+
+    /// When the most recent command started (unix seconds) — `None` until
+    /// a command runs.
+    pub fn last_command_started_at(&self) -> Option<u64> {
+        self.last_command_started_at
     }
 
     /// The last `count` non-blank lines on the terminal's screen — empty
@@ -1018,6 +1028,7 @@ impl TerminalView {
                 }
                 TerminalUiEvent::CommandBegan => {
                     self.command_running = true;
+                    self.last_command_started_at = Some(crate::model::unix_time());
                     cx.emit(TerminalViewEvent::ActivityChanged);
                 }
                 TerminalUiEvent::CommandEnded(code) => {
