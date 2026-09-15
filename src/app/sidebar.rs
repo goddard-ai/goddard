@@ -2649,12 +2649,11 @@ impl Waku {
                                             status.uncommitted_changes
                                         }),
                                         |element| {
-                                            element.child(
-                                                div()
-                                                    .flex_none()
-                                                    .text_color(theme.text_ghost)
-                                                    .child("*"),
-                                            )
+                                            element.child(icon(
+                                                "icons/asterisk.svg",
+                                                12.0,
+                                                theme.text_ghost,
+                                            ))
                                         },
                                     ),
                             )
