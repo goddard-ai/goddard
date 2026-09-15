@@ -498,7 +498,14 @@ impl Waku {
         canvas(
             |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
             move |_, region, window, _| {
-                md::render::install_selection_input(region, window, &selection)
+                // ⌥-click a line to select it and open the annotation editor —
+                // triple-click followed by ⌘L.
+                md::render::install_selection_input(
+                    region,
+                    window,
+                    &selection,
+                    Some(Box::new(AddToChat)),
+                )
             },
         )
         .absolute()
@@ -512,7 +519,7 @@ impl Waku {
         canvas(
             |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
             move |_, region, window, _| {
-                md::render::install_selection_input(region, window, &selection)
+                md::render::install_selection_input(region, window, &selection, None)
             },
         )
         .absolute()

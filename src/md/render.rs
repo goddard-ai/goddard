@@ -26,8 +26,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font, FontStyle,
-    FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
+    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font,
+    FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString,
     StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font,
     img, point, prelude::*, px, quad, relative, size,
@@ -1111,10 +1111,21 @@ fn registry_point(
 /// prepaints a Normal hitbox over the region each frame and passes its id as
 /// `region`, which gates the handlers via `is_hovered` — false whenever a
 /// `BlockMouse` or `BlockMouseExceptScroll` hitbox covers the point.
-pub fn install_selection_input(region: HitboxId, window: &mut Window, state: &TranscriptSelection) {
+///
+/// `alt_click` is the action ⌥-click dispatches once the clicked line is
+/// selected and settled — the transcript passes ⌘L's `AddToChat`, making the
+/// gesture "select this chunk and annotate it" without the action handler
+/// seeing anything but an ordinary settled selection. Surfaces that pass
+/// `None` keep plain click behavior under ⌥.
+pub fn install_selection_input(
+    region: HitboxId,
+    window: &mut Window,
+    state: &TranscriptSelection,
+    alt_click: Option<Box<dyn Action>>,
+) {
     window.on_mouse_event({
         let state = state.clone();
-        move |event: &MouseDownEvent, phase, window, _| {
+        move |event: &MouseDownEvent, phase, window, cx| {
             if phase != DispatchPhase::Bubble
                 || event.button != MouseButton::Left
                 || !region.is_hovered(window)
@@ -1131,6 +1142,24 @@ pub fn install_selection_input(region: HitboxId, window: &mut Window, state: &Tr
                     let offset = match entry.geometry.index_for_position(event.position) {
                         Ok(offset) | Err(offset) => offset,
                     };
+                    // ⌥-click selects the whole line like a triple-click and
+                    // settles the drag at once, then the caller's action runs
+                    // against the settled selection.
+                    if event.modifiers.alt
+                        && let Some(action) = alt_click.as_ref()
+                    {
+                        selection.begin_with_span(
+                            entry.key.clone(),
+                            entry.text.clone(),
+                            line_range(&entry.text, offset),
+                        );
+                        selection.end_drag(&entry.key);
+                        drop(selection);
+                        drop(registry);
+                        window.dispatch_action(action.boxed_clone(), cx);
+                        window.refresh();
+                        return;
+                    }
                     // Shift-click grows a settled selection to the clicked
                     // character instead of anchoring a new drag.
                     let extended = event.modifiers.shift

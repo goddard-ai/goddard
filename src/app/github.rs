@@ -939,7 +939,12 @@ impl Waku {
                 canvas(
                     |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
                     move |_, region, window, _| {
-                        md::render::install_selection_input(region, window, &selection_for_input)
+                        md::render::install_selection_input(
+                            region,
+                            window,
+                            &selection_for_input,
+                            None,
+                        )
                     },
                 )
                 .absolute()
