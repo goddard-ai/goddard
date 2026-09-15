@@ -24,6 +24,10 @@ pub fn init(cx: &mut App) {
 
 pub(super) struct ArchiveDialogState {
     session_id: Uuid,
+    /// Sidebar row index when the archive came from a sidebar row — carried
+    /// through to `finish_archive_session` so selection lands on a positional
+    /// neighbor. `None` for every other archive entry point.
+    sidebar_position: Option<usize>,
     title: String,
     preview: crate::git_commit::ArchivePreview,
     scroll: ScrollHandle,
@@ -38,6 +42,7 @@ impl Waku {
         &mut self,
         session_id: Uuid,
         preview: crate::git_commit::ArchivePreview,
+        sidebar_position: Option<usize>,
         cx: &mut Context<Self>,
     ) -> FocusHandle {
         let title = self
@@ -50,6 +55,7 @@ impl Waku {
         let archive_focus = cx.focus_handle();
         let state = ArchiveDialogState {
             session_id,
+            sidebar_position,
             title,
             preview,
             scroll: ScrollHandle::new(),
@@ -65,7 +71,7 @@ impl Waku {
         let Some(dialog) = self.archive_dialog.take() else {
             return;
         };
-        self.finish_archive_session(dialog.session_id, window, cx);
+        self.finish_archive_session(dialog.session_id, dialog.sidebar_position, window, cx);
     }
 
     fn close_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {

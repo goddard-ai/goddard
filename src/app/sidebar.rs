@@ -627,6 +627,26 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
         .position(|row| *row == SidebarRow::Session(session_id))
 }
 
+/// The first session row at-or-below `position` that `is_available` accepts,
+/// scanning downward and wrapping to the top. Non-session rows are skipped.
+fn next_sidebar_session_in_rows(
+    rows: &[SidebarRow],
+    position: usize,
+    is_available: impl Fn(Uuid) -> bool,
+) -> Option<Uuid> {
+    if rows.is_empty() {
+        return None;
+    }
+    let start = position % rows.len();
+    (0..rows.len())
+        .map(|offset| (start + offset) % rows.len())
+        .filter_map(|index| match rows[index] {
+            SidebarRow::Session(session_id) => Some(session_id),
+            _ => None,
+        })
+        .find(|session_id| is_available(*session_id))
+}
+
 /// Sessions reachable by ⌘1–⌘9, in displayed order. Reading the row snapshot
 /// — rather than re-walking sessions — means folded groups, project "show
 /// more" overflow, and the pinned-first layout all apply for free.
@@ -2288,6 +2308,35 @@ impl Waku {
         }
     }
 
+    /// Archives a session from its sidebar row — the hover button or the row
+    /// context menu — remembering the row's position so an archived active
+    /// surface hands selection to the next not-busy session below it.
+    fn archive_session_from_sidebar(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let position = sidebar_session_row_index(&rows, session_id);
+        self.archive_session(session_id, position, window, cx);
+    }
+
+    /// The first not-busy session at or below `position` in the current
+    /// sidebar order, wrapping to the top. `position` is the row index the
+    /// just-archived session occupied, so the row that followed it now sits
+    /// there.
+    pub(super) fn next_sidebar_session_from_row(&self, position: usize) -> Option<Uuid> {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        next_sidebar_session_in_rows(&rows, position, |session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| !session.is_busy())
+        })
+    }
+
     fn sidebar_row(
         &self,
         index: usize,
@@ -2933,8 +2982,99 @@ impl Waku {
             .and_then(|entries| {
                 sidebar_pull_request_badge(entries, session_pull_request_window(session))
             });
+        let status_indicator: Option<AnyElement> = if shortcut_hint {
+            None
+        } else if working {
+            Some(motion::spin_slow(icon(
+                "icons/loader-circle.svg",
+                12.0,
+                status_color(&theme, session.status),
+            )))
+        } else {
+            match session.status {
+                SessionStatus::Background => Some(
+                    icon("icons/hourglass.svg", 12.0, status_color(&theme, session.status))
+                        .into_any_element(),
+                ),
+                SessionStatus::Waiting => Some(
+                    icon("icons/alert.svg", 12.0, status_color(&theme, session.status))
+                        .into_any_element(),
+                ),
+                SessionStatus::Failed => Some(
+                    icon("icons/x.svg", 12.0, status_color(&theme, session.status))
+                        .into_any_element(),
+                ),
+                SessionStatus::Idle
+                    if self.state.unseen_completions.contains_key(&session_id) =>
+                {
+                    Some(
+                        div()
+                            .flex_none()
+                            .size(px(12.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(div().size(px(7.0)).rounded_full().bg(theme.info))
+                            .into_any_element(),
+                    )
+                }
+                _ => None,
+            }
+        };
+        let group_name = SharedString::from(format!("session-row-{session_id}"));
+        let archive_focus = self
+            .sidebar_session_archive_focuses
+            .borrow_mut()
+            .entry(session_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // The archive control borrows the status slot: it stays zero-width
+        // until the row is hovered or the button takes keyboard focus.
+        let archive_button = div()
+            .id(SharedString::from(format!("session-archive-{session_id}")))
+            .track_focus(&archive_focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| {
+                style.w(px(20.0)).opacity(1.0)
+            })
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .border_1()
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
+                tr!("session.archive"),
+                &ArchiveSession,
+            ))
+            .child(icon("icons/archive.svg", 12.0, theme.text_secondary))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.archive_session_from_sidebar(session_id, window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.archive_session_from_sidebar(session_id, window, cx);
+                    cx.stop_propagation();
+                }
+            }));
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .group(group_name.clone())
             .w_full()
             .min_w_0()
             .flex()
@@ -2958,59 +3098,19 @@ impl Waku {
                     .overflow_hidden()
                     .line_height(sp(18.0))
                     .child(title)
-                    .when(working && !shortcut_hint, |element| {
-                        element.child(motion::spin_slow(icon(
-                            "icons/loader-circle.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        )))
+                    .when_some(status_indicator, |element, indicator| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .size(px(12.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .group_hover(group_name.clone(), |style| style.invisible())
+                                .child(indicator),
+                        )
                     })
-                    .when(
-                        session.status == SessionStatus::Background && !shortcut_hint,
-                        |element| {
-                            element.child(icon(
-                                "icons/hourglass.svg",
-                                12.0,
-                                status_color(&theme, session.status),
-                            ))
-                        },
-                    )
-                    .when(
-                        session.status == SessionStatus::Waiting && !shortcut_hint,
-                        |element| {
-                            element.child(icon(
-                                "icons/alert.svg",
-                                12.0,
-                                status_color(&theme, session.status),
-                            ))
-                        },
-                    )
-                    .when(
-                        session.status == SessionStatus::Failed && !shortcut_hint,
-                        |element| {
-                            element.child(icon(
-                                "icons/x.svg",
-                                12.0,
-                                status_color(&theme, session.status),
-                            ))
-                        },
-                    )
-                    .when(
-                        session.status == SessionStatus::Idle
-                            && self.state.unseen_completions.contains_key(&session_id)
-                            && !shortcut_hint,
-                        |element| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .size(px(12.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
-                            )
-                        },
-                    ),
+                    .when(!shortcut_hint, |element| element.child(archive_button)),
             )
             .child(
                 div()
@@ -3253,7 +3353,7 @@ impl Waku {
                     items.extend([
                         MenuItem::new(tr!("session.archive"), move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
-                                waku.archive_session(session_id, window, cx)
+                                waku.archive_session_from_sidebar(session_id, window, cx)
                             });
                         })
                         .shortcut_action(&ArchiveSession)
@@ -3780,6 +3880,48 @@ mod tests {
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
         );
+    }
+
+    #[test]
+    fn next_sidebar_session_scans_down_from_the_departed_row_and_wraps() {
+        let group = SidebarGroup::Date(SessionDateGroup::Today);
+        let sessions = [
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            Uuid::from_u128(4),
+        ];
+        // Row 2 is the departed session's slot: the scan starts on the row
+        // that slid up into it.
+        let rows = vec![
+            SidebarRow::Header(group),
+            SidebarRow::Session(sessions[0]),
+            SidebarRow::Session(sessions[1]),
+            SidebarRow::Session(sessions[2]),
+            SidebarRow::Session(sessions[3]),
+            SidebarRow::GroupSpacer,
+        ];
+        let idle = |_| true;
+        assert_eq!(
+            next_sidebar_session_in_rows(&rows, 2, idle),
+            Some(sessions[1])
+        );
+
+        // A busy session is skipped for the next available one below it.
+        assert_eq!(
+            next_sidebar_session_in_rows(&rows, 2, |id| id != sessions[1]),
+            Some(sessions[2])
+        );
+
+        // Past the last row the scan wraps to the top of the list.
+        assert_eq!(
+            next_sidebar_session_in_rows(&rows, 4, |id| id == sessions[0]),
+            Some(sessions[0])
+        );
+
+        // Non-session rows are skipped; nothing available means no selection.
+        assert_eq!(next_sidebar_session_in_rows(&rows, 0, |_| false), None);
+        assert_eq!(next_sidebar_session_in_rows(&[], 0, idle), None);
     }
 
     #[test]

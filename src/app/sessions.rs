@@ -651,9 +651,14 @@ impl Waku {
     /// checkout of disk; the daemon purges archives once they outlive the
     /// retention window. Terminals that ran inside the worktree are closed
     /// once the removal lands.
+    /// `sidebar_position` is the session's sidebar row index when the archive
+    /// was triggered from the sidebar; `finish_archive_session` uses it to
+    /// hand selection to a positional neighbor instead of the unread-based
+    /// fallback.
     pub(super) fn archive_session(
         &mut self,
         session_id: Uuid,
+        sidebar_position: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -671,7 +676,7 @@ impl Waku {
             .workspace_path_for_session(session)
             .map(std::path::Path::to_path_buf)
         else {
-            self.finish_archive_session(session_id, window, cx);
+            self.finish_archive_session(session_id, sidebar_position, window, cx);
             return;
         };
         if self.archive_dialog.is_some() || !self.archive_preview_pending.insert(session_id) {
@@ -699,7 +704,12 @@ impl Waku {
                             if !preview.files.is_empty()
                                 || !preview.unpushed_commits.is_empty() =>
                         {
-                            let focus = waku.open_archive_dialog(session_id, preview, cx);
+                            let focus = waku.open_archive_dialog(
+                                session_id,
+                                preview,
+                                sidebar_position,
+                                cx,
+                            );
                             Some(focus)
                         }
                         _ => None,
@@ -717,7 +727,12 @@ impl Waku {
                     }
                     None => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_archive_session(session_id, window, cx)
+                            waku.finish_archive_session(
+                                session_id,
+                                sidebar_position,
+                                window,
+                                cx,
+                            )
                         });
                     }
                 }
@@ -728,9 +743,14 @@ impl Waku {
 
     /// Hides the task outright — the point every archive path reaches once
     /// the checkout proved clean or the user confirmed.
+    ///
+    /// `sidebar_position` is `Some` only for archives initiated from a sidebar
+    /// row; it selects the next not-busy session at-or-below the departed
+    /// row's slot before falling back to the unread-based path.
     pub(super) fn finish_archive_session(
         &mut self,
         session_id: Uuid,
+        sidebar_position: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -780,7 +800,19 @@ impl Waku {
         }
         self.queue_archived_worktree_cleanup(session_id, cx);
         if was_selected {
-            self.select_session_fallback(project_id, projectless, window, cx);
+            if let Some(next_id) = sidebar_position
+                .and_then(|position| self.next_sidebar_session_from_row(position))
+            {
+                self.state.selected_session = None;
+                self.settings_page = None;
+                self.request_session_activation(
+                    next_id,
+                    SessionActivationTransition::Visit,
+                    cx,
+                );
+            } else {
+                self.select_session_fallback(project_id, projectless, window, cx);
+            }
         } else {
             self.save();
             cx.notify();
@@ -835,7 +867,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if let Some(session_id) = self.state.selected_session {
-            self.archive_session(session_id, window, cx);
+            self.archive_session(session_id, None, window, cx);
         }
     }
 
