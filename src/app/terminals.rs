@@ -401,7 +401,6 @@ impl Waku {
             .track_focus(&row_focus)
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .child(icon("icons/terminal.svg", 13.0, theme.text_secondary))
             .child(
                 div()
                     .min_w_0()
