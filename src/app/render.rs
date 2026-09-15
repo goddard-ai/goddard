@@ -220,13 +220,11 @@ impl Waku {
     }
 
     /// Entering the edge strip reveals the overlay at once; the nudge plays
-    /// out from there. The vibrancy tint that backs translucent sidebar
-    /// pixels is sized to the docked width, so it extends under the wider
-    /// overlay while the peek is up.
+    /// out from there.
     fn sidebar_peek_strip_hover(
         &mut self,
         hovered: &bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !*hovered
@@ -238,7 +236,6 @@ impl Waku {
         self.sidebar_peek = SidebarPeek::Shown {
             entered: Instant::now(),
         };
-        crate::platform::set_sidebar_material_width(window, self.sidebar_peek_width(window));
         cx.notify();
     }
 
@@ -248,7 +245,7 @@ impl Waku {
     fn sidebar_peek_overlay_hover(
         &mut self,
         hovered: &bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if *hovered {
@@ -261,14 +258,13 @@ impl Waku {
             return;
         }
         if matches!(self.sidebar_peek, SidebarPeek::Shown { .. }) {
-            if cx.reduce_motion() {
-                self.sidebar_peek = SidebarPeek::Hidden;
-                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
+            self.sidebar_peek = if cx.reduce_motion() {
+                SidebarPeek::Hidden
             } else {
-                self.sidebar_peek = SidebarPeek::Exiting {
+                SidebarPeek::Exiting {
                     started: Instant::now(),
-                };
-            }
+                }
+            };
             cx.notify();
         }
     }
@@ -280,17 +276,10 @@ impl Waku {
         // settings covers the workspace outright — either way the overlay
         // retires without its nudge-out.
         if self.settings_page.is_some() || !self.sidebar_peek_allowed() {
-            if !matches!(self.sidebar_peek, SidebarPeek::Hidden) {
-                self.sidebar_peek = SidebarPeek::Hidden;
-                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
-            }
+            self.sidebar_peek = SidebarPeek::Hidden;
             return None;
         }
         if cx.reduce_motion() {
-            if matches!(self.sidebar_peek, SidebarPeek::Exiting { .. }) {
-                self.sidebar_peek = SidebarPeek::Hidden;
-                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
-            }
             return (!matches!(self.sidebar_peek, SidebarPeek::Hidden)).then_some(0.0);
         }
         match self.sidebar_peek {
@@ -307,7 +296,6 @@ impl Waku {
                 let progress = started.elapsed().as_secs_f32() / SIDEBAR_PEEK_SLIDE.as_secs_f32();
                 if progress >= 1.0 {
                     self.sidebar_peek = SidebarPeek::Hidden;
-                    crate::platform::set_sidebar_material_width(window, self.sidebar_width);
                     return None;
                 }
                 window.request_animation_frame();
@@ -736,7 +724,10 @@ impl Render for Waku {
             // The peek overlay: the real sidebar pane — scroll position and
             // all — mounted over the content rather than in the layout. Once
             // up it covers the strip and is itself the hover surface, so only
-            // leaving the panel dismisses it.
+            // leaving the panel dismisses it. On macOS the pane's own fill is
+            // transparent — it borrows the native vibrancy strip behind the
+            // window, which the opaque surface under this overlay hides — so
+            // the overlay carries the sidebar's solid color itself.
             .when_some(sidebar_peek_offset, |root, offset| {
                 root.child(
                     div()
@@ -747,6 +738,7 @@ impl Render for Waku {
                         .bottom_0()
                         .left(px(offset))
                         .w(px(self.sidebar_peek_width(window)))
+                        .bg(theme.sidebar_drag_background)
                         .border_r(hairline())
                         .border_color(theme.sidebar_border)
                         .on_hover(cx.listener(Self::sidebar_peek_overlay_hover))
