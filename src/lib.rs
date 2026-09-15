@@ -375,6 +375,19 @@ pub fn run() {
                 KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
                 KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
                 KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
+                // Re-bound on the overlay context so the chord cancels when
+                // the switcher's focus path does not pass "Waku" (the
+                // settings branch renders the layer as its sibling).
+                KeyBinding::new(
+                    "secondary-escape",
+                    CancelProjectSwitch,
+                    Some("ProjectSwitcher"),
+                ),
+                KeyBinding::new(
+                    "secondary-shift-escape",
+                    CancelProjectSwitch,
+                    Some("ProjectSwitcher"),
+                ),
                 KeyBinding::new("down", SwitchProjectForward, Some("ProjectSwitcher")),
                 KeyBinding::new("right", SwitchProjectForward, Some("ProjectSwitcher")),
                 KeyBinding::new("up", SwitchProjectBackward, Some("ProjectSwitcher")),
