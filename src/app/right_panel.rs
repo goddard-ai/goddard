@@ -814,7 +814,7 @@ fn file_highlighter_language(relative_path: &str) -> &'static str {
     {
         Some("rs") => "rust",
         Some("ts" | "mts" | "cts") => "typescript",
-        Some("tsx") => "tsx",
+        Some("tsx" | "tsrx") => "tsx",
         Some("js" | "jsx" | "mjs" | "cjs") => "javascript",
         Some("py" | "pyi") => "python",
         Some("go") => "go",
@@ -825,14 +825,19 @@ fn file_highlighter_language(relative_path: &str) -> &'static str {
         Some("cs") => "csharp",
         Some("scala" | "sc") => "scala",
         Some("rb" | "rake" | "gemspec") => "ruby",
+        Some("ex" | "exs" | "heex" | "eex" | "leex") => "elixir",
+        Some("lua") => "lua",
+        Some("php" | "php3" | "php4" | "php5" | "phtml") => "php",
         Some("swift") => "swift",
+        Some("dart") => "dart",
+        Some("zig" | "zon") => "zig",
         Some("json" | "jsonc" | "json5") => "json",
         Some("yaml" | "yml") => "yaml",
         Some("toml") => "toml",
         Some("ini" | "cfg" | "conf") => "ini",
         Some("sh" | "bash" | "zsh" | "fish") => "bash",
         Some("css" | "scss" | "sass" | "less") => "css",
-        Some("html" | "htm" | "xml" | "svg" | "vue" | "svelte") => "html",
+        Some("html" | "htm" | "xml" | "svg" | "vue" | "svelte" | "astro") => "html",
         Some("sql") => "sql",
         Some("diff" | "patch") => "diff",
         Some("md" | "markdown" | "mdx") => "markdown",
@@ -1488,6 +1493,10 @@ mod tests {
         assert_eq!(file_highlighter_language("Sources/App.swift"), "swift");
         assert_eq!(file_highlighter_language("Makefile"), "make");
         assert_eq!(file_highlighter_language("src/native.hpp"), "cpp");
+        assert_eq!(file_highlighter_language("lib/main.ex"), "elixir");
+        assert_eq!(file_highlighter_language("src/main.zig"), "zig");
+        assert_eq!(file_highlighter_language("web/page.astro"), "html");
+        assert_eq!(file_highlighter_language("ui/card.tsrx"), "tsx");
         assert_eq!(file_highlighter_language("LICENSE"), "text");
 
         for (path, expected_language) in [
@@ -1528,8 +1537,14 @@ mod tests {
             ("make", Some(Lang::Shell)),
             ("cpp", Some(Lang::C)),
             ("markdown", Some(Lang::Markdown)),
+            ("elixir", Some(Lang::Elixir)),
+            ("lua", Some(Lang::Lua)),
+            ("php", Some(Lang::Php)),
+            ("dart", Some(Lang::Dart)),
+            ("zig", Some(Lang::Zig)),
+            ("tsx", Some(Lang::Script)),
+            ("html", Some(Lang::Html)),
             // Not yet lexed; these fall back to unhighlighted monospace.
-            ("elixir", None),
             ("text", None),
         ] {
             assert_eq!(lang_for_tag(language), expected, "{language}");

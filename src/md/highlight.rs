@@ -104,14 +104,19 @@ impl From<Carry> for EmbeddedCarry {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Lang {
     Rust,
-    /// JavaScript, TypeScript, JSX/TSX — one spec, superset keywords.
+    /// JavaScript, TypeScript, JSX/TSX, TSRX — one spec, superset keywords.
     Script,
     Python,
     Go,
     C,
     Java,
     Ruby,
+    Elixir,
+    Lua,
+    Php,
     Swift,
+    Dart,
+    Zig,
     Json,
     Yaml,
     Toml,
@@ -130,20 +135,25 @@ pub fn lang_for_tag(tag: &str) -> Option<Lang> {
     Some(match tag.as_str() {
         "rust" | "rs" => Lang::Rust,
         "js" | "jsx" | "mjs" | "cjs" | "javascript" | "node" | "ts" | "tsx" | "mts" | "cts"
-        | "typescript" => Lang::Script,
+        | "typescript" | "tsrx" => Lang::Script,
         "py" | "python" | "python3" => Lang::Python,
         "go" | "golang" => Lang::Go,
         "c" | "h" | "cc" | "cpp" | "c++" | "cxx" | "hpp" | "objc" | "m" => Lang::C,
         "java" | "kt" | "kotlin" | "scala" | "cs" | "csharp" | "c#" => Lang::Java,
         "rb" | "ruby" | "gemfile" | "rake" => Lang::Ruby,
+        "ex" | "exs" | "elixir" | "heex" | "eex" | "leex" => Lang::Elixir,
+        "lua" => Lang::Lua,
+        "php" | "php3" | "php4" | "php5" | "phtml" => Lang::Php,
         "swift" => Lang::Swift,
+        "dart" => Lang::Dart,
+        "zig" | "zon" => Lang::Zig,
         "json" | "jsonc" | "json5" => Lang::Json,
         "yaml" | "yml" => Lang::Yaml,
         "toml" | "ini" | "cfg" => Lang::Toml,
         "sh" | "bash" | "zsh" | "shell" | "shellscript" | "console" | "fish" | "dockerfile"
         | "docker" | "makefile" | "make" => Lang::Shell,
         "css" | "scss" | "sass" | "less" => Lang::Css,
-        "html" | "htm" | "xml" | "svg" | "vue" | "svelte" => Lang::Html,
+        "html" | "htm" | "xml" | "svg" | "vue" | "svelte" | "astro" => Lang::Html,
         "sql" | "postgres" | "postgresql" | "mysql" | "sqlite" => Lang::Sql,
         "md" | "markdown" | "mdx" | "mdown" => Lang::Markdown,
         "diff" | "patch" => Lang::Diff,
@@ -328,6 +338,8 @@ fn spec(lang: Lang) -> LangSpec {
             ],
             literals: &["true", "false", "null", "undefined", "NaN", "Infinity"],
             extra_identifier: &['_', '$'],
+            // TS decorators and TSRX's `@if`/`@for` template directives.
+            meta_sigils: &['@'],
             ..DEFAULT_SPEC
         },
         Lang::Python => LangSpec {
@@ -548,6 +560,191 @@ fn spec(lang: Lang) -> LangSpec {
             meta_sigils: &['@', '$', ':'],
             ..DEFAULT_SPEC
         },
+        Lang::Elixir => LangSpec {
+            line_comments: &["#"],
+            block_comment: None,
+            strings: &[TRIPLE_DOUBLE, TRIPLE_SINGLE, DOUBLE, SINGLE],
+            keywords: &[
+                "after",
+                "alias",
+                "and",
+                "case",
+                "catch",
+                "cond",
+                "def",
+                "defexception",
+                "defguard",
+                "defguardp",
+                "defimpl",
+                "defmacro",
+                "defmacrop",
+                "defmodule",
+                "defoverridable",
+                "defp",
+                "defprotocol",
+                "defstruct",
+                "do",
+                "else",
+                "end",
+                "fn",
+                "for",
+                "if",
+                "import",
+                "in",
+                "not",
+                "or",
+                "quote",
+                "raise",
+                "receive",
+                "require",
+                "rescue",
+                "retry",
+                "super",
+                "throw",
+                "try",
+                "unless",
+                "unquote",
+                "use",
+                "when",
+                "with",
+            ],
+            literals: &[
+                "true",
+                "false",
+                "nil",
+                "__CALLER__",
+                "__DIR__",
+                "__ENV__",
+                "__MODULE__",
+                "__STACKTRACE__",
+            ],
+            extra_identifier: &['_', '?', '!'],
+            // `:atom` and `@module_attribute`.
+            meta_sigils: &['@', ':'],
+            ..DEFAULT_SPEC
+        },
+        Lang::Lua => LangSpec {
+            line_comments: &["--"],
+            // Long comments; `--` prefixes the opener, so the lexer must
+            // check block comments first for this to carry across lines.
+            block_comment: Some(("--[[", "]]")),
+            strings: &[DOUBLE, SINGLE],
+            keywords: &[
+                "and",
+                "break",
+                "do",
+                "else",
+                "elseif",
+                "end",
+                "for",
+                "function",
+                "goto",
+                "if",
+                "in",
+                "local",
+                "not",
+                "or",
+                "repeat",
+                "return",
+                "then",
+                "until",
+                "while",
+            ],
+            literals: &["true", "false", "nil", "self"],
+            ..DEFAULT_SPEC
+        },
+        Lang::Php => LangSpec {
+            line_comments: &["//", "#"],
+            strings: &[DOUBLE, SINGLE],
+            keywords: &[
+                "abstract",
+                "and",
+                "as",
+                "break",
+                "case",
+                "catch",
+                "class",
+                "clone",
+                "const",
+                "continue",
+                "declare",
+                "default",
+                "do",
+                "echo",
+                "else",
+                "elseif",
+                "enddeclare",
+                "endfor",
+                "endforeach",
+                "endif",
+                "endswitch",
+                "endwhile",
+                "enum",
+                "extends",
+                "final",
+                "finally",
+                "fn",
+                "for",
+                "foreach",
+                "function",
+                "global",
+                "goto",
+                "if",
+                "implements",
+                "include",
+                "include_once",
+                "instanceof",
+                "insteadof",
+                "interface",
+                "isset",
+                "list",
+                "match",
+                "namespace",
+                "new",
+                "or",
+                "php",
+                "print",
+                "private",
+                "protected",
+                "public",
+                "readonly",
+                "require",
+                "require_once",
+                "return",
+                "static",
+                "switch",
+                "throw",
+                "trait",
+                "try",
+                "unset",
+                "use",
+                "var",
+                "while",
+                "xor",
+                "yield",
+            ],
+            literals: &[
+                "true", "false", "null", "TRUE", "FALSE", "NULL", "this", "self", "parent",
+            ],
+            types: &[
+                "int",
+                "float",
+                "string",
+                "bool",
+                "array",
+                "object",
+                "void",
+                "mixed",
+                "iterable",
+                "callable",
+                "never",
+            ],
+            // `$var` lexes as one plain identifier rather than meta — every
+            // PHP variable carries the sigil, so painting it would colour
+            // half the file.
+            extra_identifier: &['_', '$'],
+            ..DEFAULT_SPEC
+        },
         Lang::Swift => LangSpec {
             strings: &[TRIPLE_DOUBLE, DOUBLE],
             keywords: &[
@@ -612,6 +809,180 @@ fn spec(lang: Lang) -> LangSpec {
                 "true", "false", "nil", "Any", "Bool", "Double", "Int", "String", "Void", "some",
             ],
             meta_sigils: &['@', '#'],
+            ..DEFAULT_SPEC
+        },
+        Lang::Dart => LangSpec {
+            strings: &[TRIPLE_DOUBLE, TRIPLE_SINGLE, DOUBLE, SINGLE],
+            keywords: &[
+                "abstract",
+                "as",
+                "assert",
+                "async",
+                "await",
+                "base",
+                "break",
+                "case",
+                "catch",
+                "class",
+                "const",
+                "continue",
+                "covariant",
+                "default",
+                "deferred",
+                "do",
+                "else",
+                "enum",
+                "export",
+                "extends",
+                "extension",
+                "external",
+                "factory",
+                "final",
+                "finally",
+                "for",
+                "get",
+                "hide",
+                "if",
+                "implements",
+                "import",
+                "in",
+                "interface",
+                "is",
+                "late",
+                "library",
+                "mixin",
+                "new",
+                "of",
+                "on",
+                "operator",
+                "part",
+                "required",
+                "rethrow",
+                "return",
+                "sealed",
+                "set",
+                "show",
+                "static",
+                "super",
+                "switch",
+                "sync",
+                "this",
+                "throw",
+                "try",
+                "typedef",
+                "var",
+                "when",
+                "while",
+                "with",
+                "yield",
+            ],
+            literals: &["true", "false", "null"],
+            types: &[
+                "bool", "double", "dynamic", "int", "num", "void", "Function", "Future",
+                "Iterable", "List", "Map", "Never", "Null", "Object", "Record", "Set", "Stream",
+                "String", "Symbol",
+            ],
+            meta_sigils: &['@'],
+            ..DEFAULT_SPEC
+        },
+        Lang::Zig => LangSpec {
+            block_comment: None,
+            // `'a'` is a comptime_int character literal; `\\` multiline
+            // strings are a line prefix the spec model cannot express.
+            strings: &[DOUBLE, SINGLE],
+            keywords: &[
+                "addrspace",
+                "align",
+                "allowzero",
+                "and",
+                "anyframe",
+                "anytype",
+                "asm",
+                "async",
+                "await",
+                "break",
+                "callconv",
+                "catch",
+                "comptime",
+                "const",
+                "continue",
+                "defer",
+                "do",
+                "else",
+                "enum",
+                "errdefer",
+                "error",
+                "export",
+                "extern",
+                "fn",
+                "for",
+                "if",
+                "inline",
+                "linksection",
+                "noalias",
+                "noinline",
+                "nosuspend",
+                "opaque",
+                "or",
+                "orelse",
+                "packed",
+                "pub",
+                "resume",
+                "return",
+                "struct",
+                "suspend",
+                "switch",
+                "test",
+                "threadlocal",
+                "try",
+                "union",
+                "unreachable",
+                "usingnamespace",
+                "var",
+                "volatile",
+                "while",
+            ],
+            literals: &["true", "false", "null", "undefined"],
+            types: &[
+                "anyerror",
+                "anyopaque",
+                "bool",
+                "c_char",
+                "c_int",
+                "c_long",
+                "c_longdouble",
+                "c_longlong",
+                "c_short",
+                "c_uint",
+                "c_ulong",
+                "c_ulonglong",
+                "c_ushort",
+                "c_void",
+                "comptime_float",
+                "comptime_int",
+                "f16",
+                "f32",
+                "f64",
+                "f80",
+                "f128",
+                "i8",
+                "i16",
+                "i32",
+                "i64",
+                "i128",
+                "isize",
+                "noreturn",
+                "type",
+                "u8",
+                "u16",
+                "u32",
+                "u64",
+                "u128",
+                "usize",
+                "void",
+            ],
+            // `@import`, `@panic` and friends are builtins.
+            meta_sigils: &['@'],
             ..DEFAULT_SPEC
         },
         Lang::Json => LangSpec {
@@ -876,15 +1247,9 @@ pub fn tokenize_line(lang: Lang, line: &str, carry: Carry) -> (Vec<Token>, Carry
     while index < bytes.len() {
         let rest = &line[index..];
 
-        if spec
-            .line_comments
-            .iter()
-            .any(|marker| rest.starts_with(*marker))
-        {
-            push(&mut tokens, index..line.len(), TokenClass::Comment);
-            break;
-        }
-
+        // Block comments run first: a language whose line marker prefixes the
+        // block opener — Lua's `--` against `--[[` — otherwise can never
+        // carry the comment across lines.
         if let Some((open, close)) = spec.block_comment
             && rest.starts_with(open)
         {
@@ -900,6 +1265,15 @@ pub fn tokenize_line(lang: Lang, line: &str, carry: Carry) -> (Vec<Token>, Carry
                 }
             }
             continue;
+        }
+
+        if spec
+            .line_comments
+            .iter()
+            .any(|marker| rest.starts_with(*marker))
+        {
+            push(&mut tokens, index..line.len(), TokenClass::Comment);
+            break;
         }
 
         if let Some((slot, string)) = spec
@@ -1564,6 +1938,10 @@ mod tests {
         assert_eq!(lang_for_tag("rs"), Some(Lang::Rust));
         assert_eq!(lang_for_tag("TypeScript"), Some(Lang::Script));
         assert_eq!(lang_for_tag(" tsx "), Some(Lang::Script));
+        assert_eq!(lang_for_tag("tsrx"), Some(Lang::Script));
+        assert_eq!(lang_for_tag("astro"), Some(Lang::Html));
+        assert_eq!(lang_for_tag("exs"), Some(Lang::Elixir));
+        assert_eq!(lang_for_tag("zon"), Some(Lang::Zig));
         assert_eq!(lang_for_tag("brainfuck"), None);
     }
 
@@ -1640,6 +2018,87 @@ mod tests {
                 ("return", TokenClass::Keyword),
                 ("None", TokenClass::Literal),
                 ("# ok", TokenClass::Comment),
+            ]
+        );
+    }
+
+    #[test]
+    fn elixir_atoms_attributes_and_bang_predicates() {
+        assert_eq!(
+            spans(Lang::Elixir, "@spec run?(x) :: :ok"),
+            vec![
+                ("@spec", TokenClass::Meta),
+                ("run?", TokenClass::Function),
+                (":ok", TokenClass::Meta),
+            ]
+        );
+    }
+
+    #[test]
+    fn lua_long_comments_carry_across_lines() {
+        // `--` is the line-comment prefix of the `--[[` block opener; the
+        // block must still win so its closer is found on a later line.
+        let (tokens, carry) = tokenize_line(Lang::Lua, "--[[ open", Carry::None);
+        assert_eq!(carry, Carry::BlockComment);
+        assert_eq!(tokens[0].class, TokenClass::Comment);
+
+        let (tokens, carry) = tokenize_line(Lang::Lua, "close ]] local x = 1", carry);
+        assert_eq!(carry, Carry::None);
+        assert_eq!(&"close ]] local x = 1"[tokens[0].range.clone()], "close ]]");
+        assert!(tokens.iter().any(|token| token.class == TokenClass::Keyword));
+    }
+
+    #[test]
+    fn php_variables_stay_plain_while_keywords_colour() {
+        assert_eq!(
+            spans(Lang::Php, "<?php echo $name ?? 'x'; // c"),
+            vec![
+                ("php", TokenClass::Keyword),
+                ("echo", TokenClass::Keyword),
+                ("'x'", TokenClass::String),
+                ("// c", TokenClass::Comment),
+            ]
+        );
+    }
+
+    #[test]
+    fn zig_builtins_and_primitives() {
+        assert_eq!(
+            spans(Lang::Zig, "const x: u8 = @intCast(1); // c"),
+            vec![
+                ("const", TokenClass::Keyword),
+                ("u8", TokenClass::Type),
+                ("@intCast", TokenClass::Meta),
+                ("1", TokenClass::Number),
+                ("// c", TokenClass::Comment),
+            ]
+        );
+    }
+
+    #[test]
+    fn dart_keywords_types_and_annotations() {
+        assert_eq!(
+            spans(Lang::Dart, "final String name = 'x'; // c"),
+            vec![
+                ("final", TokenClass::Keyword),
+                ("String", TokenClass::Type),
+                ("'x'", TokenClass::String),
+                ("// c", TokenClass::Comment),
+            ]
+        );
+        assert_eq!(
+            spans(Lang::Dart, "@override"),
+            vec![("@override", TokenClass::Meta)]
+        );
+    }
+
+    #[test]
+    fn script_meta_sigil_covers_decorators_and_tsrx_directives() {
+        assert_eq!(
+            spans(Lang::Script, "@Component({}) @if (ready) {"),
+            vec![
+                ("@Component", TokenClass::Meta),
+                ("@if", TokenClass::Meta),
             ]
         );
     }
@@ -1824,7 +2283,12 @@ mod tests {
             (Lang::Yaml, "key: value # c"),
             (Lang::Toml, "[table]\nkey = \"v\""),
             (Lang::Ruby, "def x?(a) @b = :sym end"),
+            (Lang::Elixir, "def run?(x), do: {:ok, x}"),
+            (Lang::Lua, "local x = f(1) --[[note]] -- tail"),
+            (Lang::Php, "<?php echo $user->name ?? 'x'; # tail"),
             (Lang::Swift, "let x: Int = 1 // c"),
+            (Lang::Dart, "@override final String s = 'x';"),
+            (Lang::Zig, "const x: u8 = @intCast(1); // c"),
             (Lang::Java, "@Override public void f() {}"),
             (Lang::C, "int main(void) { return 0; }"),
         ];
