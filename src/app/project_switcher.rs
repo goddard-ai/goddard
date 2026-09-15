@@ -85,14 +85,24 @@ impl ProjectSwitcherUi {
 }
 
 fn ordered_project_ids(current: Option<Uuid>, recent: &[Uuid], projects: &[Project]) -> Vec<Uuid> {
-    let valid = projects
+    let by_id = projects
         .iter()
-        .map(|project| project.id)
-        .collect::<HashSet<_>>();
+        .map(|project| (project.id, project))
+        .collect::<HashMap<_, _>>();
     let mut seen = HashSet::with_capacity(projects.len());
+    // Every projectless workspace displays as "No project" and hides its
+    // ephemeral path, so the first one reached stands in for all of them.
+    let mut projectless_seen = false;
     let mut ordered = Vec::with_capacity(projects.len().min(MAX_PROJECTS));
     let mut push = |id| {
-        if ordered.len() < MAX_PROJECTS && valid.contains(&id) && seen.insert(id) {
+        let Some(project) = by_id.get(&id) else {
+            return;
+        };
+        if ordered.len() < MAX_PROJECTS
+            && !(project.is_projectless() && projectless_seen)
+            && seen.insert(id)
+        {
+            projectless_seen |= project.is_projectless();
             ordered.push(id);
         }
     };
@@ -603,6 +613,37 @@ mod tests {
                 added_newest.id,
                 added_oldest.id,
             ]
+        );
+    }
+
+    #[test]
+    fn switcher_order_collapses_projectless_projects_to_a_single_entry() {
+        let root = crate::projectless::workspace_root().expect("default projectless root");
+        let projectless = |name, created_at| Project {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: root.join("2026-08-08").join(name),
+            created_at,
+        };
+        let first = projectless("first", 10);
+        let second = projectless("second", 20);
+        let ordinary = Project {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: PathBuf::from("/tmp/dev/ordinary"),
+            created_at: 30,
+        };
+        let projects = vec![first.clone(), second.clone(), ordinary.clone()];
+
+        // The most recently added projectless project keeps the one row.
+        assert_eq!(
+            ordered_project_ids(None, &[], &projects),
+            vec![ordinary.id, second.id]
+        );
+        // A projectless draft's own project wins the slot instead.
+        assert_eq!(
+            ordered_project_ids(Some(first.id), &[second.id], &projects),
+            vec![first.id, ordinary.id]
         );
     }
 }
