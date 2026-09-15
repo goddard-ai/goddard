@@ -412,7 +412,10 @@ it in a browser tab in one click.
 Goddard is designed to be driven without a mouse:
 
 - **Command palette (⌘K / Ctrl+K):** fuzzy search across tasks, commands,
-  settings pages, providers, projects, scripts, and CLI sessions to resume.
+  settings pages, providers, projects, scripts, and CLI sessions to resume —
+  plus **full chat-history search**: the query runs against every stored
+  message in every task and returns matching snippets (archived chats are
+  excluded; they're searched separately in Settings → Archived).
 - **Task switcher (Ctrl+Tab / Ctrl+Shift+Tab):** recently-used tasks in an
   overlay; releasing the modifier commits.
 - **Project switcher:** same pattern, for recent projects.
@@ -718,6 +721,11 @@ command that can create tasks and send messages to other tasks.
 
 **Can I import a session I started in the terminal?**
 Yes — command palette → Resume… lists resumable CLI sessions per provider.
+
+**Can I search everything I've ever asked an agent?**
+Yes. The command palette searches message content across all tasks, not just
+titles — type a few words you remember and matching messages come back as
+snippets. Cmd/Ctrl+F does the same thing within the open transcript.
 
 **Can I undo what the agent did?**
 Revert to Here rolls back both the conversation and the Git working tree to
