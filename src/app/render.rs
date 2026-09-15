@@ -299,7 +299,9 @@ impl Waku {
                     return None;
                 }
                 window.request_animation_frame();
-                Some(-SIDEBAR_PEEK_NUDGE * ease_out_quint()(progress.max(0.0)))
+                // Ease-in (the entry's quint mirrored): the panel accelerates
+                // off the edge instead of braking into its disappearance.
+                Some(-SIDEBAR_PEEK_NUDGE * progress.max(0.0).powi(5))
             }
         }
     }
