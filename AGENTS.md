@@ -3,14 +3,18 @@
 ## Development runtime
 
 - Assume `bun ./scripts/dev.ts` is already running and owns the current
-  `Goddard Debug.app` process. Source changes are rebuilt, signed, and relaunched
-  automatically. Only run it yourself if not already launched.
+  `Goddard Debug.app` process. Source changes are rebuilt and signed
+  automatically; relaunch the app by typing `a` + enter in the watcher
+  terminal (`b` also restarts the daemon). Only run it yourself if not
+  already launched.
 - During normal development and UI validation, do not run
-  `scripts/bundle.sh debug`, start a second watcher, or manually quit/relaunch
-  `Goddard Debug.app`. Quitting the app also stops the watcher.
-- After an edit, wait for the watcher to finish its successful rebuild and
-  validate the freshly relaunched debug app. Only start or recover the watcher
-  manually when it is confirmed unavailable.
+  `scripts/bundle.sh debug` or start a second watcher. Quitting the app
+  leaves the watcher and daemon running; `a` relaunches, `q` or Ctrl-C
+  stops everything.
+- After an edit, wait for the watcher to finish its successful rebuild,
+  relaunch the app via the watcher's `a` command, and validate the fresh
+  debug app. Only start or recover the watcher manually when it is
+  confirmed unavailable.
 - No visual test unless requested.
 
 ## Performance

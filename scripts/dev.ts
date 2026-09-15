@@ -26,6 +26,21 @@ const daemonToken =
   process.env.WAKU_DAEMON_TOKEN ?? crypto.randomUUID().replaceAll("-", "");
 const externalDaemonAddress = process.env.WAKU_DAEMON_ADDRESS;
 const interactive = process.stdin.isTTY === true;
+const stdoutIsTTY = process.stdout.isTTY === true;
+
+// Bun's `$` pipes child stdio even when it echoes to a TTY parent, so cargo's
+// `term.color = auto` would strip colors. Advertise the TTY explicitly.
+if (stdoutIsTTY) {
+  process.env.CARGO_TERM_COLOR ??= "always";
+}
+
+const paint =
+  (open: string, close: string) =>
+  (text: string): string =>
+    stdoutIsTTY ? `${open}${text}${close}` : text;
+const bold = paint("\x1b[1m", "\x1b[22m");
+const dim = paint("\x1b[2m", "\x1b[22m");
+const green = paint("\x1b[32m", "\x1b[39m");
 const daemonPortBase = 34_123;
 const daemonPortScanLimit = 20;
 const daemonReadyTimeoutMs = 15_000;
@@ -69,6 +84,8 @@ let daemonRestartWhenIdle = false;
 let daemonRestarting = false;
 let protocolDirty = false;
 let forceDaemonRestart = false;
+let relaunchAfterBuild = false;
+let daemonBuildDirty = false;
 let controlClient: WakuClient | undefined;
 let lastDeferredLiveCount: number | undefined;
 let lastDaemonSpawnAt = 0;
@@ -380,6 +397,7 @@ async function buildDaemon(): Promise<boolean> {
     );
     return false;
   }
+  daemonBuildDirty = true;
   return true;
 }
 
@@ -413,6 +431,9 @@ async function spawnDaemon(bind: string): Promise<void> {
   daemon = child;
   daemonBind = bind;
   daemonAddress = ready.address;
+  // A freshly spawned daemon runs the just-built binary, so its protocol is
+  // never behind the sources on disk.
+  protocolDirty = false;
   controlClient = undefined;
   lastDaemonSpawnAt = Date.now();
   void watchDaemonExit(child);
@@ -430,7 +451,7 @@ function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
       await restartDaemon("unexpected exit");
     } else {
       daemonRestartPending = true;
-      console.log("[waku-dev] Press 'd' to restart the daemon.");
+      console.log("[waku-dev] Press d + enter to restart the daemon.");
     }
   });
 }
@@ -536,6 +557,7 @@ async function stopDaemon(): Promise<void> {
   ]);
   if (!finished) child.kill();
   await child.exited.catch(() => {});
+  controlClient?.disconnect();
   controlClient = undefined;
 }
 
@@ -642,6 +664,38 @@ async function pollForDaemonIdle(): Promise<void> {
   daemonRestartWhenIdle = false;
 }
 
+function shortcutLine(key: string, description: string): string {
+  return `  ${green("➜")}  ${dim("press")} ${bold(key)} ${dim(`+ enter to ${description}`)}`;
+}
+
+function printShortcuts(): void {
+  console.log(
+    [
+      "",
+      `  ${dim("Shortcuts")}`,
+      shortcutLine("a", "relaunch the app"),
+      shortcutLine("b", "restart the daemon, then relaunch the app"),
+      shortcutLine("d", "restart the daemon now"),
+      shortcutLine("D", "restart the daemon once sessions go idle"),
+      shortcutLine("q", "quit the watcher, app, and daemon"),
+      shortcutLine("h", "show this help"),
+      "",
+    ].join("\n"),
+  );
+}
+
+function printBanner(): void {
+  const daemonDetail =
+    externalDaemonAddress === undefined
+      ? "survives app relaunches and quits"
+      : "external — not restarted by the watcher";
+  console.log(
+    `\n  ${bold("waku dev")} ${dim("— watching for changes")}\n\n` +
+      `  ${green("➜")}  ${dim("app")}     ${appName}${isMacOS ? ".app" : ""}\n` +
+      `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress} ${dim(`(${daemonDetail})`)}`,
+  );
+}
+
 async function handleCommand(command: string): Promise<void> {
   switch (command) {
     case "":
@@ -659,18 +713,50 @@ async function handleCommand(command: string): Promise<void> {
       armDaemonRestartWhenIdle();
       return;
     case "a":
-      queuedBuild = mergedTarget(queuedBuild, "app");
-      void drainBuildQueue();
+      if (protocolDirty) {
+        console.log(
+          "[waku-dev] The protocol changed; press b + enter to restart the daemon before relaunching.",
+        );
+        return;
+      }
+      if (
+        building ||
+        queuedBuild !== undefined ||
+        debouncedBuild !== undefined
+      ) {
+        relaunchAfterBuild = true;
+        console.log(
+          "[waku-dev] Will relaunch the app once the current build finishes.",
+        );
+        return;
+      }
+      await relaunchApp();
       return;
     case "b":
-      forceDaemonRestart = true;
-      queuedBuild = mergedTarget(queuedBuild, "app");
-      void drainBuildQueue();
+      if (
+        building ||
+        queuedBuild !== undefined ||
+        debouncedBuild !== undefined
+      ) {
+        forceDaemonRestart = true;
+        relaunchAfterBuild = true;
+        console.log(
+          "[waku-dev] Will restart the daemon and relaunch the app once the current build finishes.",
+        );
+        return;
+      }
+      await restartDaemon("requested");
+      if (!stopping) await relaunchApp();
+      return;
+    case "q":
+      await cleanup();
+      return;
+    case "h":
+      printShortcuts();
       return;
     default:
       console.log(
-        "[waku-dev] Commands: 'd' restarts the daemon, 'D' restarts it once " +
-          "sessions go idle, 'a' rebuilds and relaunches the app, 'b' does both.",
+        "[waku-dev] Unknown command — press h + enter to show shortcuts.",
       );
   }
 }
@@ -717,19 +803,24 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     stdout: "inherit",
     stderr: "inherit",
   });
-  void launchedApp.exited.then(async (exitCode) => {
+  void launchedApp.exited.then((exitCode) => {
     if (stopping || app !== launchedApp) return;
     app = undefined;
-    stopping = true;
-    closeWatchers();
-    clearRebuildTimer();
-    closeCommandLoop();
-    await stopDaemon();
-    await releaseHyprlandRules();
-    console.log("[waku-dev] App exited; stopping the watcher.");
-    process.exitCode = exitCode;
+    // The daemon owns session state, so it and the watcher stay up when the
+    // app exits; 'a' relaunches, 'q' shuts everything down.
+    console.log(
+      `[waku-dev] App exited (${exitCode}); the daemon is still running — press a + enter to relaunch.`,
+    );
   });
   return launchedApp;
+}
+
+async function relaunchApp(): Promise<void> {
+  relaunchAfterBuild = false;
+  await stopApp();
+  if (stopping) return;
+  await prepareHyprlandLaunch();
+  if (!stopping) app = launchApp();
 }
 
 function clearRebuildTimer(): void {
@@ -820,6 +911,8 @@ async function drainBuildQueue(): Promise<void> {
       const buildAppRevision = appChangeRevision;
       const buildDaemonRevision = daemonChangeRevision;
       if (!(await build(target)) || stopping) continue;
+      const daemonRebuilt = daemonBuildDirty;
+      daemonBuildDirty = false;
 
       if (target === "daemon") {
         if (daemonChangeRevision === buildDaemonRevision) {
@@ -832,15 +925,19 @@ async function drainBuildQueue(): Promise<void> {
                 ? "; no live sessions"
                 : `; ${live} live session${live === 1 ? "" : "s"} would be interrupted`;
           console.log(
-            `[waku-dev] Daemon rebuilt${detail} — 'd' restarts it, 'D' waits for idle.`,
+            `[waku-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter once sessions go idle.`,
           );
           // Non-interactive runs cannot press 'd'; keep the previous
           // rebuild-and-swap behavior so the daemon never goes stale.
           if (!interactive) {
             await restartDaemon("non-interactive rebuild");
+          } else if (forceDaemonRestart) {
+            await restartDaemon("requested");
           } else if (daemonRestartWhenIdle && live === 0) {
             await restartDaemon("sessions idle");
           }
+          forceDaemonRestart = false;
+          if (relaunchAfterBuild && !stopping) await relaunchApp();
         }
         continue;
       }
@@ -855,19 +952,45 @@ async function drainBuildQueue(): Promise<void> {
         continue;
       }
 
-      const daemonRestartReason = forceDaemonRestart
-        ? "requested"
-        : protocolDirty
-          ? "protocol changed"
-          : undefined;
-      forceDaemonRestart = false;
-      protocolDirty = false;
-      if (daemonRestartReason !== undefined) {
-        await restartDaemon(daemonRestartReason);
+      // Non-interactive runs have nobody to press 'a'/'b'; keep the previous
+      // rebuild-and-relaunch behavior so neither side goes stale.
+      if (!interactive) {
+        if (forceDaemonRestart || protocolDirty) {
+          await restartDaemon(
+            forceDaemonRestart ? "requested" : "protocol changed",
+          );
+          forceDaemonRestart = false;
+        }
+        await relaunchApp();
+        continue;
       }
-      await stopApp();
-      if (!stopping) await prepareHyprlandLaunch();
-      if (!stopping) app = launchApp();
+
+      // The daemon survives app relaunches, so a finished build only needs a
+      // hint. A protocol change is the exception: the rebuilt app cannot
+      // safely attach to the stale daemon, so 'b' must restart it first.
+      if (protocolDirty) {
+        daemonRestartPending = true;
+        console.log(
+          "[waku-dev] App rebuilt, but the protocol changed — press b + enter to restart the daemon and relaunch.",
+        );
+      } else {
+        console.log(
+          daemonRebuilt
+            ? "[waku-dev] App and daemon rebuilt — press b + enter to restart both, a + enter to relaunch the app only."
+            : "[waku-dev] App rebuilt — press a + enter to relaunch.",
+        );
+      }
+
+      if (relaunchAfterBuild) {
+        relaunchAfterBuild = false;
+        if (forceDaemonRestart) {
+          await restartDaemon("requested");
+          if (!stopping) await relaunchApp();
+        } else if (!protocolDirty) {
+          await relaunchApp();
+        }
+      }
+      forceDaemonRestart = false;
     }
   } finally {
     building = false;
@@ -894,6 +1017,7 @@ startWatchers();
 building = true;
 const initialAppRevision = appChangeRevision;
 const initialBuildSucceeded = await build("app");
+daemonBuildDirty = false;
 building = false;
 if (!initialBuildSucceeded) {
   closeWatchers();
@@ -909,9 +1033,7 @@ try {
 }
 
 if (appChangeRevision === initialAppRevision) {
-  await stopApp();
-  await prepareHyprlandLaunch();
-  if (!stopping) app = launchApp();
+  await relaunchApp();
 } else {
   console.log(
     "[waku-dev] Changes arrived during the initial build; waiting to rebuild.",
@@ -920,8 +1042,5 @@ if (appChangeRevision === initialAppRevision) {
 }
 
 startCommandLoop();
-console.log(
-  "[waku-dev] Watching for source changes. The daemon survives app relaunches; " +
-    "after a daemon rebuild, 'd' restarts it, 'D' once sessions go idle, " +
-    "'a' rebuilds and relaunches the app, 'b' does both.",
-);
+printBanner();
+if (interactive) printShortcuts();
