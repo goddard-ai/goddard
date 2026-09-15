@@ -914,6 +914,8 @@ right_panel.tabs: 右パネルのタブ
 right_panel.add_tab: パネルタブを追加
 right_panel.hide: 右パネルを隠す
 right_panel.close_tab: "%{title} を閉じる"
+right_panel.maximize: パネルを最大化
+right_panel.restore: パネルを元に戻す
 
 open_in.open: "プロジェクトを %{app} で開く"
 open_in.choose: プロジェクトを開くアプリを選択…
@@ -993,8 +995,6 @@ files.could_not_save: "%{path} を保存できませんでした：%{error}"
 files.preview_markdown: Markdown をプレビュー
 files.edit_markdown_source: ソースを編集
 files.open_on_github: GitHub で開く
-files.enter_fullscreen: フルスクリーンにする
-files.exit_fullscreen: フルスクリーンを終了
 files.resize_tree: ファイルツリーの幅を変更
 files.refresh: ファイルを更新
 files.loading: ファイルを読み込み中…

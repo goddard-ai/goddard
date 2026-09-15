@@ -73,7 +73,7 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    ExitFileFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
+    ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
     GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, MarkUnreadAndGoToNextUnseen,
     NavigateBack, NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace,
     OpenResumePicker, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstProject,
@@ -1545,16 +1545,17 @@ pub struct Waku {
     /// while one is running.
     sidebar_rendered_width: f32,
     right_panel_rendered_width: f32,
-    /// The markdown file surface currently fullscreen, if any — runtime-only;
-    /// the docked layout it covers comes back exactly as it was. The path is
-    /// stored alongside so a Files-surface reselection also ends the mode.
-    fullscreen_surface: Option<(RightPanelSurface, String)>,
+    /// The right-panel surface currently maximized over the window, if any —
+    /// runtime-only; the docked layout it covers comes back exactly as it
+    /// was. The path of the file shown at entry rides alongside so a
+    /// Files-surface reselection also ends the mode.
+    fullscreen_surface: Option<(RightPanelSurface, Option<String>)>,
     /// The slide animating the fullscreen layer's width in or out, if any.
-    file_fullscreen_slide: Option<motion::WidthTween>,
+    panel_fullscreen_slide: Option<motion::WidthTween>,
     /// Width the fullscreen layer occupies this frame — the docked content
     /// width while inactive, so a toggle starts its slide from the panel's
     /// real edge.
-    file_fullscreen_rendered_width: f32,
+    panel_fullscreen_rendered_width: f32,
     fps_counter_visible: bool,
     panel_resize_drag: Option<PanelResizeDrag>,
     /// Window-relative PiP position, independent of incoming preview frames.
@@ -3390,8 +3391,8 @@ impl Waku {
                     0.0
                 },
                 fullscreen_surface: None,
-                file_fullscreen_slide: None,
-                file_fullscreen_rendered_width: if right_panel_visible {
+                panel_fullscreen_slide: None,
+                panel_fullscreen_rendered_width: if right_panel_visible {
                     right_panel_width
                 } else {
                     0.0

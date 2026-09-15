@@ -119,7 +119,7 @@ actions!(
         ToggleFindWholeWord,
         ToggleFindRegex,
         ReplaceAllMatches,
-        ExitFileFullscreen,
+        ExitPanelFullscreen,
         BrowserBack,
         BrowserForward,
         BrowserReload,
@@ -494,10 +494,10 @@ pub fn run() {
                 // falls through to CancelTurn anywhere else.
                 KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
                 KeyBinding::new("escape", CloseFind, Some("FindBar")),
-                // Between FileEditorPane and Waku: escape in a fullscreen
-                // file exits the mode once no find bar claims it, instead of
-                // reaching CancelTurn.
-                KeyBinding::new("escape", ExitFileFullscreen, Some("FileFullscreen")),
+                // Between FileEditorPane and Waku: escape in a maximized
+                // panel tab exits the mode once no find bar claims it,
+                // instead of reaching CancelTurn.
+                KeyBinding::new("escape", ExitPanelFullscreen, Some("PanelFullscreen")),
                 KeyBinding::new(
                     "secondary-alt-c",
                     ToggleFindCaseSensitive,

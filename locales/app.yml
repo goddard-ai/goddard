@@ -1782,6 +1782,10 @@ right_panel.hide:
   en: Hide right panel
 right_panel.close_tab:
   en: Close %{title}
+right_panel.maximize:
+  en: Maximize panel
+right_panel.restore:
+  en: Restore panel
 
 open_in.open:
   en: Open project in %{app}
@@ -1935,10 +1939,6 @@ files.edit_markdown_source:
   en: Edit source
 files.open_on_github:
   en: Open on GitHub
-files.enter_fullscreen:
-  en: Enter full screen
-files.exit_fullscreen:
-  en: Exit full screen
 files.resize_tree:
   en: Resize file tree
 files.refresh:

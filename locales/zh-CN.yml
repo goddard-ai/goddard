@@ -879,6 +879,8 @@ right_panel.tabs: 右侧面板标签页
 right_panel.add_tab: 添加面板标签页
 right_panel.hide: 隐藏右侧面板
 right_panel.close_tab: 关闭%{title}
+right_panel.maximize: 最大化面板
+right_panel.restore: 还原面板
 open_in.open: 用%{app}打开项目
 open_in.choose: 选择打开项目的应用…
 environment.title: 环境
@@ -953,8 +955,6 @@ files.could_not_save: "无法保存 %{path}：%{error}"
 files.preview_markdown: 预览 Markdown
 files.edit_markdown_source: 编辑源码
 files.open_on_github: 在 GitHub 上打开
-files.enter_fullscreen: 进入全屏
-files.exit_fullscreen: 退出全屏
 files.resize_tree: 调整文件树宽度
 files.refresh: 刷新文件
 files.loading: 正在加载文件…

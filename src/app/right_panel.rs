@@ -1879,7 +1879,7 @@ impl Waku {
         // Fullscreen belonged to the session's surfaces being swapped out;
         // even a restored session showing the same path starts docked.
         self.fullscreen_surface = None;
-        self.file_fullscreen_slide = None;
+        self.panel_fullscreen_slide = None;
         self.right_panel_visible = state.visible;
         self.right_panel_surfaces = state.surfaces;
         self.right_panel_active_surface = state.active_surface;
@@ -2328,7 +2328,7 @@ impl Waku {
             .child(body)
             // The fullscreen layer owns the window's width; dragging the
             // panel edge would fight it until the mode exits.
-            .when(!self.file_fullscreen_active(), |element| {
+            .when(!self.panel_fullscreen_active(), |element| {
                 element.child(self.render_panel_resize_handle(
                     "right-panel-resize-handle",
                     PanelResizeTarget::RightPanel,
@@ -2886,6 +2886,7 @@ impl Waku {
         }
         tabs = tabs.child(div().w(px(TAB_SCROLL_FADE_WIDTH)).h(px(1.0)).flex_none());
 
+        let fullscreen = self.panel_fullscreen_active();
         let mut header = div()
             .id("right-panel-header")
             .h(px(48.0))
@@ -2893,8 +2894,25 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(6.0))
-            .pl(px(10.0))
+            // Maximized, the layer spans the window and the strip's leading
+            // edge runs under the traffic lights; the same clearance the
+            // sidebar reserves keeps the tabs clickable.
+            .pl(px(if fullscreen {
+                TRAFFIC_LIGHT_CLEARANCE
+            } else {
+                10.0
+            }))
             .pr(px(14.0))
+            // On client-decorated platforms the maximized layer also covers
+            // the sidebar's window controls, so the header hosts them while
+            // it owns the window's top edge. A no-op where the OS draws them.
+            .when(fullscreen, |header| {
+                header.children(self.render_client_window_controls(
+                    super::window_chrome::WindowControlSide::Left,
+                    window,
+                    cx,
+                ))
+            })
             .child(
                 div()
                     .relative()
@@ -2964,6 +2982,44 @@ impl Waku {
                                 .collect()
                         },
                     )),
+            );
+        }
+
+        if self.active_right_panel_surface().is_some() {
+            let maximized = self.fullscreen_surface.is_some();
+            let focus = self.transcript_control_focus("right-panel-maximize-toggle", cx);
+            let (icon_path, label) = if maximized {
+                ("icons/minimize.svg", tr!("right_panel.restore"))
+            } else {
+                ("icons/maximize.svg", tr!("right_panel.maximize"))
+            };
+            header = header.child(
+                div()
+                    .id("right-panel-maximize-toggle")
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .size(px(26.0))
+                    .rounded(px(8.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .child(icon(icon_path, 13.0, theme.text_tertiary))
+                    .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_panel_fullscreen(cx)))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.toggle_panel_fullscreen(cx);
+                            cx.stop_propagation();
+                        }
+                    })),
             );
         }
 
@@ -3254,7 +3310,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
-        let fullscreen = self.file_fullscreen_active();
+        let fullscreen = self.panel_fullscreen_active();
         let file_tree_width = if fullscreen {
             0.0
         } else {
@@ -3342,37 +3398,6 @@ impl Waku {
                     }
                 }))
         });
-        let fullscreen_toggle = is_markdown.then(|| {
-            let focus = self.transcript_control_focus("file-fullscreen-toggle", cx);
-            let (icon_path, label) = if fullscreen {
-                ("icons/window-restore.svg", tr!("files.exit_fullscreen"))
-            } else {
-                ("icons/window-maximize.svg", tr!("files.enter_fullscreen"))
-            };
-            div()
-                .id("file-fullscreen-toggle")
-                .track_focus(&focus)
-                .tab_index(0)
-                .size(px(26.0))
-                .rounded(px(9.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .hover(|style| style.bg(theme.overlay))
-                .child(icon(icon_path, 12.0, theme.text_tertiary))
-                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_file_fullscreen(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.toggle_file_fullscreen(cx);
-                        cx.stop_propagation();
-                    }
-                }))
-        });
-
         let editor = div()
             .flex_1()
             .min_h_0()
@@ -3400,8 +3425,7 @@ impl Waku {
                             .child(relative_path.clone()),
                     )
                     .children(github_button)
-                    .children(preview_toggle)
-                    .children(fullscreen_toggle),
+                    .children(preview_toggle),
             )
             .child(body);
 
@@ -3764,48 +3788,48 @@ impl Waku {
         self.set_markdown_preview(!self.state.markdown_preview, cx);
     }
 
-    /// The fullscreen file layer is on screen this frame — the mode is
+    /// The maximized panel layer is on screen this frame — the mode is
     /// active or its exit slide is still traveling.
-    pub(super) fn file_fullscreen_active(&self) -> bool {
-        self.fullscreen_surface.is_some() || self.file_fullscreen_slide.is_some()
+    pub(super) fn panel_fullscreen_active(&self) -> bool {
+        self.fullscreen_surface.is_some() || self.panel_fullscreen_slide.is_some()
     }
 
-    /// Cover the window with the active file surface, or dock it back.
+    /// Cover the window with the active right-panel surface, or dock it back.
     /// Runtime-only: nothing persists, and every other way the surface goes
     /// away (tab close, surface switch, panel hide, session swap) is
     /// reconciled per frame in `settle_panel_slides`.
-    fn toggle_file_fullscreen(&mut self, cx: &mut Context<Self>) {
+    fn toggle_panel_fullscreen(&mut self, cx: &mut Context<Self>) {
         let entering = self.fullscreen_surface.is_none();
         self.fullscreen_surface = if entering {
             self.active_right_panel_surface()
                 .cloned()
-                .zip(self.visible_right_panel_file_path())
+                .map(|surface| (surface, self.visible_right_panel_file_path()))
         } else {
             None
         };
-        let from = if entering && self.file_fullscreen_slide.is_none() {
+        let from = if entering && self.panel_fullscreen_slide.is_none() {
             self.right_panel_rendered_width
         } else {
             // Leaving, or reversing a slide still in flight: start where the
             // layer's edge actually is.
-            self.file_fullscreen_rendered_width
+            self.panel_fullscreen_rendered_width
         };
-        self.file_fullscreen_slide = self.begin_panel_slide(from, cx);
+        self.panel_fullscreen_slide = self.begin_panel_slide(from, cx);
         cx.notify();
     }
 
-    /// Escape inside the fullscreen layer. The binding's FileFullscreen
+    /// Escape inside the maximized layer. The binding's PanelFullscreen
     /// context sits deeper than Waku's CancelTurn and shallower than
     /// FileEditorPane's close-find, so it only fires once no find bar has
     /// claimed the keystroke.
-    pub(super) fn exit_file_fullscreen_action(
+    pub(super) fn exit_panel_fullscreen_action(
         &mut self,
-        _: &ExitFileFullscreen,
+        _: &ExitPanelFullscreen,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.fullscreen_surface.is_some() {
-            self.toggle_file_fullscreen(cx);
+            self.toggle_panel_fullscreen(cx);
         }
     }
 
