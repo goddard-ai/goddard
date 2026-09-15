@@ -1891,6 +1891,17 @@ impl Waku {
                             .size_full(),
                         ),
                     )
+                    // Rows dissolve into the sidebar surface just above the
+                    // footer while more content waits below the fold.
+                    .child(scrollbar::edge_fade(
+                        self.sidebar_list_state.clone(),
+                        scrollbar::FadeEdge::Bottom,
+                        if is_resizing {
+                            theme.sidebar_drag_background
+                        } else {
+                            theme.sidebar
+                        },
+                    ))
                     .child(scrollbar::vertical(
                         &self.sidebar_list_state,
                         &self.sidebar_scrollbar,
