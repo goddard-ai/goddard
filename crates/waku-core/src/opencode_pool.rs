@@ -118,6 +118,20 @@ pub(crate) fn acquire(binary: &Path, cwd: &Path) -> anyhow::Result<PooledServer>
     acquire_with_start(binary, cwd, || OpenCodeServer::start(binary, cwd))
 }
 
+/// Like [`acquire`], but the started server receives extra environment. The
+/// environment is per-workspace, not per-session: callers must only pass
+/// values identical for every session in the workspace, since an already
+/// running server answers without them.
+pub(crate) fn acquire_with_env(
+    binary: &Path,
+    cwd: &Path,
+    environment: &[(String, String)],
+) -> anyhow::Result<PooledServer> {
+    acquire_with_start(binary, cwd, || {
+        OpenCodeServer::start_with_env(binary, cwd, environment)
+    })
+}
+
 /// Returns a live resident server for `binary`, whichever workspace owns it.
 ///
 /// Reads of OpenCode's global store — the cross-project session catalog —

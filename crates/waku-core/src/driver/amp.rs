@@ -98,6 +98,7 @@ impl AmpDriver {
             agent_preset: _,
             computer_use_enabled: _,
             agent,
+            subagents: _,
             provider_cursor,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -582,6 +583,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -641,6 +643,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,

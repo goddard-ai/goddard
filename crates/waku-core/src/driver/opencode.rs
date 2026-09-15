@@ -203,6 +203,7 @@ impl OpenCodeDriver {
             agent_preset: _,
             computer_use_enabled,
             agent: agent_env,
+            subagents,
             provider_cursor,
         } = options;
         let resume_session_id = match provider_cursor {
@@ -235,6 +236,15 @@ impl OpenCodeDriver {
         if let Some(agent_env) = &agent_env {
             crate::command_env::merge_agent_environment(&mut environment, agent_env);
         }
+        // Subagent definitions are identical for every session, so they ride
+        // the shared workspace server's config. OpenCode merges
+        // `OPENCODE_CONFIG_CONTENT` over the user's config files.
+        if let Some(config) = subagents
+            .as_ref()
+            .and_then(crate::subagents::opencode_config_json)
+        {
+            environment.push(("OPENCODE_CONFIG_CONTENT".into(), config));
+        }
         // Computer Use bakes per-session configuration into the server's
         // environment, so it keeps a dedicated server. A session carrying
         // the agent surface gets one too — its scoped token must never leak
@@ -245,7 +255,7 @@ impl OpenCodeDriver {
         let server = if computer_use.is_some() || agent_env.is_some() {
             PooledServer::dedicated(OpenCodeServer::start_with_env(&binary, &cwd, &environment)?)
         } else {
-            crate::opencode_pool::acquire(&binary, &cwd)?
+            crate::opencode_pool::acquire_with_env(&binary, &cwd, &environment)?
         };
 
         let agent = "build";
@@ -1635,6 +1645,7 @@ server.serve_forever()
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -1756,6 +1767,7 @@ server.serve_forever()
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -1845,6 +1857,7 @@ server.serve_forever()
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,

@@ -216,6 +216,7 @@ impl PiDriver {
             agent_preset: _,
             computer_use_enabled,
             agent,
+            subagents,
             provider_cursor,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -254,6 +255,26 @@ impl PiDriver {
             .as_ref()
             .map(|_| crate::computer_use::pi_extension_path())
             .transpose()?;
+        // Pi has no built-in subagent tool, so delegation arrives as a
+        // waku-owned extension: a `waku_delegate` tool that runs `pi -p`
+        // subprocesses on the spec's models. The file lives in Goddard's
+        // data directory — identical content for every session — and reads
+        // the spec from `WAKU_SUBAGENTS`. Oh My Pi is a fork with its own
+        // extension model, so only stock Pi gets it.
+        let subagent_extension = subagents
+            .as_ref()
+            .filter(|spec| !spec.agents.is_empty() && flavor == PiFlavor::Pi)
+            .map(|spec| -> anyhow::Result<(PathBuf, String)> {
+                let directory = dirs::data_dir()
+                    .ok_or_else(|| anyhow!("Application Support directory is unavailable"))?
+                    .join("Waku")
+                    .join("subagents");
+                Ok((
+                    crate::subagents::write_pi_extension(&directory)?,
+                    serde_json::to_string(spec)?,
+                ))
+            })
+            .transpose()?;
         let mut command = crate::command_env::command(&binary);
         command.args(["--mode", "rpc", flavor.full_access_arg()]);
         if let Some(agent) = &agent {
@@ -269,6 +290,13 @@ impl PiDriver {
                 .zip(pi_extension.as_deref())
                 .map(|(runtime, extension)| (&runtime.config, extension)),
         );
+        if let Some((extension, spec_json)) = &subagent_extension {
+            command
+                .arg("--extension")
+                .arg(extension)
+                .env("WAKU_SUBAGENTS", spec_json)
+                .env("WAKU_PI_BINARY", &binary);
+        }
         let mut command = crate::command_env::guard_command(command);
         let command = command
             .current_dir(&cwd)
@@ -1768,6 +1796,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -2016,6 +2045,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,

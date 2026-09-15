@@ -608,6 +608,40 @@ impl ProviderAgentPreset {
     }
 }
 
+/// A named subagent a session's model can delegate work to.
+///
+/// Definitions are injected at launch through whatever channel the harness
+/// offers — Claude's `--agents` JSON, an OpenCode `agent.*` config entry, a
+/// Pi extension tool — so the fields stay harness-neutral. The `waku-` name
+/// prefix doubles as the attribution key: a `BackgroundWorkItem.role` that
+/// starts with it identifies a Goddard-defined agent with no extra plumbing.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct SubagentDef {
+    /// Agent name as the harness reports it, conventionally `waku-<name>`.
+    pub name: String,
+    /// "When to use" text the harness surfaces to the orchestrating model.
+    pub description: String,
+    /// The subagent's instructions.
+    pub prompt: String,
+    /// Read-only agents have write tools denied where the harness allows it.
+    #[serde(default)]
+    pub read_only: bool,
+    /// Harness-native model id; `None` runs the harness's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Harness-native reasoning effort, where the harness supports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+
+/// The subagents a launch injects. Every field is launch-time only — no
+/// harness can re-inject mid-session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct SubagentSpec {
+    #[serde(default)]
+    pub agents: Vec<SubagentDef>,
+}
+
 impl ProviderModel {
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {

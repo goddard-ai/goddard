@@ -130,6 +130,7 @@ impl AcpDriver {
             agent_preset: _,
             computer_use_enabled,
             agent: agent_env,
+            subagents: _,
             provider_cursor,
         } = options;
         let fork_context = match &provider_cursor {
@@ -3111,6 +3112,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -3165,6 +3167,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -3224,6 +3227,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,

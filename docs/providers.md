@@ -39,9 +39,18 @@ Inputs ([driver/mod.rs:67](../crates/waku-core/src/driver/mod.rs#L79)):
 pub struct DriverStartOptions {
     binary, cwd, mode,
     model, reasoning_effort, service_tier,
-    computer_use_enabled, provider_cursor,
+    computer_use_enabled, subagents, provider_cursor,
 }
 ```
+
+`subagents` carries named subagent definitions (`waku-`-prefixed) the driver
+injects at launch through the harness's own channel — `--agents` JSON plus an
+`--append-system-prompt` routing hint for Claude, `OPENCODE_CONFIG_CONTENT`
+agent entries on the pooled OpenCode server, a waku-owned `--extension`
+delegate tool for Pi, a `developerInstructions` hint for Codex, and a
+`waku-subagents` session instruction entry for the adopted OpenCode 2
+service. Injection is launch-time only; no transport can re-inject
+mid-session.
 
 Outputs ([model.rs:973](../crates/waku-core/src/model.rs)): `Connected`,
 `AvailableCommands`, `TurnStarted`, `TextDelta`, `ReasoningDelta`, `Activity`,

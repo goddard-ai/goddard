@@ -931,6 +931,7 @@ impl Backend for WakuBackend {
                     agent_preset: options.agent_preset,
                     computer_use_enabled: options.computer_use_enabled,
                     agent: None,
+                    subagents: None,
                     provider_cursor: options
                         .provider_cursor
                         .map(serde_json::from_value)
@@ -1577,6 +1578,7 @@ impl WakuBackend {
                 // A fork/rollback driver is a one-shot process, not the
                 // task's live runtime; it never receives a scoped token.
                 agent: None,
+                subagents: None,
                 provider_cursor: source.provider_cursor.clone(),
             },
             event_sender,
@@ -1764,6 +1766,7 @@ impl WakuBackend {
                 agent_preset: source.agent_preset.clone(),
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: source.provider_cursor.clone(),
             },
             event_sender,
@@ -1906,6 +1909,10 @@ impl WakuBackend {
                 ),
             }
         }
+        // Named subagents ride the launch with the runtime: every live
+        // session gets the default set, and drivers without an injection
+        // channel simply ignore it.
+        options.subagents = Some(crate::subagents::default_spec());
         // A launch that never came up keeps no credential.
         let handle = match driver::start_local(provider, options, event_sender) {
             Ok(handle) => handle,
@@ -2026,6 +2033,7 @@ impl WakuBackend {
                 agent_preset: session.agent_preset.clone(),
                 computer_use_enabled: self.settings.get().computer_use_enabled,
                 agent: None,
+                subagents: None,
                 provider_cursor: session.provider_cursor.clone(),
             };
             (provider, options)

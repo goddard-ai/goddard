@@ -109,6 +109,7 @@ impl DeepSeekDriver {
             agent_preset,
             computer_use_enabled: _,
             agent,
+            subagents: _,
             provider_cursor,
         } = options;
         let (requested_session_id, resuming) = match provider_cursor {

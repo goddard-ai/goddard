@@ -197,6 +197,11 @@ pub struct DriverStartOptions {
     /// in when `agent_tools_enabled` is on; it never crosses the wire, so no
     /// client can mint itself a credential by setting it.
     pub agent: Option<crate::agent::AgentLaunchEnv>,
+    /// Named subagent definitions the driver injects at launch through its
+    /// harness's own mechanism. Launch-time only — no transport can
+    /// re-inject mid-session, which is why this is not a `SessionOptions`
+    /// field.
+    pub subagents: Option<waku_protocol::model::SubagentSpec>,
     pub provider_cursor: Option<ProviderResumeCursor>,
 }
 

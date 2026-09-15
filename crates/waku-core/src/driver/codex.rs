@@ -222,6 +222,7 @@ impl CodexDriver {
             agent_preset: _,
             computer_use_enabled,
             agent,
+            subagents,
             provider_cursor,
         } = options;
         let provider_session_id = match provider_cursor {
@@ -376,6 +377,14 @@ impl CodexDriver {
                 let mut model = model;
                 let mut reasoning_effort = reasoning_effort;
                 let mut service_tier = service_tier;
+                // Codex cannot register agent definitions, so delegation is
+                // hint-only: the session learns `spawn_agent` exists through
+                // `developerInstructions`, which a resumed thread keeps from
+                // its original start.
+                let subagent_hint = subagents
+                    .as_ref()
+                    .filter(|spec| !spec.agents.is_empty())
+                    .map(|_| crate::subagents::CODEX_HINT);
                 let open_thread = if let Some(thread_id) = provider_session_id {
                     let mut params = json!({
                         "threadId": thread_id,
@@ -403,6 +412,9 @@ impl CodexDriver {
                         "approvalsReviewer": approvals_reviewer,
                         "serviceName": "waku"
                     });
+                    if let Some(hint) = subagent_hint {
+                        params["developerInstructions"] = json!(hint);
+                    }
                     if let Some(model) = model.as_deref() {
                         params["model"] = json!(model);
                     }
@@ -2517,6 +2529,7 @@ mod tests {
                     agent_preset: None,
                     computer_use_enabled: false,
                     agent: None,
+                    subagents: None,
                     provider_cursor: Some(cursor),
                 },
                 events,
@@ -2603,6 +2616,7 @@ mod tests {
                     agent_preset: None,
                     computer_use_enabled: false,
                     agent: None,
+                    subagents: None,
                     provider_cursor: cursor,
                 },
                 events,

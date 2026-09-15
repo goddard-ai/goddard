@@ -377,6 +377,7 @@ pub(super) struct OpenCode2Driver {
     supports_steer: bool,
     computer_use: Option<Arc<OpenCode2ComputerUse>>,
     agent_surface: Option<OpenCode2AgentSurface>,
+    subagent_instruction: Option<SubagentInstruction>,
 }
 
 impl OpenCode2Driver {
@@ -398,6 +399,7 @@ impl OpenCode2Driver {
             agent_preset,
             computer_use_enabled,
             agent: agent_env,
+            subagents,
             provider_cursor,
         } = options;
 
@@ -536,6 +538,54 @@ impl OpenCode2Driver {
             }
         };
 
+        // The adopted service cannot register agents, so delegation is a
+        // routing-hint instruction entry naming the subagent-mode agents the
+        // user's own config already defines. A hint that fails to write
+        // degrades to no delegation, not a failed session.
+        let subagent_instruction = match &subagents {
+            Some(spec) if !spec.agents.is_empty() => {
+                let available = agents
+                    .iter()
+                    .filter(|agent| {
+                        !agent.hidden
+                            && matches!(
+                                agent.mode,
+                                opencode2_api::AgentMode::Subagent | opencode2_api::AgentMode::All
+                            )
+                    })
+                    .map(|agent| agent.id.clone())
+                    .collect::<Vec<_>>();
+                let hint = crate::subagents::opencode2_hint(&available);
+                match opencode2_api::put_instruction_entry(
+                    &endpoint,
+                    &session_id,
+                    SUBAGENT_INSTRUCTION_KEY,
+                    &hint,
+                ) {
+                    Ok(()) => Some(SubagentInstruction {
+                        endpoint: endpoint.clone(),
+                        session_id: session_id.clone(),
+                    }),
+                    Err(error) => {
+                        eprintln!(
+                            "waku-daemon: could not attach OpenCode 2 subagent instructions: {error}"
+                        );
+                        None
+                    }
+                }
+            }
+            // Same reconcile rule as the agent surface: a resumed session may
+            // retain our entry after an interrupted shutdown.
+            _ => {
+                let _ = opencode2_api::remove_instruction_entry(
+                    &endpoint,
+                    &session_id,
+                    SUBAGENT_INSTRUCTION_KEY,
+                );
+                None
+            }
+        };
+
         // The session's own token totals are a LIFETIME cumulative counter and
         // cannot gauge how full the window is, so read the latest assistant
         // message's per-request usage instead.
@@ -644,6 +694,7 @@ impl OpenCode2Driver {
             supports_steer: true,
             computer_use,
             agent_surface,
+            subagent_instruction,
         })
     }
 }
@@ -659,6 +710,24 @@ struct OpenCode2AgentSurface {
 }
 
 const AGENT_INSTRUCTION_KEY: &str = "waku-agent";
+const SUBAGENT_INSTRUCTION_KEY: &str = "waku-subagents";
+
+/// A `waku-subagents` instruction entry: attached at start, removed on drop
+/// so a later session reconciles to whatever its own launch injected.
+struct SubagentInstruction {
+    endpoint: Endpoint,
+    session_id: String,
+}
+
+impl Drop for SubagentInstruction {
+    fn drop(&mut self) {
+        let _ = opencode2_api::remove_instruction_entry(
+            &self.endpoint,
+            &self.session_id,
+            SUBAGENT_INSTRUCTION_KEY,
+        );
+    }
+}
 
 impl OpenCode2AgentSurface {
     fn start(
@@ -784,6 +853,7 @@ impl Drop for OpenCode2Driver {
         // Revoke the session's agent instruction and credential-carrying
         // launcher while the service is still expected to answer.
         drop(self.agent_surface.take());
+        drop(self.subagent_instruction.take());
         let _ = self.commands.send(DriverCommand::Shutdown);
     }
 }
@@ -3104,6 +3174,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -3170,6 +3241,7 @@ mod tests {
                     agent_preset: None,
                     computer_use_enabled: true,
                     agent: None,
+                    subagents: None,
                     provider_cursor: None,
                 },
                 events,

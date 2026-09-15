@@ -179,6 +179,7 @@ impl ClaudeDriver {
             agent_preset: _,
             computer_use_enabled: _,
             agent,
+            subagents,
             provider_cursor,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
@@ -205,6 +206,17 @@ impl ClaudeDriver {
         configure_stream_command(&mut command, mode);
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
+        }
+        if let Some(subagents) = &subagents {
+            // `--agents` definitions live only for this session and outrank
+            // file-based ones, so nothing lands in the user's repo or
+            // `~/.claude`. The hint teaches the parent when to delegate.
+            if let Some(agents_json) = crate::subagents::claude_agents_json(subagents) {
+                command.args(["--agents", &agents_json]);
+            }
+            if let Some(hint) = crate::subagents::routing_hint(subagents) {
+                command.args(["--append-system-prompt", &hint]);
+            }
         }
         let launch_model = wire_model(model.as_deref(), context_window.as_deref());
         if let Some(model) = launch_model.as_deref() {
@@ -1895,6 +1907,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
@@ -1964,6 +1977,7 @@ mod tests {
                 agent_preset: None,
                 computer_use_enabled: false,
                 agent: None,
+                subagents: None,
                 provider_cursor: None,
             },
             events,
