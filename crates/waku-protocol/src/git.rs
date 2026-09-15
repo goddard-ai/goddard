@@ -115,6 +115,13 @@ pub struct CommitEntry {
     pub subject: String,
     /// Message body past the subject; empty when the commit has none.
     pub body: String,
+    /// Author name (`%an`).
+    pub author: String,
+    /// Author date, unix seconds (`%at`).
+    pub authored_at: u64,
+    /// Lines the commit touched; both zero for merges and binary-only diffs.
+    pub additions: u64,
+    pub deletions: u64,
 }
 
 /// How `PullUpstream` integrates upstream commits.

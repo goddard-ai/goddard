@@ -192,28 +192,79 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
             "log",
             &format!("--skip={skip}"),
             &format!("-n{limit}"),
-            "--format=%H%x1f%h%x1f%s%x1f%b%x1e",
+            "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%b%x1e",
         ],
     )?;
+    let stats = commit_numstats(cwd, skip, limit)?;
     Ok(output
         .split('\x1e')
         .filter_map(|record| {
             let mut fields = record.split('\x1f');
             let sha = fields.next()?.trim().to_owned();
             let short_sha = fields.next()?.to_owned();
+            let author = fields.next()?.to_owned();
+            let authored_at = fields
+                .next()
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .unwrap_or(0);
             let subject = fields.next()?.to_owned();
             let body = fields.next().unwrap_or_default().trim().to_owned();
             if sha.is_empty() {
                 return None;
             }
+            let (additions, deletions) = stats.get(&sha).copied().unwrap_or_default();
             Some(CommitEntry {
                 sha,
                 short_sha,
                 subject,
                 body,
+                author,
+                authored_at,
+                additions,
+                deletions,
             })
         })
         .collect())
+}
+
+/// Per-commit `+/-` totals for the same `git log` page, keyed by full sha.
+/// `--numstat` prints each commit's `add\tdel\tpath` lines after its format
+/// record; the leading `\x1e` keeps the two aligned when the diff is empty
+/// (merges, binary-only changes), which `--numstat` simply omits lines for.
+fn commit_numstats(
+    cwd: &Path,
+    skip: usize,
+    limit: usize,
+) -> anyhow::Result<HashMap<String, (u64, u64)>> {
+    let output = git_stdout(
+        cwd,
+        &[
+            "log",
+            &format!("--skip={skip}"),
+            &format!("-n{limit}"),
+            "--format=%x1e%H",
+            "--numstat",
+        ],
+    )?;
+    let mut stats = HashMap::new();
+    for record in output.split('\x1e') {
+        let mut lines = record.lines();
+        let Some(sha) = lines.next().map(str::trim).filter(|sha| !sha.is_empty()) else {
+            continue;
+        };
+        let totals = lines.fold((0u64, 0u64), |(additions, deletions), line| {
+            let mut fields = line.splitn(3, '\t');
+            match (
+                fields.next().and_then(|value| value.parse::<u64>().ok()),
+                fields.next().and_then(|value| value.parse::<u64>().ok()),
+            ) {
+                (Some(added), Some(deleted)) => (additions + added, deletions + deleted),
+                _ => (additions, deletions),
+            }
+        });
+        stats.insert(sha.to_owned(), totals);
+    }
+    Ok(stats)
 }
 
 /// `rev-list --left-right --count HEAD...<upstream>`: commits each side has
@@ -381,6 +432,24 @@ mod tests {
         assert_eq!(page[0].subject, "commit 3");
         assert_eq!(page[1].subject, "commit 2");
         assert_eq!(page[0].short_sha.len(), 7);
+        assert_eq!(page[0].author, "Test");
+        assert!(page[0].authored_at > 0);
+        assert_eq!((page[0].additions, page[0].deletions), (0, 0));
+    }
+
+    #[test]
+    fn commits_carry_numstat_totals() {
+        let cwd = repository();
+        std::fs::write(cwd.join("file.txt"), "one\ntwo\n").unwrap();
+        run_git(&cwd, &["add", "file.txt"]);
+        run_git(&cwd, &["commit", "-qm", "init"]);
+        std::fs::write(cwd.join("file.txt"), "one\n").unwrap();
+        run_git(&cwd, &["commit", "-qam", "drop a line"]);
+
+        let page = commits(&cwd, 0, 10).unwrap();
+        assert_eq!(page[0].subject, "drop a line");
+        assert_eq!((page[0].additions, page[0].deletions), (0, 1));
+        assert_eq!((page[1].additions, page[1].deletions), (2, 0));
     }
 
     #[test]

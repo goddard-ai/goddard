@@ -135,15 +135,11 @@ impl GitPanelDiffHover {
     }
 }
 
-/// A commit row's message popover; the subject and body already rode in with
-/// the list, so hover only schedules the card.
+/// A commit row's tooltip; the message and stats already rode in with the
+/// list, so hover only schedules the card.
 pub(super) struct GitPanelCommitHover {
     pub sha: String,
-    pub row_hovered: bool,
-    pub card_hovered: bool,
     pub open: bool,
-    pub scroll_handle: ScrollHandle,
-    pub scrollbar: Rc<ScrollbarState>,
 }
 
 /// The commit-diff modal's state.
@@ -154,6 +150,8 @@ pub(super) struct GitPanelCommitDiff {
     pub state: GitPanelCommitDiffState,
     pub list_state: ListState,
     pub scrollbar: Rc<ScrollbarState>,
+    pub body_scroll: ScrollHandle,
+    pub body_scrollbar: Rc<ScrollbarState>,
 }
 
 pub(super) enum GitPanelCommitDiffState {
@@ -1071,46 +1069,29 @@ impl Waku {
         .detach();
     }
 
-    /// The same dwell-and-retarget cycle, for a commit row's message card.
+    /// The commit tooltip dwells before it opens but closes the moment the
+    /// row loses the pointer — it sits under the row, so there is no card to
+    /// keep alive for.
     fn git_panel_commit_row_hovered(&mut self, sha: String, hovered: bool, cx: &mut Context<Self>) {
         if !hovered {
             let leaving = self
                 .git_panel_commit_hover
                 .as_ref()
-                .is_some_and(|hover| hover.sha == sha && hover.row_hovered);
+                .is_some_and(|hover| hover.sha == sha);
             if !leaving {
                 return;
             }
-            if let Some(hover) = self.git_panel_commit_hover.as_mut() {
-                hover.row_hovered = false;
-            }
-            self.schedule_git_panel_commit_hover_close(cx);
+            self.git_panel_commit_hover = None;
+            self.git_panel_commit_hover_generation =
+                self.git_panel_commit_hover_generation.wrapping_add(1);
+            cx.notify();
             return;
         }
 
+        self.git_panel_commit_hover = Some(GitPanelCommitHover { sha, open: false });
         self.git_panel_commit_hover_generation =
             self.git_panel_commit_hover_generation.wrapping_add(1);
         let generation = self.git_panel_commit_hover_generation;
-        match self.git_panel_commit_hover.as_mut() {
-            Some(hover) if hover.open => {
-                if hover.sha != sha {
-                    hover.sha = sha;
-                    hover.scroll_handle = ScrollHandle::new();
-                }
-                hover.row_hovered = true;
-                hover.card_hovered = false;
-            }
-            _ => {
-                self.git_panel_commit_hover = Some(GitPanelCommitHover {
-                    sha,
-                    row_hovered: true,
-                    card_hovered: false,
-                    open: false,
-                    scroll_handle: ScrollHandle::new(),
-                    scrollbar: ScrollbarState::new(),
-                });
-            }
-        }
         cx.notify();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
@@ -1123,51 +1104,11 @@ impl Waku {
                 let Some(hover) = this.git_panel_commit_hover.as_mut() else {
                     return;
                 };
-                if !hover.row_hovered || hover.open {
+                if hover.open {
                     return;
                 }
                 hover.open = true;
                 cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn git_panel_commit_card_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
-        let Some(hover) = self.git_panel_commit_hover.as_mut() else {
-            return;
-        };
-        if hover.card_hovered == hovered {
-            return;
-        }
-        hover.card_hovered = hovered;
-        self.git_panel_commit_hover_generation =
-            self.git_panel_commit_hover_generation.wrapping_add(1);
-        if !hovered {
-            self.schedule_git_panel_commit_hover_close(cx);
-        }
-    }
-
-    fn schedule_git_panel_commit_hover_close(&mut self, cx: &mut Context<Self>) {
-        self.git_panel_commit_hover_generation =
-            self.git_panel_commit_hover_generation.wrapping_add(1);
-        let generation = self.git_panel_commit_hover_generation;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(GIT_PANEL_HOVER_CLOSE_DELAY)
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.git_panel_commit_hover_generation != generation {
-                    return;
-                }
-                let close = this
-                    .git_panel_commit_hover
-                    .as_ref()
-                    .is_some_and(|hover| !hover.row_hovered && !hover.card_hovered);
-                if close {
-                    this.git_panel_commit_hover = None;
-                    cx.notify();
-                }
             });
         })
         .detach();
@@ -1189,6 +1130,8 @@ impl Waku {
             state: GitPanelCommitDiffState::Loading,
             list_state: ListState::new(0, ListAlignment::Top, px(GIT_PANEL_MODAL_HEIGHT)),
             scrollbar: ScrollbarState::new(),
+            body_scroll: ScrollHandle::new(),
+            body_scrollbar: ScrollbarState::new(),
         });
         cx.notify();
         let client = waku_client::WorkspaceClient::new(self.daemon.client());
@@ -1338,63 +1281,13 @@ impl Waku {
         .into_any_element()
     }
 
-    /// The commit box: branch and upstream counts, the message input, and the
-    /// state-aware action button.
+    /// The commit box: the message input and the state-aware action button.
+    /// The branch the box commits onto heads the commits section instead.
     fn render_git_panel_commit_area(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(panel) = self.git_panel.as_ref() else {
             return div().into_any_element();
         };
-        let snapshot = panel.snapshot.clone();
-
-        let mut branch_row = div()
-            .h(px(24.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .child(icon("icons/git-branch.svg", 11.0, theme.text_tertiary))
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .child(
-                        snapshot
-                            .as_ref()
-                            .map(|snapshot| snapshot.branch.clone())
-                            .unwrap_or_default(),
-                    ),
-            );
-        if let Some(upstream) = snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.upstream.as_ref())
-        {
-            branch_row = branch_row.child(div().flex_1()).children(
-                [
-                    (upstream.behind, "icons/arrow-down.svg"),
-                    (upstream.ahead, "icons/arrow-up.svg"),
-                ]
-                .into_iter()
-                .filter(|(count, _)| *count > 0)
-                .map(|(count, icon_path)| {
-                    div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(px(2.0))
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(icon(icon_path, 10.0, theme.text_tertiary))
-                        .child(count.to_string())
-                        .into_any_element()
-                }),
-            );
-        } else {
-            branch_row = branch_row.child(div().flex_1());
-        }
 
         let message_box = div()
             .w_full()
@@ -1421,7 +1314,6 @@ impl Waku {
             .gap(px(8.0))
             .border_b_1()
             .border_color(theme.border)
-            .child(branch_row)
             .child(message_box)
             .child(self.render_git_panel_action_button(cx))
             .when_some(panel.error.clone(), |area, error| {
@@ -1505,8 +1397,10 @@ impl Waku {
             .h(px(30.0))
             .w_full()
             .rounded(px(8.0))
+            .relative()
             .flex()
             .items_center()
+            .justify_center()
             .gap(px(6.0))
             .px(px(10.0))
             .cursor_default()
@@ -1537,17 +1431,45 @@ impl Waku {
         } else {
             button = button.bg(theme.inset);
         }
-        // Sync carries its trailing count and down arrow per the spec.
-        if matches!(primary, GitPanelPrimary::Sync) && pending_label.is_none() {
-            button = button
-                .child(div().flex_1())
+        // The ⌘↩ chip — the binding fires whichever primary the button is
+        // showing — plus Sync's trailing count and down arrow, pinned right
+        // so the icon and label stay centered.
+        if enabled && pending_label.is_none() {
+            let mut accessory = div()
+                .absolute()
+                .right(px(6.0))
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
                 .child(
                     div()
-                        .text_size(sp(12.0))
-                        .text_color(theme.text_tertiary)
-                        .child(behind.to_string()),
-                )
-                .child(icon("icons/arrow-down.svg", 11.0, theme.text_tertiary));
+                        .h(px(18.0))
+                        .px(px(6.0))
+                        .rounded(px(9.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.surface)
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_secondary)
+                        .child(crate::platform::primary_shortcut("⌘↩", "Ctrl+Enter")),
+                );
+            if matches!(primary, GitPanelPrimary::Sync) {
+                accessory = accessory
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(behind.to_string()),
+                    )
+                    .child(icon("icons/arrow-down.svg", 11.0, theme.text_tertiary));
+            }
+            button = button.child(accessory);
         }
         button.into_any_element()
     }
@@ -1615,7 +1537,7 @@ impl Waku {
                 }
             }
         }
-        body.child(self.render_git_panel_commits(width, window, cx))
+        body.child(self.render_git_panel_commits(width, cx))
             .into_any_element()
     }
 
@@ -2023,14 +1945,56 @@ impl Waku {
         Some(git_panel_hover_card(card, panel_width, window))
     }
 
+    /// The branch the commit box writes to, with its upstream counts — moved
+    /// out of the commit area to head the list it describes.
+    fn git_panel_branch_row(snapshot: &GitPanelSnapshot, theme: &Theme) -> AnyElement {
+        let mut row = div()
+            .h(px(24.0))
+            .flex_none()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(icon("icons/git-branch.svg", 11.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(snapshot.branch.clone()),
+            );
+        if let Some(upstream) = snapshot.upstream.as_ref() {
+            row = row.child(div().flex_1()).children(
+                [
+                    (upstream.behind, "icons/arrow-down.svg"),
+                    (upstream.ahead, "icons/arrow-up.svg"),
+                ]
+                .into_iter()
+                .filter(|(count, _)| *count > 0)
+                .map(|(count, icon_path)| {
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(icon(icon_path, 10.0, theme.text_tertiary))
+                        .child(count.to_string())
+                        .into_any_element()
+                }),
+            );
+        } else {
+            row = row.child(div().flex_1());
+        }
+        row.into_any_element()
+    }
+
     /// The paged commit list. Rows mark commits the upstream lacks and dwell
     /// for their full message; a click opens the commit-diff modal.
-    fn render_git_panel_commits(
-        &self,
-        width: f32,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_git_panel_commits(&self, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(panel) = self.git_panel.as_ref() else {
             return div().into_any_element();
@@ -2046,8 +2010,7 @@ impl Waku {
             // `git log` starts at HEAD and the first `ahead` entries are the
             // ones the upstream has not seen.
             let unpushed = index < ahead as usize;
-            rows = rows
-                .child(self.render_git_panel_commit_row(entry, index, unpushed, width, window, cx));
+            rows = rows.child(self.render_git_panel_commit_row(entry, index, unpushed, width, cx));
         }
         if panel.commits_loading {
             rows = rows.child(
@@ -2085,6 +2048,9 @@ impl Waku {
                 tr!("git_panel.commits"),
                 &theme,
             ))
+            .when_some(panel.snapshot.as_ref(), |section, snapshot| {
+                section.child(Self::git_panel_branch_row(snapshot, &theme))
+            })
             .child(
                 div()
                     .id("git-panel-commits")
@@ -2110,7 +2076,6 @@ impl Waku {
         index: usize,
         unpushed: bool,
         width: f32,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
@@ -2119,7 +2084,7 @@ impl Waku {
             .git_panel_commit_hover
             .as_ref()
             .is_some_and(|hover| hover.sha == entry.sha && hover.open)
-            .then(|| self.render_git_panel_commit_popover(width, window, cx))
+            .then(|| self.render_git_panel_commit_popover(width, cx))
             .flatten();
         let sha = entry.sha.clone();
         let entry_for_click = entry.clone();
@@ -2149,14 +2114,10 @@ impl Waku {
             )
             .child(
                 div()
-                    .id(SharedString::from(format!(
-                        "git-panel-commit-subject-{index}"
-                    )))
                     .min_w_0()
                     .flex_1()
                     .truncate()
                     .text_color(theme.text_secondary)
-                    .tooltip(Tooltip::text(entry.subject.clone()))
                     .child(entry.subject.clone()),
             )
             .when(unpushed, |row| {
@@ -2185,12 +2146,12 @@ impl Waku {
             .children(popover)
     }
 
-    /// A commit row's message card — the full subject and body the compact
-    /// row truncates.
+    /// A commit row's tooltip, parked directly under the row: the full
+    /// subject, a clamped body preview, then who authored it and its `+/-`
+    /// totals.
     fn render_git_panel_commit_popover(
         &self,
         panel_width: f32,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let hover = self.git_panel_commit_hover.as_ref()?;
@@ -2203,68 +2164,63 @@ impl Waku {
             .as_ref()
             .and_then(|panel| panel.commits.iter().find(|entry| entry.sha == hover.sha))
             .cloned()?;
-        let scroll = hover.scroll_handle.clone();
-        let wheel = scroll.clone();
-        let body = if entry.body.is_empty() {
-            div()
-                .px(px(12.0))
-                .py(px(8.0))
-                .text_size(sp(12.5))
-                .text_color(theme.text_tertiary)
-                .child(tr!("git_panel.no_commit_body"))
-                .into_any_element()
+        let body = commit_body_text(&entry.body);
+        let ago = format_time_ago(unix_time().saturating_sub(entry.authored_at));
+        let byline = if entry.author.is_empty() {
+            ago
         } else {
-            div()
-                .w_full()
-                .min_h_0()
-                .relative()
-                .max_h(px(240.0))
+            format!("{} · {}", entry.author, ago)
+        };
+        let mut meta = div()
+            .flex_none()
+            .px(px(12.0))
+            .py(px(5.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .border_t_1()
+            .border_color(theme.border)
+            .text_size(sp(11.0))
+            .text_color(theme.text_tertiary)
+            .child(div().min_w_0().flex_1().truncate().child(byline));
+        if entry.additions + entry.deletions > 0 {
+            meta = meta
                 .child(
                     div()
-                        .id("git-panel-commit-message-scroll")
-                        .w_full()
-                        .min_h_0()
-                        .max_h(px(240.0))
-                        .overflow_y_scroll()
-                        .track_scroll(&scroll)
-                        .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
-                        .child(
-                            div()
-                                .px(px(12.0))
-                                .py(px(8.0))
-                                .text_size(sp(12.5))
-                                .line_height(sp(17.0))
-                                .text_color(theme.text_secondary)
-                                .child(entry.body.clone()),
-                        ),
+                        .flex_none()
+                        .text_color(theme.success)
+                        .child(format!("+{}", entry.additions)),
                 )
-                .child(scrollbar::vertical(&scroll, &hover.scrollbar))
-                .into_any_element()
-        };
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(theme.danger)
+                        .child(format!("-{}", entry.deletions)),
+                );
+        }
         let card = div()
             .id("git-panel-commit-message-card")
-            .on_hover(cx.listener(|this, hovering, _, cx| {
-                this.git_panel_commit_card_hovered(*hovering, cx);
-            }))
+            // The card floats over neighboring rows; don't let clicks land on
+            // the commit underneath.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(|_, _, cx| cx.stop_propagation())
             .overflow_hidden()
-            .rounded(px(12.0))
+            .rounded(px(10.0))
             .border_1()
             .border_color(theme.border)
-            .bg(theme.surface)
+            .bg(theme.raised)
             .shadow_lg()
             .flex()
             .flex_col()
             .child(
                 div()
-                    .min_h(px(30.0))
                     .flex_none()
                     .px(px(12.0))
-                    .py(px(6.0))
+                    .pt(px(8.0))
+                    .pb(px(6.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .border_b_1()
-                    .border_color(theme.border)
                     .child(
                         div()
                             .flex_none()
@@ -2284,8 +2240,33 @@ impl Waku {
                             .child(entry.subject.clone()),
                     ),
             )
-            .child(body);
-        Some(git_panel_hover_card(card, panel_width, window))
+            .when(!body.is_empty(), |card| {
+                card.child(
+                    div()
+                        .flex_none()
+                        .px(px(12.0))
+                        .pb(px(8.0))
+                        .text_size(sp(12.0))
+                        .line_height(sp(16.0))
+                        .text_color(theme.text_secondary)
+                        .line_clamp(4)
+                        .child(body),
+                )
+            })
+            .child(meta);
+        Some(
+            deferred(FloatingSurface::anchored_to_parent(
+                div()
+                    .w(px(panel_width))
+                    .px(px(8.0))
+                    .child(card)
+                    .into_any_element(),
+                MenuAlign::BelowLeft,
+                px(4.0),
+                px(8.0),
+            ))
+            .into_any_element(),
+        )
     }
 
     /// The panel's three modals, drawn above the workspace.
@@ -2650,19 +2631,34 @@ impl Waku {
                     ),
             )
             .when(!modal.body.is_empty(), |card| {
+                let scroll = modal.body_scroll.clone();
+                let wheel = scroll.clone();
                 card.child(
                     div()
                         .flex_none()
-                        .max_h(px(80.0))
-                        .overflow_hidden()
-                        .px(px(14.0))
-                        .py(px(8.0))
+                        .relative()
+                        .max_h(px(84.0))
                         .border_b_1()
                         .border_color(theme.border)
-                        .text_size(sp(12.5))
-                        .line_height(sp(17.0))
-                        .text_color(theme.text_secondary)
-                        .child(modal.body.clone()),
+                        .child(
+                            div()
+                                .id("git-panel-commit-modal-body")
+                                .w_full()
+                                .max_h(px(84.0))
+                                .overflow_y_scroll()
+                                .track_scroll(&scroll)
+                                .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
+                                .child(
+                                    div()
+                                        .px(px(14.0))
+                                        .py(px(8.0))
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(17.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(commit_body_text(&modal.body)),
+                                ),
+                        )
+                        .child(scrollbar::vertical(&scroll, &modal.body_scrollbar)),
                 )
             })
             .child(body);
@@ -2759,8 +2755,17 @@ impl Waku {
     }
 }
 
-/// The floating surface shared by the file-diff and commit-message cards. The
-/// trailing spacer makes the surface measure `panel - overlap` wider than the
+/// A commit body reads like Markdown source: single newlines are soft breaks
+/// and collapse to spaces, while blank lines still separate paragraphs.
+fn commit_body_text(body: &str) -> String {
+    body.split("\n\n")
+        .map(|paragraph| paragraph.lines().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The file-diff card's floating surface. The trailing spacer makes the
+/// surface measure `panel - overlap` wider than the
 /// card; right-aligning then parks the card's right edge just inside the
 /// panel's left edge — the "barely overlaps" placement.
 fn git_panel_hover_card(card: Stateful<Div>, panel_width: f32, window: &Window) -> AnyElement {
