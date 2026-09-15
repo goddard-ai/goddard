@@ -1746,8 +1746,59 @@ impl TextInput {
                     self.replace_text_in_range(None, "", window, cx);
                 } else if self.cursor_offset() - line_start >= item.body_start {
                     // The text after the caret flows into the new item.
-                    let prefix = format!("\n{}{}", &line[..item.indent], item.next_marker);
-                    self.replace_text_in_range(None, &prefix, window, cx);
+                    let cursor = self.cursor_offset();
+                    let mut text = format!("\n{}{}", &line[..item.indent], item.next_marker);
+                    if let Some(number) = item.number {
+                        // The rest of the ordered run shifts down a number.
+                        // A deeper indent belongs to a nested list and
+                        // passes through; anything else ends the run.
+                        let mut expected = number + 2;
+                        let mut lines = Vec::new();
+                        let mut end = cursor;
+                        let mut pos = line_end + 1;
+                        while pos <= self.content.len() {
+                            let next_end = self.content[pos..]
+                                .find('\n')
+                                .map_or(self.content.len(), |i| pos + i);
+                            let next_line = &self.content[pos..next_end];
+                            match highlight::list_item(next_line) {
+                                Some(next)
+                                    if next.number.is_some()
+                                        && next.indent == item.indent =>
+                                {
+                                    lines.push(format!(
+                                        "{}{}{}",
+                                        &next_line[..next.indent],
+                                        expected,
+                                        &next_line[next.marker_end - 1..]
+                                    ));
+                                    expected += 1;
+                                }
+                                Some(next) if next.indent > item.indent => {
+                                    lines.push(next_line.to_owned());
+                                }
+                                _ => break,
+                            }
+                            end = next_end;
+                            pos = next_end + 1;
+                        }
+                        if !lines.is_empty() {
+                            text = format!(
+                                "{}{}\n{}",
+                                text,
+                                &self.content[cursor..line_end],
+                                lines.join("\n")
+                            );
+                            self.select_range(cursor..end, cx);
+                            self.replace_text_in_range(None, &text, window, cx);
+                            // The splice ran past the renumbered lines; the
+                            // caret belongs behind the new item's marker.
+                            let caret = cursor + 1 + item.indent + item.next_marker.len();
+                            self.select_range(caret..caret, cx);
+                            return;
+                        }
+                    }
+                    self.replace_text_in_range(None, &text, window, cx);
                 } else {
                     // A caret inside the marker itself breaks plainly.
                     self.replace_text_in_range(None, "\n", window, cx);
@@ -3057,6 +3108,7 @@ impl ComposerInput {
                 .auto_height()
                 .media_paste()
                 .list_continuation()
+                .syntax(Some("markdown"))
                 .placeholder(tr!("input.do_anything"))
         });
         let focus_handle = input.read(cx).focus();
@@ -3378,6 +3430,61 @@ mod tests {
         cx.read_entity(&composer, |composer, cx| {
             assert_eq!(composer.content(cx), "- one\n-  two");
             assert_eq!(composer.cursor(cx), "- one\n- ".len());
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_renumbers_the_rest_of_an_ordered_list(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("1. one\n2. two\n3. three", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(6..6, cx));
+        });
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "1. one\n2. \n3. two\n4. three");
+            assert_eq!(composer.cursor(cx), "1. one\n2. ".len());
+        });
+    }
+
+    #[gpui::test]
+    fn shift_enter_renumbers_past_a_nested_item(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("1. one\n   - nested\n2. two", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(6..6, cx));
+        });
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(
+                composer.content(cx),
+                "1. one\n2. \n   - nested\n3. two"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn a_blank_line_ends_the_ordered_run(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("1. one\n\n3. three", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(6..6, cx));
+        });
+
+        cx.simulate_keystrokes("shift-enter");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "1. one\n2. \n\n3. three");
         });
     }
 

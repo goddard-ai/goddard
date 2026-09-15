@@ -1218,6 +1218,9 @@ pub(crate) struct ListItem {
     /// End of the marker run from the line start — `line[indent..marker_end]`
     /// is the bullet or `12.`/`3)`; the separating whitespace is excluded.
     pub marker_end: usize,
+    /// For an ordered marker, its number — the digits are
+    /// `line[indent..marker_end - 1]`. Bullets are `None`.
+    pub number: Option<u64>,
     /// A `[ ]`/`[x]`/`[X]` checkbox span from the line start, when one
     /// directly follows the marker.
     pub checkbox: Option<Range<usize>>,
@@ -1239,9 +1242,9 @@ pub(crate) fn list_item(line: &str) -> Option<ListItem> {
         index += 1;
     }
     let indent = index;
-    let (marker_end, mut next_marker) = match bytes.get(index) {
+    let (marker_end, number, mut next_marker) = match bytes.get(index) {
         Some(b'-' | b'*' | b'+') if matches!(bytes.get(index + 1), None | Some(b' ' | b'\t')) => {
-            (index + 1, format!("{} ", &line[index..index + 1]))
+            (index + 1, None, format!("{} ", &line[index..index + 1]))
         }
         Some(b'0'..=b'9') => {
             let digits = line[index..].bytes().take_while(u8::is_ascii_digit).count();
@@ -1254,6 +1257,7 @@ pub(crate) fn list_item(line: &str) -> Option<ListItem> {
             let number: u64 = line[index..index + digits].parse().ok()?;
             (
                 index + digits + 1,
+                Some(number),
                 format!("{}{} ", number + 1, bytes[index + digits] as char),
             )
         }
@@ -1279,6 +1283,7 @@ pub(crate) fn list_item(line: &str) -> Option<ListItem> {
     Some(ListItem {
         indent,
         marker_end,
+        number,
         checkbox,
         body_start,
         next_marker,
