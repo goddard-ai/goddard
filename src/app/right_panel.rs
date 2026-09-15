@@ -2466,6 +2466,9 @@ impl Waku {
                 PendingCommandRun {
                     name: command.display_name().to_owned(),
                     toast_id,
+                    tail: Vec::new(),
+                    tail_published_at: None,
+                    tail_flush_armed: false,
                 },
             );
         }
@@ -2481,10 +2484,23 @@ impl Waku {
     /// that is no longer on screen; its result stays silent rather than
     /// toasting into another session's context. Switching back before the
     /// finish restores the surface and the report.
-    fn custom_command_finished(&mut self, terminal_id: Uuid, exit_code: i32, cx: &mut Context<Self>) {
-        let Some(run) = self.custom_command_runs.remove(&terminal_id) else {
+    fn custom_command_finished(
+        &mut self,
+        terminal_id: Uuid,
+        exit_code: Option<i32>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut run) = self.custom_command_runs.remove(&terminal_id) else {
             return;
         };
+        // One last read — output written between the final dirty poll and
+        // the finish event is exactly what a failure wants to show.
+        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
+            let tail = view.read(cx).output_tail(COMMAND_RUN_TAIL_LINES);
+            if !tail.is_empty() {
+                run.tail = tail;
+            }
+        }
         let Some(index) = self
             .right_panel_surfaces
             .iter()
@@ -2492,16 +2508,21 @@ impl Waku {
         else {
             return;
         };
-        let (message, tone) = if exit_code == 0 {
-            (
+        let (message, tone) = match exit_code {
+            Some(0) => (
                 tr!("commands.succeeded", name = run.name),
                 ToastTone::Success,
-            )
-        } else {
-            (
-                tr!("commands.failed", name = run.name, code = exit_code),
+            ),
+            Some(code) => (
+                tr!("commands.failed", name = run.name, code = code),
                 ToastTone::Failure,
-            )
+            ),
+            // The shell or PTY went away without reporting a status —
+            // a signal kill, or a spawn that never reached the script.
+            None => (
+                tr!("commands.failed_no_code", name = run.name),
+                ToastTone::Failure,
+            ),
         };
         if self
             .toast
@@ -2512,13 +2533,82 @@ impl Waku {
         } else {
             self.show_toast_with_tone(message, tone, None);
         }
-        if exit_code != 0 {
+        // The last thing a failed run printed is usually the error —
+        // keep it under the result.
+        if exit_code != Some(0)
+            && !run.tail.is_empty()
+            && let Some(toast) = self.toast.as_mut()
+        {
+            toast.detail = Some(run.tail.clone());
+        }
+        if exit_code != Some(0) {
             self.right_panel_active_surface = Some(index);
             self.reveal_right_panel_tab(index);
             self.request_active_terminal_focus();
             self.set_right_panel_visible(true, cx);
         }
         cx.notify();
+    }
+
+    /// Mirror the bottom of a running command's screen into the toast it
+    /// owns. The terminal view notifies on every PTY dirty flag — up to
+    /// the 24ms poll cadence — so publishes are throttled to the
+    /// stream-commit cadence with one trailing flush that lands whatever
+    /// the last burst left.
+    fn refresh_command_run_tail(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        let Some(tail) = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .map(|view| view.read(cx).output_tail(COMMAND_RUN_TAIL_LINES))
+        else {
+            return;
+        };
+        let Some(run) = self.custom_command_runs.get_mut(&terminal_id) else {
+            return;
+        };
+        if tail == run.tail {
+            return;
+        }
+        run.tail = tail;
+        let elapsed = run.tail_published_at.map(|published| published.elapsed());
+        if elapsed.is_none_or(|elapsed| elapsed >= COMMAND_RUN_TAIL_INTERVAL) {
+            run.tail_published_at = Some(Instant::now());
+            self.publish_command_run_tail(terminal_id, cx);
+            return;
+        }
+        if run.tail_flush_armed {
+            return;
+        }
+        run.tail_flush_armed = true;
+        let delay = COMMAND_RUN_TAIL_INTERVAL.saturating_sub(elapsed.unwrap_or_default());
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(run) = this.custom_command_runs.get_mut(&terminal_id) else {
+                    return;
+                };
+                run.tail_flush_armed = false;
+                run.tail_published_at = Some(Instant::now());
+                this.publish_command_run_tail(terminal_id, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Copy a run's buffered tail onto the toast it owns. A dismissed or
+    /// superseded toast id means the run outlived it — nothing to update.
+    fn publish_command_run_tail(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        let Some(run) = self.custom_command_runs.get(&terminal_id) else {
+            return;
+        };
+        let detail = (!run.tail.is_empty()).then(|| run.tail.clone());
+        let Some(toast) = self.toast.as_mut().filter(|toast| toast.id == run.toast_id) else {
+            return;
+        };
+        if toast.detail != detail {
+            toast.detail = detail;
+            cx.notify();
+        }
     }
 
     /// Close the tab a finished terminal belongs to, wherever it sits — the
@@ -2610,6 +2700,12 @@ impl Waku {
                             this.custom_command_finished(terminal_id, *code, cx);
                         }
                     }
+                })
+                .detach();
+                // The view's 24ms poll notifies on every PTY dirty flag;
+                // each one is a chance to refresh the toast's output tail.
+                cx.observe(&view, move |this, _, cx| {
+                    this.refresh_command_run_tail(terminal_id, cx);
                 })
                 .detach();
             }

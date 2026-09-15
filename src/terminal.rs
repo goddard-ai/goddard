@@ -125,10 +125,12 @@ enum TerminalUiEvent {
 /// not just the foreground job.
 pub enum TerminalViewEvent {
     Exited,
-    /// A custom-command script finished, carrying its exit code. Raised by
-    /// the launch line's sentinel and, as a fallback for scripts that exit
-    /// the shell themselves, by the child's own exit status.
-    CommandFinished(i32),
+    /// A custom-command script finished, carrying its exit code when one
+    /// was reported. Raised by the launch line's sentinel, by the child's
+    /// own exit status as a fallback for scripts that exit the shell
+    /// themselves, and with `None` when the PTY ended — or never started —
+    /// without a status, so a pending run always resolves.
+    CommandFinished(Option<i32>),
 }
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
@@ -389,6 +391,13 @@ impl TerminalSession {
 
     fn take_dirty(&self) -> bool {
         self.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    /// The bottom `count` non-blank rows of the live screen — what a custom
+    /// command's toast mirrors while it runs. Reads the grid, not the
+    /// viewport, so scroll position can't skew it.
+    fn tail_lines(&self, count: usize) -> Vec<String> {
+        tail_lines(&self.term.lock(), count)
     }
 
     fn link_at(&mut self, point: TerminalPoint) -> Option<TerminalLink> {
@@ -763,7 +772,13 @@ impl TerminalView {
                 .update(cx, |this, cx| {
                     match started {
                         Ok(session) => this.session = Some(session),
-                        Err(error) => this.error = Some(error.to_string()),
+                        Err(error) => {
+                            this.error = Some(error.to_string());
+                            // A command that never launched still owns a
+                            // pending run — resolve it so its toast isn't
+                            // pinned forever.
+                            cx.emit(TerminalViewEvent::CommandFinished(None));
+                        }
                     }
                     cx.notify();
                 })
@@ -819,6 +834,15 @@ impl TerminalView {
         &self.working_directory
     }
 
+    /// The last `count` non-blank lines on the terminal's screen — empty
+    /// until the PTY session has spawned and printed something.
+    pub fn output_tail(&self, count: usize) -> Vec<String> {
+        self.session
+            .as_ref()
+            .map(|session| session.tail_lines(count))
+            .unwrap_or_default()
+    }
+
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
     }
@@ -857,16 +881,16 @@ impl TerminalView {
                     session.write(formatter(&text).into_bytes());
                 }
                 TerminalUiEvent::CommandExit(code) => {
-                    cx.emit(TerminalViewEvent::CommandFinished(code));
+                    cx.emit(TerminalViewEvent::CommandFinished(Some(code)));
                 }
                 TerminalUiEvent::Exited(code) => {
                     self.exited = true;
                     // The completion event goes first: a script that exits
                     // the shell itself still resolves its run before the
                     // exit event can close the surface out from under it.
-                    if let Some(code) = code {
-                        cx.emit(TerminalViewEvent::CommandFinished(code));
-                    }
+                    // `None` — a signal kill or a PTY teardown — resolves
+                    // the run as a failure rather than leaving it pending.
+                    cx.emit(TerminalViewEvent::CommandFinished(code));
                     cx.emit(TerminalViewEvent::Exited);
                 }
             }
@@ -1706,6 +1730,40 @@ fn existing_terminal_file_path(value: &str, working_directory: &Path) -> Option<
     }
 }
 
+/// The bottom `count` non-blank rows of the live screen, oldest first.
+/// Grid lines index the visible screen as `0..screen_lines` regardless of
+/// scrollback or display offset.
+fn tail_lines<T: EventListener>(term: &Term<T>, count: usize) -> Vec<String> {
+    let grid = term.grid();
+    let mut lines = Vec::with_capacity(count);
+    for index in (0..grid.screen_lines() as i32).rev() {
+        let row = &grid[Line(index)];
+        let mut text = String::with_capacity(row.len());
+        for cell in row {
+            if cell.flags.intersects(
+                Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN,
+            ) {
+                text.push(' ');
+                continue;
+            }
+            text.push(cell.c);
+            if let Some(zerowidth) = cell.zerowidth() {
+                text.extend(zerowidth);
+            }
+        }
+        let text = text.trim_end();
+        if text.is_empty() {
+            continue;
+        }
+        lines.push(text.to_owned());
+        if lines.len() == count {
+            break;
+        }
+    }
+    lines.reverse();
+    lines
+}
+
 /// ⌘K: drop the scrollback and every row above the cursor, moving the line
 /// being edited to the top of the screen — Terminal.app's "Clear Scrollback"
 /// and Zed's `terminal::Clear` behavior. The alt screen has no scrollback and
@@ -1973,6 +2031,22 @@ mod tests {
     fn terminal_point_for(content: &str, needle: &str) -> TerminalPoint {
         let offset = content.find(needle).unwrap();
         TerminalPoint::new(Line((offset / 40) as i32), Column(offset % 40))
+    }
+
+    #[test]
+    fn tail_reports_bottom_non_blank_screen_lines() {
+        // Three-row screen: the first line has already scrolled into
+        // history, so only what is still on screen counts.
+        let term = parse_terminal(b"one\r\ntwo\r\nthree\r\nfour");
+        assert_eq!(tail_lines(&term, 3), vec!["two", "three", "four"]);
+        assert_eq!(tail_lines(&term, 1), vec!["four"]);
+    }
+
+    #[test]
+    fn tail_skips_blank_rows_and_trailing_whitespace() {
+        let term = parse_terminal(b"alpha   \r\n\r\nomega");
+        assert_eq!(tail_lines(&term, 3), vec!["alpha", "omega"]);
+        assert!(tail_lines(&parse_terminal(b""), 3).is_empty());
     }
 
     fn plain_link_value(term: &Term<VoidListener>, point: TerminalPoint) -> Option<String> {

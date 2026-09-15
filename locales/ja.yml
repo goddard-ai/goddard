@@ -150,6 +150,7 @@ commands.no_workspace: 先にタスクを選択してください。コマンド
 commands.running: "%{name} を実行中…"
 commands.succeeded: "%{name} が完了しました"
 commands.failed: "%{name} が失敗しました（終了コード %{code}）"
+commands.failed_no_code: "%{name} が失敗しました"
 commands.agent_badge: エージェント
 commands.agent_added: エージェントがカスタムコマンド「%{name}」を追加しました。
 

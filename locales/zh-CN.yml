@@ -147,6 +147,7 @@ commands.no_workspace: 请先选择一个任务——命令会在当前任务目
 commands.running: 正在运行 %{name}…
 commands.succeeded: "%{name} 已完成"
 commands.failed: "%{name} 失败（退出码 %{code}）"
+commands.failed_no_code: "%{name} 失败"
 commands.agent_badge: 智能体
 commands.agent_added: 智能体添加了自定义命令“%{name}”。
 

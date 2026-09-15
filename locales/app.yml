@@ -292,6 +292,8 @@ commands.succeeded:
   en: "%{name} finished"
 commands.failed:
   en: "%{name} failed (exit %{code})"
+commands.failed_no_code:
+  en: "%{name} failed"
 commands.agent_badge:
   en: Agent
 commands.agent_added:

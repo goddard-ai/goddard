@@ -571,13 +571,14 @@ impl Waku {
         let toast = self.toast.as_ref().map(|toast| {
             (
                 toast.message.clone(),
+                toast.detail.clone(),
                 toast.tone,
                 toast.action.clone(),
                 toast.id,
             )
         });
-        toast.map(|(message, tone, action, generation)| {
-            self.render_toast(message, tone, action, generation, cx)
+        toast.map(|(message, detail, tone, action, generation)| {
+            self.render_toast(message, detail, tone, action, generation, cx)
                 .into_any_element()
         })
     }
@@ -585,6 +586,7 @@ impl Waku {
     fn render_toast(
         &self,
         message: String,
+        detail: Option<Vec<String>>,
         tone: ToastTone,
         action: Option<ToastAction>,
         generation: u64,
@@ -642,6 +644,27 @@ impl Waku {
                 }
             }));
 
+        let detail_block = detail.filter(|lines| !lines.is_empty()).map(|lines| {
+            div()
+                .mt(px(6.0))
+                .pt(px(6.0))
+                .border_t_1()
+                .border_color(theme.border)
+                .flex()
+                .flex_col()
+                .font_family(crate::fonts::current(cx).code)
+                .text_size(sp(11.5))
+                .line_height(sp(15.0))
+                .text_color(theme.text_tertiary)
+                .children(lines.into_iter().map(|line| {
+                    div()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .overflow_hidden()
+                        .child(SharedString::from(line))
+                }))
+        });
+
         let action_button = action.map(|action| {
             let session_id = action.session_id;
             div()
@@ -696,8 +719,7 @@ impl Waku {
                     .bg(theme.raised)
                     .shadow_lg()
                     .flex()
-                    .items_center()
-                    .gap(px(8.0))
+                    .flex_col()
                     .text_size(sp(12.5))
                     .line_height(sp(16.0))
                     .text_color(theme.text)
@@ -706,10 +728,17 @@ impl Waku {
                     }))
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .child(md::render::frame_reset(self.toast_selection.clone()))
-                    .child(status_icon)
-                    .child(div().flex_1().min_w_0().whitespace_normal().child(message))
-                    .children(action_button)
-                    .child(dismiss)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(status_icon)
+                            .child(div().flex_1().min_w_0().whitespace_normal().child(message))
+                            .children(action_button)
+                            .child(dismiss),
+                    )
+                    .children(detail_block)
                     .child(self.toast_selection_input()),
             )
             // Keep the toast top-centered just beneath Goddard's 48px header.

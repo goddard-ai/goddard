@@ -140,9 +140,16 @@ const STREAM_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Zed keeps status toasts on screen for ten seconds, pausing the countdown
 /// while the pointer is over the toast so a long message remains readable.
 const DEFAULT_TOAST_DURATION: Duration = Duration::from_secs(5);
-/// How long a custom command's spinner toast waits on a result before
-/// handing off — a run still going past this reports to a fresh toast.
+/// Residual lifetime of a command's spinner toast. While the run is
+/// pending the dismiss clock never arms — the toast mirrors the command's
+/// output tail — so this only applies when a run's surface disappears
+/// without ever reporting a result.
 const COMMAND_PROGRESS_TOAST_DURATION: Duration = Duration::from_millis(2_500);
+/// How much of a running command's screen its toast mirrors.
+const COMMAND_RUN_TAIL_LINES: usize = 3;
+/// Tail publishes ride the stream-commit cadence — a PTY burst dirties the
+/// terminal every 24ms poll, and each publish costs a full-window frame.
+const COMMAND_RUN_TAIL_INTERVAL: Duration = Duration::from_millis(125);
 const MINIMUM_TOAST_RESUME_DURATION: Duration = Duration::from_millis(800);
 const TOAST_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 const TASK_NOTIFICATION_TAG_PREFIX: &str = "waku-task:";
@@ -286,6 +293,9 @@ struct PanelResizeDrag {
 #[derive(Debug)]
 struct ToastState {
     message: String,
+    /// Extra lines under the title — today only a running command's
+    /// output tail.
+    detail: Option<Vec<String>>,
     tone: ToastTone,
     action: Option<ToastAction>,
     id: u64,
@@ -324,6 +334,14 @@ struct PendingCommandRun {
     /// The toast reporting this run. Stale once it dismisses or a newer
     /// toast replaces it, which is what hands a late result a fresh toast.
     toast_id: u64,
+    /// Bottom screen lines last read from the run's terminal, waiting to
+    /// be mirrored into the toast or already there.
+    tail: Vec<String>,
+    /// Bounds tail publishes to the stream-commit cadence. `None` until
+    /// the first one.
+    tail_published_at: Option<Instant>,
+    /// A trailing publish timer is in flight for the buffered tail.
+    tail_flush_armed: bool,
 }
 
 fn paused_toast_duration(remaining: Duration, elapsed: Duration) -> Duration {
@@ -2117,6 +2135,7 @@ impl Waku {
         self.toast_generation = self.toast_generation.wrapping_add(1);
         self.toast = Some(ToastState {
             message: message.into(),
+            detail: None,
             tone,
             action,
             id: self.toast_generation,
@@ -2136,6 +2155,7 @@ impl Waku {
             return;
         };
         toast.message = message.into();
+        toast.detail = None;
         toast.tone = tone;
         toast.duration_remaining = DEFAULT_TOAST_DURATION;
         toast.timer_started = None;
@@ -2202,6 +2222,16 @@ impl Waku {
             return;
         };
         if toast.hovered || toast.timer_started.is_some() {
+            return;
+        }
+        // A pending command run owns its toast until the result lands —
+        // the output tail it mirrors would be cut short by the dismiss
+        // clock.
+        if self
+            .custom_command_runs
+            .values()
+            .any(|run| run.toast_id == toast.id)
+        {
             return;
         }
 
@@ -3426,6 +3456,7 @@ impl Waku {
                 header_drag_armed: false,
                 toast: startup_toast.map(|message| ToastState {
                     message,
+                    detail: None,
                     tone: ToastTone::Alert,
                     action: None,
                     id: 0,
