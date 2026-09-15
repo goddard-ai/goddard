@@ -3156,13 +3156,19 @@ impl Waku {
     /// gets text — [`CONTINUE_PROMPT`] — but the message is `hidden`, so no
     /// transcript row, title, or restored draft comes of it.
     pub(super) fn continue_interrupted_session(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.composer_session() else {
             return;
         };
         if !composer::session_awaits_continue(session) || self.model_picker_has_no_providers() {
             return;
         }
-        self.submit_composer_submission(ComposerSubmission::hidden_continue(), cx);
+        let session_id = session.id;
+        let submission = ComposerSubmission::hidden_continue();
+        if self.big_picture.is_open() {
+            self.submit_composer_submission_to(session_id, submission, cx);
+        } else {
+            self.submit_composer_submission(submission, cx);
+        }
     }
 
     pub(super) fn submit_composer_submission(

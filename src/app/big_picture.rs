@@ -29,7 +29,6 @@ const CARD_COMPOSER_GAP: f32 = 20.0;
 /// Narrowest a card can get before the layout would rather clip than crush
 /// the header row — only reached on very small windows.
 const CARD_MIN_WIDTH: f32 = 140.0;
-const COMPOSER_WIDTH: f32 = 560.0;
 const COMPOSER_BOTTOM_MARGIN: f32 = 28.0;
 const HINT_BOTTOM_MARGIN: f32 = 10.0;
 const CARD_TRANSITION: Duration = Duration::from_millis(220);
@@ -123,6 +122,11 @@ impl BigPictureUi {
 
     pub(super) fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// The card the docked composer follows up on; `None` starts a task.
+    pub(super) fn target(&self) -> Option<Uuid> {
+        self.target
     }
 }
 
@@ -807,157 +811,85 @@ impl Waku {
             .into_any_element()
     }
 
-    fn render_big_picture_composer(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// The chip the shared composer card shows above the field while a card
+    /// is targeted — the destination stays visible even once a draft hides
+    /// the placeholder.
+    pub(super) fn render_big_picture_target_chip(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.big_picture.is_open() {
+            return None;
+        }
         let theme = Theme::current(cx);
-        let target = self.big_picture.target.and_then(|session_id| {
+        let title = self.big_picture.target.and_then(|session_id| {
             self.state
                 .sessions
                 .iter()
                 .find(|session| session.id == session_id)
-                .map(|session| (session.id, session.display_title().to_owned()))
-        });
-        let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
-            || !self.composer_attachments.is_empty();
-        let can_send = has_draft && !self.model_picker_has_no_providers();
+                .map(|session| session.display_title().to_owned())
+        })?;
         let clear_target_focus = self.transcript_control_focus("big-picture-clear-target", cx);
-        let send_focus = self.transcript_control_focus("big-picture-send", cx);
-        div()
-            .id("big-picture-composer")
-            .w(px(COMPOSER_WIDTH))
-            .flex_none()
-            .rounded(px(16.0))
-            .border(hairline())
-            .border_color(theme.border)
-            .bg(theme.composer)
-            .py(px(10.0))
-            .shadow_xl()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .children(target.map(|(_, title)| {
-                div()
-                    .flex_none()
-                    .mx(px(10.0))
-                    .mb(px(6.0))
-                    .h(px(24.0))
-                    .pl(px(8.0))
-                    .pr(px(4.0))
-                    .rounded(px(7.0))
-                    .bg(theme.accent.opacity(0.12))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(icon("icons/corner-down-right.svg", 11.0, theme.accent))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(11.5))
-                            .text_color(theme.accent)
-                            .child(tr!("big_picture.replying_to", title = title)),
-                    )
-                    .child(
-                        div()
-                            .id("big-picture-clear-target")
-                            .track_focus(&clear_target_focus)
-                            .tab_index(0)
-                            .size(px(18.0))
-                            .flex_none()
-                            .rounded(px(5.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .hover(|element| element.bg(theme.overlay_strong))
-                            .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
-                            .child(icon("icons/x.svg", 10.0, theme.accent))
-                            .on_click(cx.listener(move |this, _, _, cx| {
+        Some(
+            div()
+                .flex_none()
+                .mx(px(10.0))
+                .mb(px(6.0))
+                .h(px(24.0))
+                .pl(px(8.0))
+                .pr(px(4.0))
+                .rounded(px(7.0))
+                .bg(theme.accent.opacity(0.12))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(icon("icons/corner-down-right.svg", 11.0, theme.accent))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(11.5))
+                        .text_color(theme.accent)
+                        .child(tr!("big_picture.replying_to", title = title)),
+                )
+                .child(
+                    div()
+                        .id("big-picture-clear-target")
+                        .track_focus(&clear_target_focus)
+                        .tab_index(0)
+                        .size(px(18.0))
+                        .flex_none()
+                        .rounded(px(5.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .hover(|element| element.bg(theme.overlay_strong))
+                        .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
+                        .child(icon("icons/x.svg", 10.0, theme.accent))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_big_picture_target(None, cx);
+                            cx.stop_propagation();
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                                 this.set_big_picture_target(None, cx);
                                 cx.stop_propagation();
-                            }))
-                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.set_big_picture_target(None, cx);
-                                    cx.stop_propagation();
-                                }
-                            })),
-                    )
-                    .into_any_element()
-            }))
-            .when(!self.composer_attachments.is_empty(), |card| {
-                card.child(self.render_composer_attachments(cx))
-            })
-            .child(div().pt(px(2.0)).child(self.composer.clone()))
-            .child(
-                div()
-                    .mt(px(8.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_ghost)
-                            .child(tr!("big_picture.hint")),
-                    )
-                    .child(
-                        div()
-                            .id("big-picture-send")
-                            .track_focus(&send_focus)
-                            .tab_index(0)
-                            .w(px(26.0))
-                            .h(px(26.0))
-                            .flex_none()
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(if can_send {
-                                theme.inverse
-                            } else {
-                                theme.overlay_strong
-                            })
-                            .when(can_send, |element| {
-                                element
-                                    .cursor_default()
-                                    .hover(|element| element.opacity(0.9))
-                                    .active(|element| element.opacity(0.8))
-                            })
-                            .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
-                            .child(icon(
-                                "icons/arrow-up.svg",
-                                16.0,
-                                if can_send {
-                                    theme.on_inverse
-                                } else {
-                                    theme.text_ghost
-                                },
-                            ))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let prompt = this.composer.read(cx).content(cx).to_owned();
-                                if let Some(submission) =
-                                    this.submission_with_attachments(&prompt, cx)
-                                {
-                                    this.composer.update(cx, |input, cx| input.clear(cx));
-                                    this.submit_big_picture_submission(submission, cx);
-                                }
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    let prompt = this.composer.read(cx).content(cx).to_owned();
-                                    if let Some(submission) =
-                                        this.submission_with_attachments(&prompt, cx)
-                                    {
-                                        this.composer.update(cx, |input, cx| input.clear(cx));
-                                        this.submit_big_picture_submission(submission, cx);
-                                    }
-                                    cx.stop_propagation();
-                                }
-                            })),
-                    ),
-            )
+                            }
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The same composer card the session column docks — same controls, same
+    /// shortcuts. Only the submit routing and the target chip differ.
+    fn render_big_picture_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        div()
+            .w_full()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(self.render_composer(window, cx))
     }
 
     pub(super) fn render_big_picture(
@@ -1031,7 +963,7 @@ impl Waku {
                     .px(px(EDGE_MARGIN))
                     .flex()
                     .justify_center()
-                    .child(self.render_big_picture_composer(cx)),
+                    .child(self.render_big_picture_composer(window, cx)),
             )
             .child(
                 div()

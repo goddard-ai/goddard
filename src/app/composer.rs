@@ -2874,9 +2874,33 @@ impl Waku {
         )
     }
 
+    /// The session the composer's submit affordances answer to: the big-
+    /// picture target while the overlay is open — `None` there means the next
+    /// prompt starts a fresh task — and the selected session everywhere else.
+    pub(super) fn composer_session(&self) -> Option<&AgentSession> {
+        if self.big_picture.is_open() {
+            return self
+                .big_picture
+                .target()
+                .and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
+        }
+        self.selected_session()
+    }
+
+    /// A submit click goes where Enter would: the overlay's own routing while
+    /// Big Picture is open, the selected session otherwise.
+    fn route_composer_submission(&mut self, submission: ComposerSubmission, cx: &mut Context<Self>) {
+        if self.big_picture.is_open() {
+            self.submit_big_picture_submission(submission, cx);
+        } else {
+            self.submit_composer_submission(submission, cx);
+        }
+    }
+
     pub(super) fn render_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let session = self.selected_session();
+        let session = self.composer_session();
+        let session_id = session.map(|session| session.id);
         let preparing = session.is_some_and(|session| {
             self.submission_preparations.contains(&session.id)
                 || self.response_fork_preparations.contains_key(&session.id)
@@ -2971,6 +2995,8 @@ impl Waku {
                         }))
                 })
                 .children(autocomplete)
+                // Big Picture's "replying to" chip; absent everywhere else.
+                .children(self.render_big_picture_target_chip(cx))
                 .when(!self.composer_attachments.is_empty(), |card| {
                     card.child(self.render_composer_attachments(cx))
                 })
@@ -3041,8 +3067,10 @@ impl Waku {
                                         .when(!escape_stop_armed, |element| {
                                             element.child(icon("icons/stop.svg", 18.0, theme.text))
                                         })
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.cancel_turn(cx);
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if let Some(session_id) = session_id {
+                                                this.cancel_session_turn(session_id, cx);
+                                            }
                                         })),
                                 )
                                 .when(can_send, |element| {
@@ -3074,7 +3102,7 @@ impl Waku {
                                                 {
                                                     this.composer
                                                         .update(cx, |input, cx| input.clear(cx));
-                                                    this.submit_composer_submission(submission, cx);
+                                                    this.route_composer_submission(submission, cx);
                                                 }
                                             })),
                                     )
@@ -3119,7 +3147,7 @@ impl Waku {
                                         this.submission_with_attachments(&prompt, cx)
                                     {
                                         this.composer.update(cx, |input, cx| input.clear(cx));
-                                        this.submit_composer_submission(submission, cx);
+                                        this.route_composer_submission(submission, cx);
                                     }
                                 })),
                             ComposerSubmitAction::Continue => div()

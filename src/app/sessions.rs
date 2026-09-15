@@ -1978,7 +1978,7 @@ impl Waku {
         self.cancel_session_turn(session_id, cx);
     }
 
-    fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
         // Worktree/checkpoint preparation has no safe interrupt contract. The
         // composer deliberately shows a spinner rather than Stop until the
