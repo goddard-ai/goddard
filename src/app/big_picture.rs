@@ -190,10 +190,17 @@ fn big_picture_preview_lines(session: &AgentSession) -> Vec<(MessageRole, String
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let snippet = snippet
-                .graphemes(true)
-                .take(PREVIEW_SNIPPET_GRAPHEMES)
-                .collect::<String>();
+            // Agent text renders whole — a clipped sentence mid-reply reads
+            // as a bug. Only user prompts keep a cap: a pasted wall of text
+            // would otherwise swallow the card's other lines.
+            let snippet = if message.role == MessageRole::User {
+                snippet
+                    .graphemes(true)
+                    .take(PREVIEW_SNIPPET_GRAPHEMES)
+                    .collect::<String>()
+            } else {
+                snippet
+            };
             (message.role, snippet)
         })
         .collect()
