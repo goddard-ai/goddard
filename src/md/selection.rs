@@ -106,6 +106,49 @@ impl Selection {
         true
     }
 
+    /// Shift-click extension: move the head to `head`, a registry
+    /// `(element index, byte offset)` point, and return true. Returns false
+    /// when nothing is settled to extend, so the caller can start a fresh
+    /// drag instead.
+    ///
+    /// The fixed end is the drag's anchor — unless the click lands on the
+    /// anchor's outer side, in which case the far edge stays fixed so an
+    /// outside click always grows the selection to contain it (the macOS
+    /// convention). The fixed end becomes the new anchor so a press that
+    /// turns into a drag keeps extending from it.
+    pub fn extend_to<G>(&mut self, registry: &SelectionRegistry<G>, head: (usize, usize)) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+        let anchor = self
+            .anchor
+            .as_ref()
+            .and_then(|key| registry.position(key).map(|index| (index, self.anchor_offset)));
+        let edges = self
+            .spans
+            .first()
+            .zip(self.spans.last())
+            .and_then(|(first, last)| {
+                registry
+                    .position(&first.key)
+                    .zip(registry.position(&last.key))
+                    .map(|(s, e)| ((s, first.range.start), (e, last.range.end)))
+            });
+        let fixed = match (anchor, edges) {
+            (Some(anchor), Some((start, end))) if head < start && anchor <= start => end,
+            (Some(anchor), Some((start, end))) if head > end && anchor >= end => start,
+            (Some(anchor), _) => anchor,
+            (None, Some((start, end))) if head < start => end,
+            (None, Some((start, _))) => start,
+            (None, None) => return false,
+        };
+        self.spans = registry.resolve(fixed, head);
+        self.anchor = Some(registry.entries()[fixed.0].key.clone());
+        self.anchor_offset = fixed.1;
+        self.dragging = true;
+        true
+    }
+
     /// The resolved spans in document order. Empty until a drag moves.
     pub fn spans(&self) -> &[Span] {
         &self.spans
@@ -525,6 +568,77 @@ mod tests {
             span.block_break = false;
         }
         assert_eq!(selection.text(), "one\n\ntwo");
+    }
+
+    #[test]
+    fn shift_click_extends_a_settled_selection() {
+        let registry = sample();
+        let mut selection = Selection::default();
+        let anchor = TextKey::new("r1", 0);
+        selection.begin(anchor.clone(), 6);
+        selection.set_spans(registry.resolve((0, 6), (0, 15)));
+        selection.end_drag(&anchor);
+
+        // Nothing to extend from an empty selection.
+        assert!(!Selection::default().extend_to(&registry, (0, 0)));
+
+        // A click beyond the far edge keeps the anchor and grows.
+        assert!(selection.extend_to(&registry, (2, 5)));
+        assert_eq!(
+            selected(&registry, selection.spans()),
+            vec!["paragraph", "second", "third"]
+        );
+
+        // A click on the anchor's outer side holds the far edge instead, so
+        // the selection still grows to contain it.
+        assert!(selection.extend_to(&registry, (0, 2)));
+        assert_eq!(
+            selected(&registry, selection.spans()),
+            vec!["rst paragraph", "second", "third"]
+        );
+
+        // A click inside contracts from the fixed end.
+        assert!(selection.extend_to(&registry, (0, 10)));
+        assert_eq!(
+            selected(&registry, selection.spans()),
+            vec!["graph", "second", "third"]
+        );
+
+        // The extension ends like a drag: release keeps the text.
+        assert_eq!(
+            selection.end_drag(&TextKey::new("r2", 2)).as_deref(),
+            Some("graph\n\nsecond\n\nthird")
+        );
+    }
+
+    #[test]
+    fn shift_click_after_a_word_click_keeps_the_word() {
+        let registry = registry(&[("r1", "hello world")]);
+        let mut selection = Selection::default();
+        let key = TextKey::new("r1", 0);
+        selection.begin_with_span(key.clone(), Rc::from("hello world"), 6..11);
+        selection.end_drag(&key);
+
+        // The word's start is the stored anchor; clicking before it extends
+        // from the word's end so the whole word survives.
+        assert!(selection.extend_to(&registry, (0, 2)));
+        assert_eq!(selection.wash_range(&key), Some(2..11));
+    }
+
+    #[test]
+    fn shift_click_without_anchors_in_view_uses_the_visible_edge() {
+        let registry = sample();
+        let mut selection = Selection::default();
+        // The anchor's element is gone from the frame, but a span remains.
+        selection.begin(TextKey::new("gone", 0), 0);
+        selection.set_spans(registry.resolve((0, 6), (0, 15)));
+        selection.end_drag(&TextKey::new("gone", 0));
+
+        assert!(selection.extend_to(&registry, (2, 5)));
+        assert_eq!(
+            selected(&registry, selection.spans()),
+            vec!["paragraph", "second", "third"]
+        );
     }
 
     #[test]

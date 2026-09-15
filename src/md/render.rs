@@ -1131,33 +1131,48 @@ pub fn install_selection_input(
             });
             let mut selection = state.selection.borrow_mut();
             match hit {
-                Some((_, entry)) => {
+                Some((index, entry)) => {
                     let offset = match entry.geometry.index_for_position(event.position) {
                         Ok(offset) | Err(offset) => offset,
                     };
-                    match event.click_count {
-                        2 => selection.begin_with_span(
-                            entry.key.clone(),
-                            entry.text.clone(),
-                            word_range(&entry.text, offset),
-                        ),
-                        count if count >= 3 => selection.begin_with_span(
-                            entry.key.clone(),
-                            entry.text.clone(),
-                            line_range(&entry.text, offset),
-                        ),
-                        _ => selection.begin(entry.key.clone(), offset),
+                    // Shift-click grows a settled selection to the clicked
+                    // character instead of anchoring a new drag.
+                    let extended = event.modifiers.shift
+                        && event.click_count == 1
+                        && selection.extend_to(&registry, (index, offset));
+                    if !extended {
+                        match event.click_count {
+                            2 => selection.begin_with_span(
+                                entry.key.clone(),
+                                entry.text.clone(),
+                                word_range(&entry.text, offset),
+                            ),
+                            count if count >= 3 => selection.begin_with_span(
+                                entry.key.clone(),
+                                entry.text.clone(),
+                                line_range(&entry.text, offset),
+                            ),
+                            _ => selection.begin(entry.key.clone(), offset),
+                        }
                     }
                     drop(selection);
                     drop(registry);
                     window.refresh();
                 }
                 None => {
+                    // A shift-click in a gutter or between blocks still
+                    // extends, to the nearest text.
+                    let extended = event.modifiers.shift
+                        && event.click_count == 1
+                        && registry_point(&registry, event.position)
+                            .is_some_and(|head| selection.extend_to(&registry, head));
                     let had_selection = !selection.is_empty();
-                    selection.clear();
+                    if !extended {
+                        selection.clear();
+                    }
                     drop(selection);
                     drop(registry);
-                    if had_selection {
+                    if extended || had_selection {
                         window.refresh();
                     }
                 }
