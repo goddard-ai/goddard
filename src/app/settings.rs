@@ -1581,7 +1581,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let agent_tools_card = self.agent_tools_card(theme, cx);
         let agent_settings_card = self.agent_settings_card(theme, cx);
-        if self.daemon.is_remote() {
+        if self.daemon.is_externally_managed() {
             return div()
                 .mt(px(15.0))
                 .w_full()
@@ -2321,7 +2321,7 @@ impl Waku {
         if self.daemon_reconfigure_pending || settings == self.state.daemon_exposure {
             return;
         }
-        if self.daemon.is_remote() {
+        if self.daemon.is_externally_managed() {
             self.show_toast(tr!("daemon.external_description"));
             return;
         }

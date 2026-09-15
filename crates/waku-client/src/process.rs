@@ -287,6 +287,28 @@ fn desktop_client_address(address: &str) -> anyhow::Result<String> {
     Ok(std::net::SocketAddr::new(ip, address.port()).to_string())
 }
 
+/// The daemon address points back at this machine: a loopback or
+/// unspecified IP, or a `localhost` name. Anything unparseable counts as
+/// remote — a desktop PTY or reveal on a misread host is the worse error.
+fn daemon_address_is_loopback(address: &str) -> bool {
+    let normalized = if address.starts_with("ws://") || address.starts_with("wss://") {
+        address.to_owned()
+    } else {
+        format!("ws://{address}")
+    };
+    let Ok(url) = url::Url::parse(&normalized) else {
+        return false;
+    };
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Domain(domain)) => {
+            domain.eq_ignore_ascii_case("localhost") || domain.ends_with(".localhost")
+        }
+        None => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ExecutableStamp {
     modified: Option<SystemTime>,
@@ -319,6 +341,10 @@ pub enum DaemonStatus {
 
 struct SupervisorInner {
     executable: Option<PathBuf>,
+    /// The daemon's host is not this machine. An externally managed
+    /// daemon on loopback is still local — desktop PTYs, reveals, and
+    /// checkout work all target this host.
+    remote: bool,
     target: Mutex<DaemonTarget>,
     exposure: Mutex<Option<DaemonExposureSettings>>,
     restart: Mutex<()>,
@@ -378,6 +404,7 @@ impl DaemonSupervisor {
         let supervisor = Self::from_target(
             DaemonTarget::Local(process),
             Some(executable.to_owned()),
+            false,
             Some(exposure),
             settings,
         )?;
@@ -401,6 +428,7 @@ impl DaemonSupervisor {
                 token,
             },
             None,
+            !daemon_address_is_loopback(address),
             None,
             settings,
         )?;
@@ -415,12 +443,14 @@ impl DaemonSupervisor {
     fn from_target(
         target: DaemonTarget,
         executable: Option<PathBuf>,
+        remote: bool,
         exposure: Option<DaemonExposureSettings>,
         settings: DaemonSettings,
     ) -> anyhow::Result<Self> {
         let (settings_updates, settings_update_rx) = unbounded();
         let inner = Arc::new(SupervisorInner {
             executable,
+            remote,
             target: Mutex::new(target),
             exposure: Mutex::new(exposure),
             restart: Mutex::new(()),
@@ -459,6 +489,13 @@ impl DaemonSupervisor {
     }
 
     pub fn is_remote(&self) -> bool {
+        self.inner.remote
+    }
+
+    /// The daemon's lifecycle is owned outside this app — a remote host or
+    /// an external local manager — so settings cannot reconfigure or
+    /// restart it.
+    pub fn is_externally_managed(&self) -> bool {
         self.inner.executable.is_none()
     }
 
@@ -835,5 +872,28 @@ mod tests {
             "127.0.0.1:34123"
         );
         assert_eq!(desktop_client_address("[::]:34123").unwrap(), "[::1]:34123");
+    }
+
+    #[test]
+    fn loopback_addresses_are_not_remote() {
+        for local in [
+            "127.0.0.1:34123",
+            "127.0.0.2:34123",
+            "localhost:34123",
+            "dev.localhost:34123",
+            "[::1]:34123",
+            "0.0.0.0:34123",
+            "ws://127.0.0.1:34123",
+            "ws://localhost:34123/v1",
+        ] {
+            assert!(daemon_address_is_loopback(local), "{local}");
+        }
+        for remote in [
+            "10.0.0.5:34123",
+            "ws://daemon.example.com",
+            "not an address",
+        ] {
+            assert!(!daemon_address_is_loopback(remote), "{remote}");
+        }
     }
 }
