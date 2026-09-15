@@ -32,9 +32,14 @@ const CARD_MIN_WIDTH: f32 = 140.0;
 const COMPOSER_BOTTOM_MARGIN: f32 = 28.0;
 const HINT_BOTTOM_MARGIN: f32 = 10.0;
 const CARD_TRANSITION: Duration = Duration::from_millis(220);
+/// Each card waits this long past its left neighbor before rising on open.
+const CARD_STAGGER: Duration = Duration::from_millis(55);
 /// A leaving card outlives its transition by a hair so the timer never cuts
 /// the last frames.
 const CARD_EXIT_LINGER: Duration = Duration::from_millis(260);
+/// How far the composer travels on open, and how long that takes.
+const COMPOSER_RISE: f32 = 28.0;
+const COMPOSER_TRANSITION: Duration = Duration::from_millis(300);
 const PREVIEW_MESSAGES: usize = 5;
 const PREVIEW_SNIPPET_GRAPHEMES: usize = 220;
 
@@ -75,6 +80,8 @@ struct BigPictureSlot {
     leaving: bool,
     /// Fresh mounts fade up; reordered or surviving cards only slide.
     entering: bool,
+    /// How long a fresh mount waits before it starts rising — the stagger.
+    enter_delay: Duration,
     /// Bumped per transition so `with_animation` replays from delta 0.
     anim_seq: u64,
 }
@@ -91,6 +98,8 @@ pub(super) struct BigPictureUi {
     previous_focus: Option<FocusHandle>,
     focus_generation: u64,
     anim_seq: u64,
+    /// Bumped on every open so the composer's rise replays from delta 0.
+    open_seq: u64,
     /// A prompt that arrived before its projectless workspace did; drained by
     /// the completion that materializes the session it belongs to.
     pending_submission: Option<ComposerSubmission>,
@@ -117,6 +126,7 @@ impl BigPictureUi {
             previous_focus: None,
             focus_generation: 0,
             anim_seq: 0,
+            open_seq: 0,
             pending_submission: None,
             hydrate_requested: HashSet::new(),
             last_row_count: 0,
@@ -246,6 +256,8 @@ impl Waku {
         self.big_picture.target = None;
         self.big_picture.hydrate_requested.clear();
         self.big_picture.focus_generation = self.big_picture.focus_generation.wrapping_add(1);
+        self.big_picture.open_seq = self.big_picture.open_seq.wrapping_add(1);
+        self.big_picture.last_row_count = 0;
         self.big_picture.highlighted =
             big_picture_order(&self.state.sessions, &self.state.unseen_completions)
                 .first()
@@ -448,6 +460,9 @@ impl Waku {
             if slot.leaving && desired.contains(&slot.session_id) {
                 slot.leaving = false;
                 slot.entering = true;
+                // A card that never finished leaving rises back where it
+                // stands — it skipped the entrance line, so no stagger.
+                slot.enter_delay = Duration::ZERO;
                 seq += 1;
                 slot.anim_seq = seq;
             }
@@ -520,6 +535,7 @@ impl Waku {
                         from_width: card_width,
                         leaving: false,
                         entering: true,
+                        enter_delay: CARD_STAGGER * index as u32,
                         anim_seq: seq,
                     });
                 }
@@ -651,6 +667,7 @@ impl Waku {
         let from_left = slot.from_left;
         let width = slot.width;
         let from_width = slot.from_width;
+        let enter_delay = slot.enter_delay;
         let anim_id =
             SharedString::from(format!("big-picture-card-{session_id}-{}", slot.anim_seq));
         let preview = if session.detail_loaded {
@@ -812,8 +829,22 @@ impl Waku {
             .child(card)
             .with_animation(
                 anim_id,
-                Animation::new(CARD_TRANSITION).with_easing(ease_out_quint()),
+                Animation::new(if entering {
+                    CARD_TRANSITION + enter_delay
+                } else {
+                    CARD_TRANSITION
+                })
+                .with_easing(ease_out_quint()),
                 move |element, delta| {
+                    // The stagger folds into the animation's span: the card
+                    // sits invisible through its delay, then rises.
+                    let delta = if entering {
+                        let delay = enter_delay.as_secs_f32()
+                            / (CARD_TRANSITION + enter_delay).as_secs_f32();
+                        ((delta - delay) / (1.0 - delay)).clamp(0.0, 1.0)
+                    } else {
+                        delta
+                    };
                     let element = element
                         .left(px(from_left + (left - from_left) * delta))
                         .w(px(from_width + (width - from_width) * delta))
@@ -991,25 +1022,44 @@ impl Waku {
                     .child(div().relative().size_full().children(cards)),
             )
             .child(
+                // Composer and hint rise together on every open.
                 div()
                     .flex_none()
-                    .pb(px(COMPOSER_BOTTOM_MARGIN))
-                    .px(px(EDGE_MARGIN))
                     .flex()
-                    .justify_center()
-                    .child(self.render_big_picture_composer(window, cx)),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .pb(px(HINT_BOTTOM_MARGIN))
-                    .flex()
-                    .justify_center()
+                    .flex_col()
                     .child(
                         div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_ghost)
-                            .child(tr!("big_picture.hint")),
+                            .flex_none()
+                            .pb(px(COMPOSER_BOTTOM_MARGIN))
+                            .px(px(EDGE_MARGIN))
+                            .flex()
+                            .justify_center()
+                            .child(self.render_big_picture_composer(window, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .pb(px(HINT_BOTTOM_MARGIN))
+                            .flex()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_ghost)
+                                    .child(tr!("big_picture.hint")),
+                            ),
+                    )
+                    .with_animation(
+                        SharedString::from(format!(
+                            "big-picture-chrome-{}",
+                            self.big_picture.open_seq
+                        )),
+                        Animation::new(COMPOSER_TRANSITION).with_easing(ease_out_quint()),
+                        |element, delta| {
+                            element
+                                .top(px(COMPOSER_RISE * (1.0 - delta)))
+                                .opacity(delta)
+                        },
                     ),
             );
         Some(
