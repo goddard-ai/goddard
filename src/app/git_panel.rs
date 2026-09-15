@@ -2228,7 +2228,9 @@ impl Waku {
                     .pt(px(8.0))
                     .pb(px(6.0))
                     .flex()
-                    .items_center()
+                    // Baseline so the hash sits on the subject's first line
+                    // when the subject wraps rather than truncating.
+                    .items_baseline()
                     .gap(px(8.0))
                     .child(
                         div()
@@ -2242,8 +2244,8 @@ impl Waku {
                         div()
                             .min_w_0()
                             .flex_1()
-                            .truncate()
                             .text_size(sp(12.5))
+                            .line_height(sp(16.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
                             .child(entry.subject.clone()),
