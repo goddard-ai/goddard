@@ -300,7 +300,11 @@ Goddard stamps each request with a string id (`waku-<n>`) and Pi answers with
 `{"type": "response", "id", "success", "data"}`. Everything else on the stream
 is an unsolicited event. Requests are issued synchronously by the writer thread
 with a 10 s timeout ([pi.rs:800](../crates/waku-core/src/driver/pi.rs#L800));
-events keep flowing on the reader thread meanwhile.
+events keep flowing on the reader thread meanwhile. The handshake gets 30 s
+instead: the agent does not answer at all until it has finished loading its
+extensions, resources and — when model networking is on — its model catalog,
+which Pi itself budgets 15 s for, so the live-process timeout there would fail
+a session that was merely slow to start.
 
 **Lifetime** — long-lived, and unlike Codex it survives Stop: cancelling sends
 `abort` over the existing connection. It ends when the runtime is dropped, by

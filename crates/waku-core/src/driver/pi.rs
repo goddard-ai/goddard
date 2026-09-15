@@ -27,6 +27,13 @@ use crate::model::{ActivityKind, DriverEvent, ProviderResumeCursor, ReportedComm
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The handshake races the agent's own startup, so it needs more headroom than
+/// a request against the already-running process. Pi loads extensions and
+/// resources and, when model networking is on, refreshes its model catalog
+/// before it reads stdin — it budgets 15 s for that refresh alone — and a
+/// timed-out `get_state` there fails the whole session.
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Oh My Pi has to start a whole second agent to clone a session, so it needs
 /// more headroom than a request against the already-running process.
 const CLONE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -360,24 +367,28 @@ impl PiDriver {
                 let mut stdin = stdin;
                 let mut next_request_id = 0_u64;
                 let initialize = (|| -> Result<Value, String> {
+                    // The agent does not answer until it has finished loading,
+                    // so every handshake request gets the startup timeout.
                     // Negotiate before anything else so a large first response
                     // arrives chunked rather than shrunk to an error frame.
                     if flavor.negotiates_protocol_v2() {
-                        send_request(
+                        send_request_with_timeout(
                             &mut stdin,
                             &writer_pending,
                             &mut next_request_id,
                             json!({"type": "negotiate_protocol", "protocolVersion": 2}),
+                            INITIALIZE_TIMEOUT,
                         )?;
                     }
-                    let _ = send_request(
+                    let _ = send_request_with_timeout(
                         &mut stdin,
                         &writer_pending,
                         &mut next_request_id,
                         json!({"type": "get_state"}),
+                        INITIALIZE_TIMEOUT,
                     )?;
                     if let Some(session_file) = resume_session_file {
-                        let response = send_request(
+                        let response = send_request_with_timeout(
                             &mut stdin,
                             &writer_pending,
                             &mut next_request_id,
@@ -385,6 +396,7 @@ impl PiDriver {
                                 "type": "switch_session",
                                 "sessionPath": session_file
                             }),
+                            INITIALIZE_TIMEOUT,
                         )?;
                         if response.pointer("/data/cancelled").and_then(Value::as_bool)
                             == Some(true)
@@ -398,7 +410,7 @@ impl PiDriver {
                     if let Some(model) = model.as_deref() {
                         let (provider, model_id) =
                             parse_model_slug(model).map_err(|error| error.to_string())?;
-                        let _ = send_request(
+                        let _ = send_request_with_timeout(
                             &mut stdin,
                             &writer_pending,
                             &mut next_request_id,
@@ -407,21 +419,24 @@ impl PiDriver {
                                 "provider": provider,
                                 "modelId": model_id
                             }),
+                            INITIALIZE_TIMEOUT,
                         )?;
                     }
                     if let Some(level) = reasoning_effort.as_deref() {
-                        let _ = send_request(
+                        let _ = send_request_with_timeout(
                             &mut stdin,
                             &writer_pending,
                             &mut next_request_id,
                             json!({"type": "set_thinking_level", "level": level}),
+                            INITIALIZE_TIMEOUT,
                         )?;
                     }
-                    send_request(
+                    send_request_with_timeout(
                         &mut stdin,
                         &writer_pending,
                         &mut next_request_id,
                         json!({"type": "get_state"}),
+                        INITIALIZE_TIMEOUT,
                     )
                 })();
 
@@ -834,7 +849,17 @@ fn send_request(
     stdin: &mut impl Write,
     pending: &PendingResponses,
     next_request_id: &mut u64,
+    request: Value,
+) -> Result<Value, String> {
+    send_request_with_timeout(stdin, pending, next_request_id, request, RPC_TIMEOUT)
+}
+
+fn send_request_with_timeout(
+    stdin: &mut impl Write,
+    pending: &PendingResponses,
+    next_request_id: &mut u64,
     mut request: Value,
+    timeout: Duration,
 ) -> Result<Value, String> {
     *next_request_id += 1;
     let id = format!("waku-{}", next_request_id);
@@ -847,13 +872,14 @@ fn send_request(
         pending.lock().remove(&id);
         return Err(format!("transport write failed: {error}"));
     }
-    match response_rx.recv_timeout(RPC_TIMEOUT) {
+    match response_rx.recv_timeout(timeout) {
         Ok(response) => response,
         Err(_) => {
             pending.lock().remove(&id);
             Err(format!(
-                "{} timed out",
-                request["type"].as_str().unwrap_or("request")
+                "{} timed out after {}s",
+                request["type"].as_str().unwrap_or("request"),
+                timeout.as_secs()
             ))
         }
     }

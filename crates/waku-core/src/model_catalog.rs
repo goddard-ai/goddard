@@ -16,7 +16,10 @@ use crate::model::{ProviderAgentPreset, ProviderKind, ProviderModel, ProviderMod
 use waku_protocol::model_catalog::normalize_cursor_reasoning_effort;
 
 const CODEX_RPC_TIMEOUT: Duration = Duration::from_secs(5);
-const PI_RPC_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The probe answers only after the agent has finished loading its extensions,
+/// resources and model catalog, which can outlast a live request's budget.
+const PI_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const CURSOR_ACP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
