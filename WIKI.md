@@ -28,9 +28,11 @@ Cursor, or other agent subscription is what you pay with.
 | Price | Free, open source (GPL v3) |
 | Account required | No Goddard account. You sign in through each agent's own CLI |
 | Platforms | macOS (signed `.dmg`), Linux (install script, Wayland + X11), Windows (per-user installer or portable zip) |
+| Download size | ~80 MB |
 | Where is my data | Locally on your machine — no Goddard cloud service |
 | Languages | English, Japanese, Simplified Chinese |
 | Updates | Automatic, cryptographically signed, with rollback on Linux |
+| Community | GitHub issues and Discord (both linked from the site menu) |
 
 ## Is Goddard right for you?
 
@@ -173,7 +175,9 @@ worktree** later, carrying its uncommitted state with it.
 
 - **Send** with Enter; newline with Shift+Enter.
 - **Queue a follow-up** while the agent is working — queued messages appear as
-  cards above the composer and start a new turn when the current one settles.
+  cards above the composer with per-message actions (steer it into the running
+  turn, remove it), and start a new turn when the current one settles. With an
+  empty composer, Cmd/Ctrl+Enter steers the oldest queued follow-up.
 - **Steer** with Cmd/Ctrl+Enter: inject the message into the *running* turn
   when the provider supports it. If steering is refused or unsupported, the
   message falls back to the follow-up queue automatically.
@@ -314,16 +318,19 @@ A workspace file tree with a reading/editing pane: syntax highlighting,
 Markdown source/preview toggle, save with Cmd/Ctrl+S, find and replace
 (Cmd/Ctrl+F inside the editor, with case/whole-word/regex), and "Open on
 GitHub" for tracked files. **Cmd+P** opens a fuzzy file finder over the same
-index.
+index. On macOS, an **Open in…** control opens the project folder in an
+external app of your choice (Finder, your editor) and remembers it.
 
 ### Terminal
 
 Real PTY terminals in right-panel tabs, scoped to the task's workspace —
 multiple per task, plus global terminals in the sidebar's Terminals group
 (pinnable). macOS/Linux run your login shell; Windows prefers PowerShell 7,
-falls back to Windows PowerShell, then `COMSPEC`. Scrollback clear, terminal
-font sizing, and copy/paste that doesn't steal Ctrl+C from the shell
-(Ctrl+Shift+C/V on Windows).
+falls back to Windows PowerShell, then `COMSPEC`. A shell-integration script
+sourced into each PTY reports the live working directory and per-command
+boundaries, so tabs track `cd` and show command status icons. Scrollback
+clear, terminal font sizing, and copy/paste that doesn't steal Ctrl+C from
+the shell (Ctrl+Shift+C/V on Windows).
 
 ### Embedded browser
 
@@ -357,12 +364,19 @@ Goddard is designed to be driven without a mouse:
 **Settings → Appearance:**
 
 - Match system appearance, or pick light/dark independently.
-- Separate light and dark theme palettes — Default, Gruvbox, Everforest,
-  Kanagawa, Zenburn, Poimandres, GitHub, Dracula, Rosé Pine, Kanso, and more.
+- Separate light and dark theme palettes: Default, Gruvbox, Everforest,
+  Kanagawa, Zenburn, Poimandres, GitHub, Dracula, Rosé Pine (Dawn/Moon), and
+  Kanso (Zen/Pearl).
 - UI font and code font (any installed family), with independent sizes for UI
   text, code/diff/editor text, and the terminal.
 - Sidebar transparency (vibrancy) on or off.
 - Interface language: System, English, 日本語, 简体中文.
+- Window size, position, and display are restored across launches.
+
+Accessibility: every control is keyboard-operable with visible focus
+treatments, the system reduce-motion setting is honored, and status is never
+carried by color alone. One honest limitation: GPUI does not yet expose a
+screen-reader tree, so VoiceOver and equivalents are not supported.
 
 **Settings → General:** automatic updates, anonymous usage-data sharing
 (off by default — and prompts, responses, project names, and file paths are
@@ -522,15 +536,71 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | Remote-daemon terminal for browser clients | yes | yes | not yet |
 | Three-finger swipe navigation | yes | — | — |
 
+## Troubleshooting
+
+**A provider shows as not installed.** Run the CLI by name in a fresh terminal.
+If the shell can't find it either, the install never put a shim on `PATH`. If
+the shell finds it but Goddard doesn't, set the binary path in **Settings →
+Providers**. Detection already knows about version managers (nvm, fnm) and
+per-user prefixes (`%APPDATA%\npm`, `~/.bun/bin`, `~/.cargo/bin`, scoop,
+WindowsApps).
+
+**The window opens black, or the app exits at startup (Windows).** Goddard
+needs a working Direct3D 11 device — update the GPU driver; in a VM, enable 3D
+acceleration.
+
+**The app dies on its first frame in a Linux VM.** Software Vulkan/GL
+rasterizers (lavapipe, llvmpipe) can crash compiling shaders — a driver bug,
+not Goddard's. Give the guest a real GL driver (e.g. virtio-gpu-gl on UTM), or
+set `VK_DRIVER_FILES=/nonexistent.json` to force the GL path.
+
+**Git-backed features do nothing.** Goddard shells out to `git` — make sure
+`git --version` works in a new terminal (install Git for Windows on Windows).
+
+**Updates never arrive.** The updater fetches `releases.waku.sh` (via
+`curl.exe` in System32 on Windows); a proxy or filter blocking that host
+blocks updates. **Check for Updates…** in the app menu reports the reason.
+Downloading and running the installer manually is always equivalent.
+
+**SmartScreen warns on first launch (Windows).** Expected when the release
+isn't code-signed — choose **More info → Run anyway**.
+
+## Uninstalling
+
+- **macOS:** move Goddard to the Trash. Settings, tasks, and workspaces live in
+  `~/.waku` — delete it to remove them too.
+- **Linux:** `curl -fsSL https://waku.sh/install.sh | sh -s -- --uninstall`
+  removes `~/.local/waku.app`, the symlink, and the desktop entry. `~/.waku`
+  stays; delete it to remove projects and settings.
+- **Windows:** uninstall from Settings → Apps, or delete the portable folder.
+  Task data is `%LOCALAPPDATA%\Goddard`, settings `%USERPROFILE%\.waku`.
+
 ## FAQ
 
 **Does Goddard replace Claude Code / Codex / etc.?**
 No — it drives them. You need at least one agent CLI installed and signed in.
 Goddard replaces each CLI's terminal interface with a shared native one.
 
+**Is it native or another Electron shell?**
+Native down to the frame — Rust on GPUI, the GPU-accelerated framework behind
+Zed. No Electron, instant launch, and scrolling that holds up on a 120 Hz
+display through long transcripts.
+
+**How is it different from an editor with AI built in?**
+An editor with AI ties you to one provider inside one editor. Goddard sits
+alongside your existing setup and runs the agents you already subscribe to —
+you pick the best tool per task, not the one bundled in.
+
+**Do my agent's own config still work — MCP servers, hooks, AGENTS.md?**
+Yes. Goddard launches the real CLI through its native session protocol, so the
+agent loads its own configuration, MCP servers, hooks, skills, and project
+instructions exactly as if you'd run it in a terminal.
+
 **Do I pay Goddard anything?**
-No. It's free and GPL-licensed. Your agent provider subscription is the only
-cost, and it bills exactly as if you used the CLI directly.
+No. It's free (~80 MB download) and GPL-licensed. "Bring your own
+subscription" is literal — there's no bundled plan or markup, and your agent
+provider bills exactly as if you used the CLI directly. Your existing plans,
+rate limits, and API keys apply unchanged.
 
 **Where do my conversations go?**
 Nowhere. Everything is stored locally (or on a daemon host you control).
@@ -541,10 +611,22 @@ Agents run as local processes under the daemon — they keep working while the
 window is closed to another task, and the daemon keeps sessions resumable, but
 they still need your machine (or your daemon host) to be on.
 
+**If I quit Goddard, do I lose my sessions?**
+No. Tasks, transcripts, drafts, and queued follow-ups are persisted locally
+and reopen where you left them. Idle provider processes are reaped after
+about 30 minutes, but that's invisible — the next prompt resumes the native
+session.
+
 **Can I use it on a server/headless machine?**
 Yes: run `waku-daemon` on the host, expose it with `--allow-non-loopback`, an
 origin allowlist, and a token, then connect with Goddard Web, the mobile app,
 or a desktop pointed at the external daemon.
+
+**What can agents do on my machine?**
+Agents run under your user account, and you pick the access mode per task —
+from approving every action to letting the agent work unattended. Goddard
+maps your choice onto each provider's own permission system rather than
+inventing a second one.
 
 **Can several agents work in parallel?**
 Yes — that's the core design. Independent tasks run simultaneously, each in
@@ -566,6 +648,19 @@ mechanisms where they exist.
 The app does; your agent's model calls obviously don't. Everything except the
 provider round-trip is local.
 
+**Can I export or back up my data?**
+There's no built-in export tool — but there's also no lock-in. Everything is
+ordinary files you can browse, copy, or back up from the system file manager:
+`~/.waku` on macOS/Linux, `%LOCALAPPDATA%\Goddard` plus `%USERPROFILE%\.waku`
+on Windows. Provider transcripts also remain in each CLI's own session store
+(`~/.claude/projects`, Codex threads, etc.).
+
+**Can I open multiple windows?**
+No — Goddard is a single-window app by design. Parallel work lives in
+sidebar tasks, ⌘1–9 jumps, the Ctrl+Tab switcher, and Big Picture (⌘0)
+rather than separate windows. Window size, position, and display are restored
+across launches.
+
 **Is there telemetry?**
 Optional, anonymous, off by default — feature-usage and reliability data only,
 never prompt/response content, project names, or file paths.
@@ -577,5 +672,6 @@ handle routine approvals and only ask about risky ones; Full access for
 hands-off runs (required for Pi, Oh My Pi, and Amp).
 
 **How do I report a bug or contribute?**
-The project is open source — issues and contributions go through its
-repository; see CONTRIBUTING.md for the development workflow.
+The project is open source (GPL-3.0) on GitHub — open an issue there, or join
+the Discord linked from the site's menu. See CONTRIBUTING.md for the
+development workflow.
