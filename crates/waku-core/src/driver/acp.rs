@@ -251,11 +251,29 @@ fn sdk_agent(
     // `AcpAgentConfig` deliberately contains only argv and environment. macOS
     // `env -C` supplies the session cwd without a shell, preserving exact
     // argument boundaries and the SDK's process-group lifecycle management.
-    let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
-    args.extend(launch.args);
-    let config = AcpAgentConfig::new("/usr/bin/env")
-        .args(args)
-        .envs(environment);
+    // On unix a guardian shell watches the daemon pid so a crashed daemon
+    // cannot orphan the agent.
+    #[cfg(unix)]
+    let (program, args) = {
+        let mut args = vec![
+            "-c".to_owned(),
+            crate::command_env::DAEMON_GUARDIAN_SCRIPT.to_owned(),
+            "waku-acp-guardian".to_owned(),
+            "/usr/bin/env".to_owned(),
+            "-C".to_owned(),
+            cwd.to_owned(),
+            binary.to_owned(),
+        ];
+        args.extend(launch.args);
+        ("/bin/sh", args)
+    };
+    #[cfg(not(unix))]
+    let (program, args) = {
+        let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
+        args.extend(launch.args);
+        ("/usr/bin/env", args)
+    };
+    let config = AcpAgentConfig::new(program).args(args).envs(environment);
     Ok(AcpAgent::new(config).with_debug(move |line, direction| {
         if direction != LineDirection::Stderr || line.trim().is_empty() {
             return;

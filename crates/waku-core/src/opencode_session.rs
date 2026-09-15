@@ -216,7 +216,7 @@ impl OpenCodeServer {
         for (name, value) in environment {
             command.env(name, value);
         }
-        let command = command
+        command
             .args([
                 "serve",
                 "--hostname",
@@ -226,7 +226,10 @@ impl OpenCodeServer {
             ])
             .env("OPENCODE_SERVER_PASSWORD", "")
             .env("OPENCODE_SERVER_USERNAME", "opencode")
-            .current_dir(cwd)
+            .current_dir(cwd);
+        // `opencode serve` has no stdio link to notice a daemon death on.
+        let mut command = crate::command_env::guard_command(command);
+        let command = command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());

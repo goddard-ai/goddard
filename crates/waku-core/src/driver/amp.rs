@@ -130,6 +130,7 @@ impl AmpDriver {
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
+        let mut command = crate::command_env::guard_command(command);
         let command = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

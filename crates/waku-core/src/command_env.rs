@@ -165,6 +165,68 @@ pub fn plain_command(program: impl AsRef<OsStr>) -> Command {
     command
 }
 
+// A spawned provider dies with the daemon only if someone asks it to: a
+// crashed daemon runs no destructors, and the restarted daemon cold-starts a
+// fresh runtime instead of re-adopting the orphan — at best a leak, at worst
+// a second process still working the session. The wrapper watches both the
+// daemon pid and its own pid so a daemon death AND a direct `kill()` on the
+// wrapper (which destructors also cannot intercept under SIGKILL) both reach
+// the real child. `<&0` is load-bearing: a non-interactive shell hands a
+// background job /dev/null for stdin, which would starve stdio providers.
+#[cfg(unix)]
+pub(crate) const DAEMON_GUARDIAN_SCRIPT: &str = r#"
+daemon=$PPID
+wrapper=$$
+"$@" <&0 &
+child=$!
+(
+  while kill -0 "$daemon" 2>/dev/null && kill -0 "$wrapper" 2>/dev/null; do
+    sleep 1
+  done
+  kill -TERM "$child" 2>/dev/null || true
+) &
+watcher=$!
+trap 'kill -TERM "$child" "$watcher" 2>/dev/null' EXIT HUP INT TERM
+wait "$child"
+exit $?
+"#;
+
+/// Wrap a built command in a `/bin/sh` guardian that terminates the real
+/// child when the daemon process dies. The child inherits the wrapper's
+/// stdio and its exit status is preserved, so callers treat the wrapper as
+/// the child it guards. Call this after args/env/cwd are configured and
+/// before stdio is set: `Command` exposes getters for the former but not
+/// the latter.
+#[cfg(unix)]
+pub fn guard_command(command: Command) -> Command {
+    let mut guarded = plain_command("/bin/sh");
+    guarded
+        .arg("-c")
+        .arg(DAEMON_GUARDIAN_SCRIPT)
+        .arg("waku-daemon-guardian")
+        .arg(command.get_program());
+    guarded.args(command.get_args());
+    if let Some(cwd) = command.get_current_dir() {
+        guarded.current_dir(cwd);
+    }
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => {
+                guarded.env(name, value);
+            }
+            None => {
+                guarded.env_remove(name);
+            }
+        }
+    }
+    guarded
+}
+
+#[cfg(not(unix))]
+pub fn guard_command(command: Command) -> Command {
+    command
+}
+
 fn detach_console(command: &mut Command) {
     #[cfg(windows)]
     {

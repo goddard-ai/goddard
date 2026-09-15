@@ -262,6 +262,7 @@ impl PiDriver {
                 .zip(pi_extension.as_deref())
                 .map(|(runtime, extension)| (&runtime.config, extension)),
         );
+        let mut command = crate::command_env::guard_command(command);
         let command = command
             .current_dir(&cwd)
             .stdin(Stdio::piped())

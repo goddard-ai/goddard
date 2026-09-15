@@ -219,6 +219,7 @@ impl ClaudeDriver {
             command.args(["--session-id", &session_id]);
         }
 
+        let mut command = crate::command_env::guard_command(command);
         let command = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
