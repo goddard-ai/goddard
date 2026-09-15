@@ -1388,5 +1388,6 @@ git_panel.not_a_repository: 不是 Git 仓库
 git_panel.unexpected_result: 守护进程返回了意外的结果
 git_panel.resolve_rebase_prompt: 此仓库中的 `git pull --rebase` 因冲突而停止。请解决工作区中的冲突并继续变基。
 git_panel.resolve_merge_prompt: 此仓库中的 `git pull` 合并因冲突而停止。请解决工作区中的冲突并完成合并。
+git_panel.view_on_github: 在 GitHub 上查看
 git_panel.open_file_in: "在 %{app} 中打开"
 git_panel.open_file: 在编辑器中打开文件

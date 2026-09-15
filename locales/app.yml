@@ -2436,6 +2436,8 @@ git_panel.resolve_rebase_prompt:
   en: "The `git pull --rebase` in this repository stopped on conflicts. Resolve the conflicts in the working tree and continue the rebase."
 git_panel.resolve_merge_prompt:
   en: "The `git pull` merge in this repository stopped on conflicts. Resolve the conflicts in the working tree and complete the merge."
+git_panel.view_on_github:
+  en: View on GitHub
 git_panel.open_file_in:
   en: Open in %{app}
 git_panel.open_file:

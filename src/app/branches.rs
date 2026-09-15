@@ -8,7 +8,7 @@ enum BranchOperation {
 /// `https://github.com/<owner>/<repo>` for a GitHub remote URL, `None` for any
 /// other host or a value that does not parse. Handles the `scheme://` forms
 /// (https, ssh, git) and the scp-style `git@github.com:owner/repo` shorthand.
-fn github_remote_base(remote_url: &str) -> Option<String> {
+pub(super) fn github_remote_base(remote_url: &str) -> Option<String> {
     let remote_url = remote_url.trim();
     let (host, path) = if let Some((_, rest)) = remote_url.split_once("://") {
         let (authority, path) = rest.split_once('/')?;

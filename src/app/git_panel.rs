@@ -8,7 +8,9 @@
 
 use std::rc::Rc;
 
-use gpui::{KeyBinding, actions};
+use gpui::{
+    ElementId, HighlightStyle, InteractiveText, KeyBinding, StyledText, UnderlineStyle, actions,
+};
 
 use waku_client::git::{
     CommitEntry, GitFileChange, GitPanelSnapshot, PullOutcome, PullStrategy, SyncInProgress,
@@ -2566,6 +2568,20 @@ impl Waku {
     ) -> Option<AnyElement> {
         let modal = self.git_panel_commit_diff.as_ref()?;
         let theme = Theme::current(cx);
+        // `…/commit/<sha>` and `#<n>` issue links only make sense when the
+        // workspace's origin remote is a github.com repository.
+        let github_base = self
+            .git_panel
+            .as_ref()
+            .and_then(|panel| panel.snapshot.as_ref())
+            .and_then(|snapshot| snapshot.origin_url.as_deref())
+            .and_then(branches::github_remote_base);
+        let (subject_text, subject_linked) = linkified_commit_text(
+            "git-panel-commit-modal-subject-text",
+            &modal.subject,
+            github_base.as_deref(),
+            theme.accent,
+        );
         let body = match &modal.state {
             GitPanelCommitDiffState::Loading => div()
                 .flex_1()
@@ -2652,26 +2668,47 @@ impl Waku {
                     .gap(px(8.0))
                     .border_b(hairline())
                     .border_color(theme.border)
+                    // The hash and subject share one baseline so different
+                    // faces and sizes still sit on the same line; the buttons
+                    // stay centered on the row itself.
                     .child(
                         div()
-                            .flex_none()
-                            .font_family(crate::fonts::current(cx).code)
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_tertiary)
-                            .child(modal.sha.chars().take(8).collect::<String>()),
-                    )
-                    .child(
-                        div()
-                            .id("git-panel-commit-modal-subject")
                             .min_w_0()
                             .flex_1()
-                            .truncate()
-                            .text_size(sp(13.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .tooltip(Tooltip::text(modal.subject.clone()))
-                            .child(modal.subject.clone()),
+                            .flex()
+                            .items_baseline()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .font_family(crate::fonts::current(cx).code)
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(modal.sha.chars().take(8).collect::<String>()),
+                            )
+                            .child(
+                                div()
+                                    .id("git-panel-commit-modal-subject")
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_size(sp(13.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .when(!subject_linked, |element| {
+                                        element.tooltip(Tooltip::text(modal.subject.clone()))
+                                    })
+                                    .child(subject_text),
+                            ),
                     )
+                    .when_some(github_base.clone(), |row, base| {
+                        let url = format!("{base}/commit/{}", modal.sha);
+                        row.child(
+                            icon_button("git-panel-commit-modal-github", "icons/github.svg", theme)
+                                .tooltip(Tooltip::text(tr!("git_panel.view_on_github")))
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                        )
+                    })
                     .child(
                         icon_button("git-panel-commit-modal-close", "icons/x.svg", theme)
                             .tooltip(Tooltip::text(tr!("common.close")))
@@ -2683,6 +2720,12 @@ impl Waku {
             .when(!modal.body.is_empty(), |card| {
                 let scroll = modal.body_scroll.clone();
                 let wheel = scroll.clone();
+                let (body_text, _) = linkified_commit_text(
+                    "git-panel-commit-modal-body-text",
+                    &commit_body_text(&modal.body),
+                    github_base.as_deref(),
+                    theme.accent,
+                );
                 card.child(
                     div()
                         .flex_none()
@@ -2705,7 +2748,7 @@ impl Waku {
                                         .text_size(sp(12.5))
                                         .line_height(sp(17.0))
                                         .text_color(theme.text_secondary)
-                                        .child(commit_body_text(&modal.body)),
+                                        .child(body_text),
                                 ),
                         )
                         .child(scrollbar::vertical(&scroll, &modal.body_scrollbar)),
@@ -2865,6 +2908,92 @@ fn commit_author_avatar(email: &str) -> Option<SharedString> {
     }
     let digest = format!("{:x}", <md5::Md5 as md5::Digest>::digest(lower));
     Some(format!("https://www.gravatar.com/avatar/{digest}?s=64&d=identicon").into())
+}
+
+/// `#<number>` issue/PR references in commit text. A `#` qualifies with a
+/// non-word (or start) edge on its left and the digits with a non-word (or
+/// end) edge on their right, so `x#5` and `#5x` stay literal.
+fn issue_ref_spans(text: &str) -> Vec<(Range<usize>, u64)> {
+    fn word_byte(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || byte == b'_'
+    }
+    let bytes = text.as_bytes();
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'#' || (index > 0 && word_byte(bytes[index - 1])) {
+            index += 1;
+            continue;
+        }
+        let digits = index + 1;
+        let mut end = digits;
+        while end < bytes.len() && bytes[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end == digits || (end < bytes.len() && word_byte(bytes[end])) {
+            index += 1;
+            continue;
+        }
+        if let Ok(number) = text[digits..end].parse::<u64>() {
+            spans.push((index..end, number));
+        }
+        index = end;
+    }
+    spans
+}
+
+/// `text` with each `#<n>` span linked to `<base>/issues/<n>` — GitHub
+/// forwards the issue URL to the pull request when the number names one.
+/// The second return says whether anything linked, so a caller can drop its
+/// plain-text tooltip instead of stacking it under the link's URL hint.
+fn linkified_commit_text(
+    id: impl Into<ElementId>,
+    text: &str,
+    base: Option<&str>,
+    link_color: Hsla,
+) -> (AnyElement, bool) {
+    let Some(base) = base else {
+        return (text.to_owned().into_any_element(), false);
+    };
+    let spans = issue_ref_spans(text);
+    if spans.is_empty() {
+        return (text.to_owned().into_any_element(), false);
+    }
+    let styled =
+        StyledText::new(text.to_owned()).with_highlights(spans.iter().map(|(range, _)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(link_color),
+                    underline: Some(UnderlineStyle {
+                        color: Some(link_color),
+                        thickness: px(1.0),
+                        wavy: false,
+                    }),
+                    ..Default::default()
+                },
+            )
+        }));
+    let (ranges, urls): (Vec<Range<usize>>, Vec<String>) = spans
+        .into_iter()
+        .map(|(range, number)| (range, format!("{base}/issues/{number}")))
+        .unzip();
+    let tooltip_urls = urls.clone();
+    (
+        InteractiveText::new(id, styled)
+            .on_click(ranges, move |clicked, _, cx| {
+                if let Some(url) = urls.get(clicked) {
+                    cx.open_url(url);
+                }
+            })
+            .tooltip(move |clicked, window, cx| {
+                tooltip_urls
+                    .get(clicked)
+                    .map(|url| Tooltip::text(url.clone())(window, cx))
+            })
+            .into_any_element(),
+        true,
+    )
 }
 
 /// A commit body reads like Markdown source: single newlines are soft breaks
