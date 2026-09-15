@@ -18,7 +18,7 @@ use crate::ui::motion;
 
 /// Rendered size of the mark. The source viewBox is `-10 -10 160 125`; its
 /// margin leaves room for the sway, so the drawn face fills ~84% of the box.
-const WIDTH: f32 = 23.0;
+const WIDTH: f32 = 28.0;
 const HEIGHT: f32 = WIDTH * 125.0 / 160.0;
 const CENTER: (f32, f32) = (WIDTH / 2.0, HEIGHT / 2.0);
 
