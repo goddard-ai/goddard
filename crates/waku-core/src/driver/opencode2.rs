@@ -2051,6 +2051,40 @@ fn emit_tool(
             .with_mcp_server(Some(server));
     }
     let _ = events.send(DriverEvent::RichActivity(item));
+
+    // A `subagent`/`task` call is also a unit of delegated work: upsert it so
+    // the run renders on the tasks surface, its agent name carried on `role`.
+    // Every tool transition re-emits, so `role` lands once `called` delivers
+    // the parsed input.
+    if matches!(slot.tool_name.as_deref(), Some("subagent" | "task")) {
+        let status = if complete {
+            if failed {
+                BackgroundWorkStatus::Failed
+            } else {
+                BackgroundWorkStatus::Completed
+            }
+        } else {
+            BackgroundWorkStatus::Running
+        };
+        let mut work =
+            BackgroundWorkItem::new(BackgroundWorkKind::Subagent, id, slot.title.clone(), status);
+        work.role = slot
+            .input
+            .as_ref()
+            .and_then(|input| input.get("agent"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        work.model = slot
+            .input
+            .as_ref()
+            .and_then(|input| input.get("model"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        work.origin_activity_id = Some(id.to_owned());
+        let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+            work,
+        )));
+    }
 }
 
 fn retry_activity(kind: &str, data: &Value, state: &StreamState, events: &impl DriverEventSink) {
@@ -2446,6 +2480,44 @@ mod tests {
                 "model": {"id": "claude-sonnet-4-5", "providerID": "anthropic"}
             }
         })
+    }
+
+    /// A `subagent` tool call doubles as delegated work: the transcript keeps
+    /// its activity row and the tasks surface gets a subagent item keyed on
+    /// the same call id, with the agent name on `role` once the input lands.
+    #[test]
+    fn subagent_calls_emit_background_work() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(step_started("msg_1"));
+        harness.feed(json!({
+            "type": "session.tool.input.started",
+            "data": {"assistantMessageID": "msg_1", "id": "call_s1", "name": "subagent"}
+        }));
+        harness.feed(json!({
+            "type": "session.tool.called",
+            "data": {"assistantMessageID": "msg_1", "id": "call_s1",
+                     "input": {"agent": "explore", "prompt": "Find auth flow"}}
+        }));
+        harness.feed(json!({
+            "type": "session.tool.success",
+            "data": {"assistantMessageID": "msg_1", "id": "call_s1",
+                     "content": [{"type": "text", "text": "auth lives in auth.rs"}]}
+        }));
+
+        let works: Vec<BackgroundWorkItem> = harness
+            .drain()
+            .into_iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(works.len(), 3);
+        assert_eq!(works[0].key.kind, BackgroundWorkKind::Subagent);
+        assert_eq!(works[0].status, BackgroundWorkStatus::Running);
+        assert_eq!(works[1].role.as_deref(), Some("explore"));
+        assert_eq!(works[2].status, BackgroundWorkStatus::Completed);
+        assert_eq!(works[2].origin_activity_id.as_deref(), Some("call_s1"));
     }
 
     /// The regression that shipped: beta-19192 emits NO `session.idle`, so a

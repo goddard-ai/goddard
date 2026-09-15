@@ -29,7 +29,8 @@ use crate::driver::{
 };
 use crate::http_wire::{Endpoint, StreamControl, open_event_stream};
 use crate::model::{
-    ActivityKind, DriverEvent, PermissionOption, ProviderResumeCursor, ReportedCommand,
+    ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKind,
+    BackgroundWorkStatus, DriverEvent, PermissionOption, ProviderResumeCursor, ReportedCommand,
     RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 use crate::opencode_pool::PooledServer;
@@ -1329,6 +1330,45 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
     )
     .with_tool_name(part.get("tool").and_then(Value::as_str));
     let _ = events.send(DriverEvent::RichActivity(item));
+
+    // A `task` call is also a unit of delegated work: upsert it so the run
+    // renders on the tasks surface, its agent name carried on `role` — the
+    // `waku-` prefix is what attributes a run to a Goddard-injected agent.
+    if part.get("tool").and_then(Value::as_str) == Some("task")
+        && let Some(call_id) = part.get("callID").and_then(Value::as_str)
+    {
+        let input = part.pointer("/state/input");
+        let status = match part.pointer("/state/status").and_then(Value::as_str) {
+            Some("completed") => BackgroundWorkStatus::Completed,
+            Some("error") => BackgroundWorkStatus::Failed,
+            _ => BackgroundWorkStatus::Running,
+        };
+        let title = input
+            .and_then(|input| input.get("description"))
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| tr!("background.subagent"));
+        let mut work =
+            BackgroundWorkItem::new(BackgroundWorkKind::Subagent, call_id, title, status);
+        work.role = input
+            .and_then(|input| {
+                input
+                    .get("subagent_type")
+                    .or_else(|| input.get("subagentType"))
+                    .or_else(|| input.get("agent"))
+            })
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        work.model = input
+            .and_then(|input| input.get("model"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        work.origin_activity_id = Some(call_id.to_owned());
+        let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+            work,
+        )));
+    }
 }
 
 #[cfg(test)]
@@ -1961,6 +2001,37 @@ server.serve_forever()
         ));
         assert_eq!(seen.len(), 5, "non-transcript events leaked");
         assert!(!*turn.lock(), "the turn should be settled exactly once");
+    }
+
+    /// A `task` tool call doubles as delegated work: the transcript keeps its
+    /// activity row and the tasks surface gets a subagent item keyed on the
+    /// same call id, with the agent name on `role`.
+    #[test]
+    fn task_calls_emit_subagent_background_work() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+        let wire = [
+            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"running","input":{"description":"Find auth flow","subagent_type":"waku-explore"}}}}}),
+            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"completed","output":"auth lives in auth.rs"}}}}),
+        ];
+        for event in wire {
+            handle_event(&event, &events, &commands, &turn, true, &mut state);
+        }
+
+        let seen: Vec<DriverEvent> = event_rx.try_iter().collect();
+        let works: Vec<&BackgroundWorkItem> = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(works.len(), 2);
+        assert_eq!(works[0].key.provider_id, "call_t1");
+        assert_eq!(works[0].key.kind, BackgroundWorkKind::Subagent);
+        assert_eq!(works[0].role.as_deref(), Some("waku-explore"));
+        assert_eq!(works[0].status, BackgroundWorkStatus::Running);
+        assert_eq!(works[1].status, BackgroundWorkStatus::Completed);
+        assert_eq!(works[0].origin_activity_id.as_deref(), Some("call_t1"));
     }
 
     /// The exact `session.error` payload a live opencode 1.18 server emits when
