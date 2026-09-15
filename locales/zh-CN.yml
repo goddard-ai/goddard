@@ -334,6 +334,11 @@ session.archive: 归档
 session.pin: 置顶
 session.unpin: 取消置顶
 session.mark_unread: 标记为未读
+archive.confirm_title: 归档此任务？
+archive.confirm_title_named: "归档 %{name}？"
+archive.confirm_description: 该检出中仍有进行中的工作。归档会将其快照并移除工作树；取消归档可恢复。
+archive.uncommitted: "%{count} 个未提交的文件"
+archive.unpushed: "%{count} 个未推送的提交"
 sidebar.today: 今天
 sidebar.search: 搜索
 sidebar.options: 侧边栏选项

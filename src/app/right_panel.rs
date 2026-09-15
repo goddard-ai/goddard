@@ -2388,6 +2388,7 @@ impl Waku {
             || self.task_switcher.is_open()
             || self.project_switcher.is_open()
             || self.commit_dialog.is_some()
+            || self.archive_dialog.is_some()
             || self.image_preview.is_some()
             || self.composer.read(cx).context_menu_open(cx)
             || self
@@ -2668,6 +2669,15 @@ impl Waku {
             self.right_panel_terminals.remove(&terminal_id);
             return;
         };
+        if !working_directory.is_dir() {
+            // The workspace is gone — typically an archived session's
+            // worktree awaiting restore. A PTY launched now would fall back
+            // to the filesystem root and, once the directory returns, look
+            // current to `matches_project` while its shell sits in the
+            // wrong place. The restore's completion re-runs this ensure.
+            self.right_panel_terminals.remove(&terminal_id);
+            return;
+        }
         let matches_project = self
             .right_panel_terminals
             .get(&terminal_id)

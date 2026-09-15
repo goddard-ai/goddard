@@ -141,12 +141,24 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
     })
 }
 
+/// Snapshot the whole worktree — including untracked files — into `git_ref`.
+/// The commit's first parent is the checkout's HEAD, so a worktree recreated
+/// from the ref can come up on the real commit with the snapshot's
+/// difference replayed as uncommitted work rather than as a detached root
+/// commit with no history.
 pub fn capture_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
     if !is_git_repository(cwd) {
         bail!("checkpoints require a Git repository");
     }
 
-    let commit = capture_worktree_commit(cwd)?;
+    let head = resolve_ref(cwd, "HEAD");
+    let parents = head.iter().cloned().collect::<Vec<_>>();
+    let commit = capture_worktree_commit_from(
+        cwd,
+        head.as_deref(),
+        "Goddard worktree snapshot",
+        &parents,
+    )?;
     git_output(cwd, ["update-ref", git_ref, &commit])?;
     Ok(())
 }

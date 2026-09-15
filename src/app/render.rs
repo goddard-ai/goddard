@@ -287,6 +287,7 @@ impl Render for Waku {
             let command_palette = self.render_command_palette(window, cx);
             let file_finder = self.render_file_finder(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
+            let archive_dialog = self.render_archive_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
             let toast = self.render_active_toast(cx);
             let content = div()
@@ -318,6 +319,7 @@ impl Render for Waku {
                 .children(command_palette)
                 .children(file_finder)
                 .children(commit_dialog)
+                .children(archive_dialog)
                 .children(goal_dialog)
                 .children(image_preview)
                 .children(task_switcher)
@@ -336,6 +338,7 @@ impl Render for Waku {
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
+        let archive_dialog = self.render_archive_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let toast = self.render_active_toast(cx);
         let content = div()
@@ -536,6 +539,7 @@ impl Render for Waku {
             .children(command_palette)
             .children(file_finder)
             .children(commit_dialog)
+            .children(archive_dialog)
             .children(goal_dialog)
             .children(image_preview)
             .children(task_switcher)

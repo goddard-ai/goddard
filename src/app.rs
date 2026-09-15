@@ -1382,6 +1382,11 @@ pub struct Waku {
     /// Window-modal Git commit/push UI. Its repository snapshot is filled
     /// off-thread; frames only read this in-memory value.
     commit_dialog: Option<commit_dialog::CommitDialogState>,
+    /// The archive confirmation shown when a checkout still holds
+    /// uncommitted or unpushed work; `archive_preview_pending` dedupes the
+    /// background inspection that decides whether it opens.
+    archive_dialog: Option<archive_dialog::ArchiveDialogState>,
+    archive_preview_pending: HashSet<Uuid>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
     goal_dialog_request: Option<goal_dialog::GoalDialogRequest>,
     /// Goal operations accepted before the session's runtime exists. Goals
@@ -1880,6 +1885,7 @@ pub struct Waku {
 
 mod activity_diff;
 mod annotations;
+mod archive_dialog;
 mod autocomplete;
 mod background_work;
 mod branches;
@@ -1912,6 +1918,7 @@ mod window_chrome;
 mod worktrees;
 
 pub use annotations::init as init_annotation_keys;
+pub use archive_dialog::init as init_archive_dialog_keys;
 pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
@@ -3310,6 +3317,8 @@ impl Waku {
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,
+                archive_dialog: None,
+                archive_preview_pending: HashSet::new(),
                 goal_dialog: None,
                 goal_dialog_request: None,
                 pending_goal_operations: HashMap::new(),

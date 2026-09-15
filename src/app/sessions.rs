@@ -284,6 +284,7 @@ impl Waku {
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
             self.restore_right_panel_state(session_id, cx);
+            self.restore_missing_worktree(session_id, cx);
         } else {
             self.ensure_right_panel_terminals(cx);
         }
@@ -611,12 +612,101 @@ impl Waku {
 
     /// Hides a task from the sidebar and search without deleting it.
     ///
+    /// A checkout still holding uncommitted or unpushed work gets a
+    /// confirmation first — inspected on the background executor — so the
+    /// user sees what the archive snapshot is about to carry. Inspection
+    /// failures archive anyway: the snapshot ref keeps the state regardless.
+    ///
     /// An active turn is stopped first — a hidden session must not keep
     /// working. A worktree-based task is then snapshotted into its archive
     /// ref and its worktree removed, so archived chats stop costing a full
     /// checkout of disk; the daemon purges archives once they outlive the
     /// retention window.
     pub(super) fn archive_session(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .filter(|session| session.has_started() && session.archived_at.is_none())
+        else {
+            return;
+        };
+        // No workspace means nothing for a preview to inspect — archive now.
+        let Some(workspace) = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            self.finish_archive_session(session_id, window, cx);
+            return;
+        };
+        if self.archive_dialog.is_some()
+            || !self.archive_preview_pending.insert(session_id)
+        {
+            return;
+        }
+        let window_handle = window.window_handle();
+        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let preview = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace_client.request(
+                        waku_client::WorkspaceOperation::InspectArchivePreview {
+                            cwd: workspace,
+                        },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
+                        _ => None,
+                    }
+                })
+                .await;
+            let finish = waku
+                .update(cx, |waku, cx| {
+                    waku.archive_preview_pending.remove(&session_id);
+                    match preview {
+                        Some(preview)
+                            if !preview.files.is_empty()
+                                || !preview.unpushed_commits.is_empty() =>
+                        {
+                            let focus =
+                                waku.open_archive_dialog(session_id, preview, cx);
+                            Some(focus)
+                        }
+                        _ => None,
+                    }
+                })
+                .unwrap_or(None);
+            let _ = window_handle.update(cx, move |_, window, cx| {
+                match finish {
+                    Some(focus) => {
+                        // Like the other deferred surfaces, focus lands two
+                        // frames after the modal joins the dispatch tree.
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| {
+                                window.focus(&focus, cx)
+                            });
+                        });
+                    }
+                    None => {
+                        let _ = waku.update(cx, |waku, cx| {
+                            waku.finish_archive_session(session_id, window, cx)
+                        });
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Hides the task outright — the point every archive path reaches once
+    /// the checkout proved clean or the user confirmed.
+    pub(super) fn finish_archive_session(
         &mut self,
         session_id: Uuid,
         window: &mut Window,
@@ -705,6 +795,10 @@ impl Waku {
         // An unarchived session keeps its worktree: a queued cleanup must
         // not fire after the task is back.
         self.pending_worktree_cleanups.remove(&session_id);
+        // If cleanup already removed the worktree, bring it back now —
+        // waiting for the next prompt's restore leaves terminals and file
+        // surfaces pointing at a directory that does not exist.
+        self.restore_missing_worktree(session_id, cx);
         self.save();
         if announce {
             self.show_unarchived_toast(session_id);
@@ -1197,6 +1291,7 @@ impl Waku {
             || self.task_switcher.is_open()
             || self.project_switcher.is_open()
             || self.commit_dialog.is_some()
+            || self.archive_dialog.is_some()
             || self.goal_dialog.is_some()
             || self.image_preview.is_some()
             || self.menus.borrow().values().any(|menu| menu.is_open())

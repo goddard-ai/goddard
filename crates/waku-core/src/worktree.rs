@@ -302,6 +302,36 @@ pub fn ensure(
     git_stdout(&repository, &["worktree", "prune"])
         .context("could not prune stale Git worktree registrations")?;
     let branch = branch.map(str::trim).filter(|branch| !branch.is_empty());
+    // A snapshot captured by `checkpoint::capture_ref` records the checkout's
+    // HEAD as its first parent. Restoring detaches at that real commit and
+    // replays the snapshot's difference as uncommitted — including untracked —
+    // work, so an archived session comes back with its history and dirty
+    // state intact instead of a historyless commit and a clean tree.
+    // Parentless `base_ref`s (plain checkpoint commits) keep their old
+    // meaning: detach at the commit itself.
+    let snapshot = match base_ref
+        .map(str::trim)
+        .filter(|reference| !reference.is_empty())
+    {
+        Some(reference) if ref_is_commit(&repository, reference)? => {
+            let commit = git_stdout(
+                &repository,
+                &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
+            )?;
+            // `rev-list --parents` prints "<commit> <parent>..."; a root
+            // commit lists itself alone, which `--verify <commit>^1` would
+            // report as a hard error instead.
+            let parent = git_stdout(
+                &repository,
+                &["rev-list", "--parents", "-n", "1", &commit],
+            )?
+            .split_whitespace()
+            .nth(1)
+            .map(str::to_owned);
+            Some((commit, parent))
+        }
+        _ => None,
+    };
     let checked_out = match branch {
         Some(branch) if local_branch_exists(&repository, branch)? => {
             add_branch(&repository, &worktree_path, branch).with_context(|| {
@@ -310,14 +340,12 @@ pub fn ensure(
             Some(branch.to_owned())
         }
         _ => {
-            // Detached restore: the session's checkpoint snapshot when it
-            // survives, else the same default base a fresh worktree gets.
-            let base = match base_ref
-                .map(str::trim)
-                .filter(|reference| !reference.is_empty())
-            {
-                Some(reference) if ref_is_commit(&repository, reference)? => reference.to_owned(),
-                _ => default_base_ref(&repository)?,
+            // Detached restore: the snapshot's recorded HEAD when there is
+            // one, the snapshot itself when not, else the same default base
+            // a fresh worktree gets.
+            let base = match &snapshot {
+                Some((commit, parent)) => parent.clone().unwrap_or_else(|| commit.clone()),
+                None => default_base_ref(&repository)?,
             };
             add_detached(&repository, &worktree_path, &base).with_context(|| {
                 format!("could not recreate worktree {}", worktree_path.display())
@@ -325,6 +353,14 @@ pub fn ensure(
             None
         }
     };
+    if let Some((commit, Some(_))) = &snapshot {
+        carry_state(&worktree_path, commit).with_context(|| {
+            format!(
+                "could not restore the worktree's uncommitted state in {}",
+                worktree_path.display()
+            )
+        })?;
+    }
     if !path.is_dir() {
         bail!(
             "Git recreated the worktree, but its project directory is missing: {}",
@@ -876,6 +912,68 @@ mod tests {
         assert_eq!(
             fs::read_to_string(created.path.join("notes.txt")).unwrap(),
             "untracked\n"
+        );
+
+        // The restore lands on the commit the worktree had — real history,
+        // not the snapshot — with the carried state left uncommitted.
+        let worktree_root = created
+            .path
+            .ancestors()
+            .find(|ancestor| ancestor.join(".git").exists())
+            .unwrap()
+            .to_path_buf();
+        assert_eq!(
+            git_stdout(&worktree_root, &["rev-parse", "HEAD"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "feature"]).unwrap()
+        );
+        let status = git_stdout(&worktree_root, &["status", "--porcelain"]).unwrap();
+        assert!(
+            status.lines().any(|line| line.ends_with("README.md")),
+            "the modified file stays modified: {status}"
+        );
+        assert!(
+            status
+                .lines()
+                .any(|line| line.starts_with("??") && line.ends_with("notes.txt")),
+            "the untracked file stays untracked: {status}"
+        );
+        assert_eq!(
+            git_stdout(&worktree_root, &["log", "--format=%s", "HEAD"]).unwrap(),
+            "feature\ninitial"
+        );
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_removed_worktree_on_a_branch_restores_its_dirty_state() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let created = create(&project, Some("Branched"), None, Some("feature")).unwrap();
+        // The session checked its worktree out onto a branch, then dirtied it.
+        run_git(&created.path, &["checkout", "-b", "session-branch"]);
+        fs::write(created.path.join("README.md"), "dirty\n").unwrap();
+        fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
+
+        let git_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
+        crate::checkpoint::capture_ref(&created.path, &git_ref).unwrap();
+        remove(&created.path, true).unwrap();
+
+        let ensured =
+            ensure(&project, &created.path, Some("session-branch"), Some(&git_ref)).unwrap();
+        assert_eq!(ensured, Some(Some("session-branch".to_owned())));
+        let worktree_root = created
+            .path
+            .ancestors()
+            .find(|ancestor| ancestor.join(".git").exists())
+            .unwrap()
+            .to_path_buf();
+        let status = git_stdout(&worktree_root, &["status", "--porcelain"]).unwrap();
+        assert!(status.lines().any(|line| line.ends_with("README.md")));
+        assert!(
+            status
+                .lines()
+                .any(|line| line.starts_with("??") && line.ends_with("notes.txt"))
         );
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();

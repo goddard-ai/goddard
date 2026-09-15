@@ -330,6 +330,123 @@ impl Waku {
             .detach();
     }
 
+    /// Recreates a session's worktree on the background executor when its
+    /// directory is gone — archived tasks outlive their worktrees once
+    /// archive cleanup removes them. Submission preparation runs the same
+    /// restore before a turn, but surfaces like a right-panel terminal need
+    /// the directory as soon as the session is back on screen, not at the
+    /// first prompt. Prefers the snapshot archive cleanup left, then the
+    /// session's latest checkpoint — the same order `prepare_submission`
+    /// uses.
+    pub(super) fn restore_missing_worktree(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.daemon.is_remote() {
+            return;
+        }
+        let Some((project_path, path, branch)) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id && session.has_started())
+            .and_then(|session| match &session.workspace {
+                SessionWorkspace::Worktree { path, branch, .. } => self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == session.project_id)
+                    .map(|project| (project.path.clone(), path.clone(), branch.clone())),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        if path.exists() {
+            return;
+        }
+        let archive_ref = checkpoint::archive_ref(session_id);
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let ensured = cx
+                .background_executor()
+                .spawn(async move {
+                    let archived = workspace
+                        .request(waku_client::WorkspaceOperation::HasRef {
+                            cwd: project_path.clone(),
+                            git_ref: archive_ref.clone(),
+                        })
+                        .is_ok_and(|result| {
+                            matches!(
+                                result,
+                                waku_client::WorkspaceResult::Bool { value: true }
+                            )
+                        });
+                    let base_ref = if archived {
+                        Some(archive_ref.clone())
+                    } else {
+                        match workspace.request(
+                            waku_client::WorkspaceOperation::SessionTurnRefs {
+                                cwd: project_path.clone(),
+                                session_id,
+                            },
+                        ) {
+                            Ok(waku_client::WorkspaceResult::TurnRefs { turn_counts }) => {
+                                turn_counts.into_iter().max().map(|turn_count| {
+                                    checkpoint::checkpoint_ref(session_id, turn_count)
+                                })
+                            }
+                            _ => None,
+                        }
+                    };
+                    let ensured = match workspace.request(
+                        waku_client::WorkspaceOperation::EnsureWorktree {
+                            project_path: project_path.clone(),
+                            path,
+                            branch,
+                            base_ref,
+                        },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::WorktreeEnsured { created, branch }) => {
+                            Some((created, branch))
+                        }
+                        _ => None,
+                    };
+                    // The archive snapshot is single-use, same as the
+                    // submission path treats it.
+                    if archived && ensured.is_some() {
+                        let _ = workspace.request(waku_client::WorkspaceOperation::DeleteRef {
+                            cwd: project_path,
+                            git_ref: archive_ref,
+                        });
+                    }
+                    ensured
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                let Some((created, branch)) = ensured else {
+                    return;
+                };
+                if !created {
+                    return;
+                }
+                if let Some(session) = waku.state.session_mut(session_id)
+                    && let SessionWorkspace::Worktree {
+                        branch: stored, ..
+                    } = &mut session.workspace
+                {
+                    *stored = branch;
+                }
+                waku.save();
+                if waku.state.selected_session == Some(session_id) {
+                    waku.invalidate_workspace_queries(cx);
+                    // Terminals that skipped spawning against the missing
+                    // directory can bind the real cwd now.
+                    waku.ensure_right_panel_terminals(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Marks an archived session's worktree for snapshot-and-remove.
     /// [`Self::drain_pending_worktree_cleanups`] runs it once nothing can
     /// still write into the worktree.

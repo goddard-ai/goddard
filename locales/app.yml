@@ -673,6 +673,17 @@ session.unpin:
 session.mark_unread:
   en: Mark as Unread
 
+archive.confirm_title:
+  en: Archive this task?
+archive.confirm_title_named:
+  en: "Archive %{name}?"
+archive.confirm_description:
+  en: Its checkout still has work in progress. Archiving snapshots it and removes the worktree; unarchiving restores it.
+archive.uncommitted:
+  en: "%{count} uncommitted files"
+archive.unpushed:
+  en: "%{count} unpushed commits"
+
 sidebar.today:
   en: Today
 sidebar.search:

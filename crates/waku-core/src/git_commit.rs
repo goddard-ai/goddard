@@ -16,7 +16,9 @@ use anyhow::{Context as _, anyhow, bail};
 use uuid::Uuid;
 
 use crate::model::ProviderKind;
-pub use waku_protocol::git::{AgentInvocation, CheckoutStatus, CommitSnapshot as Snapshot};
+pub use waku_protocol::git::{
+    AgentInvocation, ArchivePreview, CheckoutStatus, CommitSnapshot as Snapshot, StatusEntry,
+};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -102,6 +104,47 @@ pub fn checkout_status(cwd: &Path) -> anyhow::Result<Option<CheckoutStatus>> {
     };
     Ok(Some(CheckoutStatus {
         uncommitted_changes: !status.is_empty(),
+        unpushed_commits,
+    }))
+}
+
+/// What archiving a checkout would stash: every dirty working-tree file and
+/// the subjects of commits on HEAD no remote-tracking ref has. `Ok(None)`
+/// outside a work tree.
+pub fn archive_preview(cwd: &Path) -> anyhow::Result<Option<ArchivePreview>> {
+    if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
+        .is_some_and(|answer| answer == "true")
+    {
+        return Ok(None);
+    }
+    let files = git_stdout(cwd, &["status", "--porcelain=v1", "--untracked-files=all"])?
+        .lines()
+        .filter_map(|line| {
+            // Porcelain v1 is "XY <path>"; renames append " -> <original>",
+            // which stays part of the shown path.
+            let (status, path) = line.split_at_checked(3)?;
+            Some(StatusEntry {
+                status: status.trim().to_owned(),
+                path: path.to_owned(),
+            })
+        })
+        .collect();
+    // Match `checkout_status`: commits unreachable from every remote, and
+    // none at all when the repository has no remote to push to.
+    let unpushed_commits = if git_stdout(cwd, &["remote"])?.is_empty() {
+        Vec::new()
+    } else {
+        git_optional_stdout(cwd, &["log", "--format=%s", "HEAD", "--not", "--remotes"])?
+            .map(|log| {
+                log.lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    Ok(Some(ArchivePreview {
+        files,
         unpushed_commits,
     }))
 }
@@ -733,6 +776,51 @@ mod tests {
         let status = checkout_status(&root).unwrap().unwrap();
         assert!(!status.uncommitted_changes);
         assert_eq!(status.unpushed_commits, 1);
+    }
+
+    #[test]
+    fn archive_preview_lists_dirty_files_and_unpushed_subjects() {
+        let root = repository();
+        let preview = archive_preview(&root).unwrap().unwrap();
+        assert!(preview.files.is_empty());
+        assert!(preview.unpushed_commits.is_empty());
+
+        fs::write(root.join("README.md"), "edited\n").unwrap();
+        fs::write(root.join("new.txt"), "untracked\n").unwrap();
+        run_git(
+            &root,
+            &["remote", "add", "origin", "https://example.com/repo.git"],
+        );
+        run_git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        run_git(&root, &["add", "new.txt"]);
+        run_git(&root, &["commit", "-m", "add new.txt"]);
+        fs::write(root.join("scratch.txt"), "scratch\n").unwrap();
+
+        let preview = archive_preview(&root).unwrap().unwrap();
+        assert!(
+            preview
+                .files
+                .iter()
+                .any(|file| file.path == "README.md" && file.status == "M"),
+            "{:?}",
+            preview.files
+        );
+        assert!(
+            preview
+                .files
+                .iter()
+                .any(|file| file.path == "scratch.txt" && file.status == "??"),
+            "{:?}",
+            preview.files
+        );
+        assert_eq!(preview.unpushed_commits, ["add new.txt"]);
+    }
+
+    #[test]
+    fn archive_preview_is_none_outside_a_repository() {
+        let root = std::env::temp_dir().join(format!("waku-preview-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(archive_preview(&root).unwrap().is_none());
     }
 
     #[test]

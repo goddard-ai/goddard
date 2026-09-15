@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
-    AgentInvocation, BranchSnapshot, CheckoutStatus, CommitSnapshot, CreatedWorktree,
+    AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitSnapshot,
+    CreatedWorktree,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -215,6 +216,12 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    /// The dirty-file list and unpushed commit subjects an archive
+    /// confirmation shows; `None` outside a work tree.
+    InspectArchivePreview {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
     GenerateCommitMessage {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -356,6 +363,10 @@ pub enum WorkspaceResult {
     /// `None` when `cwd` is not inside a Git repository.
     CheckoutStatus {
         status: Option<CheckoutStatus>,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    ArchivePreview {
+        preview: Option<ArchivePreview>,
     },
     CommitMessage {
         message: String,

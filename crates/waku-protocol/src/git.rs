@@ -58,6 +58,23 @@ pub struct CheckoutStatus {
     pub unpushed_commits: u64,
 }
 
+/// One working-tree entry as `git status --porcelain=v1` reports it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct StatusEntry {
+    /// The two-letter porcelain status, e.g. `M`, `A`, `??`.
+    pub status: String,
+    pub path: String,
+}
+
+/// Everything archiving a session's checkout would stash away: every dirty
+/// working-tree file and the subjects of the commits on HEAD that no
+/// remote-tracking ref has. Powers the archive confirmation.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct ArchivePreview {
+    pub files: Vec<StatusEntry>,
+    pub unpushed_commits: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct CommitSnapshot {
     pub branch: String,

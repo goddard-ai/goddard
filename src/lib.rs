@@ -271,6 +271,7 @@ pub fn run() {
             crate::app::init_element_inspector(cx);
             crate::app::init_file_finder(cx);
             crate::app::init_commit_dialog_keys(cx);
+            crate::app::init_archive_dialog_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
             crate::app::init_image_preview_keys(cx);
