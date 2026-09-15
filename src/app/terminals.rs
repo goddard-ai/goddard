@@ -28,18 +28,45 @@ fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// `~/…` for paths under the home directory, the absolute path otherwise.
-fn home_abbreviated_path(path: &Path) -> String {
-    let Some(home) = dirs::home_dir() else {
-        return path.display().to_string();
-    };
-    if path == home {
-        "~".to_owned()
-    } else if let Ok(rest) = path.strip_prefix(&home) {
-        format!("~/{}", rest.display())
-    } else {
-        path.display().to_string()
+/// Character budget for a row's location label before ancestors fold
+/// under `…/` — beyond it a layout-level tail clip would saw through a
+/// component's middle.
+const SIDEBAR_TERMINAL_DETAIL_MAX_CHARS: usize = 32;
+
+/// Shorten a slash-separated label by popping whole ancestors, never
+/// cutting through a component: `~/a/b/c` becomes `…/b/c`, then `…/c`.
+/// With `keep_first`, the leading component — a repository name — stays
+/// put and the popped middle folds as `repo/…/leaf` instead.
+fn truncate_path_ancestors(path: &str, max_chars: usize, keep_first: bool) -> String {
+    if path.chars().count() <= max_chars {
+        return path.to_owned();
     }
+    let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
+    if components.len() <= 1 {
+        return path.to_owned();
+    }
+    if keep_first {
+        // The leading component anchors; the `…` stands for the middle
+        // components between it and the leaf, so it needs both to exist.
+        for dropped in 2..components.len() {
+            let candidate = format!("{}/…/{}", components[0], components[dropped..].join("/"));
+            if candidate.chars().count() <= max_chars {
+                return candidate;
+            }
+        }
+        return if components.len() > 2 {
+            format!("{}/…/{}", components[0], components[components.len() - 1])
+        } else {
+            path.to_owned()
+        };
+    }
+    for dropped in 1..components.len() {
+        let candidate = format!("…/{}", components[dropped..].join("/"));
+        if candidate.chars().count() <= max_chars {
+            return candidate;
+        }
+    }
+    format!("…/{}", components[components.len() - 1])
 }
 
 impl Waku {
@@ -80,7 +107,8 @@ impl Waku {
         if self.sidebar_terminal_repo_scan_fingerprint.get() == Some(fingerprint) {
             return;
         }
-        self.sidebar_terminal_repo_scan_fingerprint.set(Some(fingerprint));
+        self.sidebar_terminal_repo_scan_fingerprint
+            .set(Some(fingerprint));
         let generation = self
             .sidebar_terminal_repo_scan_generation
             .get()
@@ -492,7 +520,9 @@ impl Waku {
                 )))
             } else {
                 match terminal.last_command_exit() {
-                    Some(0) => Some(icon("icons/check.svg", 12.0, theme.success).into_any_element()),
+                    Some(0) => {
+                        Some(icon("icons/check.svg", 12.0, theme.success).into_any_element())
+                    }
                     Some(_) => Some(icon("icons/x.svg", 12.0, theme.danger).into_any_element()),
                     None => None,
                 }
@@ -534,12 +564,24 @@ impl Waku {
                     .filter(|rel| !rel.as_os_str().is_empty())
                     .map(|rel| format!("{name}/{}", rel.display()))
                     .unwrap_or(name);
-                ("icons/folder.svg", label)
+                // The repo name anchors the label — the folded middle
+                // comes from the working directory's ancestors.
+                (
+                    "icons/folder.svg",
+                    truncate_path_ancestors(&label, SIDEBAR_TERMINAL_DETAIL_MAX_CHARS, true),
+                )
             }
             None => (
                 "icons/terminal-square.svg",
                 cwd.as_deref()
-                    .map(|cwd| format!("{shell_name} {}", home_abbreviated_path(cwd)))
+                    .map(|cwd| {
+                        let cwd =
+                            settings::abbreviate_home_path(cwd, self.home_directory.as_deref());
+                        let budget = SIDEBAR_TERMINAL_DETAIL_MAX_CHARS
+                            .saturating_sub(shell_name.chars().count() + 1);
+                        let cwd = truncate_path_ancestors(&cwd, budget, false);
+                        format!("{shell_name} {cwd}")
+                    })
                     .unwrap_or_else(|| shell_name.clone()),
             ),
         };
@@ -599,10 +641,13 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(4.0))
+                    .max_w(px(200.0))
                     .text_size(sp(12.5))
                     .text_color(theme.text_tertiary)
                     .child(icon(detail_icon, 12.5, theme.text_tertiary))
-                    .child(SharedString::from(detail)),
+                    // The char budget folds ancestors first; this clip is
+                    // only the last resort for a single oversized leaf.
+                    .child(div().min_w_0().truncate().child(SharedString::from(detail))),
             )
             .child(
                 div()
@@ -677,5 +722,57 @@ impl Waku {
             .pb(px(SIDEBAR_TERMINAL_ROW_GAP))
             .child(row)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ancestor_truncation_leaves_short_paths_alone() {
+        assert_eq!(truncate_path_ancestors("~/src", 32, false), "~/src");
+        assert_eq!(truncate_path_ancestors("waku", 4, true), "waku");
+    }
+
+    #[test]
+    fn ancestor_truncation_pops_whole_components() {
+        assert_eq!(
+            truncate_path_ancestors("~/very/long/ancestor/path", 12, false),
+            "…/path"
+        );
+        assert_eq!(
+            truncate_path_ancestors("~/very/long/ancestor/path", 16, false),
+            "…/ancestor/path"
+        );
+    }
+
+    #[test]
+    fn ancestor_truncation_keeps_the_repo_name_anchored() {
+        assert_eq!(
+            truncate_path_ancestors("repo/alpha/beta/gamma", 14, true),
+            "repo/…/gamma"
+        );
+        assert_eq!(
+            truncate_path_ancestors("repo/alpha/beta/gamma", 18, true),
+            "repo/…/beta/gamma"
+        );
+        // Two components have no ancestors to pop — nothing is faked.
+        assert_eq!(truncate_path_ancestors("repo/leaf", 4, true), "repo/leaf");
+    }
+
+    #[test]
+    fn ancestor_truncation_never_cuts_through_a_component() {
+        let truncated = truncate_path_ancestors("~/a/averyverylongleafname", 8, false);
+        assert_eq!(truncated, "…/averyverylongleafname");
+        assert!(
+            truncated.ends_with("averyverylongleafname"),
+            "the leaf stays whole even past the budget: {truncated}"
+        );
+        // A lone component has no ancestors to pop.
+        assert_eq!(
+            truncate_path_ancestors("averyverylongname", 8, false),
+            "averyverylongname"
+        );
     }
 }
