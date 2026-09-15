@@ -510,17 +510,43 @@ impl Render for Waku {
                     .children(permission)
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
-                    // Projects page docks its own composer instead.
+                    // Projects page docks its own composer instead. While the
+                    // overlay is open a spacer holds the lane at its last
+                    // measured height so the transcript's frame — and with it
+                    // the scroll anchor — does not shift.
                     .when(
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
-                            && self.projects_page.is_none()
-                            && !self.big_picture.is_open(),
+                            && self.projects_page.is_none(),
                         |element| {
-                            element
-                                .children(self.render_queued_messages(cx))
-                                .child(self.render_composer(window, cx))
-                                .child(self.render_workspace_footer(cx))
+                            if self.big_picture.is_open() {
+                                element.child(
+                                    div()
+                                        .flex_none()
+                                        .h(px(self.composer_lane_height.get())),
+                                )
+                            } else {
+                                let lane_height = self.composer_lane_height.clone();
+                                element.child(
+                                    div()
+                                        .flex_none()
+                                        .relative()
+                                        .child(
+                                            canvas(
+                                                move |bounds, _, _| {
+                                                    lane_height
+                                                        .set(f32::from(bounds.size.height))
+                                                },
+                                                |_, _, _, _| (),
+                                            )
+                                            .absolute()
+                                            .inset_0(),
+                                        )
+                                        .children(self.render_queued_messages(cx))
+                                        .child(self.render_composer(window, cx))
+                                        .child(self.render_workspace_footer(cx)),
+                                )
+                            }
                         },
                     )
                     .relative()

@@ -2001,6 +2001,12 @@ pub struct Waku {
     /// whatever happens to be painted beneath it.
     toast_selection: TranscriptSelection,
     transcript_scrollbar: Rc<ScrollbarState>,
+    /// Last measured height of the docked composer lane (queued prompts +
+    /// composer + workspace footer). Big Picture remounts the composer entity
+    /// inside its own layer; while it is open the column keeps a spacer at
+    /// this height so the transcript's frame — and its scroll position —
+    /// never moves.
+    composer_lane_height: Rc<Cell<f32>>,
     /// Every menu site in the app, keyed by a stable id. Handles are created on
     /// first use and live as long as the window.
     menus: RefCell<HashMap<SharedString, ContextMenuHandle>>,
@@ -3943,6 +3949,7 @@ impl Waku {
                 transcript_search: None,
                 toast_selection: TranscriptSelection::default(),
                 transcript_scrollbar: ScrollbarState::new(),
+                composer_lane_height: Rc::new(Cell::new(0.0)),
                 menus: RefCell::new(HashMap::new()),
                 navigation_rail: navigation_rail.clone(),
                 navigation_rail_reset_generation: Cell::new(0),
