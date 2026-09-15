@@ -152,7 +152,7 @@ impl Waku {
         );
         let right_panel = slide_width(
             &mut self.right_panel_slide,
-            if self.right_panel_visible {
+            if self.right_panel_visible || self.git_panel_visible {
                 right_panel_content
             } else {
                 0.0
@@ -346,6 +346,7 @@ impl Render for Waku {
         let commit_dialog = self.render_commit_dialog(cx);
         let archive_dialog = self.render_archive_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
+        let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
             .key_context("Waku")
@@ -355,6 +356,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_settings_action))
             .on_action(cx.listener(Self::toggle_sidebar_action))
             .on_action(cx.listener(Self::toggle_right_panel_action))
+            .on_action(cx.listener(Self::toggle_git_panel_action))
             .on_action(cx.listener(Self::toggle_command_palette_action))
             .on_action(cx.listener(Self::toggle_file_finder_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
@@ -529,9 +531,17 @@ impl Render for Waku {
                         // the pane this slot is only a spacer: the docked
                         // layout underneath never disturbs, and the pane is
                         // never mounted in two places at once.
+                        // The Git panel and the right panel are alternatives
+                        // in the same slot — the flag decides which pane is
+                        // mounted; the slot's width and slide are shared.
                         .when(!panels.panel_fullscreen, |element| {
+                            let pane = if self.git_panel_visible {
+                                self.git_panel_pane.clone()
+                            } else {
+                                self.right_panel_pane.clone()
+                            };
                             element.child(
-                                self.right_panel_pane.clone().cached(
+                                pane.cached(
                                     StyleRefinement::default()
                                         .absolute()
                                         .top_0()
@@ -573,6 +583,7 @@ impl Render for Waku {
             .children(commit_dialog)
             .children(archive_dialog)
             .children(goal_dialog)
+            .children(git_panel_overlays)
             .children(image_preview)
             .children(task_switcher)
             .children(project_switcher)

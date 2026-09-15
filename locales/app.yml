@@ -42,6 +42,8 @@ menu.toggle_sidebar:
   en: Toggle Sidebar
 menu.toggle_right_panel:
   en: Toggle Right Panel
+menu.toggle_git_panel:
+  en: Toggle Git Panel
 menu.focus_composer:
   en: Focus Composer
 menu.focus_terminal:
@@ -2149,6 +2151,8 @@ diff.source_committed:
   en: Committed
 diff.source_branch:
   en: Branch
+diff.source_commit:
+  en: Commit
 diff.loading:
   en: Loading changes…
 diff.preparing_review:
@@ -2189,6 +2193,71 @@ diff.rows_hidden_one:
   en: 1 more line · open Review to read the whole change
 diff.rows_hidden:
   en: "%{count} more lines · open Review to read the whole change"
+
+git_panel.toggle:
+  en: Toggle Git panel
+git_panel.title:
+  en: Git
+git_panel.sync_changes:
+  en: Sync changes
+git_panel.syncing_rebase:
+  en: Rebasing…
+git_panel.syncing_merge:
+  en: Merging…
+git_panel.aborting:
+  en: Aborting…
+git_panel.commit:
+  en: Commit
+git_panel.push_changes:
+  en: Push changes
+git_panel.changes:
+  en: Changes
+git_panel.staged:
+  en: Staged
+git_panel.stage:
+  en: Stage
+git_panel.unstage:
+  en: Unstage
+git_panel.commits:
+  en: Commits
+git_panel.no_commits:
+  en: No commits yet
+git_panel.unpushed:
+  en: Not pushed to upstream
+git_panel.no_commit_body:
+  en: No commit description
+git_panel.nothing_staged:
+  en: No staged changes
+git_panel.nothing_staged_description:
+  en: Staged changes are committed by default. Commit all unstaged changes instead?
+git_panel.commit_all_one:
+  en: Commit all changes (1 file)
+git_panel.commit_all:
+  en: Commit all changes (%{count} files)
+git_panel.rebase_conflict:
+  en: Rebase stopped on conflicts
+git_panel.merge_conflict:
+  en: Merge stopped on conflicts
+git_panel.conflict_description:
+  en: Pulling stopped midway through — the conflicts are still in the working tree.
+git_panel.resolve_in_chat:
+  en: Resolve in chat
+git_panel.merge_instead:
+  en: Merge instead
+git_panel.abort_rebase:
+  en: Abort rebase
+git_panel.abort_merge:
+  en: Abort merge
+git_panel.not_a_repository:
+  en: Not a Git repository
+git_panel.no_task:
+  en: Select a task to see its Git state
+git_panel.unexpected_result:
+  en: Unexpected daemon response
+git_panel.resolve_rebase_prompt:
+  en: "The `git pull --rebase` in this repository stopped on conflicts. Resolve the conflicts in the working tree and continue the rebase."
+git_panel.resolve_merge_prompt:
+  en: "The `git pull` merge in this repository stopped on conflicts. Resolve the conflicts in the working tree and complete the merge."
 
 terminal.transport_failed:
   en: Terminal transport failed

@@ -40,10 +40,10 @@ const CODEX_COMMIT_MODEL: &str = "gpt-5.6-luna";
 // `unsupported_value`, listing `none` as the lowest it accepts.
 const CODEX_COMMIT_EFFORT: &str = r#"model_reasoning_effort="none""#;
 
-struct CapturedOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(crate) struct CapturedOutput {
+    pub(crate) status: ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
 pub fn inspect(cwd: &Path) -> anyhow::Result<Snapshot> {
@@ -533,7 +533,7 @@ fn truncate_utf8(mut value: String, limit: usize) -> (String, bool) {
     (value, true)
 }
 
-fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
+pub(crate) fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
     git_success(cwd, &["rev-parse", "--git-dir"]).map(|_| ())
 }
 
@@ -573,7 +573,7 @@ fn numstat(cwd: &Path, args: &[&str]) -> anyhow::Result<(u64, u64)> {
     }))
 }
 
-fn upstream(cwd: &Path) -> anyhow::Result<Option<String>> {
+pub(crate) fn upstream(cwd: &Path) -> anyhow::Result<Option<String>> {
     git_optional_stdout(
         cwd,
         &[
@@ -585,7 +585,7 @@ fn upstream(cwd: &Path) -> anyhow::Result<Option<String>> {
     )
 }
 
-fn remote_for_branch(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
+pub(crate) fn remote_for_branch(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
     let remotes = git_stdout(cwd, &["remote"])?;
     let mut remotes = remotes.lines().filter(|remote| !remote.is_empty());
     if remotes.clone().any(|remote| remote == "origin") {
@@ -595,7 +595,7 @@ fn remote_for_branch(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>>
     Ok(remotes.next().map(str::to_owned))
 }
 
-fn push_target(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
+pub(crate) fn push_target(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
     if let Some(upstream) = upstream(cwd)? {
         return Ok(Some(upstream));
     }
@@ -615,14 +615,14 @@ fn push_target(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
     Ok(exists.status.success().then_some(target))
 }
 
-fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+pub(crate) fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = git_success(cwd, args)?;
     Ok(String::from_utf8_lossy(&output.stdout)
         .trim_end()
         .to_owned())
 }
 
-fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
+pub(crate) fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
     let output = git_capture(cwd, args)?;
     if output.status.success() {
         return Ok(Some(
@@ -635,7 +635,7 @@ fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<Strin
     bail!("Git command failed: {}", command_error(&output))
 }
 
-fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
+pub(crate) fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
     let output = git_capture(cwd, args)?;
     if output.status.success() {
         Ok(output)
@@ -644,7 +644,7 @@ fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
     }
 }
 
-fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
+pub(crate) fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
     let mut command = crate::command_env::command("git");
     command
         .args(args)
@@ -712,7 +712,7 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> Vec<u8> {
     kept
 }
 
-fn command_error(output: &CapturedOutput) -> String {
+pub(crate) fn command_error(output: &CapturedOutput) -> String {
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     let stderr = stderr.trim();
     if stderr.is_empty() {

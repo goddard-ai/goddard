@@ -20,6 +20,7 @@ menu.select_all: すべてを選択
 menu.view: 表示
 menu.command_palette: コマンドパレット…
 menu.toggle_sidebar: サイドバーの表示を切り替える
+menu.toggle_git_panel: Git パネルの表示を切り替える
 menu.toggle_right_panel: 右パネルの表示を切り替える
 menu.focus_composer: 入力欄にフォーカスを移動
 menu.focus_terminal: ターミナルにフォーカスを移動
@@ -1089,6 +1090,7 @@ diff.source_uncommitted: 未コミット
 diff.source_unstaged: 未ステージ
 diff.source_staged: ステージ済み
 diff.source_committed: コミット済み
+diff.source_commit: コミット
 diff.source_branch: ブランチ
 diff.loading: 変更を読み込み中…
 diff.preparing_review: レビューを準備中…
@@ -1307,3 +1309,36 @@ usage_error.curl_did_not_finish: curl がリクエストを完了しませんで
 usage_error.curl_failed: "curl に失敗しました：%{error}"
 usage_error.unknown_error: 不明なエラー
 usage_error.curl_no_status: curl から HTTP ステータス行が返されませんでした
+
+git_panel.toggle: Git パネルの表示を切り替える
+git_panel.title: Git
+git_panel.sync_changes: 変更を同期
+git_panel.syncing_rebase: リベース中…
+git_panel.syncing_merge: マージ中…
+git_panel.aborting: 中止中…
+git_panel.commit: コミット
+git_panel.push_changes: 変更をプッシュ
+git_panel.changes: 変更
+git_panel.staged: ステージ済み
+git_panel.stage: ステージ
+git_panel.unstage: ステージ解除
+git_panel.commits: コミット
+git_panel.no_commits: コミットはまだありません
+git_panel.unpushed: 上流にプッシュされていません
+git_panel.no_commit_body: コミットの説明なし
+git_panel.nothing_staged: ステージ済みの変更がありません
+git_panel.nothing_staged_description: 既定ではステージ済みの変更のみコミットします。代わりに未ステージの変更をすべてコミットしますか？
+git_panel.commit_all_one: すべての変更をコミット（1 ファイル）
+git_panel.commit_all: すべての変更をコミット（%{count} ファイル）
+git_panel.rebase_conflict: 競合のためリベースが停止しました
+git_panel.merge_conflict: 競合のためマージが停止しました
+git_panel.conflict_description: プルが途中で停止しました — 競合は作業ツリーに残っています。
+git_panel.resolve_in_chat: チャットで解決
+git_panel.merge_instead: 代わりにマージ
+git_panel.abort_rebase: リベースを中止
+git_panel.abort_merge: マージを中止
+git_panel.no_task: タスクを選択すると Git の状態が表示されます
+git_panel.not_a_repository: Git リポジトリではありません
+git_panel.unexpected_result: デーモンから予期しない応答がありました
+git_panel.resolve_rebase_prompt: このリポジトリでの `git pull --rebase` が競合で停止しました。作業ツリーの競合を解決してリベースを続行してください。
+git_panel.resolve_merge_prompt: このリポジトリでの `git pull` マージが競合で停止しました。作業ツリーの競合を解決してマージを完了してください。

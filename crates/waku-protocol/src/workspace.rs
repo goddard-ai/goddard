@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
-    AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitSnapshot,
-    CreatedWorktree,
+    AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot,
+    CreatedWorktree, GitPanelSnapshot, PullOutcome, PullStrategy,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -24,6 +24,9 @@ pub enum ReviewDiffSource {
     Staged,
     Committed,
     Branch,
+    /// Marks a `CommitDiff` result's data; `CollectReviewDiff` never receives
+    /// it because a commit diff comes from `git show`, not a range diff.
+    Commit,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -380,6 +383,59 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    /// The Git panel's one-pass working-tree read: branch, upstream counts,
+    /// and both change lists. `None` outside a work tree.
+    InspectGitPanel {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    StageFile {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+    },
+    UnstageFile {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+    },
+    /// Integrate upstream changes (`git pull --rebase` or `--no-rebase`).
+    /// Conflict means an integration is still in progress; `AbortSync` or
+    /// the agent has to resolve it before anything else can commit.
+    PullUpstream {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        strategy: PullStrategy,
+    },
+    /// Abort whichever integration is mid-flight (`rebase --abort` or
+    /// `merge --abort`). No-op when none is.
+    AbortSync {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// `git log` for HEAD, paged: `skip` leading entries are skipped and at
+    /// most `limit` are returned.
+    ListCommits {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        skip: usize,
+        limit: usize,
+    },
+    /// One file's working-tree diff for the Git panel's hover preview.
+    /// `staged` selects `--cached`; an unstaged path with no index entry is
+    /// diffed as a new file.
+    FileDiff {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+        staged: bool,
+    },
+    /// One commit's diff (`git show`) for the Git panel's diff modal.
+    CommitDiff {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        sha: String,
+    },
     CaptureTurnStart {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -548,6 +604,16 @@ pub enum WorkspaceResult {
     },
     CommitMessage {
         message: String,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    GitPanel {
+        snapshot: Option<GitPanelSnapshot>,
+    },
+    Pull {
+        outcome: PullOutcome,
+    },
+    Commits {
+        entries: Vec<CommitEntry>,
     },
     Checkpoint {
         checkpoint: Checkpoint,

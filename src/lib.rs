@@ -74,6 +74,7 @@ actions!(
         CheckForUpdates,
         ToggleSidebar,
         ToggleRightPanel,
+        ToggleGitPanel,
         ToggleCommandPalette,
         ToggleFileFinder,
         OpenResumePicker,
@@ -274,6 +275,7 @@ pub fn run() {
             crate::app::init_element_inspector(cx);
             crate::app::init_file_finder(cx);
             crate::app::init_commit_dialog_keys(cx);
+            crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
@@ -733,6 +735,7 @@ pub(crate) fn set_app_menus(cx: &mut App, updater_available: bool) {
                 MenuItem::separator(),
                 MenuItem::action(tr!("menu.toggle_sidebar"), ToggleSidebar),
                 MenuItem::action(tr!("menu.toggle_right_panel"), ToggleRightPanel),
+                MenuItem::action(tr!("menu.toggle_git_panel"), ToggleGitPanel),
                 MenuItem::action(tr!("menu.focus_composer"), FocusComposer),
                 MenuItem::action(tr!("menu.focus_terminal"), FocusTerminal),
                 MenuItem::action(tr!("menu.toggle_model_picker"), ToggleModelPicker),

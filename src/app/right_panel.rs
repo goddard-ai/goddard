@@ -1879,6 +1879,10 @@ impl Waku {
         self.fullscreen_surface = None;
         self.panel_fullscreen_slide = None;
         self.right_panel_visible = state.visible;
+        if state.visible {
+            // A restored-visible panel wins the slot back from the Git panel.
+            self.close_git_panel_state();
+        }
         self.right_panel_surfaces = state.surfaces;
         self.right_panel_active_surface = state.active_surface;
         self.right_panel_last_focused_terminal = state.last_focused_terminal;
@@ -2211,6 +2215,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The Git panel has no tabs; ⌘W on it just gives the slot back.
+        if self.git_panel_visible {
+            self.set_git_panel_visible(false, window, cx);
+            return;
+        }
         if let Some(active) = self.right_panel_active_surface {
             self.close_right_panel_surface(active, cx);
             if self.right_panel_surfaces.is_empty() {
@@ -2995,13 +3004,14 @@ impl Waku {
         }
 
         self.window_drag_region(
-            header.child(self.render_right_panel_toggle(cx)).children(
-                self.render_client_window_controls(
+            header
+                .child(self.render_git_panel_toggle(cx))
+                .child(self.render_right_panel_toggle(cx))
+                .children(self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,
                     window,
                     cx,
-                ),
-            ),
+                )),
             cx,
         )
     }
@@ -5012,6 +5022,7 @@ impl Waku {
             ReviewDiffSource::Staged => tr!("diff.source_staged"),
             ReviewDiffSource::Committed => tr!("diff.source_committed"),
             ReviewDiffSource::Branch => tr!("diff.source_branch"),
+            ReviewDiffSource::Commit => tr!("diff.source_commit"),
         }
     }
 
@@ -5127,10 +5138,18 @@ impl Waku {
                         } else {
                             waku.right_panel_diff_expanded_paths = directories;
                         }
-                        waku.right_panel_diff_selected_file = selected_path
+                        // A file row sent over from the Git panel wins the
+                        // selection over the previously selected path.
+                        let pending_path = waku.right_panel_pending_diff_file.take();
+                        waku.right_panel_diff_selected_file = pending_path
                             .as_deref()
                             .and_then(|path| {
                                 snapshot.files.iter().position(|file| file.path == path)
+                            })
+                            .or_else(|| {
+                                selected_path.as_deref().and_then(|path| {
+                                    snapshot.files.iter().position(|file| file.path == path)
+                                })
                             })
                             .or_else(|| (!snapshot.files.is_empty()).then_some(0));
                         let line_count = snapshot.lines.len();
@@ -5138,6 +5157,11 @@ impl Waku {
                         waku.right_panel_diff_error = None;
                         waku.right_panel_diff_list_state.reset(line_count);
                         waku.sync_right_panel_diff_tree_rows(cx);
+                        if pending_path.is_some()
+                            && let Some(index) = waku.right_panel_diff_selected_file
+                        {
+                            waku.select_right_panel_diff_file(index, cx);
+                        }
                     }
                     Err(error) => {
                         let message = error.to_string();
@@ -5216,7 +5240,11 @@ impl Waku {
         cx.notify();
     }
 
-    fn select_right_panel_diff_file(&mut self, file_index: usize, cx: &mut Context<Self>) {
+    pub(super) fn select_right_panel_diff_file(
+        &mut self,
+        file_index: usize,
+        cx: &mut Context<Self>,
+    ) {
         self.right_panel_diff_selected_file = Some(file_index);
         if let Some(line) = self
             .right_panel_diff_snapshot

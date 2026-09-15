@@ -3267,7 +3267,7 @@ pub(super) fn changed_files_diff_file_lines(
 /// at half of that — plus the overlap the anchor gap buys back — always
 /// leaves one side with room, and the body scrolls past the cap exactly like
 /// it does past `CHANGED_FILES_DIFF_MAX_HEIGHT`.
-fn changed_files_diff_body_max_height(window: &Window) -> Pixels {
+pub(super) fn changed_files_diff_body_max_height(window: &Window) -> Pixels {
     let margin =
         CHANGED_FILES_DIFF_FLOATING_MARGIN + f32::from(window.client_inset().unwrap_or(px(0.0)));
     let usable = (f32::from(window.viewport_size().height) - margin * 2.0).max(0.0);
@@ -3280,7 +3280,7 @@ fn changed_files_diff_body_max_height(window: &Window) -> Pixels {
 }
 
 /// A centered one-line state inside the changed-files preview card.
-fn changed_files_diff_message(label: String, theme: &Theme) -> AnyElement {
+pub(super) fn changed_files_diff_message(label: String, theme: &Theme) -> AnyElement {
     div()
         .w_full()
         .h(px(72.0))
@@ -3294,7 +3294,7 @@ fn changed_files_diff_message(label: String, theme: &Theme) -> AnyElement {
 }
 
 /// The separator between two hunks of the same file.
-fn activity_diff_break_row(
+pub(super) fn activity_diff_break_row(
     label: Option<String>,
     code_family: SharedString,
     theme: &Theme,

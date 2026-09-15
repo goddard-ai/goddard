@@ -20,6 +20,7 @@ menu.select_all: 全选
 menu.view: 显示
 menu.command_palette: 命令面板…
 menu.toggle_sidebar: 显示或隐藏侧边栏
+menu.toggle_git_panel: 显示或隐藏 Git 面板
 menu.toggle_right_panel: 显示或隐藏右侧面板
 menu.focus_composer: 将焦点移到输入框
 menu.focus_terminal: 将焦点移到终端
@@ -1048,6 +1049,7 @@ diff.source_uncommitted: 未提交
 diff.source_unstaged: 未暂存
 diff.source_staged: 已暂存
 diff.source_committed: 已提交
+diff.source_commit: 提交
 diff.source_branch: 分支
 diff.loading: 正在加载更改…
 diff.preparing_review: 正在准备审阅…
@@ -1257,3 +1259,36 @@ usage_error.curl_did_not_finish: curl 未能完成请求
 usage_error.curl_failed: "curl 失败：%{error}"
 usage_error.unknown_error: 未知错误
 usage_error.curl_no_status: curl 未返回 HTTP 状态行
+
+git_panel.toggle: 显示或隐藏 Git 面板
+git_panel.title: Git
+git_panel.sync_changes: 同步更改
+git_panel.syncing_rebase: 正在变基…
+git_panel.syncing_merge: 正在合并…
+git_panel.aborting: 正在中止…
+git_panel.commit: 提交
+git_panel.push_changes: 推送更改
+git_panel.changes: 更改
+git_panel.staged: 已暂存
+git_panel.stage: 暂存
+git_panel.unstage: 取消暂存
+git_panel.commits: 提交记录
+git_panel.no_commits: 暂无提交
+git_panel.unpushed: 尚未推送到上游
+git_panel.no_commit_body: 无提交描述
+git_panel.nothing_staged: 没有已暂存的更改
+git_panel.nothing_staged_description: 默认仅提交已暂存的更改。是否改为提交所有未暂存的更改？
+git_panel.commit_all_one: 提交所有更改（1 个文件）
+git_panel.commit_all: 提交所有更改（%{count} 个文件）
+git_panel.rebase_conflict: 变基因冲突而停止
+git_panel.merge_conflict: 合并因冲突而停止
+git_panel.conflict_description: 拉取中途停止——冲突仍留在工作区中。
+git_panel.resolve_in_chat: 在对话中解决
+git_panel.merge_instead: 改为合并
+git_panel.abort_rebase: 中止变基
+git_panel.abort_merge: 中止合并
+git_panel.no_task: 选择一个任务以查看其 Git 状态
+git_panel.not_a_repository: 不是 Git 仓库
+git_panel.unexpected_result: 守护进程返回了意外的结果
+git_panel.resolve_rebase_prompt: 此仓库中的 `git pull --rebase` 因冲突而停止。请解决工作区中的冲突并继续变基。
+git_panel.resolve_merge_prompt: 此仓库中的 `git pull` 合并因冲突而停止。请解决工作区中的冲突并完成合并。

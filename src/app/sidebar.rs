@@ -3360,7 +3360,7 @@ impl Waku {
                 )
             })
             .flatten();
-        let right_window_controls = (!self.right_panel_visible)
+        let right_window_controls = (!self.right_panel_slot_visible())
             .then(|| {
                 self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,
@@ -3475,11 +3475,12 @@ impl Waku {
                 ),
             )
             .child(self.render_background_work_summary(cx))
-            .when(!self.right_panel_visible, |element| {
+            .when(!self.right_panel_slot_visible(), |element| {
                 element
                     .when(self.fps_counter_visible, |element| {
                         element.child(self.render_fps_counter(cx))
                     })
+                    .child(self.render_git_panel_toggle(cx))
                     .child(self.render_right_panel_toggle(cx))
             })
             .children(right_window_controls)

@@ -33,6 +33,9 @@ pub enum Source {
     Staged,
     Committed,
     Branch,
+    /// A single commit's `git show` diff — only ever produced by the
+    /// `CommitDiff` operation, never collected as a range.
+    Commit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -345,6 +348,7 @@ pub fn wire_source(source: Source) -> waku_client::workspace::ReviewDiffSource {
         Source::Staged => waku_client::workspace::ReviewDiffSource::Staged,
         Source::Committed => waku_client::workspace::ReviewDiffSource::Committed,
         Source::Branch => waku_client::workspace::ReviewDiffSource::Branch,
+        Source::Commit => waku_client::workspace::ReviewDiffSource::Commit,
     }
 }
 

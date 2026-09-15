@@ -307,6 +307,8 @@ impl Waku {
             self.sync_user_input_answer(cx);
             self.restore_right_panel_state(session_id, cx);
             self.restore_missing_worktree(session_id, cx);
+            // An open Git panel follows the newly selected session's checkout.
+            self.sync_git_panel_workspace(cx);
         } else {
             self.ensure_right_panel_terminals(cx);
         }
@@ -366,6 +368,10 @@ impl Waku {
             .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
+        // The panel's working-tree snapshot moved with the same moments.
+        if self.git_panel.is_some() {
+            self.refresh_git_panel(cx);
+        }
     }
 
     pub(super) fn create_session_for(
@@ -994,6 +1000,9 @@ impl Waku {
     pub(super) fn set_right_panel_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         if visible {
             self.request_active_terminal_focus();
+            // The Git panel shares this slot: opening the right panel
+            // dismisses it without touching its width or slide.
+            self.close_git_panel_state();
         } else {
             self.right_panel_pending_terminal_focus = None;
         }
@@ -1013,6 +1022,7 @@ impl Waku {
     pub(super) fn persist_panel_layout(&mut self) {
         self.state.sidebar_visible = self.sidebar_visible;
         self.state.right_panel_visible = self.right_panel_visible;
+        self.state.git_panel_visible = self.git_panel_visible;
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;
         self.save();
@@ -1055,7 +1065,7 @@ impl Waku {
         fitted_panel_widths(
             f32::from(window.viewport_size().width),
             self.sidebar_visible || self.sidebar_slide.is_some(),
-            self.right_panel_visible || self.right_panel_slide.is_some(),
+            self.right_panel_visible || self.git_panel_visible || self.right_panel_slide.is_some(),
             self.sidebar_width,
             self.right_panel_width,
         )

@@ -80,9 +80,9 @@ use crate::{
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
     ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
-    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
-    ToggleWorkspace,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleModelPicker,
+    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
+    ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1569,6 +1569,32 @@ pub struct Waku {
     sidebar_width: f32,
     right_panel_visible: bool,
     right_panel_width: f32,
+    /// The Git panel shares the right panel's slot and never shows with it:
+    /// opening one dismisses the other. See `git_panel.rs`.
+    git_panel_visible: bool,
+    git_panel: Option<git_panel::GitPanelState>,
+    /// The commit/push/sync the panel's action button is running, if any.
+    git_panel_operation: Option<git_panel::GitPanelOperation>,
+    /// Guards snapshot/commit fetches against superseded panel state.
+    git_panel_generation: u64,
+    /// Per-file hover previews, keyed by path and section. A partially staged
+    /// file caches its staged and unstaged previews separately.
+    git_panel_file_diffs: HashMap<(String, bool), git_panel::GitPanelFileDiff>,
+    git_panel_hover: Option<git_panel::GitPanelDiffHover>,
+    git_panel_hover_generation: u64,
+    git_panel_commit_hover: Option<git_panel::GitPanelCommitHover>,
+    git_panel_commit_hover_generation: u64,
+    /// The conflicted-sync modal: which integration is stopped mid-flight.
+    git_panel_sync_conflict: Option<waku_client::git::SyncInProgress>,
+    /// The "nothing staged" prompt's open flag.
+    git_panel_unstaged_prompt: bool,
+    /// The commit-diff modal, when a commit row is open.
+    git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
+    /// Focus target the Git panel's modals share — only one is ever open.
+    git_panel_modal_focus: FocusHandle,
+    /// A Git panel file row sent to the Review surface; applied to the
+    /// surface's next snapshot landing.
+    right_panel_pending_diff_file: Option<String>,
     /// The show/hide slide each panel is in the middle of, if any. Driven by
     /// hand from `render` (see [`motion::WidthTween`]) because the width these
     /// produce is what the transcript column between them is laid out against.
@@ -1939,6 +1965,7 @@ pub struct Waku {
     sidebar_pane: Entity<WakuPane>,
     transcript_pane: Entity<WakuPane>,
     right_panel_pane: Entity<WakuPane>,
+    git_panel_pane: Entity<WakuPane>,
     /// The unix second the pending time-label wake-up targets, or `None` when
     /// none is armed. See `schedule_time_label_wake`.
     time_label_wake: Cell<Option<u64>>,
@@ -1964,6 +1991,7 @@ mod drafts;
 mod element_inspector;
 mod file_finder;
 mod file_search;
+mod git_panel;
 mod github;
 mod goal_dialog;
 mod image_preview;
@@ -1997,6 +2025,7 @@ pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
 pub use element_inspector::init as init_element_inspector;
 pub use file_finder::init as init_file_finder;
+pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
@@ -2663,6 +2692,7 @@ impl Waku {
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);
         let right_panel_pane = WakuPane::new(Waku::right_panel_pane_content, cx);
+        let git_panel_pane = WakuPane::new(Waku::git_panel_pane_content, cx);
         let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
@@ -2677,6 +2707,7 @@ impl Waku {
             });
         let sidebar_visible = state.sidebar_visible;
         let right_panel_visible = state.right_panel_visible;
+        let git_panel_visible = state.git_panel_visible && !right_panel_visible;
         let sidebar_width = sanitize_panel_width(
             state.sidebar_width,
             DEFAULT_SIDEBAR_WIDTH,
@@ -3610,17 +3641,31 @@ impl Waku {
                 sidebar_width,
                 right_panel_visible,
                 right_panel_width,
+                git_panel_visible,
+                git_panel: None,
+                git_panel_operation: None,
+                git_panel_generation: 0,
+                git_panel_file_diffs: HashMap::new(),
+                git_panel_hover: None,
+                git_panel_hover_generation: 0,
+                git_panel_commit_hover: None,
+                git_panel_commit_hover_generation: 0,
+                git_panel_sync_conflict: None,
+                git_panel_unstaged_prompt: false,
+                git_panel_commit_diff: None,
+                git_panel_modal_focus: cx.focus_handle(),
+                right_panel_pending_diff_file: None,
                 sidebar_slide: None,
                 right_panel_slide: None,
                 sidebar_rendered_width: if sidebar_visible { sidebar_width } else { 0.0 },
-                right_panel_rendered_width: if right_panel_visible {
+                right_panel_rendered_width: if right_panel_visible || git_panel_visible {
                     right_panel_width
                 } else {
                     0.0
                 },
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
-                panel_fullscreen_rendered_width: if right_panel_visible {
+                panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {
                     right_panel_width
                 } else {
                     0.0
@@ -3796,6 +3841,7 @@ impl Waku {
                 sidebar_pane: sidebar_pane.clone(),
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
+                git_panel_pane: git_panel_pane.clone(),
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
                 fps_last_frame: Instant::now(),
@@ -3804,7 +3850,12 @@ impl Waku {
             }
         });
         navigation_rail.update(cx, |rail, _| rail.set_waku(entity.downgrade()));
-        for pane in [&sidebar_pane, &transcript_pane, &right_panel_pane] {
+        for pane in [
+            &sidebar_pane,
+            &transcript_pane,
+            &right_panel_pane,
+            &git_panel_pane,
+        ] {
             pane.update(cx, |pane, cx| pane.bind(&entity, cx));
         }
         let initial_row_count = entity.read(cx).transcript_row_count();

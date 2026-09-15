@@ -169,6 +169,33 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::git_commit::push(&cwd)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::InspectGitPanel { cwd } => WorkspaceResult::GitPanel {
+            snapshot: crate::git_panel::inspect(&cwd)?,
+        },
+        WorkspaceOperation::StageFile { cwd, path } => {
+            crate::git_panel::stage(&cwd, &path)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::UnstageFile { cwd, path } => {
+            crate::git_panel::unstage(&cwd, &path)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::PullUpstream { cwd, strategy } => WorkspaceResult::Pull {
+            outcome: crate::git_panel::pull(&cwd, strategy)?,
+        },
+        WorkspaceOperation::AbortSync { cwd } => {
+            crate::git_panel::abort_sync(&cwd)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::ListCommits { cwd, skip, limit } => WorkspaceResult::Commits {
+            entries: crate::git_panel::commits(&cwd, skip, limit)?,
+        },
+        WorkspaceOperation::FileDiff { cwd, path, staged } => WorkspaceResult::ReviewDiff {
+            data: file_diff(&cwd, &path, staged)?,
+        },
+        WorkspaceOperation::CommitDiff { cwd, sha } => WorkspaceResult::ReviewDiff {
+            data: commit_diff(&cwd, &sha)?,
+        },
         WorkspaceOperation::CaptureTurnStart {
             cwd,
             session_id,
@@ -374,6 +401,96 @@ fn collect_review_diff(cwd: &Path, source: ReviewDiffSource) -> anyhow::Result<R
     })
 }
 
+/// The Git panel's per-file hover preview: the file's staged (`--cached`) or
+/// unstaged diff, capped the same way `collect_review_diff` caps its patch.
+/// An unstaged path with no index entry is an untracked file and diffs as a
+/// new file through `--no-index`.
+fn file_diff(cwd: &Path, path: &str, staged: bool) -> anyhow::Result<ReviewDiffData> {
+    ensure_repository(cwd)?;
+    let source = if staged {
+        ReviewDiffSource::Staged
+    } else {
+        ReviewDiffSource::Unstaged
+    };
+    let tracked = staged || !git(cwd, ["ls-files", "-z", "--", path])?.is_empty();
+    // Tracked: `git diff [--cached] -- path`. Untracked: the file versus
+    // `/dev/null`, which `diff --no-index` reports as a new-file patch.
+    let diff_args = |mode: &'static str| -> Vec<&str> {
+        if tracked {
+            let mut args = vec![mode];
+            if staged {
+                args.push("--cached");
+            }
+            args.extend(["--", path]);
+            args
+        } else {
+            vec![mode, "--no-index", "/dev/null", path]
+        }
+    };
+    let numstat = file_diff_output(cwd, &diff_args("--numstat"), !tracked)?;
+    let hydrated = file_diff_output(cwd, &diff_args("--unified=2147483647"), !tracked)?;
+    let (patch, complete_context) = if hydrated.len() <= MAX_HYDRATED_PATCH_BYTES {
+        (hydrated, true)
+    } else {
+        (
+            file_diff_output(cwd, &diff_args("--unified=3"), !tracked)?,
+            false,
+        )
+    };
+    Ok(ReviewDiffData {
+        source,
+        numstat,
+        patch,
+        complete_context,
+    })
+}
+
+/// One commit's diff for the Git panel's modal: the commit against its first
+/// parent, or the empty tree for a root commit. A merge reads as the delta
+/// the merge brought in.
+fn commit_diff(cwd: &Path, sha: &str) -> anyhow::Result<ReviewDiffData> {
+    ensure_repository(cwd)?;
+    let to = resolve(cwd, sha).ok_or_else(|| anyhow!("unknown commit {sha}"))?;
+    let from = resolve(cwd, &format!("{sha}^")).unwrap_or_else(|| EMPTY_TREE.to_owned());
+    let range = DiffRange { from, to };
+    let numstat = diff_output(cwd, &range, &["--numstat"])?;
+    let hydrated = diff_output(cwd, &range, &["--unified=2147483647"])?;
+    let (patch, complete_context) = if hydrated.len() <= MAX_HYDRATED_PATCH_BYTES {
+        (hydrated, true)
+    } else {
+        (diff_output(cwd, &range, &["--unified=3"])?, false)
+    };
+    Ok(ReviewDiffData {
+        source: ReviewDiffSource::Commit,
+        numstat,
+        patch,
+        complete_context,
+    })
+}
+
+/// `git diff` output for a single path. `no_index` runs the
+/// `/dev/null`-vs-file form, where exit status 1 still means success (the
+/// files differed).
+fn file_diff_output(cwd: &Path, args: &[&str], no_index: bool) -> anyhow::Result<String> {
+    let output = crate::command_env::plain_command("git")
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--no-ext-diff",
+            "--no-color",
+        ])
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .context("failed to generate Git diff")?;
+    if output.status.success() || (no_index && output.status.code() == Some(1)) {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        bail!("{}", command_error(&output))
+    }
+}
+
 fn resolve_diff_range(cwd: &Path, source: ReviewDiffSource) -> anyhow::Result<DiffRange> {
     let head = resolve(cwd, "HEAD").unwrap_or_else(|| EMPTY_TREE.to_owned());
     Ok(match source {
@@ -418,6 +535,9 @@ fn resolve_diff_range(cwd: &Path, source: ReviewDiffSource) -> anyhow::Result<Di
             from: branch_base(cwd)?,
             to: crate::checkpoint::capture_worktree_commit(cwd)?,
         },
+        ReviewDiffSource::Commit => {
+            bail!("commit diffs are collected by the CommitDiff operation")
+        }
     })
 }
 

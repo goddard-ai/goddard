@@ -465,6 +465,8 @@ struct AppState {
     sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
     right_panel_visible: bool,
+    #[serde(default)]
+    git_panel_visible: bool,
     #[serde(default = "default_sidebar_width")]
     sidebar_width: f32,
     #[serde(default)]
@@ -569,6 +571,9 @@ pub struct PersistedState {
     pub sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
     pub right_panel_visible: bool,
+    /// The Git panel shares the right panel's slot; both are never visible.
+    #[serde(default)]
+    pub git_panel_visible: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f32,
     #[serde(default)]
@@ -662,6 +667,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
+            git_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
@@ -869,6 +875,7 @@ impl PersistedState {
             project_workspaces: self.project_workspaces.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
+            git_panel_visible: self.git_panel_visible,
             sidebar_width: self.sidebar_width,
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
@@ -922,6 +929,7 @@ impl PersistedState {
         self.project_workspaces = app_state.project_workspaces;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
+        self.git_panel_visible = app_state.git_panel_visible;
         self.sidebar_width = app_state.sidebar_width;
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;

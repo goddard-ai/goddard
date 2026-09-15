@@ -75,6 +75,74 @@ pub struct ArchivePreview {
     pub unpushed_commits: Vec<String>,
 }
 
+/// One file with uncommitted changes in the Git panel's staged or unstaged
+/// section. A partially staged file appears in both lists, once per section.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct GitFileChange {
+    pub path: String,
+    /// The section's porcelain letter for this file (`M`, `A`, `D`, `R`,
+    /// `??`), so the UI can distinguish an add from a delete without
+    /// re-parsing the diff.
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    /// Listed under `unstaged` via `??`. Untracked files have no index entry,
+    /// so `additions`/`deletions` stay zero and their diff preview is
+    /// synthesized per file.
+    pub untracked: bool,
+}
+
+/// The Git panel's working-tree state: branch, upstream relationship, and
+/// both change lists in one pass.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct GitPanelSnapshot {
+    /// Current branch name, or the short HEAD when detached.
+    pub branch: String,
+    /// `None` for a detached HEAD or a branch with no upstream configured.
+    pub upstream: Option<UpstreamStatus>,
+    /// A remote the branch could publish to exists — the same condition the
+    /// commit dialog's push affordance uses.
+    pub can_push: bool,
+    pub staged: Vec<GitFileChange>,
+    pub unstaged: Vec<GitFileChange>,
+}
+
+/// One `git log` entry for the panel's commit list.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct CommitEntry {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+    /// Message body past the subject; empty when the commit has none.
+    pub body: String,
+}
+
+/// How `PullUpstream` integrates upstream commits.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PullStrategy {
+    Rebase,
+    Merge,
+}
+
+/// Which integration left the checkout conflicted — decides whether abort
+/// runs `git rebase --abort` or `git merge --abort`.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncInProgress {
+    Rebase,
+    Merge,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PullOutcome {
+    /// The pull applied cleanly; the checkout is caught up.
+    Clean,
+    /// The pull stopped on conflicts and an integration is still in progress.
+    Conflict { in_progress: SyncInProgress },
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct CommitSnapshot {
     pub branch: String,
