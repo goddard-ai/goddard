@@ -98,6 +98,15 @@ const RUNTIME_MODE_MENU_ID: &str = "runtime-mode";
 const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
 const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
+/// The left-edge hover strip that reveals the peek sidebar while the docked
+/// one is closed.
+const SIDEBAR_PEEK_STRIP: f32 = 30.0;
+/// The peek overlay sits a touch wider than the docked sidebar.
+const SIDEBAR_PEEK_WIDTH_FACTOR: f32 = 1.15;
+/// The peek nudge: the overlay appears and vanishes without fading, only
+/// drifting these few px into place on reveal and back out before unmount.
+const SIDEBAR_PEEK_NUDGE: f32 = 8.0;
+const SIDEBAR_PEEK_SLIDE: Duration = Duration::from_millis(150);
 const UPDATER_BUTTON_COLLAPSED_WIDTH: f32 = 20.0;
 const UPDATER_BUTTON_EXPANDED_WIDTH: f32 = 58.0;
 const RIGHT_PANEL_MIN_WIDTH: f32 = 280.0;
@@ -653,6 +662,19 @@ enum RightPanelSurface {
     Files,
     Diff,
     File(String),
+}
+
+/// The closed sidebar's left-edge hover peek: the real sidebar pane mounted
+/// as an overlay that takes no space in the layout, nudged in on reveal and
+/// back out just before it unmounts. Scroll offset and all sidebar state
+/// live on [`Waku`], so the overlay and the docked panel never drift apart.
+#[derive(Clone, Copy)]
+enum SidebarPeek {
+    Hidden,
+    /// On screen; `entered` drives the nudge-in.
+    Shown { entered: Instant },
+    /// Hover lost; the nudge-out runs and the overlay unmounts at its end.
+    Exiting { started: Instant },
 }
 
 /// A turn whose checkpoint still has to be captured.
@@ -1615,6 +1637,8 @@ pub struct Waku {
     /// while one is running.
     sidebar_rendered_width: f32,
     right_panel_rendered_width: f32,
+    /// The closed sidebar's hover-peek overlay — see [`SidebarPeek`].
+    sidebar_peek: SidebarPeek,
     /// The right-panel surface currently maximized over the window, if any —
     /// runtime-only; the docked layout it covers comes back exactly as it
     /// was. The path of the file shown at entry rides alongside so a
@@ -3758,6 +3782,7 @@ impl Waku {
                 } else {
                     0.0
                 },
+                sidebar_peek: SidebarPeek::Hidden,
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {
