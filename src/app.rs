@@ -101,7 +101,7 @@ const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 /// The left-edge hover strip that reveals the peek sidebar while the docked
 /// one is closed.
-const SIDEBAR_PEEK_STRIP: f32 = 30.0;
+const SIDEBAR_PEEK_STRIP: f32 = 5.0;
 /// The peek overlay sits a touch wider than the docked sidebar.
 const SIDEBAR_PEEK_WIDTH_FACTOR: f32 = 1.15;
 /// The peek nudge: the overlay appears and vanishes without fading, only
