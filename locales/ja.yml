@@ -406,6 +406,8 @@ github.refresh: 更新
 github.back_to_list: 一覧に戻る
 github.open_repo: GitHub でリポジトリを開く
 github.open_external: GitHub で開く
+github.start_task: タスクを開始
+github.fix_checks: 失敗したチェックを修正
 github.resolving_repo: リポジトリを解決中…
 github.install_gh: このリポジトリを見るには GitHub CLI をインストールしてください
 github.auth_gh: "`gh auth login` を実行するとこのリポジトリを見られます"

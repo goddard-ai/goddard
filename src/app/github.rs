@@ -352,6 +352,28 @@ impl Waku {
         }
     }
 
+    /// "Start a task" / "Fix failing checks": hand the item to a draft
+    /// session. `create_session_for` selects the project's draft (creating
+    /// one when absent), which returns the main area to the transcript; the
+    /// composer then gets the prompt — but only into an empty draft, so a
+    /// user's in-progress text is never overwritten.
+    pub(super) fn github_start_task(
+        &mut self,
+        project_id: Uuid,
+        prompt: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.create_session_for(project_id, self.state.last_provider, cx);
+        if self.composer.read(cx).content(cx).trim().is_empty() {
+            self.composer
+                .update(cx, |input, cx| input.set_content(prompt, cx));
+            self.schedule_composer_draft_save(cx);
+        }
+        let focus = self.composer.read(cx).focus();
+        window.focus(&focus, cx);
+    }
+
     /// Move the open detail to the previous/next row in the current filtered
     /// list, wrapping past the ends.
     pub(super) fn github_detail_navigate(
@@ -931,51 +953,61 @@ impl Waku {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
 
-        let (title, url, state_icon, state_color, state_label, author, meta, body, comments) =
-            match content {
-                GitHubItemDetail::PullRequest(pr) => {
-                    let summary = &pr.summary;
-                    (
-                        summary.title.clone(),
-                        summary.url.clone(),
-                        sidebar::sidebar_pull_request_icon(sidebar::pull_request_class(summary)),
-                        sidebar::sidebar_pull_request_color(
-                            &theme,
-                            sidebar::pull_request_class(summary),
-                        ),
-                        sidebar::sidebar_pull_request_state_label(sidebar::pull_request_class(
-                            summary,
-                        )),
-                        summary.author.clone(),
-                        github_pr_meta(summary),
-                        pr.body.clone(),
-                        &pr.comments,
-                    )
-                }
-                GitHubItemDetail::Issue(issue) => {
-                    let summary = &issue.summary;
-                    (
-                        summary.title.clone(),
-                        summary.url.clone(),
-                        match summary.state {
-                            IssueState::Open => "icons/info.svg",
-                            IssueState::Closed => "icons/check.svg",
-                        },
-                        match summary.state {
-                            IssueState::Open => theme.success,
-                            IssueState::Closed => theme.text_secondary,
-                        },
-                        match summary.state {
-                            IssueState::Open => tr!("github.issue_open"),
-                            IssueState::Closed => tr!("github.issue_closed"),
-                        },
-                        summary.author.clone(),
-                        github_issue_meta(summary),
-                        issue.body.clone(),
-                        &issue.comments,
-                    )
-                }
-            };
+        let (
+            title,
+            url,
+            state_icon,
+            state_color,
+            state_label,
+            author,
+            meta,
+            body,
+            comments,
+            checks_failing,
+        ) = match content {
+            GitHubItemDetail::PullRequest(pr) => {
+                let summary = &pr.summary;
+                (
+                    summary.title.clone(),
+                    summary.url.clone(),
+                    sidebar::sidebar_pull_request_icon(sidebar::pull_request_class(summary)),
+                    sidebar::sidebar_pull_request_color(
+                        &theme,
+                        sidebar::pull_request_class(summary),
+                    ),
+                    sidebar::sidebar_pull_request_state_label(sidebar::pull_request_class(summary)),
+                    summary.author.clone(),
+                    github_pr_meta(summary),
+                    pr.body.clone(),
+                    &pr.comments,
+                    pr.summary.check_status == Some(waku_client::PullRequestCheckStatus::Failing),
+                )
+            }
+            GitHubItemDetail::Issue(issue) => {
+                let summary = &issue.summary;
+                (
+                    summary.title.clone(),
+                    summary.url.clone(),
+                    match summary.state {
+                        IssueState::Open => "icons/info.svg",
+                        IssueState::Closed => "icons/check.svg",
+                    },
+                    match summary.state {
+                        IssueState::Open => theme.success,
+                        IssueState::Closed => theme.text_secondary,
+                    },
+                    match summary.state {
+                        IssueState::Open => tr!("github.issue_open"),
+                        IssueState::Closed => tr!("github.issue_closed"),
+                    },
+                    summary.author.clone(),
+                    github_issue_meta(summary),
+                    issue.body.clone(),
+                    &issue.comments,
+                    false,
+                )
+            }
+        };
 
         let mut section = div()
             .w_full()
@@ -1003,6 +1035,30 @@ impl Waku {
                         .child(format!("{} · #{}", state_label, detail.number)),
                 )
                 .child(div().flex_1())
+                .child({
+                    let prompt = github_task_prompt(detail, &title, &url, false);
+                    github_detail_action(
+                        "github-start-task",
+                        "icons/plus.svg",
+                        tr!("github.start_task"),
+                        &theme,
+                        cx.listener(move |this, _, window, cx| {
+                            this.github_start_task(project_id, prompt.clone(), window, cx);
+                        }),
+                    )
+                })
+                .when(checks_failing, |element| {
+                    let prompt = github_task_prompt(detail, &title, &url, true);
+                    element.child(github_detail_action(
+                        "github-fix-checks",
+                        "icons/hammer.svg",
+                        tr!("github.fix_checks"),
+                        &theme,
+                        cx.listener(move |this, _, window, cx| {
+                            this.github_start_task(project_id, prompt.clone(), window, cx);
+                        }),
+                    ))
+                })
                 .child(
                     div()
                         .id("github-open-external")
@@ -1401,6 +1457,54 @@ fn github_issue_meta(issue: &IssueSummary) -> Vec<String> {
         ));
     }
     meta
+}
+
+/// A detail-header action chip: icon + label, hover and focus treatments
+/// matching the list rows.
+fn github_detail_action(
+    id: &'static str,
+    icon_path: &'static str,
+    label: String,
+    theme: &Theme,
+    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(24.0))
+        .px(px(8.0))
+        .rounded(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(5.0))
+        .cursor_default()
+        .hover(|style| style.bg(theme.overlay))
+        .active(|style| style.bg(theme.overlay_strong))
+        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .child(icon(icon_path, 12.0, theme.text_secondary))
+        .child(
+            div()
+                .text_size(sp(12.0))
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .on_click(on_click)
+}
+
+/// The agent-facing prompt a "Start a task" action seeds. Not localized —
+/// it is input for the agent, not UI copy.
+fn github_task_prompt(detail: GitHubDetailRef, title: &str, url: &str, fix_checks: bool) -> String {
+    let kind = match detail.kind {
+        GitHubItemKind::PullRequest => "pull request",
+        GitHubItemKind::Issue => "issue",
+    };
+    if fix_checks {
+        format!(
+            "Fix the failing checks on {kind} #{}: {title}\n{url}",
+            detail.number
+        )
+    } else {
+        format!("Work on {kind} #{}: {title}\n{url}", detail.number)
+    }
 }
 
 /// A centered icon + message for the browser's non-list states.

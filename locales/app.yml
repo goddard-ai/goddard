@@ -793,6 +793,10 @@ github.open_repo:
   en: Open repository on GitHub
 github.open_external:
   en: Open on GitHub
+github.start_task:
+  en: Start a task
+github.fix_checks:
+  en: Fix failing checks
 github.resolving_repo:
   en: Resolving repository…
 github.install_gh:

@@ -394,6 +394,8 @@ github.refresh: 刷新
 github.back_to_list: 返回列表
 github.open_repo: 在 GitHub 上打开仓库
 github.open_external: 在 GitHub 上打开
+github.start_task: 开始任务
+github.fix_checks: 修复失败的检查
 github.resolving_repo: 正在解析仓库…
 github.install_gh: 安装 GitHub CLI 以浏览此仓库
 github.auth_gh: "运行 `gh auth login` 以浏览此仓库"
