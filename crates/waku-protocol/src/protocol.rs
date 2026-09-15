@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
+use crate::custom_commands::CustomCommand;
 use crate::model::{
     AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
     ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
@@ -19,7 +20,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "WAKU_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "WAKU_DAEMON_ADDRESS";
@@ -155,6 +156,28 @@ pub enum Command {
     UpdateSettings {
         settings: DaemonSettings,
     },
+    /// Replace the command carrying `command.id` — or the one with its exact
+    /// `name` when the id matches nothing — or append it when neither does.
+    /// A nil id always means a new command; the daemon mints the real id.
+    ///
+    /// Scoped agent credentials may call this: it is the agent settings
+    /// surface, gated by `agent_settings_enabled` rather than the task-creation
+    /// opt-in, and the daemon stamps `created_by_task` with the sender.
+    UpsertCustomCommand {
+        command: CustomCommand,
+    },
+    /// Remove a custom command, addressed by id or by exact `name`.
+    /// Scoped agent credentials may call this under the same gate as
+    /// [`Self::UpsertCustomCommand`].
+    RemoveCustomCommand {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Read the daemon-owned custom command list. Scoped agent credentials
+    /// may call this so an agent can make its writes idempotent.
+    ListCustomCommands,
     ProbeProvider {
         provider: ProviderKind,
         binary_override: Option<String>,
@@ -441,6 +464,12 @@ pub enum ServerMessage {
     TaskStateChanged {
         revision: u64,
     },
+    /// The daemon's settings document changed — through another client or
+    /// through the scoped agent surface. Carries the whole document;
+    /// settings are small and every subscriber applies it wholesale.
+    SettingsChanged {
+        settings: DaemonSettings,
+    },
     ShuttingDown,
 }
 
@@ -478,6 +507,11 @@ pub enum ResponsePayload {
     },
     Settings {
         settings: DaemonSettings,
+    },
+    /// The daemon-owned custom command list after the change — or as read,
+    /// for `listCustomCommands`.
+    CustomCommands {
+        commands: Vec<CustomCommand>,
     },
     ProviderProbe {
         probe: ProviderProbe,
@@ -622,7 +656,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 8);
+        assert_eq!(PROTOCOL_VERSION, 9);
     }
 
     #[test]
@@ -631,7 +665,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 8);
+        assert_eq!(PROTOCOL_VERSION, 9);
     }
 
     #[test]

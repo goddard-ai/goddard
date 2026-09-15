@@ -95,12 +95,31 @@ pub struct EventSink {
     session_id: Uuid,
     runtime_id: Uuid,
     hub: Arc<Hub>,
+    /// The subscriber this request arrived on; `settings_changed` skips it —
+    /// the initiator already holds the document it sent. `u64::MAX` is the
+    /// "no source" sentinel agent connections and tests use.
+    source_subscriber_id: u64,
 }
 
 impl EventSink {
     pub fn send(&self, event: WireDriverEvent) -> anyhow::Result<()> {
         self.hub.emit(self.session_id, self.runtime_id, event, true);
         Ok(())
+    }
+
+    /// Push the daemon's settings document to every subscribed client except
+    /// the request's own connection — the initiator already holds the
+    /// document it sent.
+    pub fn settings_changed(&self, settings: crate::DaemonSettings) {
+        self.hub
+            .settings_changed(settings, self.source_subscriber_id);
+    }
+
+    /// The connection the in-flight request arrived on. The dispatcher sets
+    /// this so broadcasts the request triggers can skip their source.
+    pub(crate) fn with_source_subscriber(mut self, id: u64) -> Self {
+        self.source_subscriber_id = id;
+        self
     }
 
     /// Broadcast a live-only event without retaining it in the replay journal.
@@ -121,6 +140,7 @@ impl EventSink {
             session_id,
             runtime_id,
             hub: self.hub.clone(),
+            source_subscriber_id: self.source_subscriber_id,
         }
     }
 
@@ -256,6 +276,7 @@ impl Hub {
             session_id,
             runtime_id,
             hub: self.clone(),
+            source_subscriber_id: u64::MAX,
         }
     }
 
@@ -426,6 +447,15 @@ impl Hub {
             revision: state.task_state_revision,
         };
         Self::broadcast(state, &message, Some(source_subscriber_id));
+    }
+
+    fn settings_changed(&self, settings: crate::DaemonSettings, source_subscriber_id: u64) {
+        let mut state = self.state.lock();
+        Self::broadcast(
+            &mut state,
+            &ServerMessage::SettingsChanged { settings },
+            Some(source_subscriber_id),
+        );
     }
 
     fn cached_response(&self, request_id: Uuid) -> Option<ResponseOutcome> {
@@ -848,10 +878,17 @@ fn token_matches(expected: &str, candidate: &str) -> bool {
 /// The whole command surface a scoped agent credential can reach. These are
 /// deliberately absent from `command_targets_runtime` so they dispatch on
 /// their own workers — the backend serializes target-session delivery itself.
+/// The task commands sit behind the `agent_tools_enabled` opt-in; the custom
+/// command commands are the default-on agent settings surface, gated inside
+/// the backend by `agent_settings_enabled`.
 fn is_agent_command(command: &Command) -> bool {
     matches!(
         command,
-        Command::AgentCreateSession { .. } | Command::AgentPrompt { .. }
+        Command::AgentCreateSession { .. }
+            | Command::AgentPrompt { .. }
+            | Command::UpsertCustomCommand { .. }
+            | Command::RemoveCustomCommand { .. }
+            | Command::ListCustomCommands
     )
 }
 
@@ -1042,7 +1079,12 @@ fn handle_request(
         if starts_runtime {
             hub.begin_runtime(session_id, runtime_id);
         }
-        let outcome = match backend.handle(request, hub.event_sink(session_id, runtime_id), agent) {
+        let outcome = match backend.handle(
+            request,
+            hub.event_sink(session_id, runtime_id)
+                .with_source_subscriber(source_subscriber_id),
+            agent,
+        ) {
             Ok(payload) => ResponseOutcome::Ok { payload },
             Err(error) => ResponseOutcome::Error {
                 error: RpcError::from(error),

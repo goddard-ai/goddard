@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
 use waku_protocol::{
-    ClientMessage, Command, PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome,
-    ResponsePayload, RpcError, SequencedEvent, ServerMessage,
+    ClientMessage, Command, DaemonSettings, PROTOCOL_VERSION, ReplayCursor, Request,
+    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
 };
 
 const READ_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -34,6 +34,7 @@ struct ClientInner {
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     pending_events: Mutex<HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>>,
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
+    settings_subscribers: Mutex<Vec<Sender<DaemonSettings>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -110,6 +111,7 @@ impl DaemonClient {
             sessions: Mutex::new(HashMap::new()),
             pending_events: Mutex::new(HashMap::new()),
             task_state_subscribers: Mutex::new(Vec::new()),
+            settings_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -157,6 +159,14 @@ impl DaemonClient {
     pub fn subscribe_task_state(&self) -> Receiver<u64> {
         let (events, receiver) = unbounded();
         self.inner.task_state_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// Every `settingsChanged` the daemon broadcasts — a client edit or an
+    /// agent settings write — lands here as the authoritative document.
+    pub fn subscribe_settings(&self) -> Receiver<DaemonSettings> {
+        let (events, receiver) = unbounded();
+        self.inner.settings_subscribers.lock().push(events);
         receiver
     }
 
@@ -330,6 +340,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(revision).is_ok());
                     }
+                    ServerMessage::SettingsChanged { settings } => {
+                        inner
+                            .settings_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send(settings.clone()).is_ok());
+                    }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
                 }
@@ -359,6 +375,7 @@ fn run_client(
     // `processExited` event emitted by the daemon.
     drop(std::mem::take(&mut *inner.sessions.lock()));
     inner.task_state_subscribers.lock().clear();
+    inner.settings_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

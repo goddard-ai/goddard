@@ -150,6 +150,8 @@ commands.no_workspace: 先にタスクを選択してください。コマンド
 commands.running: "%{name} を実行中…"
 commands.succeeded: "%{name} が完了しました"
 commands.failed: "%{name} が失敗しました（終了コード %{code}）"
+commands.agent_badge: エージェント
+commands.agent_added: エージェントがカスタムコマンド「%{name}」を追加しました。
 
 daemon.expose_title: 管理対象デーモンを公開
 daemon.expose_description: このマシン以外の Goddard クライアントから接続できるようにします。変更時はデーモンだけが再起動します。
@@ -180,6 +182,8 @@ daemon.web_external_description: Goddard Web はブラウザの外部で管理�
 daemon.web_connection_description: このブラウザがデーモンを起動または停止することはありません。
 daemon.agent_tools_title: エージェントツール
 daemon.agent_tools_description: エージェントがタスクを作成し、他のタスクにメッセージを送れるようにします。有効な間に開始されたセッションにはセッション限定の waku-agent コマンドが提供され、送信されたプロンプトは対象のトランスクリプトに記録されます。
+daemon.agent_settings_title: エージェント設定
+daemon.agent_settings_description: エージェントがカスタムコマンドを作成・編集できるようにします。デフォルトで有効です。エージェントが追加したコマンドには印が付き、どのタスクが変更したかが記録されます。
 daemon.not_configured: 未設定
 daemon.status: 状態
 daemon.disconnect: 接続を解除

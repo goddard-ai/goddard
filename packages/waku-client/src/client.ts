@@ -2,6 +2,7 @@ import {
   PROTOCOL_VERSION,
   type ClientMessage,
   type Command,
+  type DaemonSettings,
   type ReplayCursor,
   type ResponsePayload,
   type SequencedEvent,
@@ -111,6 +112,7 @@ export class WakuClient {
   private subscriptions = new Map<string, Set<EventListener>>();
   private pendingEvents = new Map<string, SequencedEvent[]>();
   private taskStateListeners = new Set<(revision: number) => void>();
+  private settingsListeners = new Set<(settings: DaemonSettings) => void>();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
   private connectionGeneration = 0;
@@ -369,6 +371,13 @@ export class WakuClient {
     return () => this.taskStateListeners.delete(listener);
   }
 
+  /** Every `settingsChanged` the daemon broadcasts — a client edit or an
+   * agent settings write — lands here as the authoritative document. */
+  subscribeSettings(listener: (settings: DaemonSettings) => void): () => void {
+    this.settingsListeners.add(listener);
+    return () => this.settingsListeners.delete(listener);
+  }
+
   /** Observes connection changes, including remote socket closure. */
   subscribeConnectionState(listener: ConnectionStateListener): () => void {
     this.connectionStateListeners.add(listener);
@@ -445,6 +454,10 @@ export class WakuClient {
     }
     if (message.type === "taskStateChanged") {
       for (const listener of this.taskStateListeners) listener(message.revision);
+      return;
+    }
+    if (message.type === "settingsChanged") {
+      for (const listener of this.settingsListeners) listener(message.settings);
       return;
     }
     if (message.type === "shuttingDown") {

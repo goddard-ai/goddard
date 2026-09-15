@@ -147,6 +147,8 @@ commands.no_workspace: 请先选择一个任务——命令会在当前任务目
 commands.running: 正在运行 %{name}…
 commands.succeeded: "%{name} 已完成"
 commands.failed: "%{name} 失败（退出码 %{code}）"
+commands.agent_badge: 智能体
+commands.agent_added: 智能体添加了自定义命令“%{name}”。
 
 daemon.expose_title: 暴露由 Goddard 管理的守护进程
 daemon.expose_description: 允许本机之外的 Goddard 客户端连接。更改此项只会重启守护进程。
@@ -177,6 +179,8 @@ daemon.web_external_description: Goddard Web 连接到由浏览器之外管理�
 daemon.web_connection_description: 此浏览器不会启动或停止守护进程。
 daemon.agent_tools_title: 智能体工具
 daemon.agent_tools_description: 允许会话中的智能体创建任务并向其他任务发送消息。开启期间启动的会话将获得按会话隔离的 waku-agent 命令，其发送的提示会在目标转录中标记。
+daemon.agent_settings_title: 智能体设置
+daemon.agent_settings_description: 允许智能体为你创建和编辑自定义命令。默认开启；智能体添加的命令会有标记，守护进程会记录是哪个任务做出的更改。
 daemon.not_configured: 未配置
 daemon.status: 状态
 daemon.disconnect: 断开连接

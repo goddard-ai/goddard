@@ -961,6 +961,8 @@ mod tests {
             } else {
                 "/waku/agent/session"
             }),
+            task_tools: true,
+            settings_writes: true,
         }
     }
 

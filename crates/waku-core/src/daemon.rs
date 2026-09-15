@@ -24,6 +24,7 @@ use crate::model::{
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
+use waku_protocol::custom_commands::CustomCommand;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
 /// How many fully hydrated transcripts the daemon keeps resident.
@@ -366,7 +367,26 @@ impl Backend for WakuBackend {
             }),
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
+                events.settings_changed(self.settings.get());
                 Ok(ResponsePayload::Ack)
+            }
+            Command::UpsertCustomCommand { command } => {
+                self.require_agent_settings(agent)?;
+                let commands = self.upsert_custom_command(agent, command)?;
+                events.settings_changed(self.settings.get());
+                Ok(ResponsePayload::CustomCommands { commands })
+            }
+            Command::RemoveCustomCommand { id, name } => {
+                self.require_agent_settings(agent)?;
+                let commands = self.remove_custom_command(id, name)?;
+                events.settings_changed(self.settings.get());
+                Ok(ResponsePayload::CustomCommands { commands })
+            }
+            Command::ListCustomCommands => {
+                self.require_agent_settings(agent)?;
+                Ok(ResponsePayload::CustomCommands {
+                    commands: self.settings.get().custom_commands,
+                })
             }
             Command::ProbeProvider {
                 provider,
@@ -1782,6 +1802,79 @@ impl WakuBackend {
         Ok(())
     }
 
+    /// The settings surface is gated separately from task creation and only
+    /// for scoped credentials — a client holding the master token already has
+    /// full `updateSettings` access, so the flag must not gate it.
+    fn require_agent_settings(&self, agent: Option<Uuid>) -> anyhow::Result<()> {
+        if agent.is_some() && !self.settings.get().agent_settings_enabled {
+            bail!("agent settings commands are disabled on this daemon");
+        }
+        Ok(())
+    }
+
+    /// Apply `command` to the daemon-owned list. An upsert keys on the id
+    /// first and the exact name second, so an agent can assert "this command
+    /// exists" without tracking list state; a nil id always mints a new
+    /// command. Agent writes stamp `created_by_task` so clients can show
+    /// where the entry came from.
+    fn upsert_custom_command(
+        &self,
+        agent: Option<Uuid>,
+        mut command: CustomCommand,
+    ) -> anyhow::Result<Vec<CustomCommand>> {
+        if command.script.trim().is_empty() {
+            bail!("custom commands require a script");
+        }
+        // Agent writes are stamped with their task; a client keeps whatever
+        // attribution the command already carries.
+        if agent.is_some() {
+            command.created_by_task = agent;
+        }
+        if command.id.is_nil() {
+            command.id = Uuid::new_v4();
+        }
+        let mut settings = self.settings.get();
+        let existing = settings.custom_commands.iter().position(|existing| {
+            existing.id == command.id
+                || command
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| existing.name.as_deref() == Some(name))
+        });
+        match existing {
+            Some(index) => settings.custom_commands[index] = command,
+            None => settings.custom_commands.push(command),
+        }
+        self.settings.replace(settings)?;
+        Ok(self.settings.get().custom_commands)
+    }
+
+    fn remove_custom_command(
+        &self,
+        id: Option<Uuid>,
+        name: Option<String>,
+    ) -> anyhow::Result<Vec<CustomCommand>> {
+        let name = name
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty());
+        if id.is_none() && name.is_none() {
+            bail!("custom command removal needs an id or a name");
+        }
+        let mut settings = self.settings.get();
+        let before = settings.custom_commands.len();
+        settings.custom_commands.retain(|command| {
+            !(id.is_some_and(|id| command.id == id)
+                || name
+                    .as_deref()
+                    .is_some_and(|name| command.name.as_deref() == Some(name)))
+        });
+        if settings.custom_commands.len() == before {
+            bail!("no custom command matches");
+        }
+        self.settings.replace(settings)?;
+        Ok(self.settings.get().custom_commands)
+    }
+
     /// Start a provider runtime for `session_id` and forward its events into
     /// `events`, which must already target the new `runtime_id`.
     ///
@@ -1802,12 +1895,14 @@ impl WakuBackend {
         let mut options = options;
         // The credential exists before the process does so it can travel
         // with the runtime's launch environment. A missing CLI or unset
-        // daemon address disables injection for this launch only.
-        if self.settings.get().agent_tools_enabled {
+        // daemon address disables injection for this launch only. Either
+        // agent surface — task tools or settings writes — gets it injected.
+        let daemon_settings = self.settings.get();
+        if daemon_settings.agent_tools_enabled || daemon_settings.agent_settings_enabled {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
                 Err(error) => eprintln!(
-                    "waku-daemon: agent tools unavailable for session {session_id}: {error:#}"
+                    "waku-daemon: agent surface unavailable for session {session_id}: {error:#}"
                 ),
             }
         }
@@ -1861,12 +1956,15 @@ impl WakuBackend {
             .unwrap_or_else(|| Path::new("."))
             .join("agent")
             .join(session_id.to_string());
+        let settings = self.settings.get();
         Ok(crate::agent::AgentLaunchEnv {
             token: self.agent.mint(session_id),
             task_id: session_id,
             daemon_address,
             cli_path,
             shim_directory,
+            task_tools: settings.agent_tools_enabled,
+            settings_writes: settings.agent_settings_enabled,
         })
     }
 
@@ -2471,7 +2569,10 @@ fn handle_driver_command(
         | Command::CloseTerminal
         | Command::CloseSession
         | Command::AgentCreateSession { .. }
-        | Command::AgentPrompt { .. } => {
+        | Command::AgentPrompt { .. }
+        | Command::UpsertCustomCommand { .. }
+        | Command::RemoveCustomCommand { .. }
+        | Command::ListCustomCommands => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

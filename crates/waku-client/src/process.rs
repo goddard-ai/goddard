@@ -494,6 +494,14 @@ impl DaemonSupervisor {
             .send(settings)
             .map_err(|_| anyhow::anyhow!("Goddard daemon settings writer is closed"))
     }
+
+    /// Fold a `settingsChanged` broadcast into the supervisor's mirrors
+    /// without re-sending it — the document is already persisted at the
+    /// daemon, so the writer thread must not push it back.
+    pub fn note_remote_settings(&self, settings: DaemonSettings) {
+        *self.inner.settings.lock() = settings.clone();
+        *self.inner.persisted_settings.lock() = Some(settings);
+    }
 }
 
 impl Drop for DaemonSupervisor {

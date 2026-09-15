@@ -73,7 +73,7 @@ function fixture(options: { attached?: boolean } = {}) {
           return { type: 'settings', settings: {
             provider_binary_overrides: {}, disabled_providers: [],
             computer_use_enabled: false, computer_use_allowed_apps: [],
-            agent_tools_enabled: false,
+            agent_tools_enabled: false, agent_settings_enabled: true,
           } };
         case 'loadTaskState':
           return {

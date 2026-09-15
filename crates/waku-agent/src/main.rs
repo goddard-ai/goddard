@@ -4,23 +4,27 @@
 //! The daemon places this binary on the session's `PATH` together with a
 //! per-session credential (`WAKU_AGENT_TOKEN`), this session's task id
 //! (`WAKU_TASK_ID`), and the daemon address (`WAKU_DAEMON_ADDRESS`). The
-//! token grants only the two commands below — nothing else — and dies with
-//! the session.
+//! token grants only the commands below — nothing else — and dies with the
+//! session.
 //!
-//! Usage contract: invoke `create` or `prompt` only when the human you are
-//! working for has explicitly asked you to create another task or to send a
-//! message to one. There is no per-call approval gate; the daemon marks every
-//! accepted prompt with this task's id so agent-originated turns stay visible
-//! in the target's transcript.
+//! Usage contract: `command` manages the user's settings — today their
+//! custom commands — and is available whenever changing one would help them.
+//! Invoke `create` or `prompt` only when the human you are working for has
+//! explicitly asked you to create another task or to send a message to one.
+//! There is no per-call approval gate; the daemon stamps every accepted
+//! write with this task's id so agent-originated changes stay visible to the
+//! user.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context as _, anyhow, bail};
 use serde::Deserialize;
+use serde_json::json;
 use uuid::Uuid;
 
 use waku_client::DaemonClient;
+use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 use waku_protocol::model::ProviderKind;
 use waku_protocol::{
     AGENT_TASK_ENV, AGENT_TOKEN_ENV, AgentPromptDelivery, AgentWorkspace, Command,
@@ -28,21 +32,27 @@ use waku_protocol::{
 };
 
 const USAGE: &str = "\
-waku-agent — reach other Goddard tasks from inside a session
+waku-agent — Goddard's scoped agent surface inside a session
 
 USAGE
-    waku-agent create '<json>'    Create a task and start its first prompt
-    waku-agent prompt '<json>'    Send a prompt to an existing task
-    waku-agent schema             Print the JSON payload schemas
-    waku-agent --help             Show this text
+    waku-agent create '<json>'            Create a task and start its first prompt
+    waku-agent prompt '<json>'            Send a prompt to an existing task
+    waku-agent command list               List the user's custom commands
+    waku-agent command upsert '<json>'    Add or update a custom command
+    waku-agent command remove '<json>'    Remove a custom command
+    waku-agent schema                     Print the JSON payload schemas
+    waku-agent --help                     Show this text
 
 USAGE CONTRACT
-    Only invoke these commands when the human you are working for has
-    explicitly asked you to create another task or to send a message to one.
-    Do not use them for exploration, convenience, or self-orchestration.
-    There is no per-call approval gate; instead the daemon records this
-    task's id on every accepted prompt, so agent-originated turns are
-    visibly attributed in the target's transcript.
+    `command` manages the user's settings — today their custom commands —
+    and is available whenever changing a setting would help them.
+    `create` and `prompt` are the cross-task surface: only invoke them when
+    the human you are working for has explicitly asked you to create another
+    task or to send a message to one. Do not use them for exploration,
+    convenience, or self-orchestration.
+    There is no per-call approval gate for either surface; the daemon records
+    this task's id on every accepted write, so agent-originated commands and
+    turns are visibly attributed to it.
 
 ENVIRONMENT
     WAKU_DAEMON_ADDRESS   Daemon WebSocket address (injected by the daemon)
@@ -51,34 +61,71 @@ ENVIRONMENT
 
 Run `waku-agent schema` for the accepted payloads.";
 
-const SCHEMA: &str = r#"{
-  "usage_contract": "Only invoke these commands when the human you are working for has explicitly asked you to create another task or to send a message to one. There is no per-call approval gate; the daemon records this task's id on every accepted prompt so agent-originated turns stay visible in the target's transcript.",
-  "create": {
-    "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
-    "fields": {
-      "provider": {"type": "string", "required": true, "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "grok", "kimi", "ohmypi", "pi"]},
-      "model": {"type": "string", "required": true, "notes": "explicit provider model id, or \"default\" for the provider's own default"},
-      "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
-      "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
-      "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
-      "prompt": {"type": "string", "required": true}
-    },
-    "example": "{\"provider\":\"codex\",\"model\":\"default\",\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\"}",
-    "returns": {"task_id": "uuid of the created task"}
-  },
-  "prompt": {
-    "description": "Submit a prompt to an existing task, addressed by Waku task id or provider-native thread id.",
-    "fields": {
-      "task_id": {"type": "string", "notes": "Waku task UUID; exactly one of task_id and thread_id is required"},
-      "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
-      "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
-      "prompt": {"type": "string", "required": true},
-      "delivery": {"type": "string", "enum": ["queue", "steer"], "default": "queue", "notes": "queue waits for the target to go idle and preserves submission order; steer injects into the running turn and fails when no turn is running"}
-    },
-    "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"queue\"}",
-    "returns": {"ok": true}
-  }
-}"#;
+fn schema() -> serde_json::Value {
+    let icons: Vec<String> = CustomCommandIcon::ALL
+        .iter()
+        .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
+        .collect();
+    json!({
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "create": {
+            "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
+            "fields": {
+                "provider": {"type": "string", "required": true, "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "grok", "kimi", "ohmypi", "pi"]},
+                "model": {"type": "string", "required": true, "notes": "explicit provider model id, or \"default\" for the provider's own default"},
+                "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
+                "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
+                "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
+                "prompt": {"type": "string", "required": true}
+            },
+            "example": "{\"provider\":\"codex\",\"model\":\"default\",\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\"}",
+            "returns": {"task_id": "uuid of the created task"}
+        },
+        "prompt": {
+            "description": "Submit a prompt to an existing task, addressed by Waku task id or provider-native thread id.",
+            "fields": {
+                "task_id": {"type": "string", "notes": "Waku task UUID; exactly one of task_id and thread_id is required"},
+                "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
+                "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
+                "prompt": {"type": "string", "required": true},
+                "delivery": {"type": "string", "enum": ["queue", "steer"], "default": "queue", "notes": "queue waits for the target to go idle and preserves submission order; steer injects into the running turn and fails when no turn is running"}
+            },
+            "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"queue\"}",
+            "returns": {"ok": true}
+        },
+        "command": {
+            "description": "Manage the user's custom commands — shell scripts they can run from the command palette in a terminal. Commands are daemon-owned and shared across the user's clients.",
+            "subcommands": {
+                "list": {
+                    "description": "Print every custom command as a JSON array. Read this first to make writes idempotent.",
+                    "returns": "the custom command list"
+                },
+                "upsert": {
+                    "description": "Add a custom command, or replace the entry carrying `id` — or the one with the same `name` when `id` is absent or unknown. The daemon attributes the write to this task.",
+                    "fields": {
+                        "id": {"type": "string", "notes": "uuid of an existing command; omit to add a new one"},
+                        "name": {"type": "string", "notes": "palette label; omit to show the script itself"},
+                        "icon": {"type": "string", "enum": icons, "default": "terminal"},
+                        "shell": {"type": "string", "notes": "shell the command runs in; omit for the platform default"},
+                        "script": {"type": "string", "required": true, "notes": "runs inside an interactive shell, so pipes, aliases, and interactive programs all work"},
+                        "close_on_success": {"type": "boolean", "default": false, "notes": "close the terminal tab once the script exits successfully"}
+                    },
+                    "example": "{\"name\":\"Deploy staging\",\"script\":\"./scripts/deploy staging\",\"icon\":\"zap\",\"close_on_success\":true}",
+                    "returns": "the custom command list after the write"
+                },
+                "remove": {
+                    "description": "Remove a custom command, addressed by id or by its exact name.",
+                    "fields": {
+                        "id": {"type": "string", "notes": "uuid of the command; one of id and name is required"},
+                        "name": {"type": "string", "notes": "exact name of the command; one of id and name is required"}
+                    },
+                    "example": "{\"name\":\"Deploy staging\"}",
+                    "returns": "the custom command list after the write"
+                }
+            }
+        }
+    })
+}
 
 #[derive(Deserialize)]
 struct CreatePayload {
@@ -102,6 +149,29 @@ struct PromptPayload {
     prompt: String,
     #[serde(default)]
     delivery: DeliveryArg,
+}
+
+#[derive(Deserialize)]
+struct CommandUpsertPayload {
+    #[serde(default)]
+    id: Option<Uuid>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    icon: Option<CustomCommandIcon>,
+    #[serde(default)]
+    shell: Option<String>,
+    script: String,
+    #[serde(default)]
+    close_on_success: bool,
+}
+
+#[derive(Deserialize)]
+struct CommandRemovePayload {
+    #[serde(default)]
+    id: Option<Uuid>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -138,9 +208,10 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         "schema" => {
-            println!("{SCHEMA}");
+            println!("{}", serde_json::to_string_pretty(&schema())?);
             Ok(())
         }
+        "command" => command(arguments.next().as_deref(), arguments.next()),
         "create" | "prompt" => {
             let payload = arguments
                 .next()
@@ -169,6 +240,58 @@ fn run() -> anyhow::Result<()> {
             "unknown subcommand `{other}`; run `waku-agent --help`"
         )),
     }
+}
+
+fn command(action: Option<&str>, payload: Option<String>) -> anyhow::Result<()> {
+    let request = match action {
+        Some("list") => Command::ListCustomCommands,
+        Some("upsert") => Command::UpsertCustomCommand {
+            command: upsert_payload(&payload)?,
+        },
+        Some("remove") => {
+            let payload: CommandRemovePayload = serde_json::from_str(
+                payload
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("`command remove` takes one JSON object argument"))?,
+            )
+            .context(
+                "`command remove` takes a JSON object; run `waku-agent schema` for its shape",
+            )?;
+            Command::RemoveCustomCommand {
+                id: payload.id,
+                name: payload.name,
+            }
+        }
+        _ => bail!("`command` takes one of `list`, `upsert`, or `remove`"),
+    };
+    match connect()?.request(request_session_id(), Uuid::nil(), request)? {
+        ResponsePayload::CustomCommands { commands } => {
+            println!("{}", serde_json::to_string_pretty(&commands)?);
+            Ok(())
+        }
+        other => bail!("daemon returned an unexpected response: {other:?}"),
+    }
+}
+
+fn upsert_payload(payload: &Option<String>) -> anyhow::Result<CustomCommand> {
+    let payload: CommandUpsertPayload = serde_json::from_str(
+        payload
+            .as_deref()
+            .ok_or_else(|| anyhow!("`command upsert` takes one JSON object argument"))?,
+    )
+    .context("`command upsert` takes a JSON object; run `waku-agent schema` for its shape")?;
+    if payload.script.trim().is_empty() {
+        bail!("`command upsert` requires a non-empty `script`");
+    }
+    Ok(CustomCommand {
+        id: payload.id.unwrap_or_else(Uuid::nil),
+        name: payload.name,
+        icon: payload.icon.unwrap_or_default(),
+        shell: payload.shell,
+        script: payload.script,
+        close_on_success: payload.close_on_success,
+        created_by_task: None,
+    })
 }
 
 fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
@@ -333,8 +456,41 @@ mod tests {
     }
 
     #[test]
+    fn an_upsert_payload_becomes_a_custom_command() {
+        let id = Uuid::new_v4();
+        let payload = format!(
+            r#"{{"id":"{id}","name":"Deploy staging","icon":"zap","script":"./deploy","close_on_success":true}}"#
+        );
+        let command = upsert_payload(&Some(payload)).expect("a valid upsert parses");
+        assert_eq!(command.id, id);
+        assert_eq!(command.name.as_deref(), Some("Deploy staging"));
+        assert_eq!(command.icon, CustomCommandIcon::Zap);
+        assert_eq!(command.script, "./deploy");
+        assert!(command.close_on_success);
+        assert_eq!(command.created_by_task, None);
+    }
+
+    #[test]
+    fn an_upsert_without_an_id_or_defaults_still_parses() {
+        let command = upsert_payload(&Some(r#"{"script":"echo hi"}"#.to_owned()))
+            .expect("only the script is required");
+        assert!(command.id.is_nil());
+        assert_eq!(command.name, None);
+        assert_eq!(command.icon, CustomCommandIcon::Terminal);
+        assert!(!command.close_on_success);
+    }
+
+    #[test]
+    fn an_upsert_rejects_blank_scripts_and_bad_icons() {
+        assert!(upsert_payload(&Some(r#"{"script":"  "}"#.to_owned())).is_err());
+        assert!(upsert_payload(&Some(r#"{"script":"x","icon":"banana"}"#.to_owned())).is_err());
+        assert!(upsert_payload(&None).is_err());
+    }
+
+    #[test]
     fn help_and_schema_state_the_explicit_request_contract() {
-        for text in [USAGE, SCHEMA] {
+        let schema = serde_json::to_string(&schema()).unwrap();
+        for text in [USAGE, &schema] {
             assert!(
                 text.contains("explicitly asked"),
                 "the agent contract must appear in every surface"
@@ -345,6 +501,6 @@ mod tests {
             );
         }
         // The schema stays machine-readable.
-        let _: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+        let _: serde_json::Value = serde_json::from_str(&schema).unwrap();
     }
 }

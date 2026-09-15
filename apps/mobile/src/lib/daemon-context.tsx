@@ -12,7 +12,7 @@ import {
 } from "react";
 import { AppState, Platform, type AppStateStatus } from "react-native";
 
-import { daemonKeys } from "./daemon-api";
+import { daemonKeys, normalizeDaemonSettings } from "./daemon-api";
 import { hydratePersistentStorage } from "./composer-preferences-store";
 import { DaemonLink, type DaemonOutage } from "./daemon-link";
 import {
@@ -120,6 +120,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const bootstrapped = useRef(false);
   const unsubscribeLink = useRef<(() => void) | null>(null);
   const unsubscribeTaskState = useRef<(() => void) | null>(null);
+  const unsubscribeSettings = useRef<(() => void) | null>(null);
 
   const commitProfiles = useCallback(async (next: DaemonProfile[]) => {
     profilesRef.current = next;
@@ -132,6 +133,8 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     unsubscribeLink.current = null;
     unsubscribeTaskState.current?.();
     unsubscribeTaskState.current = null;
+    unsubscribeSettings.current?.();
+    unsubscribeSettings.current = null;
     const current = linkRef.current;
     linkRef.current = null;
     if (updateReactState) setClient(null);
@@ -250,6 +253,15 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
         void queryClient.invalidateQueries({
           queryKey: daemonKeys.taskState(profile.id),
         });
+      });
+      // The broadcast carries the whole settings document, so it lands in
+      // the cache directly — no refetch for another client's edit or an
+      // agent's settings write.
+      unsubscribeSettings.current = next.subscribeSettings((settings) => {
+        queryClient.setQueryData(
+          daemonKeys.settings(profile.id),
+          normalizeDaemonSettings(settings),
+        );
       });
 
       const connected = await link.open();

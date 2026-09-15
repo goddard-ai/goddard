@@ -11,12 +11,11 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Div,
     Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement,
-    KeyDownEvent,
-    ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle,
-    SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,
-    deferred, div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list,
-    point, prelude::*, pulsating_between, px, rgb,
+    KeyDownEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels,
+    Render, ScrollHandle, SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window,
+    WindowBounds, canvas, deferred, div, ease_out_quint, fill, font, img, linear_color_stop,
+    linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
 };
 use uuid::Uuid;
 
@@ -73,8 +72,7 @@ use crate::ui::{
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
-    CloseWindow,
-    ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
+    CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
     ExitFileFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
     GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, MarkUnreadAndGoToNextUnseen,
     NavigateBack, NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace,
@@ -82,9 +80,8 @@ use crate::{
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
     ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker,
-    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar,
-    ToggleUsagePanel, ToggleWorkspace,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
+    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1414,6 +1411,11 @@ pub struct Waku {
     event_wake_tx: smol::channel::Sender<()>,
     task_state_sync_tx: Sender<Result<RemoteTaskStateSnapshot, String>>,
     task_state_sync_events: Receiver<Result<RemoteTaskStateSnapshot, String>>,
+    /// `settingsChanged` broadcasts forwarded by the task-state sync worker:
+    /// the authoritative daemon document each time another client — or an
+    /// agent — rewrites it.
+    daemon_settings_tx: Sender<waku_client::DaemonSettings>,
+    daemon_settings_events: Receiver<waku_client::DaemonSettings>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -1692,7 +1694,8 @@ pub struct Waku {
     /// Pull requests resolved per session on a background executor, keyed by
     /// session id. A session absent from the map means "not known yet" — the
     /// row renders no badge, same as a session with no pull requests.
-    sidebar_pull_requests: RefCell<HashMap<Uuid, Rc<Vec<waku_protocol::workspace::PullRequestSummary>>>>,
+    sidebar_pull_requests:
+        RefCell<HashMap<Uuid, Rc<Vec<waku_protocol::workspace::PullRequestSummary>>>>,
     sidebar_pull_request_scan_fingerprint: Cell<Option<u64>>,
     sidebar_pull_request_scan_generation: Cell<u64>,
     transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
@@ -2252,7 +2255,26 @@ impl Waku {
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
         let home_directory = crate::projectless::home_directory();
-        state.apply_daemon_settings(daemon.settings());
+        // Custom commands moved from this app's settings file into the
+        // daemon's document. Seed the daemon list with any file-side commands
+        // it does not already carry — id-keyed, so the import is a no-op once
+        // every client has migrated.
+        let mut daemon_settings = daemon.settings();
+        if !state.custom_commands.is_empty() {
+            let known: HashSet<Uuid> = daemon_settings
+                .custom_commands
+                .iter()
+                .map(|command| command.id)
+                .collect();
+            daemon_settings.custom_commands.extend(
+                state
+                    .custom_commands
+                    .iter()
+                    .filter(|command| !known.contains(&command.id))
+                    .cloned(),
+            );
+        }
+        state.apply_daemon_settings(daemon_settings);
         if let Err(error) = daemon.update_settings(state.daemon_settings()) {
             eprintln!("could not normalize daemon settings after migration: {error:#}");
         }
@@ -2527,6 +2549,7 @@ impl Waku {
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
+        let (daemon_settings_tx, daemon_settings_events) = unbounded();
         #[cfg(target_os = "macos")]
         {
             let computer_permission_tx = computer_permission_tx.clone();
@@ -3273,6 +3296,8 @@ impl Waku {
                 event_wake_tx,
                 task_state_sync_tx,
                 task_state_sync_events,
+                daemon_settings_tx,
+                daemon_settings_events,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),

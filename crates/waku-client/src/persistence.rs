@@ -24,6 +24,7 @@ use waku_protocol::model::{
 };
 use waku_protocol::theme::ThemeSettings;
 
+pub use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
     ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
@@ -70,142 +71,6 @@ pub enum CompletionSound {
     Bubble,
     Chime,
     Retro,
-}
-
-/// The icon a custom command shows in the command palette, on its settings
-/// row, and on its terminal tab.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CustomCommandIcon {
-    #[default]
-    Terminal,
-    Command,
-    Zap,
-    Wrench,
-    Gauge,
-    Package,
-    GitBranch,
-    GitHub,
-    Folder,
-    File,
-    Search,
-    Globe,
-    Server,
-    CloudUpload,
-    Download,
-    Bot,
-    Sparkle,
-    Star,
-    Target,
-    Queue,
-    Compose,
-    Chart,
-    Refresh,
-    Archive,
-}
-
-/// A user-owned shell command listed in the command palette. Running one
-/// opens an interactive terminal tab that sources a materialized copy of
-/// `script` — identical in effect to pasting the text into that shell.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustomCommand {
-    pub id: Uuid,
-    /// Palette label; `None` (or blank) falls back to the script itself.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// Icon the command shows in the palette, settings list, and tab.
-    #[serde(default)]
-    pub icon: CustomCommandIcon,
-    /// Shell the terminal runs; `None` (or blank) uses the platform default
-    /// (`$SHELL` on Unix).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shell: Option<String>,
-    pub script: String,
-    /// Close the terminal tab automatically once the script exits
-    /// successfully; a failure leaves it open for inspection.
-    #[serde(default)]
-    pub close_on_success: bool,
-}
-
-impl CustomCommand {
-    pub fn new(script: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            name: None,
-            icon: CustomCommandIcon::default(),
-            shell: None,
-            script,
-            close_on_success: false,
-        }
-    }
-
-    /// What the palette row and terminal tab call this command.
-    pub fn display_name(&self) -> &str {
-        self.name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .unwrap_or(&self.script)
-    }
-}
-
-impl CustomCommandIcon {
-    pub const ALL: [Self; 24] = [
-        Self::Terminal,
-        Self::Command,
-        Self::Zap,
-        Self::Wrench,
-        Self::Gauge,
-        Self::Package,
-        Self::GitBranch,
-        Self::GitHub,
-        Self::Folder,
-        Self::File,
-        Self::Search,
-        Self::Globe,
-        Self::Server,
-        Self::CloudUpload,
-        Self::Download,
-        Self::Bot,
-        Self::Sparkle,
-        Self::Star,
-        Self::Target,
-        Self::Queue,
-        Self::Compose,
-        Self::Chart,
-        Self::Refresh,
-        Self::Archive,
-    ];
-
-    /// Icon names are product names and stay untranslated.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Terminal => "Terminal",
-            Self::Command => "Command",
-            Self::Zap => "Zap",
-            Self::Wrench => "Wrench",
-            Self::Gauge => "Gauge",
-            Self::Package => "Package",
-            Self::GitBranch => "Git branch",
-            Self::GitHub => "GitHub",
-            Self::Folder => "Folder",
-            Self::File => "File",
-            Self::Search => "Search",
-            Self::Globe => "Globe",
-            Self::Server => "Server",
-            Self::CloudUpload => "Upload",
-            Self::Download => "Download",
-            Self::Bot => "Bot",
-            Self::Sparkle => "Sparkle",
-            Self::Star => "Star",
-            Self::Target => "Target",
-            Self::Queue => "Queue",
-            Self::Compose => "Compose",
-            Self::Chart => "Chart",
-            Self::Refresh => "Refresh",
-            Self::Archive => "Archive",
-        }
-    }
 }
 
 impl CompletionSound {
@@ -262,6 +127,10 @@ fn default_sidebar_transparency() -> bool {
 }
 
 fn default_analytics_enabled() -> bool {
+    true
+}
+
+fn default_agent_settings_enabled() -> bool {
     true
 }
 
@@ -707,6 +576,8 @@ pub struct PersistedState {
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
     #[serde(default)]
     pub agent_tools_enabled: bool,
+    #[serde(default = "default_agent_settings_enabled")]
+    pub agent_settings_enabled: bool,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -778,6 +649,7 @@ impl PersistedState {
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
             agent_tools_enabled: false,
+            agent_settings_enabled: true,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -910,16 +782,24 @@ impl PersistedState {
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
             agent_tools_enabled: self.agent_tools_enabled,
+            agent_settings_enabled: self.agent_settings_enabled,
+            custom_commands: self.custom_commands.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
     }
 
+    /// Merge the daemon's settings document into this state. Custom commands
+    /// move with it: they are daemon-owned, so whatever the document carries
+    /// replaces the local mirror — including an empty list after another
+    /// client or an agent removed the last one.
     pub fn apply_daemon_settings(&mut self, settings: DaemonSettings) {
         self.computer_use_enabled = settings.computer_use_enabled;
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;
         self.agent_tools_enabled = settings.agent_tools_enabled;
+        self.agent_settings_enabled = settings.agent_settings_enabled;
+        self.custom_commands = settings.custom_commands;
         self.daemon_settings_extra = settings.extra;
     }
 

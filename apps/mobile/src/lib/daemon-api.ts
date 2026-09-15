@@ -141,12 +141,19 @@ export async function attachDaemonSession(
     : null;
 }
 
+/** Fields the daemon omits on the wire when empty get their concrete
+ * defaults so readers never re-check for presence. */
+export function normalizeDaemonSettings(settings: DaemonSettings): DaemonSettings {
+  return {
+    ...settings,
+    provider_binary_overrides: settings.provider_binary_overrides ?? {},
+    custom_commands: settings.custom_commands ?? [],
+  };
+}
+
 export async function loadDaemonSettings(client: WakuClient): Promise<DaemonSettings> {
   const response = expectResponse(await client.request({ type: 'getSettings' }), 'settings');
-  return {
-    ...response.settings,
-    provider_binary_overrides: response.settings.provider_binary_overrides ?? {},
-  };
+  return normalizeDaemonSettings(response.settings);
 }
 
 export async function probeProvider(

@@ -34,6 +34,7 @@ use crate::model::{
     RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemeSettings;
+use waku_protocol::custom_commands::CustomCommand;
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
     ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
@@ -63,6 +64,10 @@ fn default_computer_use_enabled() -> bool {
 }
 
 fn default_analytics_enabled() -> bool {
+    true
+}
+
+fn default_agent_settings_enabled() -> bool {
     true
 }
 
@@ -291,6 +296,13 @@ pub struct PersistedState {
     /// their scoped credentials. Defaults off.
     #[serde(default)]
     pub agent_tools_enabled: bool,
+    /// Whether agent harnesses may write the user-facing settings surface —
+    /// custom commands — through their scoped credentials. Defaults on.
+    #[serde(default = "default_agent_settings_enabled")]
+    pub agent_settings_enabled: bool,
+    /// Daemon-owned custom commands mirrored from the settings document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_commands: Vec<CustomCommand>,
     /// Unknown daemon settings survive edits made by this desktop version.
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
@@ -396,6 +408,8 @@ impl PersistedState {
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
             agent_tools_enabled: false,
+            agent_settings_enabled: true,
+            custom_commands: Vec::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -494,6 +508,8 @@ impl PersistedState {
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
             agent_tools_enabled: self.agent_tools_enabled,
+            agent_settings_enabled: self.agent_settings_enabled,
+            custom_commands: self.custom_commands.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -530,6 +546,8 @@ impl PersistedState {
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;
         self.agent_tools_enabled = settings.agent_tools_enabled;
+        self.agent_settings_enabled = settings.agent_settings_enabled;
+        self.custom_commands = settings.custom_commands;
         self.daemon_settings_extra = settings.extra;
     }
 
@@ -3229,8 +3247,7 @@ mod tests {
             "SQL wildcard characters are searched literally"
         );
         assert!(
-            reopened
-                .session_message_search("Hidden continue".into(), 50)()
+            reopened.session_message_search("Hidden continue".into(), 50)()
                 .unwrap()
                 .is_empty(),
             "a hidden prompt never surfaces in search"

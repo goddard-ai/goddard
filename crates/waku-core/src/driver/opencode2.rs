@@ -672,7 +672,7 @@ impl OpenCode2AgentSurface {
             &endpoint,
             session_id,
             AGENT_INSTRUCTION_KEY,
-            &crate::agent::shared_service_instruction(&shim),
+            &crate::agent::shared_service_instruction(&shim, agent),
         ) {
             let _ = std::fs::remove_dir_all(&agent.shim_directory);
             return Err(anyhow!(

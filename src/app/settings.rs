@@ -1092,6 +1092,16 @@ impl Waku {
             shell: (!shell.is_empty()).then_some(shell),
             script,
             close_on_success: editor.close_on_success,
+            // A human editing an agent's command keeps its attribution.
+            created_by_task: editor
+                .id
+                .and_then(|id| {
+                    self.state
+                        .custom_commands
+                        .iter()
+                        .find(|existing| existing.id == id)
+                })
+                .and_then(|existing| existing.created_by_task),
         };
         if let Some(index) = self
             .state
@@ -1236,6 +1246,7 @@ impl Waku {
             let label = command.display_name().to_owned();
             let script = command.script.clone();
             let edit_command = command.clone();
+            let agent_added = command.created_by_task.is_some();
             column = column.child(
                 div()
                     .w_full()
@@ -1257,11 +1268,30 @@ impl Waku {
                             .min_w_0()
                             .child(
                                 div()
-                                    .truncate()
-                                    .text_size(sp(13.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(label),
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_size(sp(13.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(label),
+                                    )
+                                    .when(agent_added, |row| {
+                                        row.child(
+                                            div()
+                                                .flex_none()
+                                                .px(px(6.0))
+                                                .py(px(1.0))
+                                                .rounded(px(5.0))
+                                                .bg(theme.overlay)
+                                                .text_size(sp(10.5))
+                                                .text_color(theme.text_secondary)
+                                                .child(tr!("commands.agent_badge")),
+                                        )
+                                    }),
                             )
                             .child(
                                 div()
@@ -1519,6 +1549,7 @@ impl Waku {
     fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let agent_tools_card = self.agent_tools_card(theme, cx);
+        let agent_settings_card = self.agent_settings_card(theme, cx);
         if self.daemon.is_remote() {
             return div()
                 .mt(px(15.0))
@@ -1549,6 +1580,7 @@ impl Waku {
                         ),
                 )
                 .child(agent_tools_card)
+                .child(agent_settings_card)
                 .into_any_element();
         }
 
@@ -2058,6 +2090,7 @@ impl Waku {
                 )
             })
             .child(agent_tools_card)
+            .child(agent_settings_card)
             .into_any_element()
     }
 
@@ -2111,6 +2144,61 @@ impl Waku {
 
     fn set_agent_tools_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.agent_tools_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The daemon-scoped settings surface agents may write — custom commands
+    /// today. On by default; turning it off makes the daemon reject the
+    /// `waku-agent command` calls outright while `create`/`prompt` stay gated
+    /// by their own switch above.
+    fn agent_settings_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.state.agent_settings_enabled;
+        let toggle = toggle_switch(
+            "agent-settings-toggle",
+            enabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| this.set_agent_settings_enabled(!enabled, cx),
+        );
+        div()
+            .min_h(px(66.0))
+            .px(px(20.0))
+            .py(px(13.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("daemon.agent_settings_title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("daemon.agent_settings_description")),
+                    ),
+            )
+            .child(toggle)
+            .into_any_element()
+    }
+
+    fn set_agent_settings_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.agent_settings_enabled = enabled;
         self.save();
         cx.notify();
     }

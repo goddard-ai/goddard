@@ -16,6 +16,7 @@ import {
   validateConnectionConfig,
   type ConnectionConfig,
 } from './connection'
+import { daemonKeys, normalizeDaemonSettings } from './daemon-api'
 import { translate, useI18n } from './i18n'
 
 export type ConnectionPhase =
@@ -106,6 +107,16 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
         queryKey: ['daemon', config.address, 'task-state'],
       })
     })
+    // The broadcast carries the whole settings document, so it lands in the
+    // cache directly — no refetch round trip for another client's edit or an
+    // agent's settings write.
+    const unsubscribeSettings = client.subscribeSettings((settings) => {
+      if (!config) return
+      queryClient.setQueryData(
+        daemonKeys.settings(config.address),
+        normalizeDaemonSettings(settings),
+      )
+    })
     const timer = window.setInterval(() => {
       if (!client.connected) {
         setError(translate(locale, 'web.daemon_connection_closed'))
@@ -114,6 +125,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     }, 1_000)
     return () => {
       unsubscribeTaskState()
+      unsubscribeSettings()
       window.clearInterval(timer)
     }
   }, [client, config, locale, phase, queryClient])

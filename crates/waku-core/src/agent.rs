@@ -239,6 +239,13 @@ pub struct AgentLaunchEnv {
     /// environment, so they write a credential-carrying shim here and point
     /// the session at it instead.
     pub shim_directory: PathBuf,
+    /// Whether `waku-agent create`/`prompt` — the opt-in cross-task surface —
+    /// will accept calls on this credential.
+    pub task_tools: bool,
+    /// Whether the `waku-agent command` settings writes will accept calls on
+    /// this credential. On by default; off only when the user disabled the
+    /// agent settings surface outright.
+    pub settings_writes: bool,
 }
 
 /// Locate the `waku-agent` binary to place on a provider's `PATH`.
@@ -308,14 +315,25 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
     Ok(shim)
 }
 
-/// The prompt OpenCode 2 sessions get in place of a launch environment: the
-/// same contract the CLI's own help states, plus the session-scoped
-/// launcher's path.
-pub fn shared_service_instruction(shim: &Path) -> String {
-    format!(
-        "Goddard agent tools are enabled for this session. When — and only when — the human explicitly asks you to create another task or send a message to one, run `{shim}` (`{shim} --help` documents the `create` and `prompt` JSON payloads). These calls are attributed to this task in the target's transcript. Do not use them for exploration or convenience.",
+/// The prompt shared-service sessions get in place of a launch environment:
+/// the same contract the CLI's own help states, plus the session-scoped
+/// launcher's path and which credential scopes this session carries.
+pub fn shared_service_instruction(shim: &Path, env: &AgentLaunchEnv) -> String {
+    let mut instruction = format!(
+        "Goddard exposes a scoped agent surface to this session through `{shim}`; `{shim} --help` documents every subcommand and its JSON payload.",
         shim = shim.display()
-    )
+    );
+    if env.settings_writes {
+        instruction.push_str(
+            " The `command` subcommands manage the user's custom commands — use them whenever adding one would help the human, not only when asked.",
+        );
+    }
+    if env.task_tools {
+        instruction.push_str(
+            " When — and only when — the human explicitly asks you to create another task or send a message to one, use `create` and `prompt`; those calls are attributed to this task in the target's transcript. Do not use them for exploration, convenience, or self-orchestration.",
+        );
+    }
+    instruction
 }
 
 #[cfg(unix)]
@@ -470,6 +488,8 @@ mod tests {
             daemon_address: "127.0.0.1:7777".to_owned(),
             cli_path: PathBuf::from("/waku/bin/waku-agent"),
             shim_directory: directory.to_path_buf(),
+            task_tools: true,
+            settings_writes: true,
         }
     }
 
@@ -498,8 +518,29 @@ mod tests {
 
     #[test]
     fn the_shared_service_instruction_names_the_shim_and_the_contract() {
-        let instruction = shared_service_instruction(Path::new("/x/waku-agent"));
+        let directory = std::env::temp_dir().join(format!("waku-agent-test-{}", Uuid::new_v4()));
+        let env = launch_env(&directory);
+        let instruction = shared_service_instruction(Path::new("/x/waku-agent"), &env);
         assert!(instruction.contains("/x/waku-agent"));
+        assert!(instruction.contains("explicitly asks"));
+        assert!(instruction.contains("`command`"));
+
+        // Each scope drops its own half of the contract when disabled.
+        let env = AgentLaunchEnv {
+            task_tools: false,
+            ..launch_env(&directory)
+        };
+        let instruction = shared_service_instruction(Path::new("/x/waku-agent"), &env);
+        assert!(instruction.contains("`command`"));
+        assert!(!instruction.contains("explicitly asks"));
+
+        let env = AgentLaunchEnv {
+            task_tools: true,
+            settings_writes: false,
+            ..launch_env(&directory)
+        };
+        let instruction = shared_service_instruction(Path::new("/x/waku-agent"), &env);
+        assert!(!instruction.contains("`command`"));
         assert!(instruction.contains("explicitly asks"));
     }
 

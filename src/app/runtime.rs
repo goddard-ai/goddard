@@ -1038,6 +1038,7 @@ impl Waku {
     pub(super) fn restart_task_state_sync(&self) {
         let clients = self.daemon.subscribe_clients();
         let results = self.task_state_sync_tx.clone();
+        let settings_updates = self.daemon_settings_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
             .name("waku-task-state-sync".into())
@@ -1050,6 +1051,7 @@ impl Waku {
                         client = newer;
                     }
                     let revisions = client.subscribe_task_state();
+                    let settings = client.subscribe_settings();
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
                     if results.send(result).is_err() {
                         return;
@@ -1085,6 +1087,21 @@ impl Waku {
                                 }
                                 signal_event_pump(&event_wake);
                             }
+                            recv(settings) -> settings => {
+                                // A closed settings channel means the socket
+                                // dropped; the client replacement above
+                                // resubscribes on the next connection.
+                                let Ok(settings) = settings else {
+                                    let Ok(replacement) = clients.recv() else {
+                                        return;
+                                    };
+                                    break replacement;
+                                };
+                                if settings_updates.send(settings).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
                         }
                     };
                 }
@@ -1110,6 +1127,48 @@ impl Waku {
                 false
             }
         }
+    }
+
+    fn drain_daemon_settings_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut latest = None;
+        while let Ok(settings) = self.daemon_settings_events.try_recv() {
+            latest = Some(settings);
+        }
+        let Some(settings) = latest else {
+            return false;
+        };
+        self.apply_remote_daemon_settings(settings, cx);
+        true
+    }
+
+    /// Fold a `settingsChanged` broadcast into the local mirrors. The
+    /// supervisor's cache is marked persisted so the writer thread does not
+    /// echo the document back; the palette and settings pages read the new
+    /// command list on the next frame. A command an agent added is the one
+    /// settings write the user did not see happen, so it gets a toast.
+    fn apply_remote_daemon_settings(
+        &mut self,
+        settings: waku_client::DaemonSettings,
+        cx: &mut Context<Self>,
+    ) {
+        let known: HashSet<Uuid> = self
+            .state
+            .custom_commands
+            .iter()
+            .map(|command| command.id)
+            .collect();
+        let agent_added: Vec<String> = settings
+            .custom_commands
+            .iter()
+            .filter(|command| command.created_by_task.is_some() && !known.contains(&command.id))
+            .map(|command| command.display_name().to_owned())
+            .collect();
+        self.daemon.note_remote_settings(settings.clone());
+        self.state.apply_daemon_settings(settings);
+        if let Some(name) = agent_added.first() {
+            self.show_toast(tr!("commands.agent_added", name = name));
+        }
+        cx.notify();
     }
 
     fn apply_remote_task_state(
@@ -3301,7 +3360,10 @@ impl Waku {
             }
             // A hidden queue entry is provider-facing text, not a follow-up
             // the user can steer — its own drain still delivers it.
-            let message = session.queued_messages.iter().find(|message| !message.hidden)?;
+            let message = session
+                .queued_messages
+                .iter()
+                .find(|message| !message.hidden)?;
             Some((session.id, message.id))
         }) else {
             return;
@@ -3766,6 +3828,7 @@ impl Waku {
             | self.drain_computer_permission_events()
             | self.drain_plan_usage_events()
             | self.drain_task_state_sync_events(cx)
+            | self.drain_daemon_settings_events(cx)
         {
             cx.notify();
         }

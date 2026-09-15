@@ -292,6 +292,10 @@ commands.succeeded:
   en: "%{name} finished"
 commands.failed:
   en: "%{name} failed (exit %{code})"
+commands.agent_badge:
+  en: Agent
+commands.agent_added:
+  en: An agent added the “%{name}” custom command.
 
 daemon.expose_title:
   en: Expose managed daemon
@@ -351,6 +355,10 @@ daemon.agent_tools_title:
   en: Agent tools
 daemon.agent_tools_description:
   en: Let an agent create tasks and send messages to other tasks. Sessions started while this is on get a session-scoped waku-agent command; prompts it sends are marked in the target transcript.
+daemon.agent_settings_title:
+  en: Agent settings
+daemon.agent_settings_description:
+  en: Let agents create and edit custom commands for you. On by default; commands an agent adds are marked, and the daemon records which task made each change.
 daemon.not_configured:
   en: Not configured
 daemon.status:
