@@ -92,16 +92,7 @@ pub fn checkout_status(cwd: &Path) -> anyhow::Result<Option<CheckoutStatus>> {
         return Ok(None);
     }
     let status = git_stdout(cwd, &["status", "--porcelain=v1", "--untracked-files=all"])?;
-    // A remote-tracking ref may not exist for this branch, so count commits
-    // unreachable from every remote rather than only `@{upstream}..HEAD`.
-    // Without a remote there is nothing to push to and the count is moot.
-    let unpushed_commits = if git_stdout(cwd, &["remote"])?.is_empty() {
-        0
-    } else {
-        git_stdout(cwd, &["rev-list", "--count", "HEAD", "--not", "--remotes"])?
-            .parse::<u64>()
-            .unwrap_or(0)
-    };
+    let unpushed_commits = checkout_only_subjects(cwd)?.len() as u64;
     Ok(Some(CheckoutStatus {
         uncommitted_changes: !status.is_empty(),
         unpushed_commits,
@@ -109,8 +100,8 @@ pub fn checkout_status(cwd: &Path) -> anyhow::Result<Option<CheckoutStatus>> {
 }
 
 /// What archiving a checkout would stash: every dirty working-tree file and
-/// the subjects of commits on HEAD no remote-tracking ref has. `Ok(None)`
-/// outside a work tree.
+/// the subjects of commits on HEAD no other ref has. `Ok(None)` outside a
+/// work tree.
 pub fn archive_preview(cwd: &Path) -> anyhow::Result<Option<ArchivePreview>> {
     if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
         .is_some_and(|answer| answer == "true")
@@ -129,24 +120,37 @@ pub fn archive_preview(cwd: &Path) -> anyhow::Result<Option<ArchivePreview>> {
             })
         })
         .collect();
-    // Match `checkout_status`: commits unreachable from every remote, and
-    // none at all when the repository has no remote to push to.
-    let unpushed_commits = if git_stdout(cwd, &["remote"])?.is_empty() {
-        Vec::new()
-    } else {
-        git_optional_stdout(cwd, &["log", "--format=%s", "HEAD", "--not", "--remotes"])?
-            .map(|log| {
-                log.lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
+    // Match `checkout_status`: commits only this checkout holds, and none at
+    // all when the repository has no remote to push to.
+    let unpushed_commits = checkout_only_subjects(cwd)?;
     Ok(Some(ArchivePreview {
         files,
         unpushed_commits,
     }))
+}
+
+/// Subjects of commits this checkout alone holds: reachable from HEAD but
+/// not from any other branch, tag, or remote-tracking ref. The branch the
+/// checkout sits on is session-owned and excluded — it cannot vouch for
+/// safety — while commits merged into a base branch are already kept. Empty
+/// when the repository has no remote: there is nothing to push to.
+fn checkout_only_subjects(cwd: &Path) -> anyhow::Result<Vec<String>> {
+    if git_stdout(cwd, &["remote"])?.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec!["log", "--format=%s", "HEAD", "--not"];
+    let exclude = git_optional_stdout(cwd, &["symbolic-ref", "-q", "--short", "HEAD"])?
+        .map(|branch| format!("--exclude={branch}"));
+    if let Some(exclude) = &exclude {
+        args.push(exclude.as_str());
+    }
+    args.extend(["--branches", "--tags", "--remotes"]);
+    let log = git_optional_stdout(cwd, &args)?.unwrap_or_default();
+    Ok(log
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_owned)
+        .collect())
 }
 
 pub fn generate_message(
@@ -814,6 +818,42 @@ mod tests {
             preview.files
         );
         assert_eq!(preview.unpushed_commits, ["add new.txt"]);
+    }
+
+    #[test]
+    fn commits_merged_into_another_branch_are_not_unpushed() {
+        let root = repository();
+        run_git(
+            &root,
+            &["remote", "add", "origin", "https://example.com/repo.git"],
+        );
+        run_git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        run_git(&root, &["checkout", "-b", "session-branch"]);
+        run_git(&root, &["commit", "--allow-empty", "-m", "session work"]);
+
+        let preview = archive_preview(&root).unwrap().unwrap();
+        assert_eq!(preview.unpushed_commits, ["session work"]);
+        assert_eq!(checkout_status(&root).unwrap().unwrap().unpushed_commits, 1);
+
+        run_git(&root, &["checkout", "main"]);
+        run_git(
+            &root,
+            &["merge", "--no-ff", "-m", "merge session", "session-branch"],
+        );
+        run_git(&root, &["checkout", "session-branch"]);
+
+        let preview = archive_preview(&root).unwrap().unwrap();
+        assert!(preview.unpushed_commits.is_empty());
+        assert_eq!(checkout_status(&root).unwrap().unwrap().unpushed_commits, 0);
+
+        run_git(&root, &["checkout", "--detach", "HEAD"]);
+        assert!(
+            archive_preview(&root)
+                .unwrap()
+                .unwrap()
+                .unpushed_commits
+                .is_empty()
+        );
     }
 
     #[test]
