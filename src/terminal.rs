@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
+use crate::input::TextInput;
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
+use crate::ui::shortcut::ShortcutHint;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
 use alacritty_terminal::grid::{BidirectionalIterator, Dimensions, Scroll};
@@ -22,14 +24,16 @@ use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use anyhow::{Context as _, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    App, AppContext, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable,
-    FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement, IntoElement,
-    KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render,
-    ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
-    Subscription, Task, TextRun, UnderlineStyle, Window, canvas, div, font, px, rgb,
+    AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement, IntoElement,
+    KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
+    Subscription, Task, TextRun, UnderlineStyle, Window, actions, canvas, div, font, px, rgb,
 };
 use parking_lot::Mutex;
+
+use gpui::prelude::FluentBuilder;
 
 use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, hairline, sp};
@@ -83,6 +87,10 @@ const TERMINAL_TOOLBAR_HEIGHT: f32 = 34.0;
 const TERMINAL_MIN_COLUMNS: usize = 20;
 const TERMINAL_MIN_ROWS: usize = 8;
 const TERMINAL_SCROLLBACK_LINES: usize = 10_000;
+/// Grid lines sent with a command-bar request — enough for "that failed"
+/// or "retry it with sudo" to resolve.
+const COMMAND_BAR_CONTEXT_LINES: usize = 60;
+const COMMAND_BAR_CONTEXT_MAX_BYTES: usize = 12 * 1024;
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_CURSOR_BLINK_PAUSE: Duration = Duration::from_millis(300);
 
@@ -165,6 +173,48 @@ pub enum TerminalViewEvent {
     /// The shell's command state or working directory changed — sidebar
     /// rows showing status or location need a repaint.
     ActivityChanged,
+    /// The command bar asked for a generated shell command. Resolving the
+    /// provider invocation and the daemon round-trip belong to the app;
+    /// the answer comes back through `apply_command_generation`.
+    GenerateCommand {
+        generation: u64,
+        request: String,
+        scrollback: String,
+        cwd: PathBuf,
+        shell: String,
+    },
+}
+
+actions!(
+    terminal_command_bar,
+    [
+        ConfirmTerminalCommand,
+        RunTerminalCommand,
+        DismissTerminalCommand,
+    ]
+);
+
+/// The command bar's bindings — the field itself keeps TextInput's editing
+/// chords, so only the three commit gestures need this context.
+pub fn init_command_bar_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new(
+            "enter",
+            ConfirmTerminalCommand,
+            Some("TerminalCommandBar > TextInput"),
+        ),
+        KeyBinding::new(
+            "secondary-enter",
+            RunTerminalCommand,
+            Some("TerminalCommandBar > TextInput"),
+        ),
+        KeyBinding::new(
+            "escape",
+            DismissTerminalCommand,
+            Some("TerminalCommandBar > TextInput"),
+        ),
+        KeyBinding::new("escape", DismissTerminalCommand, Some("TerminalCommandBar")),
+    ]);
 }
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
@@ -774,8 +824,29 @@ impl TerminalCursorBlink {
     }
 }
 
+/// The ⌘I command bar's phase: describe the command in words, wait on the
+/// agent, review — and edit — what it wrote before it touches the prompt.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CommandBarPhase {
+    Describe,
+    Generating,
+    Review,
+}
+
+struct TerminalCommandBar {
+    input: Entity<TextInput>,
+    phase: CommandBarPhase,
+    error: Option<SharedString>,
+    /// The generating provider's display name — the "via" line in review.
+    provider: Option<SharedString>,
+    /// Bumps per request; a stale daemon reply cannot land on a bar that
+    /// submitted again or reopened.
+    generation: u64,
+}
+
 pub struct TerminalView {
     session: Option<TerminalSession>,
+    command_bar: Option<TerminalCommandBar>,
     error: Option<String>,
     focus_handle: FocusHandle,
     working_directory: PathBuf,
@@ -889,6 +960,7 @@ impl TerminalView {
 
         Self {
             session: None,
+            command_bar: None,
             error: None,
             focus_handle: cx.focus_handle(),
             title: default_title.clone(),
@@ -1090,8 +1162,24 @@ impl TerminalView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // The command bar's field sits inside this view's dispatch path, so
+        // its keystrokes bubble through here — while it owns focus, nothing
+        // may reach the PTY.
+        if self.command_bar_focused(window, cx) {
+            return;
+        }
         self.pause_cursor_blink(cx);
         let keystroke = &event.keystroke;
+        // ⌘I opens the command bar: describe a command, review what the
+        // session's agent writes, then insert it at the prompt.
+        if terminal_clipboard_modifier_pressed(&keystroke.modifiers)
+            && keystroke.key.eq_ignore_ascii_case("i")
+        {
+            self.open_command_bar(window, cx);
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         if terminal_clipboard_modifier_pressed(&keystroke.modifiers)
             && keystroke.key.eq_ignore_ascii_case("c")
         {
@@ -1334,6 +1422,316 @@ impl TerminalView {
         session.write(bracketed_paste(text, session.mode()));
         session.dirty.store(true, Ordering::Release);
         cx.notify();
+    }
+
+    fn open_command_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Reopening while the bar is up just returns its focus.
+        if let Some(bar) = &self.command_bar {
+            let focus = bar.input.read(cx).focus();
+            window.focus(&focus, cx);
+            return;
+        }
+        // Embedded terminals are provider-setup probes, not user shells.
+        if self.embedded || self.exited || self.session.is_none() {
+            return;
+        }
+        let input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(4)
+                .placeholder(tr!("terminal_command.placeholder"))
+        });
+        let focus = input.read(cx).focus();
+        self.command_bar = Some(TerminalCommandBar {
+            input,
+            phase: CommandBarPhase::Describe,
+            error: None,
+            provider: None,
+            generation: 0,
+        });
+        // The input joins the dispatch tree only after the bar draws —
+        // the same two-frame deferral the commit dialog uses.
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        });
+        cx.notify();
+    }
+
+    fn close_command_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.command_bar.take().is_none() {
+            return;
+        }
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    /// Whether the bar's field owns focus — while it does, no keystroke
+    /// here may reach the PTY.
+    fn command_bar_focused(&self, window: &Window, cx: &App) -> bool {
+        self.command_bar
+            .as_ref()
+            .is_some_and(|bar| bar.input.read(cx).focus().is_focused(window))
+    }
+
+    fn command_bar_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(phase) = self.command_bar.as_ref().map(|bar| bar.phase) else {
+            return;
+        };
+        match phase {
+            CommandBarPhase::Describe => self.command_bar_generate(cx),
+            // A request is in flight; Enter does nothing until it lands.
+            CommandBarPhase::Generating => {}
+            CommandBarPhase::Review => self.insert_generated_command(false, window, cx),
+        }
+        cx.notify();
+    }
+
+    fn command_bar_generate(&mut self, cx: &mut Context<Self>) {
+        let Some(bar) = self.command_bar.as_mut() else {
+            return;
+        };
+        let request = bar.input.read(cx).content().trim().to_owned();
+        if request.is_empty() {
+            return;
+        }
+        bar.phase = CommandBarPhase::Generating;
+        bar.generation += 1;
+        bar.error = None;
+        bar.provider = None;
+        let generation = bar.generation;
+        bar.input.update(cx, |input, _| input.set_read_only(true));
+        let scrollback = self.command_bar_scrollback();
+        cx.emit(TerminalViewEvent::GenerateCommand {
+            generation,
+            request,
+            scrollback,
+            cwd: self.working_directory.clone(),
+            shell: self.shell_name.clone(),
+        });
+    }
+
+    /// The app's daemon reply for a `GenerateCommand` request — the
+    /// generation check keeps a stale answer off a bar that moved on.
+    pub fn apply_command_generation(
+        &mut self,
+        generation: u64,
+        provider: SharedString,
+        result: std::result::Result<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(bar) = self
+            .command_bar
+            .as_mut()
+            .filter(|bar| bar.generation == generation && bar.phase == CommandBarPhase::Generating)
+        else {
+            return;
+        };
+        match result {
+            Ok(command) => {
+                bar.provider = Some(provider);
+                bar.phase = CommandBarPhase::Review;
+                bar.input.update(cx, |input, cx| {
+                    input.set_read_only(false);
+                    input.set_content(command, cx);
+                });
+            }
+            Err(error) => {
+                bar.phase = CommandBarPhase::Describe;
+                bar.error = Some(error.into());
+                bar.input.update(cx, |input, _| input.set_read_only(false));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Write the reviewed command into the shell's edit buffer without
+    /// executing it — `run` follows the paste with a carriage return.
+    /// Multi-line text needs bracketed paste: without it the shell would
+    /// execute each line as it arrives. Only the Review phase may insert;
+    /// elsewhere the field still holds the request, not a command.
+    fn insert_generated_command(&mut self, run: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bar) = self
+            .command_bar
+            .as_mut()
+            .filter(|bar| bar.phase == CommandBarPhase::Review)
+        else {
+            return;
+        };
+        let command = bar.input.read(cx).content().trim().to_owned();
+        if command.is_empty() {
+            self.close_command_bar(window, cx);
+            return;
+        }
+        let Some(session) = &self.session else {
+            return;
+        };
+        let mode = session.mode();
+        if command.contains('\n') && !mode.contains(TermMode::BRACKETED_PASTE) {
+            bar.error = Some(tr!("terminal_command.multiline_blocked").into());
+            cx.notify();
+            return;
+        }
+        session.term.lock().selection = None;
+        session.write(bracketed_paste(command, mode));
+        if run {
+            session.write(b"\r".to_vec());
+        }
+        session.dirty.store(true, Ordering::Release);
+        self.close_command_bar(window, cx);
+    }
+
+    /// The bar overlays the grid's top edge; the terminal keeps streaming
+    /// behind it. Insert writes into the shell's edit buffer — plain Enter
+    /// pastes without running, ⌘↵ pastes and runs, Escape dismisses.
+    fn command_bar_element(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let bar = self.command_bar.as_ref()?;
+        let theme = Theme::current(cx);
+        let input_focus = bar.input.read(cx).focus();
+        let key_hint = |action: &dyn gpui::Action| {
+            ShortcutHint::action_in(action, &input_focus).resolve(window)
+        };
+        // Multi-line insert is only safe when the shell asked for
+        // bracketed paste — otherwise each line would execute as it lands.
+        let multi_line_blocked = bar.phase == CommandBarPhase::Review
+            && bar.input.read(cx).content().contains('\n')
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|session| !session.mode().contains(TermMode::BRACKETED_PASTE));
+
+        let mut hints: Vec<String> = Vec::new();
+        match bar.phase {
+            CommandBarPhase::Generating => hints.push(tr!("terminal_command.generating")),
+            CommandBarPhase::Describe => {
+                if let Some(key) = key_hint(&ConfirmTerminalCommand) {
+                    hints.push(format!("{key} {}", tr_cow!("terminal_command.generate")));
+                }
+            }
+            CommandBarPhase::Review => {
+                if multi_line_blocked {
+                    hints.push(tr!("terminal_command.multiline_blocked"));
+                } else {
+                    if let Some(key) = key_hint(&ConfirmTerminalCommand) {
+                        hints.push(format!("{key} {}", tr_cow!("terminal_command.insert")));
+                    }
+                    if let Some(key) = key_hint(&RunTerminalCommand) {
+                        hints.push(format!("{key} {}", tr_cow!("terminal_command.run")));
+                    }
+                }
+            }
+        }
+        if !multi_line_blocked && let Some(key) = key_hint(&DismissTerminalCommand) {
+            hints.push(format!("{key} {}", tr_cow!("terminal_command.dismiss")));
+        }
+        let mut footer = hints.join(" · ");
+        if bar.phase == CommandBarPhase::Review
+            && let Some(provider) = &bar.provider
+        {
+            footer = format!(
+                "{} · {footer}",
+                tr!("terminal_command.via", provider => provider.as_str())
+            );
+        }
+
+        Some(
+            div()
+                .id("terminal-command-bar")
+                .key_context("TerminalCommandBar")
+                .absolute()
+                .top(px(6.0))
+                .left(px(TERMINAL_PADDING_X))
+                // The overlay scrollbar owns the grid's right edge.
+                .right(px(TERMINAL_PADDING_X + 10.0))
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .px(px(10.0))
+                .py(px(7.0))
+                .rounded(px(10.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .bg(theme.composer)
+                .shadow_lg()
+                // A click on the bar's padding must not refocus the shell.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_action(cx.listener(|this, _: &ConfirmTerminalCommand, window, cx| {
+                    this.command_bar_confirm(window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &RunTerminalCommand, window, cx| {
+                    match this.command_bar.as_ref().map(|bar| bar.phase) {
+                        Some(CommandBarPhase::Review) => {
+                            this.insert_generated_command(true, window, cx)
+                        }
+                        // Outside review the field holds a request, so the
+                        // chord means the same thing Enter does.
+                        _ => this.command_bar_confirm(window, cx),
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &DismissTerminalCommand, window, cx| {
+                    this.close_command_bar(window, cx)
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap(px(8.0))
+                        .child(div().pt(px(3.0)).child(crate::ui::icon(
+                            "icons/sparkle.svg",
+                            12.5,
+                            theme.accent,
+                        )))
+                        .child(div().min_w_0().flex_1().child(bar.input.clone())),
+                )
+                .when_some(bar.error.clone(), |bar_el, error| {
+                    bar_el.child(
+                        div()
+                            .pl(px(20.0))
+                            .text_size(sp(11.0))
+                            .text_color(theme.danger)
+                            .child(error),
+                    )
+                })
+                .when(!footer.is_empty(), |bar_el| {
+                    bar_el.child(
+                        div()
+                            .pl(px(20.0))
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(footer),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// The bottom grid lines — scrollback plus screen — sent with a
+    /// generation request so "that failed" has a referent.
+    fn command_bar_scrollback(&self) -> String {
+        let Some(session) = &self.session else {
+            return String::new();
+        };
+        let term = session.term.lock();
+        let bottom = term.bottommost_line();
+        let top = term
+            .topmost_line()
+            .max(Line(bottom.0 - COMMAND_BAR_CONTEXT_LINES as i32 + 1));
+        let text = term.bounds_to_string(
+            TerminalPoint::new(top, Column(0)),
+            TerminalPoint::new(bottom, term.last_column()),
+        );
+        if text.len() <= COMMAND_BAR_CONTEXT_MAX_BYTES {
+            return text;
+        }
+        let mut start = text.len() - COMMAND_BAR_CONTEXT_MAX_BYTES;
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        text[start..].to_owned()
     }
 
     fn select_all(&mut self, cx: &mut Context<Self>) {
@@ -1626,6 +2024,7 @@ impl Render for TerminalView {
                 let copy_terminal = context_terminal.clone();
                 let paste_terminal = context_terminal.clone();
                 let select_all_terminal = context_terminal.clone();
+                let command_terminal = context_terminal.clone();
                 // The chords are hand-rolled in `on_key_down` rather than
                 // registered as bindings, so these labels are authored text.
                 vec![
@@ -1646,6 +2045,13 @@ impl Render for TerminalView {
                     })
                     .shortcut(crate::platform::primary_shortcut("⌘V", "Ctrl+Shift+V"))
                     .disabled(!can_paste),
+                    MenuItem::Separator,
+                    MenuItem::new(tr!("terminal_command.open"), move |window, cx| {
+                        command_terminal
+                            .update(cx, |terminal, cx| terminal.open_command_bar(window, cx));
+                    })
+                    .shortcut(crate::platform::primary_shortcut("⌘I", "Ctrl+Shift+I"))
+                    .disabled(!has_session),
                     MenuItem::Separator,
                     MenuItem::new(tr!("menu.select_all"), move |_, cx| {
                         select_all_terminal.update(cx, |terminal, cx| terminal.select_all(cx));
@@ -1668,6 +2074,8 @@ impl Render for TerminalView {
             )
         });
 
+        let command_bar = self.command_bar_element(window, cx);
+
         let grid = div()
             .flex_1()
             .min_h_0()
@@ -1680,7 +2088,8 @@ impl Render for TerminalView {
             .flex_col()
             .relative()
             .child(screen)
-            .children(scrollbar);
+            .children(scrollbar)
+            .children(command_bar);
 
         div()
             .id("alacritty-terminal")

@@ -172,6 +172,21 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         } => WorkspaceResult::CommitMessage {
             message: crate::git_commit::generate_message(&cwd, include_unstaged, &invocation)?,
         },
+        WorkspaceOperation::GenerateTerminalCommand {
+            cwd,
+            request,
+            scrollback,
+            shell,
+            invocation,
+        } => WorkspaceResult::TerminalCommand {
+            command: crate::shell_command::generate_command(
+                &cwd,
+                &request,
+                scrollback.as_deref(),
+                shell.as_deref(),
+                &invocation,
+            )?,
+        },
         WorkspaceOperation::Commit {
             cwd,
             message,

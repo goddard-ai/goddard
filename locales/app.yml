@@ -2086,6 +2086,27 @@ commit.committed_and_pushed:
 commit.pushed:
   en: Pushed changes
 
+terminal_command.open:
+  en: Generate Command…
+terminal_command.placeholder:
+  en: Describe a command…
+terminal_command.generate:
+  en: generate
+terminal_command.insert:
+  en: insert
+terminal_command.run:
+  en: insert and run
+terminal_command.dismiss:
+  en: dismiss
+terminal_command.generating:
+  en: Generating command…
+terminal_command.via:
+  en: via %{provider}
+terminal_command.multiline_blocked:
+  en: This shell can't accept multiple pasted lines safely — shorten it to one line or copy it out
+terminal_command.agent_unavailable:
+  en: No agent CLI is available to generate commands
+
 background.title:
   en: Background
 background.description:

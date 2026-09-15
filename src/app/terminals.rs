@@ -259,6 +259,22 @@ impl Waku {
                 // both straight off the view; the cwd fingerprint makes
                 // the repo scan re-run on its own.
                 TerminalViewEvent::ActivityChanged => cx.notify(),
+                TerminalViewEvent::GenerateCommand {
+                    generation,
+                    request,
+                    scrollback,
+                    cwd,
+                    shell,
+                } => this.generate_terminal_command(
+                    terminal_id,
+                    &view,
+                    *generation,
+                    request.clone(),
+                    scrollback.clone(),
+                    cwd.clone(),
+                    shell.clone(),
+                    cx,
+                ),
             }
         })
         .detach();
@@ -271,6 +287,80 @@ impl Waku {
             .detach();
         }
         self.right_panel_terminals.insert(terminal_id, view);
+    }
+
+    /// The command bar's daemon round-trip: resolve the owning session's
+    /// provider — a global terminal falls back to the selected one — and
+    /// run the same one-shot agent invocation the commit dialog uses. The
+    /// answer lands back on the view's bar, guarded by its generation.
+    fn generate_terminal_command(
+        &mut self,
+        terminal_id: Uuid,
+        view: &Entity<TerminalView>,
+        generation: u64,
+        request: String,
+        scrollback: String,
+        cwd: PathBuf,
+        shell: String,
+        cx: &mut Context<Self>,
+    ) {
+        let session = self
+            .terminal_records
+            .get(&terminal_id)
+            .and_then(|record| record.session)
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
+            .or_else(|| self.selected_session());
+        let invocation = session.and_then(|session| {
+            Some(crate::git_commit::AgentInvocation {
+                provider: session.provider,
+                binary: self.provider_probe(session.provider)?.path.clone()?,
+                model: self.model_for_session(session).map(str::to_owned),
+                reasoning_effort: session.reasoning_effort.clone(),
+            })
+        });
+        let Some(invocation) = invocation else {
+            view.update(cx, |view, cx| {
+                view.apply_command_generation(
+                    generation,
+                    SharedString::default(),
+                    Err(tr!("terminal_command.agent_unavailable")),
+                    cx,
+                );
+            });
+            return;
+        };
+        let provider = SharedString::new_static(invocation.provider.display_name());
+        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let view = view.downgrade();
+        cx.spawn(async move |_, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace_client.request(
+                        waku_client::WorkspaceOperation::GenerateTerminalCommand {
+                            cwd,
+                            request,
+                            scrollback: Some(scrollback).filter(|text| !text.trim().is_empty()),
+                            shell: Some(shell).filter(|name| !name.is_empty()),
+                            invocation,
+                        },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::TerminalCommand { command }) => {
+                            Ok(command)
+                        }
+                        Ok(_) => {
+                            Err("the daemon returned an invalid terminal command response"
+                                .to_owned())
+                        }
+                        Err(error) => Err(error.to_string()),
+                    }
+                })
+                .await;
+            let _ = view.update(cx, |view, cx| {
+                view.apply_command_generation(generation, provider, result, cx)
+            });
+        })
+        .detach();
     }
 
     /// Create a terminal rooted at `working_directory`. With `session` set

@@ -1057,6 +1057,16 @@ commit.agent_unavailable: 現在のエージェント CLI を利用できない�
 commit.committed: 変更をコミットしました
 commit.committed_and_pushed: 変更をコミットしてプッシュしました
 commit.pushed: 変更をプッシュしました
+terminal_command.open: コマンドを生成…
+terminal_command.placeholder: コマンドを説明…
+terminal_command.generate: 生成
+terminal_command.insert: 挿入
+terminal_command.run: 挿入して実行
+terminal_command.dismiss: 閉じる
+terminal_command.generating: コマンドを生成中…
+terminal_command.via: "%{provider} で生成"
+terminal_command.multiline_blocked: このシェルでは複数行を安全にペーストできません。1行にするか、コピーしてください
+terminal_command.agent_unavailable: コマンドを生成できるエージェント CLI がありません
 
 background.title: バックグラウンド
 background.description: エージェントが起動したプロセスとサブエージェントを確認します

@@ -1027,6 +1027,16 @@ commit.agent_unavailable: 当前智能体命令行不可用，无法生成提交
 commit.committed: 已提交更改
 commit.committed_and_pushed: 已提交并推送更改
 commit.pushed: 已推送更改
+terminal_command.open: 生成命令…
+terminal_command.placeholder: 描述要生成的命令…
+terminal_command.generate: 生成
+terminal_command.insert: 插入
+terminal_command.run: 插入并运行
+terminal_command.dismiss: 取消
+terminal_command.generating: 正在生成命令…
+terminal_command.via: 由 %{provider} 生成
+terminal_command.multiline_blocked: 当前 shell 无法安全地粘贴多行——请缩短为一行或自行复制
+terminal_command.agent_unavailable: 没有可用于生成命令的智能体 CLI
 background.title: 后台工作
 background.description: 查看智能体启动的进程和子智能体
 background.processes: 后台进程

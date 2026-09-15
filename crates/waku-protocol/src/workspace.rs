@@ -474,6 +474,19 @@ pub enum WorkspaceOperation {
         include_unstaged: bool,
         invocation: AgentInvocation,
     },
+    /// One-shot agent generation of a shell command for a terminal's
+    /// command bar. `scrollback` is the client's recent terminal output and
+    /// `shell` the PTY's shell name — both arrive already bounded.
+    GenerateTerminalCommand {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        request: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scrollback: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shell: Option<String>,
+        invocation: AgentInvocation,
+    },
     Commit {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -706,6 +719,9 @@ pub enum WorkspaceResult {
     },
     CommitMessage {
         message: String,
+    },
+    TerminalCommand {
+        command: String,
     },
     /// `None` when `cwd` is not inside a Git repository.
     GitPanel {

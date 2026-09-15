@@ -21,7 +21,7 @@ pub use waku_protocol::git::{
 };
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
-const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const MAX_DIFF_BYTES: usize = 96 * 1024;
 const MAX_STDOUT_BYTES: usize = 1024 * 1024;
@@ -159,13 +159,32 @@ pub fn generate_message(
     invocation: &AgentInvocation,
 ) -> anyhow::Result<String> {
     let prompt = commit_prompt(cwd, include_unstaged)?;
+    let output = agent_oneshot(cwd, &prompt, invocation, "a commit message")?;
+    normalize_message(&output).ok_or_else(|| {
+        anyhow!(
+            "{} returned no commit message",
+            invocation.provider.display_name()
+        )
+    })
+}
+
+/// Shared one-shot provider invocation for generated text — commit subjects
+/// and terminal commands take the same path. `description` names what was
+/// being generated in failure messages ("a commit message"). Returns the
+/// provider's raw stdout; the caller normalizes it.
+pub(crate) fn agent_oneshot(
+    cwd: &Path,
+    prompt: &str,
+    invocation: &AgentInvocation,
+    description: &str,
+) -> anyhow::Result<String> {
     let amp_settings = if invocation.provider == ProviderKind::Amp {
         let path = std::env::temp_dir().join(format!("waku-amp-commit-{}.json", Uuid::new_v4()));
         fs::write(
             &path,
             r#"{"amp.tools.enable":[],"amp.notifications.enabled":false,"amp.skills.disableClaudeCodeSkills":true}"#,
         )
-        .context("could not prepare Amp commit-message settings")?;
+        .context("could not prepare Amp generation settings")?;
         Some(path)
     } else {
         None
@@ -174,7 +193,7 @@ pub fn generate_message(
         invocation.provider,
         invocation.model.as_deref(),
         invocation.reasoning_effort.as_deref(),
-        &prompt,
+        prompt,
         amp_settings.as_deref(),
     );
     let mut command = crate::command_env::command(&invocation.binary);
@@ -185,8 +204,9 @@ pub fn generate_message(
         .env("CI", "1");
     let result = run_capture(&mut command, AGENT_TIMEOUT).with_context(|| {
         format!(
-            "{} could not generate a commit message",
-            invocation.provider.display_name()
+            "{} could not generate {}",
+            invocation.provider.display_name(),
+            description
         )
     });
     if let Some(path) = amp_settings {
@@ -195,17 +215,13 @@ pub fn generate_message(
     let output = result?;
     if !output.status.success() {
         bail!(
-            "{} could not generate a commit message: {}",
+            "{} could not generate {}: {}",
             invocation.provider.display_name(),
+            description,
             command_error(&output)
         );
     }
-    normalize_message(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
-        anyhow!(
-            "{} returned no commit message",
-            invocation.provider.display_name()
-        )
-    })
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 pub fn commit(cwd: &Path, message: &str, include_unstaged: bool) -> anyhow::Result<()> {
@@ -279,7 +295,7 @@ fn commit_prompt(cwd: &Path, include_unstaged: bool) -> anyhow::Result<String> {
     ))
 }
 
-fn agent_arguments(
+pub(crate) fn agent_arguments(
     provider: ProviderKind,
     model: Option<&str>,
     reasoning_effort: Option<&str>,
@@ -506,7 +522,7 @@ fn normalize_message(output: &str) -> Option<String> {
     Some(candidate.chars().take(200).collect())
 }
 
-fn strip_ansi(text: &str) -> String {
+pub(crate) fn strip_ansi(text: &str) -> String {
     let mut clean = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(character) = chars.next() {
@@ -524,7 +540,7 @@ fn strip_ansi(text: &str) -> String {
     clean
 }
 
-fn truncate_utf8(mut value: String, limit: usize) -> (String, bool) {
+pub(crate) fn truncate_utf8(mut value: String, limit: usize) -> (String, bool) {
     if value.len() <= limit {
         return (value, false);
     }
@@ -658,7 +674,10 @@ pub(crate) fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedO
     run_capture(&mut command, GIT_TIMEOUT)
 }
 
-fn run_capture(command: &mut Command, timeout: Duration) -> anyhow::Result<CapturedOutput> {
+pub(crate) fn run_capture(
+    command: &mut Command,
+    timeout: Duration,
+) -> anyhow::Result<CapturedOutput> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
