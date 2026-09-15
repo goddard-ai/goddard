@@ -190,7 +190,18 @@ fn composer_offers_continue_only_for_an_empty_composer_on_a_stopped_turn() {
         ComposerSubmitAction::Preparing
     );
 
-    // A settled turn does not qualify — only an interrupted one.
+    // A failed last turn — a provider error, or the runtime dying with its
+    // daemon — is equally resumable, so it offers Continue too.
+    let mut failed_turn = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    failed_turn.begin_turn("do the thing");
+    failed_turn.finish_active_turn(TurnStatus::Failed);
+    failed_turn.status = SessionStatus::Failed;
+    assert_eq!(
+        composer_submit_action(Some(&failed_turn), false, false),
+        ComposerSubmitAction::Continue
+    );
+
+    // A settled turn does not qualify — only an unsettled one.
     let mut finished = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     finished.begin_turn("done");
     finished.finish_active_turn(TurnStatus::Completed);

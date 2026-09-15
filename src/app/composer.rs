@@ -42,21 +42,22 @@ pub(super) enum ComposerSubmitAction {
     Send,
     Preparing,
     Stop,
-    /// The session's last turn ended stopped and the composer is empty —
+    /// The session's last turn ended unsettled and the composer is empty —
     /// the submit affordance continues that work with no prompt required.
     Continue,
 }
 
-/// Whether an idle session's last turn ended stopped: explicit Stop, an app
-/// quit mid-turn, and orphaned-runtime recovery all settle the turn as
-/// `Interrupted`, so they all qualify. A draft in the composer still wins —
+/// Whether an idle session's last turn ended unsettled: explicit Stop, an app
+/// quit mid-turn, and orphaned-runtime recovery settle the turn as
+/// `Interrupted`, while a provider error or a runtime dying with its daemon
+/// settles it as `Failed` — either way the work stopped mid-turn and is
+/// resumable, so both qualify. A draft in the composer still wins —
 /// see [`composer_submit_action`].
 pub(super) fn session_awaits_continue(session: &AgentSession) -> bool {
     !session.status.is_busy()
-        && session
-            .turns
-            .last()
-            .is_some_and(|turn| turn.status == TurnStatus::Interrupted)
+        && session.turns.last().is_some_and(|turn| {
+            matches!(turn.status, TurnStatus::Interrupted | TurnStatus::Failed)
+        })
 }
 
 pub(super) fn composer_submit_action(
