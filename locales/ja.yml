@@ -586,6 +586,7 @@ projects.chip_selected: "%{count} 件選択中"
 projects.composer_placeholder: タスクを入力…
 projects.send: 送信
 
+
 onboarding.open_project_to_begin: プロジェクトを開いて始めましょう
 onboarding.description: Goddard は選択したフォルダでコーディングエージェントを実行します。コード、タスク、履歴はこのコンピュータに保存されます
 onboarding.web_description: デーモンホスト上のパスを選ぶか、プロジェクトなしで開始してください。
