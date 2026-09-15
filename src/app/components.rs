@@ -5,6 +5,9 @@ use std::path::Path;
 
 const USER_MESSAGE_MAX_HEIGHT: f32 = 400.0;
 const USER_MESSAGE_VIEWPORT_MAX_HEIGHT: f32 = USER_MESSAGE_MAX_HEIGHT - 16.0;
+/// Room the "Show more"/"Show less" row takes inside a capped bubble; the
+/// scroll viewport yields it so the whole bubble stays within the cap.
+const USER_MESSAGE_EXPANDER_HEIGHT: f32 = 24.0;
 
 pub(super) fn pulse_dot(size: f32, color: Hsla) -> AnyElement {
     motion::pulse(Duration::from_millis(1600), move |phase| {
@@ -176,6 +179,17 @@ impl Waku {
             });
         })
         .detach();
+    }
+
+    pub(super) fn toggle_user_message_expanded(
+        &mut self,
+        message_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.expanded_user_messages.insert(message_id) {
+            self.expanded_user_messages.remove(&message_id);
+        }
+        cx.notify();
     }
 
     fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
@@ -354,6 +368,10 @@ pub(super) struct MessageRender<'a> {
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
     pub(super) user_message_viewport: Option<&'a UserMessageScrollViewport>,
+    /// Whether the prompt's height cap is lifted, and the focus handle its
+    /// "Show more" button tracks. Only meaningful for user messages.
+    pub(super) user_message_expanded: bool,
+    pub(super) user_message_expand_focus: Option<FocusHandle>,
     pub(super) message_edit_input: Option<Entity<ComposerInput>>,
     pub(super) attachment_menus: Vec<ContextMenuHandle>,
     pub(super) attachment_images: Vec<Option<Arc<gpui::Image>>>,
@@ -550,6 +568,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         assistant_message_action,
         user_message_action,
         user_message_viewport,
+        user_message_expanded,
+        user_message_expand_focus,
         message_edit_input,
         attachment_menus,
         attachment_images,
@@ -697,13 +717,25 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             } else {
                 if !content.trim().is_empty() {
                     let body = render_markdown_message_body(&content, markdown, theme, ctx);
+                    let overflowing = user_message_viewport
+                        .map(|viewport| viewport.overflowing.get())
+                        .unwrap_or(false);
+                    let show_expander = user_message_expanded || overflowing;
+                    let viewport_max = USER_MESSAGE_VIEWPORT_MAX_HEIGHT
+                        - if show_expander {
+                            USER_MESSAGE_EXPANDER_HEIGHT
+                        } else {
+                            0.0
+                        };
                     column = column.child(
                         div()
                             .id(SharedString::from(format!(
                                 "user-message-bubble-{message_id}"
                             )))
                             .max_w(px(540.0))
-                            .max_h(px(USER_MESSAGE_MAX_HEIGHT))
+                            .when(!user_message_expanded, |bubble| {
+                                bubble.max_h(px(USER_MESSAGE_MAX_HEIGHT))
+                            })
                             .min_w_0()
                             .relative()
                             .overflow_hidden()
@@ -719,7 +751,9 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                 div()
                                     .min_w_0()
                                     .relative()
-                                    .max_h(px(USER_MESSAGE_VIEWPORT_MAX_HEIGHT))
+                                    .when(!user_message_expanded, |body| {
+                                        body.max_h(px(viewport_max))
+                                    })
                                     .overflow_hidden()
                                     .child(
                                         div()
@@ -727,7 +761,9 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                                 "user-message-scroll-{message_id}"
                                             )))
                                             .min_w_0()
-                                            .max_h(px(USER_MESSAGE_VIEWPORT_MAX_HEIGHT))
+                                            .when(!user_message_expanded, |body| {
+                                                body.max_h(px(viewport_max))
+                                            })
                                             .when_some(user_message_viewport, |body, viewport| {
                                                 let wheel_scroll = viewport.scroll_handle.clone();
                                                 body.overflow_y_scroll()
@@ -738,6 +774,33 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                             })
                                             .child(body),
                                     )
+                                    // The scrollable child records its overflow
+                                    // during prepaint, so a later sibling sees
+                                    // this frame's measurement. A flip re-renders
+                                    // once, which is when the expander appears
+                                    // or disappears.
+                                    .when_some(user_message_viewport, |body, viewport| {
+                                        let scroll = viewport.scroll_handle.clone();
+                                        let overflowing = viewport.overflowing.clone();
+                                        let owner = waku.entity_id();
+                                        body.child(
+                                            canvas(
+                                                move |_, _, cx| {
+                                                    let clipped =
+                                                        scroll.max_offset().y > px(0.5);
+                                                    if overflowing.replace(clipped) != clipped {
+                                                        cx.notify(owner);
+                                                    }
+                                                },
+                                                |_, _, _, _| {},
+                                            )
+                                            .absolute()
+                                            .top_0()
+                                            .left_0()
+                                            .w(px(1.0))
+                                            .h(px(1.0)),
+                                        )
+                                    })
                                     // Keep the fades inside the bubble's padding so
                                     // square fade quads cannot paint over its rounded corners.
                                     .when_some(user_message_viewport, |body, viewport| {
@@ -755,6 +818,66 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         )
                                     }),
                             )
+                            .when(show_expander, |bubble| {
+                                let click_waku = waku.clone();
+                                let key_waku = waku.clone();
+                                bubble.child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "user-message-expand-{message_id}"
+                                        )))
+                                        .when_some(
+                                            user_message_expand_focus.clone(),
+                                            |button, focus| button.track_focus(&focus),
+                                        )
+                                        .tab_index(0)
+                                        .tab_stop(true)
+                                        .flex_none()
+                                        .self_start()
+                                        .mt(px(4.0))
+                                        .h(px(20.0))
+                                        .px(px(4.0))
+                                        .ml(-px(4.0))
+                                        .flex()
+                                        .items_center()
+                                        .cursor_default()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_tertiary)
+                                        .hover(|style| style.text_color(theme.text))
+                                        .focus_visible(|style| {
+                                            style.text_color(theme.text)
+                                        })
+                                        .child(if user_message_expanded {
+                                            tr!("transcript.show_less")
+                                        } else {
+                                            tr!("transcript.show_more")
+                                        })
+                                        .on_click(move |_, _, cx| {
+                                            let _ = click_waku.update(cx, |this, cx| {
+                                                this.toggle_user_message_expanded(
+                                                    message_id, cx,
+                                                );
+                                            });
+                                        })
+                                        .on_key_down(
+                                            move |event: &KeyDownEvent, _, cx| {
+                                                if !event.keystroke.modifiers.modified()
+                                                    && matches!(
+                                                        event.keystroke.key.as_str(),
+                                                        "enter" | "space"
+                                                    )
+                                                {
+                                                    let _ = key_waku.update(cx, |this, cx| {
+                                                        this.toggle_user_message_expanded(
+                                                            message_id, cx,
+                                                        );
+                                                    });
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        ),
+                                )
+                            })
                             .when_some(user_message_viewport, |bubble, viewport| {
                                 let key_scroll = viewport.scroll_handle.clone();
                                 let key_menu = menu.clone();

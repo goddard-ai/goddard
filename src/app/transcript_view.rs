@@ -1409,6 +1409,16 @@ impl Waku {
                             .or_default()
                             .clone()
                     });
+                    let user_message_expanded = message.role == MessageRole::User
+                        && self.expanded_user_messages.contains(&message.id);
+                    let user_message_expand_focus =
+                        (message.role == MessageRole::User).then(|| {
+                            self.user_message_expand_focuses
+                                .borrow_mut()
+                                .entry(message.id)
+                                .or_insert_with(|| cx.focus_handle())
+                                .clone()
+                        });
                     let metrics =
                         self.scaled_markdown_metrics(if message.role == MessageRole::User {
                             MarkdownMetrics::USER_MESSAGE
@@ -1448,6 +1458,8 @@ impl Waku {
                             assistant_message_action,
                             user_message_action,
                             user_message_viewport: user_message_viewport.as_ref(),
+                            user_message_expanded,
+                            user_message_expand_focus,
                             message_edit_input,
                             attachment_menus,
                             attachment_images,

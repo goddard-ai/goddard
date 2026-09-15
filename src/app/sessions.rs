@@ -1436,6 +1436,8 @@ impl Waku {
         self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);
         self.transcript_control_focuses.borrow_mut().clear();
         self.user_message_viewports.borrow_mut().clear();
+        self.expanded_user_messages.clear();
+        self.user_message_expand_focuses.borrow_mut().clear();
         self.hovered_response_row = None;
         // Selection belongs to the session being left.
         self.transcript_selection.selection.borrow_mut().clear();

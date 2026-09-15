@@ -2254,6 +2254,10 @@ transcript.show_more_files:
   en: Show %{count} more files
 transcript.show_fewer_files:
   en: Show fewer files
+transcript.show_more:
+  en: Show more
+transcript.show_less:
+  en: Show less
 transcript.showing_first_files:
   en: Showing first %{count} of %{total}
 transcript.scroll_to_bottom:

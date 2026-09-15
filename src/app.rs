@@ -1142,6 +1142,9 @@ struct ActivityScrollViewport {
 struct UserMessageScrollViewport {
     scroll_handle: ScrollHandle,
     scrollbar: Rc<ScrollbarState>,
+    /// Whether the capped viewport measured more content than fits as of the
+    /// last prepaint; the bubble's "Show more" button renders from this.
+    overflowing: Rc<Cell<bool>>,
 }
 
 /// Hover bookkeeping for one changed-files row and the floating diff card it
@@ -1818,6 +1821,11 @@ pub struct Waku {
     message_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
     /// Stable offsets for capped user bubbles, including across virtualized row rebuilds.
     user_message_viewports: RefCell<HashMap<Uuid, UserMessageScrollViewport>>,
+    /// User prompts whose height cap the reader lifted via "Show more".
+    expanded_user_messages: HashSet<Uuid>,
+    /// Focus handles for each bubble's "Show more" button, kept so focus
+    /// survives the virtualized row rebuilds.
+    user_message_expand_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     /// Parsed markdown for reasoning activities, keyed by stable activity id.
     activity_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
     /// Byte offsets live reasoning peeks render from, slid forward as the
@@ -3544,6 +3552,8 @@ impl Waku {
                 transcript_layout_width: Cell::new(Pixels::ZERO),
                 message_markdown: RefCell::new(HashMap::new()),
                 user_message_viewports: RefCell::new(HashMap::new()),
+                expanded_user_messages: HashSet::new(),
+                user_message_expand_focuses: RefCell::new(HashMap::new()),
                 activity_markdown: RefCell::new(HashMap::new()),
                 reasoning_window_starts: RefCell::new(HashMap::new()),
                 activity_scroll_viewports: RefCell::new(HashMap::new()),
