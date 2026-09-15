@@ -443,6 +443,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-,", OpenSettings, None),
         KeyBinding::new("secondary-b", ToggleSidebar, None),
         KeyBinding::new("secondary-alt-b", ToggleRightPanel, None),
+        KeyBinding::new("secondary-alt-g", ToggleGitPanel, None),
         // ⌘K opens the palette even in the terminal; ⌘⇧K clears the
         // scrollback there instead — hand-rolled in the terminal's
         // `on_key_down`. Elsewhere Ctrl+K is a shell shortcut

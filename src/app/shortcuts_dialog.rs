@@ -103,6 +103,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         ),
         bound(tr!("menu.toggle_sidebar"), ToggleSidebar, None),
         bound(tr!("menu.toggle_right_panel"), ToggleRightPanel, None),
+        bound(tr!("menu.toggle_git_panel"), ToggleGitPanel, None),
         bound(tr!("shortcuts.toggle_terminals"), ToggleTerminals, None),
         bound(tr!("menu.focus_composer"), FocusComposer, None),
         bound(tr!("menu.focus_terminal"), FocusTerminal, None),
