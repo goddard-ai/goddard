@@ -109,6 +109,8 @@ export type { SlashCommand } from "./SlashCommand";
 export type { StatusEntry } from "./StatusEntry";
 export type { StoredAttachment } from "./StoredAttachment";
 export type { StoredTranscriptBlockContent } from "./StoredTranscriptBlockContent";
+export type { SubagentTier } from "./SubagentTier";
+export type { SubagentTierTarget } from "./SubagentTierTarget";
 export type { SyncInProgress } from "./SyncInProgress";
 export type { ThreadGoal } from "./ThreadGoal";
 export type { ThreadGoalStatus } from "./ThreadGoalStatus";

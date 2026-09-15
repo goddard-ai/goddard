@@ -628,6 +628,10 @@ pub struct PersistedState {
     pub agent_tools_enabled: bool,
     #[serde(default = "default_agent_settings_enabled")]
     pub agent_settings_enabled: bool,
+    /// Named subagent tiers injected into every session's harness. Daemon-
+    /// owned; mirrored here so clients can render what will be injected.
+    #[serde(default)]
+    pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -711,6 +715,7 @@ impl PersistedState {
             provider_binary_overrides: HashMap::new(),
             agent_tools_enabled: false,
             agent_settings_enabled: true,
+            subagent_tiers: BTreeMap::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -857,6 +862,7 @@ impl PersistedState {
             provider_binary_overrides: self.provider_binary_overrides.clone(),
             agent_tools_enabled: self.agent_tools_enabled,
             agent_settings_enabled: self.agent_settings_enabled,
+            subagent_tiers: self.subagent_tiers.clone(),
             custom_commands: self.custom_commands.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
@@ -877,6 +883,7 @@ impl PersistedState {
         self.provider_binary_overrides = settings.provider_binary_overrides;
         self.agent_tools_enabled = settings.agent_tools_enabled;
         self.agent_settings_enabled = settings.agent_settings_enabled;
+        self.subagent_tiers = settings.subagent_tiers;
         self.custom_commands = settings.custom_commands;
         self.daemon_settings_extra = settings.extra;
     }

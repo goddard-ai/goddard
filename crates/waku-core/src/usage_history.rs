@@ -409,7 +409,7 @@ fn normalize_model_name(model: &str) -> String {
     }
 }
 
-fn lookup_rate<'a>(table: &'a RateTable, model: &str) -> Option<&'a ModelRate> {
+pub(crate) fn lookup_rate<'a>(table: &'a RateTable, model: &str) -> Option<&'a ModelRate> {
     let normalized = normalize_model_name(model);
     if normalized.is_empty() || UNPRICEABLE_MODELS.contains(&normalized.as_str()) {
         return None;
@@ -540,6 +540,18 @@ pub fn load_rate_table(cache_dir: &Path) -> RateTable {
         },
         (None, None) => RateTable::unavailable(),
     }
+}
+
+/// The on-disk rate snapshot only — never the network. Session launch builds
+/// its subagent cost labels from this so a stale table never blocks a start
+/// on an HTTPS round trip.
+pub fn load_cached_rate_table(cache_dir: &Path) -> RateTable {
+    read_rates_cache(&cache_dir.join(RATES_CACHE_FILE))
+        .map(|(_, rates)| RateTable {
+            rates,
+            status: PricingStatus::Cached,
+        })
+        .unwrap_or_else(RateTable::unavailable)
 }
 
 /* ------------------------------------------------------------------------- */

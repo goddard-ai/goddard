@@ -2,6 +2,7 @@
 import type { ComputerAppGrant } from "./ComputerAppGrant";
 import type { CustomCommand } from "./CustomCommand";
 import type { ProviderKind } from "./ProviderKind";
+import type { SubagentTier } from "./SubagentTier";
 import type { JsonValue } from "./serde_json/JsonValue";
 
 export type DaemonSettings = { computer_use_enabled: boolean, computer_use_allowed_apps: Array<ComputerAppGrant>,
@@ -25,4 +26,10 @@ agent_settings_enabled: boolean,
  * client — and the agent settings surface — shares one list, and
  * because the scripts execute on the daemon host.
  */
-custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>, provider_binary_overrides: { [key in ProviderKind]?: string }, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
+/**
+ * Named subagent tiers injected into every session's harness, keyed by
+ * tier name ("explore", "fast", "medium", "heavy"). Empty → only the
+ * built-in read-only `waku-explore` agent is injected.
+ */
+subagent_tiers?: { [key in string]: SubagentTier }, provider_binary_overrides: { [key in ProviderKind]?: string }, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

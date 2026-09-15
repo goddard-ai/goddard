@@ -9,6 +9,26 @@ use crate::computer_use::ComputerAppGrant;
 use crate::custom_commands::CustomCommand;
 use crate::model::ProviderKind;
 
+/// A provider-native model/effort target for one subagent tier. Either side
+/// may be absent — an absent model inherits the session's model, an absent
+/// effort the provider's default.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(default)]
+pub struct SubagentTierTarget {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+/// One harness-neutral tier ("fast", "medium", "heavy"), mapped per provider
+/// so the same `waku-fast` agent can be a cheap model on every harness at
+/// once. A provider missing from the map gets the tier's prompt with the
+/// session's own model.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(default)]
+pub struct SubagentTier {
+    pub providers: HashMap<ProviderKind, SubagentTierTarget>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(default)]
 pub struct DaemonSettings {
@@ -31,6 +51,11 @@ pub struct DaemonSettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     pub disabled_providers: Vec<ProviderKind>,
+    /// Named subagent tiers injected into every session's harness, keyed by
+    /// tier name ("explore", "fast", "medium", "heavy"). Empty → only the
+    /// built-in read-only `waku-explore` agent is injected.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subagent_tiers: BTreeMap<String, SubagentTier>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
     #[serde(flatten)]
@@ -46,6 +71,7 @@ impl Default for DaemonSettings {
             agent_settings_enabled: true,
             custom_commands: Vec::new(),
             disabled_providers: Vec::new(),
+            subagent_tiers: BTreeMap::new(),
             provider_binary_overrides: HashMap::new(),
             extra: BTreeMap::new(),
         }

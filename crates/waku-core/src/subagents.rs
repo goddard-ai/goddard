@@ -9,38 +9,176 @@
 //! for OpenCode, an extension file for Pi, a session instruction entry for
 //! the adopted OpenCode 2 service, and a thread-start hint for Codex.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde_json::{Value, json};
-use waku_protocol::model::{SubagentDef, SubagentSpec};
+use waku_protocol::model::{ProviderKind, SubagentDef, SubagentSpec};
+use waku_protocol::settings::SubagentTier;
+
+use crate::usage_history::{RateTable, lookup_rate};
 
 /// Agent names carrying this prefix are Goddard-defined; the transcript's
 /// background-work rows attribute their runs to us with no extra plumbing.
 pub(crate) const NAME_PREFIX: &str = "waku-";
 
-/// The fixed agent set shipped before tiered routing exists: one read-only
-/// explorer the session's model can hand lookups to.
-pub(crate) fn default_spec() -> SubagentSpec {
-    SubagentSpec {
-        agents: vec![SubagentDef {
-            name: format!("{NAME_PREFIX}explore"),
-            description: "Read-only codebase exploration: search, read, and \
-                 answer questions about how the code works. Delegate focused \
-                 lookups here instead of spending your own context on them."
-                .into(),
-            prompt: "You are a read-only exploration specialist inside a coding \
-                 session. Search, read, and answer questions about the codebase; \
-                 never write or modify files. Prefer a single focused pass and \
-                 stop as soon as you can answer exactly what was asked. Return \
-                 findings concisely: file:line references, quoted snippets, and \
-                 a one-line summary. If the task needs edits, say so and return."
-                .into(),
-            read_only: true,
-            model: None,
-            effort: None,
-        }],
+fn default_explore() -> SubagentDef {
+    SubagentDef {
+        name: format!("{NAME_PREFIX}explore"),
+        description: "Read-only codebase exploration: search, read, and \
+             answer questions about how the code works. Delegate focused \
+             lookups here instead of spending your own context on them."
+            .into(),
+        prompt: "You are a read-only exploration specialist inside a coding \
+             session. Search, read, and answer questions about the codebase; \
+             never write or modify files. Prefer a single focused pass and \
+             stop as soon as you can answer exactly what was asked. Return \
+             findings concisely: file:line references, quoted snippets, and \
+             a one-line summary. If the task needs edits, say so and return."
+            .into(),
+        read_only: true,
+        model: None,
+        effort: None,
     }
+}
+
+/// The prompt/description baseline for a tier name, after the router's
+/// @fast/@medium/@heavy split. An unknown name still gets an agent — the
+/// user named it — with a generic delegation prompt.
+fn tier_baseline(name: &str) -> (String, String, bool) {
+    match name {
+        "fast" | "explore" => (
+            "Read-only lookups, search, and quick questions — the cheap pass \
+             for anything answerable without edits."
+                .into(),
+            "You are a read-only exploration specialist inside a coding \
+             session. Search, read, and answer questions about the codebase; \
+             never write or modify files. Prefer a single focused pass and \
+             stop as soon as you can answer exactly what was asked. Return \
+             findings concisely: file:line references, quoted snippets, and \
+             a one-line summary. If the task needs edits, say so and return."
+                .into(),
+            true,
+        ),
+        "medium" | "implement" | "work" => (
+            "Focused implementation work: edits, refactoring, and tests. \
+             Delegate bounded coding tasks here."
+                .into(),
+            "You are an implementation specialist inside a coding session. \
+             Complete the bounded task exactly as asked — edit, refactor, or \
+             add tests — and return a one-line summary of what changed and \
+             where. Stay inside the task's scope; if it grows beyond what \
+             was asked, report back instead of expanding it."
+                .into(),
+            false,
+        ),
+        "heavy" | "deep" => (
+            "Deep analysis: architecture, debugging, and security review. \
+             Reserve this for the hardest problems."
+                .into(),
+            "You are a deep-analysis specialist inside a coding session. \
+             Reason carefully about the problem — architecture, debugging, \
+             or security — and explore before concluding. Return a concise, \
+             well-supported answer with file:line evidence."
+                .into(),
+            false,
+        ),
+        _ => (
+            "A specialized helper agent configured for this session.".into(),
+            "You are a specialist inside a coding session. Complete the task \
+             exactly as asked and return a concise summary. If the task \
+             exceeds your instructions, report back instead of expanding it."
+                .into(),
+            false,
+        ),
+    }
+}
+
+fn tier_slug(name: &str) -> String {
+    name.trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Relative cost labels baked into each description — "(~5× the cheapest
+/// helper's cost)" is the routing signal the session's model actually reads.
+/// Labels appear only when two or more agents carry a priced model.
+fn annotate_cost(agents: &mut [SubagentDef], rates: &RateTable) {
+    let blended = |agent: &SubagentDef| {
+        agent
+            .model
+            .as_deref()
+            .and_then(|model| lookup_rate(rates, model))
+            .map(|rate| rate.input + rate.output)
+    };
+    let priced = agents.iter().filter_map(blended).collect::<Vec<_>>();
+    if priced.len() < 2 {
+        return;
+    }
+    let cheapest = priced.iter().cloned().fold(f64::INFINITY, f64::min);
+    if cheapest <= 0.0 {
+        return;
+    }
+    for agent in agents.iter_mut() {
+        let Some(price) = blended(agent) else {
+            continue;
+        };
+        let label = if price / cheapest < 1.5 {
+            " (cheapest)".to_owned()
+        } else {
+            format!(
+                " (~{}× the cheapest helper's cost)",
+                (price / cheapest).round().max(2.0) as u32
+            )
+        };
+        agent.description.push_str(&label);
+    }
+}
+
+/// The agent set for one session launch: the built-in `waku-explore` plus a
+/// `waku-<tier>` agent per configured tier, each carrying the provider's
+/// configured model and effort. An `explore` tier customizes the built-in
+/// instead of adding a second explorer.
+pub(crate) fn spec_for(
+    provider: ProviderKind,
+    tiers: &BTreeMap<String, SubagentTier>,
+    rates: &RateTable,
+) -> SubagentSpec {
+    let mut agents = vec![default_explore()];
+    for (name, tier) in tiers {
+        let slug = tier_slug(name);
+        if slug.is_empty() {
+            continue;
+        }
+        let target = tier.providers.get(&provider);
+        if slug == "explore" {
+            if let Some(target) = target {
+                agents[0].model = target.model.clone();
+                agents[0].effort = target.effort.clone();
+            }
+            continue;
+        }
+        let (description, prompt, read_only) = tier_baseline(&slug);
+        agents.push(SubagentDef {
+            name: format!("{NAME_PREFIX}{slug}"),
+            description,
+            prompt,
+            read_only,
+            model: target.and_then(|target| target.model.clone()),
+            effort: target.and_then(|target| target.effort.clone()),
+        });
+    }
+    annotate_cost(&mut agents, rates);
+    SubagentSpec { agents }
 }
 
 /// The routing hint for harnesses that take injected agent definitions: a
@@ -60,8 +198,10 @@ pub(crate) fn routing_hint(spec: &SubagentSpec) -> Option<String> {
         "This session can delegate focused, self-contained subtasks to helper \
          agents instead of doing everything inline:\n{agents}\nInvoke your \
          task/subagent tool with the agent's name; the helper's reply returns \
-         into this turn. Trivial lookups you can answer in one or two tool \
-         calls are not worth delegating."
+         into this turn. Prefer the cheapest helper that can finish the task \
+         — a task the user tags `budget` favors the cheapest helper that \
+         fits, `quality` or `deep` prefers a deeper one. Trivial lookups you \
+         can answer in one or two tool calls are not worth delegating."
     ))
 }
 
@@ -246,7 +386,11 @@ mod tests {
 
     #[test]
     fn default_agents_carry_the_attribution_prefix() {
-        let spec = default_spec();
+        let spec = spec_for(
+            ProviderKind::Claude,
+            &BTreeMap::new(),
+            &RateTable::unavailable(),
+        );
         assert!(!spec.agents.is_empty());
         assert!(
             spec.agents
@@ -257,7 +401,11 @@ mod tests {
 
     #[test]
     fn routing_hint_names_every_agent() {
-        let spec = default_spec();
+        let spec = spec_for(
+            ProviderKind::Claude,
+            &BTreeMap::new(),
+            &RateTable::unavailable(),
+        );
         let hint = routing_hint(&spec).expect("a populated spec yields a hint");
         for agent in &spec.agents {
             assert!(hint.contains(&agent.name));
@@ -267,7 +415,12 @@ mod tests {
 
     #[test]
     fn claude_definitions_mark_read_only_agents() {
-        let json = claude_agents_json(&default_spec()).expect("agents serialize");
+        let json = claude_agents_json(&spec_for(
+            ProviderKind::Claude,
+            &BTreeMap::new(),
+            &RateTable::unavailable(),
+        ))
+        .expect("agents serialize");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["waku-explore"];
         assert!(!explore["prompt"].as_str().unwrap().is_empty());
@@ -282,11 +435,97 @@ mod tests {
 
     #[test]
     fn opencode_definitions_are_subagent_mode_and_deny_writes() {
-        let json = opencode_config_json(&default_spec()).expect("config serializes");
+        let json = opencode_config_json(&spec_for(
+            ProviderKind::Claude,
+            &BTreeMap::new(),
+            &RateTable::unavailable(),
+        ))
+        .expect("config serializes");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["agent"]["waku-explore"];
         assert_eq!(explore["mode"], "subagent");
         assert_eq!(explore["permission"]["edit"], "deny");
+    }
+
+    #[test]
+    fn tiers_become_named_agents_with_provider_models() {
+        let mut tiers = BTreeMap::new();
+        let mut explore = SubagentTier::default();
+        explore.providers.insert(
+            ProviderKind::Claude,
+            waku_protocol::settings::SubagentTierTarget {
+                model: Some("claude-haiku-4-5".into()),
+                effort: Some("low".into()),
+            },
+        );
+        let mut heavy = SubagentTier::default();
+        heavy.providers.insert(
+            ProviderKind::Claude,
+            waku_protocol::settings::SubagentTierTarget {
+                model: Some("claude-opus-4-5".into()),
+                effort: None,
+            },
+        );
+        tiers.insert("Explore".into(), explore);
+        tiers.insert("heavy".into(), heavy);
+
+        let spec = spec_for(ProviderKind::Claude, &tiers, &RateTable::unavailable());
+        assert_eq!(spec.agents.len(), 2, "an explore tier customizes, not adds");
+        assert_eq!(spec.agents[0].model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(spec.agents[0].effort.as_deref(), Some("low"));
+        assert_eq!(spec.agents[1].name, "waku-heavy");
+        assert_eq!(spec.agents[1].model.as_deref(), Some("claude-opus-4-5"));
+        assert!(!spec.agents[1].read_only);
+    }
+
+    #[test]
+    fn priced_models_get_relative_cost_labels() {
+        let mut agents = vec![
+            SubagentDef {
+                name: "waku-fast".into(),
+                description: "cheap".into(),
+                prompt: String::new(),
+                read_only: false,
+                model: Some("claude-haiku-4-5".into()),
+                effort: None,
+            },
+            SubagentDef {
+                name: "waku-heavy".into(),
+                description: "deep".into(),
+                prompt: String::new(),
+                read_only: false,
+                model: Some("claude-opus-4-5".into()),
+                effort: None,
+            },
+        ];
+        let mut rates = std::collections::HashMap::new();
+        rates.insert(
+            "claude-haiku-4-5".into(),
+            crate::usage_history::ModelRate {
+                input: 1.0,
+                output: 5.0,
+                cache_read: 0.1,
+                cache_creation: 1.25,
+            },
+        );
+        rates.insert(
+            "claude-opus-4-5".into(),
+            crate::usage_history::ModelRate {
+                input: 5.0,
+                output: 25.0,
+                cache_read: 0.5,
+                cache_creation: 6.25,
+            },
+        );
+        annotate_cost(
+            &mut agents,
+            &RateTable {
+                rates,
+                status: crate::usage_history::PricingStatus::Cached,
+            },
+        );
+        assert!(agents[0].description.ends_with("(cheapest)"));
+        assert!(agents[1].description.contains("~5×"));
     }
 
     #[test]
