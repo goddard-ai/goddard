@@ -2804,15 +2804,6 @@ impl Waku {
                 .map(|pending| pending.session_id),
             session_id,
         );
-        let working = matches!(
-            session.status,
-            SessionStatus::Connecting | SessionStatus::Working
-        );
-        let project = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id);
         let pinned = session.pinned_at.is_some();
         // While a ⌘n chip overlays the row, its trailing elements hide so
         // nothing competes with the chip; the gradient fades the rest.
@@ -2825,201 +2816,15 @@ impl Waku {
         } else {
             8.0
         };
-        let detail_label = if grouped_by_project {
-            persisted_sidebar_branch_label(&session.workspace)
-                .map(|branch| SharedString::from(branch.to_owned()))
-                .or_else(|| {
-                    if !matches!(&session.workspace, SessionWorkspace::Local) {
-                        return None;
-                    }
-                    project.and_then(|project| {
-                        self.sidebar_branch_labels
-                            .borrow()
-                            .get(&project.path)
-                            .cloned()
-                    })
-                })
-        } else {
-            Some(SharedString::from(
-                if project.is_some_and(Project::is_projectless) {
-                    tr!("project.chat")
-                } else {
-                    project
-                        .map(Project::display_name)
-                        .unwrap_or_else(|| tr!("sidebar.unknown_project"))
-                },
-            ))
-        };
-        let has_detail_label = detail_label.is_some();
-        let checkout_status = if session.has_started() {
-            self.workspace_path_for_session(session)
-                .and_then(|path| self.sidebar_checkout_statuses.borrow().get(path).copied())
-        } else {
-            None
-        };
-        let detail_icon = if grouped_by_project {
-            "icons/git-branch.svg"
-        } else if project.is_some_and(Project::is_projectless) {
-            "icons/chat.svg"
-        } else {
-            "icons/folder.svg"
-        };
-        let rename_input =
-            (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
-        let renaming = rename_input.is_some();
-        let title = if let Some(rename_input) = rename_input {
-            div()
-                .id(SharedString::from(format!(
-                    "session-rename-field-{session_id}"
-                )))
-                .key_context(SESSION_RENAME_PARENT_CONTEXT)
-                .on_action(cx.listener(|this, _: &CancelSessionRename, window, cx| {
-                    this.cancel_session_rename(window, cx);
-                }))
-                .h(px(18.0))
-                .flex_1()
-                .min_w_0()
-                .px(px(4.0))
-                .rounded(px(4.0))
-                .border(hairline())
-                .border_color(theme.accent)
-                .bg(theme.inset)
-                .flex()
-                .items_center()
-                .text_size(sp(13.5))
-                .text_color(theme.text)
-                .child(rename_input)
-                .into_any_element()
-        } else {
-            div()
-                .id(SharedString::from(format!("session-title-{session_id}")))
-                .flex_1()
-                .min_w_0()
-                .whitespace_normal()
-                .line_clamp(1)
-                .text_overflow(gpui::TextOverflow::Truncate("...".into()))
-                .text_size(sp(13.5))
-                .text_color(theme.text)
-                .on_click(
-                    cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                        if event.click_count() == 2 {
-                            this.begin_session_rename(session_id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                )
-                .child(SharedString::from(localized_session_title(session)))
-                .into_any_element()
-        };
+        let renaming = self.session_rename == Some(session_id);
         let waku = cx.entity().downgrade();
         let menu = self.menu_handle(format!("session-{session_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
-        let pull_request_badge = self
-            .sidebar_pull_requests
-            .borrow()
-            .get(&session_id)
-            .and_then(|entries| {
-                sidebar_pull_request_badge(entries, session_pull_request_window(session))
-            });
-        let status_indicator: Option<AnyElement> = if shortcut_hint {
-            None
-        } else if working {
-            Some(motion::spin_slow(icon(
-                "icons/loader-circle.svg",
-                12.0,
-                status_color(&theme, session.status),
-            )))
-        } else {
-            match session.status {
-                SessionStatus::Background => Some(
-                    icon("icons/hourglass.svg", 12.0, status_color(&theme, session.status))
-                        .into_any_element(),
-                ),
-                SessionStatus::Waiting => Some(
-                    icon("icons/alert.svg", 12.0, status_color(&theme, session.status))
-                        .into_any_element(),
-                ),
-                SessionStatus::Failed => Some(
-                    icon("icons/x.svg", 12.0, status_color(&theme, session.status))
-                        .into_any_element(),
-                ),
-                SessionStatus::Idle
-                    if self.state.unseen_completions.contains_key(&session_id) =>
-                {
-                    Some(
-                        div()
-                            .flex_none()
-                            .size(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(div().size(px(7.0)).rounded_full().bg(theme.info))
-                            .into_any_element(),
-                    )
-                }
-                _ => None,
-            }
-        };
-        let group_name = SharedString::from(format!("session-row-{session_id}"));
-        let archive_focus = self
-            .sidebar_session_archive_focuses
-            .borrow_mut()
-            .entry(session_id)
-            .or_insert_with(|| cx.focus_handle())
-            .clone();
-        // The archive control borrows the status slot: it stays zero-width
-        // until the row is hovered or the button takes keyboard focus.
-        let archive_button = div()
-            .id(SharedString::from(format!("session-archive-{session_id}")))
-            .track_focus(&archive_focus)
-            .tab_index(0)
-            .flex_none()
-            .w_0()
-            .h(px(18.0))
-            .overflow_hidden()
-            .rounded(px(4.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .opacity(0.0)
-            .group_hover(group_name.clone(), |style| {
-                style.w(px(20.0)).opacity(1.0)
-            })
-            .focus_visible(|style| {
-                style
-                    .w(px(20.0))
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
-            .hover(|style| style.bg(theme.overlay))
-            .active(|style| style.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text_with_action(
-                tr!("session.archive"),
-                &ArchiveSession,
-            ))
-            .child(icon("icons/archive.svg", 12.0, theme.text_secondary))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                this.archive_session_from_sidebar(session_id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.archive_session_from_sidebar(session_id, window, cx);
-                    cx.stop_propagation();
-                }
-            }));
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
-            .group(group_name.clone())
             .w_full()
             .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
             .pl(px(left_padding))
             .pr(px(8.0))
             .py(px(7.0))
@@ -3030,160 +2835,12 @@ impl Waku {
             })
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.sidebar_item_background))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .overflow_hidden()
-                    .line_height(sp(18.0))
-                    .child(title)
-                    .when_some(status_indicator, |element, indicator| {
-                        element.child(
-                            div()
-                                .flex_none()
-                                .size(px(12.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .group_hover(group_name.clone(), |style| style.invisible())
-                                .child(indicator),
-                        )
-                    })
-                    .when(!shortcut_hint, |element| element.child(archive_button)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
-                    .line_height(sp(15.0))
-                    .when_some(detail_label, |element, label| {
-                        element
-                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex()
-                                    .items_center()
-                                    .text_color(theme.text_tertiary)
-                                    .child(div().min_w_0().truncate().child(label))
-                                    .when(
-                                        checkout_status
-                                            .is_some_and(|status| status.uncommitted_changes),
-                                        |element| {
-                                            element.child(icon(
-                                                "icons/asterisk.svg",
-                                                12.0,
-                                                theme.text_ghost,
-                                            ))
-                                        },
-                                    ),
-                            )
-                            .when_some(
-                                checkout_status
-                                    .map(|status| status.unpushed_commits)
-                                    .filter(|count| *count > 0),
-                                |element, count| {
-                                    element.child(
-                                        div()
-                                            .flex_none()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(2.0))
-                                            .child(icon(
-                                                "icons/arrow-up.svg",
-                                                12.0,
-                                                theme.text_tertiary,
-                                            ))
-                                            .child(
-                                                div()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(SharedString::from(count.to_string())),
-                                            ),
-                                    )
-                                },
-                            )
-                            .child(div().flex_1())
-                    })
-                    .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when(
-                        session.workspace.is_worktree() && !shortcut_hint,
-                        |element| element.child(icon("icons/fork.svg", 12.5, theme.text_secondary)),
-                    )
-                    .when_some(
-                        pull_request_badge.filter(|_| !shortcut_hint),
-                        |element, badge| {
-                            let color = sidebar_pull_request_color(&theme, badge.state);
-                            let url = badge.url.clone();
-                            element.child(
-                                div()
-                                    .id(SharedString::from(format!("session-pr-{session_id}")))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(3.0))
-                                    .cursor_pointer()
-                                    .child(icon(
-                                        sidebar_pull_request_icon(badge.state),
-                                        12.0,
-                                        color,
-                                    ))
-                                    .child(div().text_size(sp(12.5)).text_color(color).child(
-                                        if badge.others == 0 {
-                                            format!("#{}", badge.number)
-                                        } else {
-                                            format!("#{} +{}", badge.number, badge.others)
-                                        },
-                                    ))
-                                    .when_some(badge.check_status, |element, status| {
-                                        element.child(icon(
-                                            sidebar_check_status_icon(status),
-                                            11.5,
-                                            sidebar_check_status_color(&theme, status),
-                                        ))
-                                    })
-                                    .when_some(badge.review_decision, |element, decision| {
-                                        element.child(icon(
-                                            sidebar_review_decision_icon(decision),
-                                            11.5,
-                                            sidebar_review_decision_color(&theme, decision),
-                                        ))
-                                    })
-                                    .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
-                                    .on_click(move |_, _, cx| {
-                                        cx.open_url(&url);
-                                        cx.stop_propagation();
-                                    }),
-                            )
-                        },
-                    )
-                    .when(pinned && !shortcut_hint, |element| {
-                        element.child(icon(
-                            "icons/pin-filled.svg",
-                            12.0,
-                            if session.is_busy() {
-                                theme.text_tertiary
-                            } else {
-                                theme.text_ghost
-                            },
-                        ))
-                    })
-                    .when_some(
-                        session_time_label(session, unix_time()).filter(|_| !shortcut_hint),
-                        |element, label| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(SharedString::from(label)),
-                            )
-                        },
-                    ),
-            )
+            .child(self.render_session_row_body(
+                session_id,
+                grouped_by_project,
+                shortcut_hint,
+                cx,
+            ))
             .when(!renaming, |element| {
                 element
                     .track_focus(&row_focus)
@@ -3378,6 +3035,383 @@ impl Waku {
                         ),
                 )
             })
+            .into_any_element()
+    }
+
+    /// The two-line body a session row shares between the sidebar and a Big
+    /// Picture card header: title plus status/archive on top, project or
+    /// branch detail below. `grouped_by_project` swaps the detail line into
+    /// branch mode the way a project-grouped sidebar does; `shortcut_hint`
+    /// hides the trailing controls while a ⌘n chip overlays the row.
+    pub(super) fn render_session_row_body(
+        &self,
+        session_id: Uuid,
+        grouped_by_project: bool,
+        shortcut_hint: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return div().into_any_element();
+        };
+        let working = matches!(
+            session.status,
+            SessionStatus::Connecting | SessionStatus::Working
+        );
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id);
+        let pinned = session.pinned_at.is_some();
+        let detail_label = if grouped_by_project {
+            persisted_sidebar_branch_label(&session.workspace)
+                .map(|branch| SharedString::from(branch.to_owned()))
+                .or_else(|| {
+                    if !matches!(&session.workspace, SessionWorkspace::Local) {
+                        return None;
+                    }
+                    project.and_then(|project| {
+                        self.sidebar_branch_labels
+                            .borrow()
+                            .get(&project.path)
+                            .cloned()
+                    })
+                })
+        } else {
+            Some(SharedString::from(
+                if project.is_some_and(Project::is_projectless) {
+                    tr!("project.chat")
+                } else {
+                    project
+                        .map(Project::display_name)
+                        .unwrap_or_else(|| tr!("sidebar.unknown_project"))
+                },
+            ))
+        };
+        let has_detail_label = detail_label.is_some();
+        let checkout_status = if session.has_started() {
+            self.workspace_path_for_session(session)
+                .and_then(|path| self.sidebar_checkout_statuses.borrow().get(path).copied())
+        } else {
+            None
+        };
+        let detail_icon = if grouped_by_project {
+            "icons/git-branch.svg"
+        } else if project.is_some_and(Project::is_projectless) {
+            "icons/chat.svg"
+        } else {
+            "icons/folder.svg"
+        };
+        let rename_input =
+            (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
+        let title = if let Some(rename_input) = rename_input {
+            div()
+                .id(SharedString::from(format!(
+                    "session-rename-field-{session_id}"
+                )))
+                .key_context(SESSION_RENAME_PARENT_CONTEXT)
+                .on_action(cx.listener(|this, _: &CancelSessionRename, window, cx| {
+                    this.cancel_session_rename(window, cx);
+                }))
+                .h(px(18.0))
+                .flex_1()
+                .min_w_0()
+                .px(px(4.0))
+                .rounded(px(4.0))
+                .border(hairline())
+                .border_color(theme.accent)
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .text_size(sp(13.5))
+                .text_color(theme.text)
+                .child(rename_input)
+                .into_any_element()
+        } else {
+            div()
+                .id(SharedString::from(format!("session-title-{session_id}")))
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
+                .line_clamp(1)
+                .text_overflow(gpui::TextOverflow::Truncate("...".into()))
+                .text_size(sp(13.5))
+                .text_color(theme.text)
+                .on_click(
+                    cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                        if event.click_count() == 2 {
+                            this.begin_session_rename(session_id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                )
+                .child(SharedString::from(localized_session_title(session)))
+                .into_any_element()
+        };
+        let pull_request_badge = self
+            .sidebar_pull_requests
+            .borrow()
+            .get(&session_id)
+            .and_then(|entries| {
+                sidebar_pull_request_badge(entries, session_pull_request_window(session))
+            });
+        let status_indicator: Option<AnyElement> = if shortcut_hint {
+            None
+        } else if working {
+            Some(motion::spin_slow(icon(
+                "icons/loader-circle.svg",
+                12.0,
+                status_color(&theme, session.status),
+            )))
+        } else {
+            match session.status {
+                SessionStatus::Background => Some(
+                    icon("icons/hourglass.svg", 12.0, status_color(&theme, session.status))
+                        .into_any_element(),
+                ),
+                SessionStatus::Waiting => Some(
+                    icon("icons/alert.svg", 12.0, status_color(&theme, session.status))
+                        .into_any_element(),
+                ),
+                SessionStatus::Failed => Some(
+                    icon("icons/x.svg", 12.0, status_color(&theme, session.status))
+                        .into_any_element(),
+                ),
+                SessionStatus::Idle
+                    if self.state.unseen_completions.contains_key(&session_id) =>
+                {
+                    Some(
+                        div()
+                            .flex_none()
+                            .size(px(12.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(div().size(px(7.0)).rounded_full().bg(theme.info))
+                            .into_any_element(),
+                    )
+                }
+                _ => None,
+            }
+        };
+        let group_name = SharedString::from(format!("session-row-{session_id}"));
+        let archive_focus = self
+            .sidebar_session_archive_focuses
+            .borrow_mut()
+            .entry(session_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // The archive control borrows the status slot: it stays zero-width
+        // until the row is hovered or the button takes keyboard focus.
+        let archive_button = div()
+            .id(SharedString::from(format!("session-archive-{session_id}")))
+            .track_focus(&archive_focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| {
+                style.w(px(20.0)).opacity(1.0)
+            })
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
+                tr!("session.archive"),
+                &ArchiveSession,
+            ))
+            .child(icon("icons/archive.svg", 12.0, theme.text_secondary))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.archive_session_from_sidebar(session_id, window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.archive_session_from_sidebar(session_id, window, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        div()
+            .group(group_name.clone())
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .overflow_hidden()
+                    .line_height(sp(18.0))
+                    .child(title)
+                    .when_some(status_indicator, |element, indicator| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .size(px(12.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .group_hover(group_name.clone(), |style| style.invisible())
+                                .child(indicator),
+                        )
+                    })
+                    .when(!shortcut_hint, |element| element.child(archive_button)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
+                    .line_height(sp(15.0))
+                    .when_some(detail_label, |element, label| {
+                        element
+                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .text_color(theme.text_tertiary)
+                                    .child(div().min_w_0().truncate().child(label))
+                                    .when(
+                                        checkout_status
+                                            .is_some_and(|status| status.uncommitted_changes),
+                                        |element| {
+                                            element.child(icon(
+                                                "icons/asterisk.svg",
+                                                12.0,
+                                                theme.text_ghost,
+                                            ))
+                                        },
+                                    ),
+                            )
+                            .when_some(
+                                checkout_status
+                                    .map(|status| status.unpushed_commits)
+                                    .filter(|count| *count > 0),
+                                |element, count| {
+                                    element.child(
+                                        div()
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(2.0))
+                                            .child(icon(
+                                                "icons/arrow-up.svg",
+                                                12.0,
+                                                theme.text_tertiary,
+                                            ))
+                                            .child(
+                                                div()
+                                                    .text_size(sp(12.5))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(SharedString::from(count.to_string())),
+                                            ),
+                                    )
+                                },
+                            )
+                            .child(div().flex_1())
+                    })
+                    .when(!has_detail_label, |element| element.child(div().flex_1()))
+                    .when(
+                        session.workspace.is_worktree() && !shortcut_hint,
+                        |element| element.child(icon("icons/fork.svg", 12.5, theme.text_secondary)),
+                    )
+                    .when_some(
+                        pull_request_badge.filter(|_| !shortcut_hint),
+                        |element, badge| {
+                            let color = sidebar_pull_request_color(&theme, badge.state);
+                            let url = badge.url.clone();
+                            element.child(
+                                div()
+                                    .id(SharedString::from(format!("session-pr-{session_id}")))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.0))
+                                    .cursor_pointer()
+                                    .child(icon(
+                                        sidebar_pull_request_icon(badge.state),
+                                        12.0,
+                                        color,
+                                    ))
+                                    .child(div().text_size(sp(12.5)).text_color(color).child(
+                                        if badge.others == 0 {
+                                            format!("#{}", badge.number)
+                                        } else {
+                                            format!("#{} +{}", badge.number, badge.others)
+                                        },
+                                    ))
+                                    .when_some(badge.check_status, |element, status| {
+                                        element.child(icon(
+                                            sidebar_check_status_icon(status),
+                                            11.5,
+                                            sidebar_check_status_color(&theme, status),
+                                        ))
+                                    })
+                                    .when_some(badge.review_decision, |element, decision| {
+                                        element.child(icon(
+                                            sidebar_review_decision_icon(decision),
+                                            11.5,
+                                            sidebar_review_decision_color(&theme, decision),
+                                        ))
+                                    })
+                                    .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
+                                    .on_click(move |_, _, cx| {
+                                        cx.open_url(&url);
+                                        cx.stop_propagation();
+                                    }),
+                            )
+                        },
+                    )
+                    .when(pinned && !shortcut_hint, |element| {
+                        element.child(icon(
+                            "icons/pin-filled.svg",
+                            12.0,
+                            if session.is_busy() {
+                                theme.text_tertiary
+                            } else {
+                                theme.text_ghost
+                            },
+                        ))
+                    })
+                    .when_some(
+                        session_time_label(session, unix_time()).filter(|_| !shortcut_hint),
+                        |element, label| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(SharedString::from(label)),
+                            )
+                        },
+                    ),
+            )
             .into_any_element()
     }
 

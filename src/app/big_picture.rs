@@ -154,20 +154,6 @@ fn big_picture_order(sessions: &[AgentSession], unseen: &HashMap<Uuid, u64>) -> 
         .collect()
 }
 
-fn big_picture_status_label(session: &AgentSession, unseen: &HashMap<Uuid, u64>) -> String {
-    match session.status {
-        SessionStatus::Waiting => tr!("big_picture.status.waiting"),
-        SessionStatus::Idle if unseen.contains_key(&session.id) => {
-            tr!("big_picture.status.unread")
-        }
-        SessionStatus::Connecting => tr!("big_picture.status.starting"),
-        SessionStatus::Working => tr!("big_picture.status.working"),
-        SessionStatus::Background => tr!("big_picture.status.background"),
-        SessionStatus::Failed => tr!("big_picture.status.failed"),
-        SessionStatus::Idle => tr!("big_picture.status.idle"),
-    }
-}
-
 /// A card's transcript tail: the last few visible messages, newest last,
 /// pinned to the bottom of the card by the column's `justify_end`.
 fn big_picture_preview_lines(session: &AgentSession) -> Vec<(MessageRole, String)> {
@@ -605,7 +591,6 @@ impl Waku {
         let session_id = session.id;
         let is_target = self.big_picture.target == Some(session_id);
         let is_highlighted = self.big_picture.highlighted == Some(session_id);
-        let unread = self.state.unseen_completions.contains_key(&session_id);
         let status = session.status;
         let leaving = slot.leaving;
         let entering = slot.entering;
@@ -613,52 +598,6 @@ impl Waku {
         let from_left = slot.from_left;
         let anim_id =
             SharedString::from(format!("big-picture-card-{session_id}-{}", slot.anim_seq));
-        let project_name = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id)
-            .filter(|project| !project.is_projectless())
-            .map(Project::display_name);
-        let status_label = big_picture_status_label(session, &self.state.unseen_completions);
-        let time_ago = session
-            .last_reply_at
-            .map(|at| sidebar::format_time_ago(unix_time().saturating_sub(at)));
-        let status_glyph = match status {
-            SessionStatus::Connecting | SessionStatus::Working => motion::spin_slow(icon(
-                "icons/loader-circle.svg",
-                12.0,
-                status_color(&theme, status),
-            )),
-            SessionStatus::Background => {
-                icon("icons/hourglass.svg", 12.0, status_color(&theme, status)).into_any_element()
-            }
-            SessionStatus::Waiting => {
-                icon("icons/alert.svg", 12.0, status_color(&theme, status)).into_any_element()
-            }
-            SessionStatus::Failed => {
-                icon("icons/x.svg", 12.0, status_color(&theme, status)).into_any_element()
-            }
-            SessionStatus::Idle => div()
-                .flex_none()
-                .size(px(12.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .size(px(if unread { 7.0 } else { 4.0 }))
-                        .rounded_full()
-                        .bg(if unread { theme.info } else { theme.text_ghost }),
-                )
-                .into_any_element(),
-        };
-        let title = session.display_title().to_owned();
-        let title = if title == AgentSession::DEFAULT_TITLE {
-            tr!("session.new_task")
-        } else {
-            title
-        };
         let preview = if session.detail_loaded {
             big_picture_preview_lines(session)
         } else {
@@ -766,59 +705,17 @@ impl Waku {
             .flex_col()
             .cursor_default()
             .child(
+                // The same two-line row the sidebar uses, wrapped in the
+                // card's header chrome.
                 div()
                     .flex_none()
-                    .px(px(14.0))
-                    .pt(px(12.0))
-                    .pb(px(10.0))
+                    .px(px(8.0))
+                    .py(px(7.0))
                     .border_b(hairline())
                     .border_color(theme.border)
                     .rounded_t(px(CARD_RADIUS - 1.0))
                     .bg(theme.surface)
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(status_glyph)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(sp(13.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(title),
-                            )
-                            .children(time_ago.map(|ago| {
-                                div()
-                                    .flex_none()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_ghost)
-                                    .child(ago)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .pl(px(20.0))
-                            .text_size(sp(11.0))
-                            .text_color(status_color(&theme, status))
-                            .child(status_label)
-                            .children(project_name.map(|name| {
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(theme.text_tertiary)
-                                    .child(format!("· {name}"))
-                            })),
-                    ),
+                    .child(self.render_session_row_body(session_id, false, false, cx)),
             )
             .child(
                 div()
@@ -828,6 +725,13 @@ impl Waku {
                     .overflow_hidden()
                     .child(body),
             );
+        if self.session_rename == Some(session_id) {
+            card = card.on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                if this.session_rename == Some(session_id) {
+                    this.commit_session_rename(cx);
+                }
+            }));
+        }
         if !leaving {
             card = card
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

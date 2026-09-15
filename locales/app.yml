@@ -223,21 +223,6 @@ big_picture.loading:
   en: Loading…
 big_picture.empty_transcript:
   en: No messages yet
-big_picture.status.waiting:
-  en: Needs input
-big_picture.status.unread:
-  en: Unread
-big_picture.status.working:
-  en: Working
-big_picture.status.starting:
-  en: Starting
-big_picture.status.background:
-  en: In background
-big_picture.status.idle:
-  en: Idle
-big_picture.status.failed:
-  en: Failed
-
 project_switcher.recently_used:
   en: Recently used
 
