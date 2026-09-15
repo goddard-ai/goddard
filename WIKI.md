@@ -233,8 +233,11 @@ is told its working directory changed.
 - **Steer** with Cmd/Ctrl+Enter: inject the message into the *running* turn
   when the provider supports it. If steering is refused or unsupported, the
   message falls back to the follow-up queue automatically.
-- **Edit and resend** earlier messages, and answer an agent's questions
-  directly in the composer.
+- **Edit and resend** earlier messages.
+- **Structured questions** — when an agent needs input, the composer turns
+  into a multi-question form with progress ("1 of 3"), Back/Next navigation,
+  preset choices, and a free-text "other" answer, instead of making you reply
+  in prose.
 - **@-mention files** — fuzzy-matched against the workspace file index — to
   pin them into context.
 - **Slash commands** — provider-native commands and skills the agent CLI
@@ -344,6 +347,11 @@ stalled, usage-limited, budget-exhausted, and complete.
 - Each response keeps a changed-files summary and a **Review** action that
   opens its diff — files in the summary open directly, and hovering one
   previews its diff inline.
+- A **navigation rail** alongside the transcript marks each turn — hover for
+  a preview of its prompt, click to jump; ⌘⌥↑/↓ step between them.
+- Every response shows its working time ("Worked for 3m") and a copy action;
+  selected text copies with ⌘C, and code blocks, commands, and file paths
+  have their own copy controls.
 - Every user message supports edit, and every response supports fork/revert —
   the transcript is the control surface, not just a log.
 
@@ -354,10 +362,11 @@ stalled, usage-limited, budget-exhausted, and complete.
   merge if you prefer (a setting). Rebase/merge conflicts surface with an
   **Abort**, **Merge instead**, or **Resolve in chat** action that hands the
   conflict to the agent.
-- **Commit dialog:** write your own subject or leave it empty and Goddard
-  generates one — by running the session's own agent CLI once, headlessly,
-  pinned to that provider's cheapest tier (Claude → Haiku, Codex → gpt-5.6-luna)
-  so generation stays fast and nearly free.
+- **Commit dialog:** Commit, Commit and push, or Push, with an
+  include-unstaged toggle. Write your own subject or leave it empty and
+  Goddard generates one — by running the session's own agent CLI once,
+  headlessly, pinned to that provider's cheapest tier (Claude → Haiku, Codex →
+  gpt-5.6-luna) so generation stays fast and nearly free.
 - **Branch picker:** search, switch, and create branches, with "checked out in
   another worktree" marked.
 - **Review surface:** diff the last turn, any turn, uncommitted/staged/
@@ -384,7 +393,9 @@ Markdown source/preview toggle, save with Cmd/Ctrl+S, find and replace
 (Cmd/Ctrl+F inside the editor, with case/whole-word/regex), and "Open on
 GitHub" for tracked files. **Cmd+P** opens a fuzzy file finder over the same
 index. On macOS, an **Open in…** control opens the project folder in an
-external app of your choice (Finder, your editor) and remembers it.
+external app and remembers your choice — VS Code, Cursor, Zed, Devin, Finder,
+Terminal, Termy (via its new-tab deeplink), iTerm2, Kitty, Ghostty, Warp,
+Xcode, and Android Studio are detected automatically.
 
 ### Terminal
 
@@ -395,7 +406,8 @@ falls back to Windows PowerShell, then `COMSPEC`. A shell-integration script
 sourced into each PTY reports the live working directory and per-command
 boundaries, so sidebar rows are named after the repo (falling back to the
 shell), track `cd`, show last-activity times and command status icons, and
-close themselves when the shell exits. Scrollback clear, terminal font
+close themselves when the shell exits. URLs in terminal output are clickable
+(OSC8 hyperlinks and plain-text links). Scrollback clear, terminal font
 sizing, and copy/paste that doesn't steal Ctrl+C from the shell
 (Ctrl+Shift+C/V on Windows).
 
@@ -511,7 +523,9 @@ split is what makes the other clients possible:
   private network.
 - **Goddard Web** is a browser client that connects to an exposed daemon over
   that authenticated WebSocket — same tasks, transcripts, diffs, and
-  permissions, rendered in the browser.
+  permissions, rendered in the browser. It includes a **daemon-host file
+  picker**, so you can browse the remote machine's folders to open a project
+  or attach files to a prompt.
 - **Goddard Mobile** (iOS/Android, Expo) connects to one or more remote
   daemons the same way; tokens are stored in the device keychain.
 - **Agent tools** (daemon setting): sessions can get a session-scoped
@@ -519,8 +533,9 @@ split is what makes the other clients possible:
   other tasks — agent-to-agent delegation, marked in the target transcript.
 - The desktop can also **connect to an externally managed daemon** (headless
   host, VM, container): files, diffs, Git, skills, usage, and attachments all
-  work over RPC. The local folder picker and PTY terminal are the current
-  exceptions until the protocol gains daemon-host equivalents.
+  work over RPC. Two things still need a local daemon on the desktop: picking
+  a project folder on the remote host (the web client's daemon file picker
+  covers this case) and PTY terminals.
 - The connection is built to fail well: an unresponsive daemon is detected and
   retried with backoff, remote sessions reconnect automatically after
   interruptions, provider processes are guarded against daemon death, and
@@ -748,6 +763,10 @@ No — Goddard is a single-window app by design. Parallel work lives in
 sidebar tasks, ⌘1–9 jumps, the Ctrl+Tab switcher, and Big Picture (⌘0)
 rather than separate windows. Window size, position, and display are restored
 across launches.
+
+**Can I customize the keybindings?**
+Not yet — the keymap is fixed (and compiled), so there's no rebinding UI or
+config file today. Themes, fonts, and sizes are the customization surface.
 
 **Is there telemetry?**
 Optional, anonymous, off by default — feature-usage and reliability data only,
