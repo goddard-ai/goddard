@@ -2029,15 +2029,7 @@ impl ActivityKind {
     /// Classifies provider tool names without mistaking unrelated MCP tools
     /// such as `create_thread` or `read_mcp_resource` for file operations.
     pub fn from_tool_name(name: &str) -> Self {
-        let normalized = name.trim().to_ascii_lowercase().replace(['-', ' '], "_");
-        let leaf = normalized
-            .rsplit("__")
-            .next()
-            .unwrap_or(&normalized)
-            .rsplit([':', '.', '/'])
-            .next()
-            .unwrap_or(&normalized);
-        let compact = leaf.replace('_', "");
+        let compact = tool_name_leaf(name);
 
         if matches!(
             compact.as_str(),
@@ -2120,6 +2112,32 @@ impl ActivityKind {
             Self::Tool
         }
     }
+}
+
+/// The normalized leaf of a provider tool name — lowercased, server/MCP
+/// prefixes stripped, separators folded so `waku_delegate`, `waku-delegate`,
+/// and `mcp__x__waku_delegate` all compare as `wakudelegate`.
+pub fn tool_name_leaf(name: &str) -> String {
+    let normalized = name.trim().to_ascii_lowercase().replace(['-', ' '], "_");
+    normalized
+        .rsplit("__")
+        .next()
+        .unwrap_or(&normalized)
+        .rsplit([':', '.', '/'])
+        .next()
+        .unwrap_or(&normalized)
+        .replace('_', "")
+}
+
+/// Whether a provider tool name dispatches a subagent rather than running
+/// inline — `task` (Claude/OpenCode), `subagent` (OpenCode 2), `spawn_agent`
+/// (Codex), `waku_delegate` (Goddard's Pi extension). Exact-leaf match only;
+/// an MCP `create_task` does not qualify.
+pub fn is_delegation_tool_name(name: &str) -> bool {
+    matches!(
+        tool_name_leaf(name).as_str(),
+        "task" | "subagent" | "spawnagent" | "wakudelegate"
+    )
 }
 
 #[derive(Clone, Debug)]

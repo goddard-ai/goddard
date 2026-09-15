@@ -2701,7 +2701,7 @@ impl Waku {
                                 .active(|element| element.bg(activity_active_surface))
                         })
                         .child(icon(
-                            activity_icon(activity.kind),
+                            activity_row_icon(activity),
                             12.0,
                             theme.text_tertiary,
                         ))

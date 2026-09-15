@@ -23,7 +23,11 @@ use super::{activity, computer_use as computer_use_runtime};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
-use crate::model::{ActivityKind, DriverEvent, ProviderResumeCursor, ReportedCommand, RuntimeMode};
+use crate::model::{
+    ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKind,
+    BackgroundWorkStatus, DriverEvent, ProviderResumeCursor, ReportedCommand, RuntimeMode,
+    is_delegation_tool_name,
+};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -1298,6 +1302,9 @@ struct PiStreamState {
     message_saw_reasoning: bool,
     failed: bool,
     tools: HashMap<String, (ActivityKind, String)>,
+    /// `waku_delegate` call id → agent name, kept for the duration of the
+    /// call so completion upserts still carry the role.
+    subagent_roles: HashMap<String, String>,
 }
 
 fn handle_pi_message(
@@ -1516,6 +1523,7 @@ fn handle_pi_message(
             };
             let complete = event_type == "tool_execution_end";
             let failed = value.get("isError").and_then(Value::as_bool) == Some(true);
+            let work_title = title.clone();
             let item = activity::tool_activity(
                 id.clone(),
                 kind,
@@ -1528,6 +1536,42 @@ fn handle_pi_message(
             )
             .with_tool_name(tool_name);
             let _ = events.send(DriverEvent::RichActivity(item));
+            // A delegated call (waku's `waku_delegate` extension, or a native
+            // equivalent) runs a helper that emits no events of its own —
+            // synthesize the tasks-surface item here the way other drivers do
+            // for their native subagent tools.
+            if tool_name.is_some_and(is_delegation_tool_name)
+                && let Some(call_id) = id.as_deref()
+            {
+                if let Some(role) = value
+                    .pointer("/args/agent")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                {
+                    state.subagent_roles.insert(call_id.to_owned(), role);
+                }
+                let status = if !complete {
+                    BackgroundWorkStatus::Running
+                } else if failed {
+                    BackgroundWorkStatus::Failed
+                } else {
+                    BackgroundWorkStatus::Completed
+                };
+                let mut work = BackgroundWorkItem::new(
+                    BackgroundWorkKind::Subagent,
+                    call_id,
+                    work_title,
+                    status,
+                );
+                work.role = state.subagent_roles.get(call_id).cloned();
+                work.origin_activity_id = Some(call_id.to_owned());
+                let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                    work,
+                )));
+                if complete {
+                    state.subagent_roles.remove(call_id);
+                }
+            }
             if complete && let Some(id) = id {
                 state.tools.remove(&id);
             }
@@ -1921,6 +1965,55 @@ mod tests {
             environment.get("WAKU_COMPUTER_USE_PROCESS_DIRECTORY"),
             Some(&Some("/tmp/waku-computer-use/session".into()))
         );
+    }
+
+    /// `waku_delegate` runs a helper `pi -p` that emits no events of its own,
+    /// so the driver synthesizes the tasks-surface item from the tool call:
+    /// running while it executes, settled at the end, role carried across.
+    #[test]
+    fn waku_delegate_calls_emit_subagent_background_work() {
+        let (pending, commands, _command_rx, mut state) = harness();
+        let (events, event_rx) = unbounded();
+        for value in [
+            json!({
+                "type": "tool_execution_start",
+                "toolCallId": "tool-9",
+                "toolName": "waku_delegate",
+                "args": {"agent": "waku-explore", "prompt": "Find the auth flow"}
+            }),
+            json!({
+                "type": "tool_execution_end",
+                "toolCallId": "tool-9",
+                "toolName": "waku_delegate",
+                "result": {"content": "auth lives in auth.rs"},
+                "isError": false
+            }),
+        ] {
+            handle_pi_message(
+                PiFlavor::Pi,
+                value,
+                &pending,
+                &commands,
+                &events,
+                &mut state,
+            );
+        }
+
+        let works: Vec<BackgroundWorkItem> = event_rx
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(works.len(), 2);
+        assert_eq!(works[0].key.kind, BackgroundWorkKind::Subagent);
+        assert_eq!(works[0].status, BackgroundWorkStatus::Running);
+        assert_eq!(works[0].role.as_deref(), Some("waku-explore"));
+        assert_eq!(works[1].status, BackgroundWorkStatus::Completed);
+        // Role survives the end event, which carries no args.
+        assert_eq!(works[1].role.as_deref(), Some("waku-explore"));
+        assert!(state.subagent_roles.is_empty());
     }
 
     #[test]

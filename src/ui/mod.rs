@@ -262,6 +262,20 @@ pub fn status_color(theme: &Theme, status: SessionStatus) -> Hsla {
     }
 }
 
+/// The icon a transcript activity row renders: a delegation call gets the
+/// bot glyph instead of the generic tool wrench so a subagent hand-off reads
+/// differently from an ordinary tool call.
+pub fn activity_row_icon(activity: &crate::model::ActivityItem) -> &'static str {
+    if activity
+        .tool_name
+        .as_deref()
+        .is_some_and(crate::model::is_delegation_tool_name)
+    {
+        return "icons/bot.svg";
+    }
+    activity_icon(activity.kind)
+}
+
 pub fn activity_icon(kind: ActivityKind) -> &'static str {
     match kind {
         ActivityKind::Reasoning => "icons/sparkle.svg",
@@ -638,6 +652,8 @@ mod tests {
         ] {
             paths.push(activity_icon(kind));
         }
+        // Delegation rows override the kind icon with the bot glyph.
+        paths.push("icons/bot.svg");
         for path in paths {
             assert!(
                 Assets.load(path).unwrap().is_some(),
