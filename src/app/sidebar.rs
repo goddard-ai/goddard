@@ -2452,12 +2452,14 @@ impl Waku {
                 )
         });
 
-        // The Terminals group reads as a third action row, so it stands
-        // flush with the search field at the action rows' height; every
-        // other group keeps the section-header size.
+        // The Terminals group reads as a third action row, so it matches the
+        // New Task and Search rows' metrics — height, padding, icon box,
+        // gap, and regular label weight; every other group keeps the
+        // section-header styling.
+        let action_row = group == SidebarGroup::Terminals;
         let header = session_group_header(
             &theme,
-            if group == SidebarGroup::Terminals {
+            if action_row {
                 SIDEBAR_ACTION_ROW_HEIGHT
             } else {
                 SIDEBAR_GROUP_HEADER_HEIGHT
@@ -2475,6 +2477,12 @@ impl Waku {
             .w_full()
             .rounded(px(8.0))
             .cursor_default()
+            .when(action_row, |element| {
+                element
+                    .px(px(4.0))
+                    .rounded(px(9.0))
+                    .font_weight(FontWeight::NORMAL)
+            })
             .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|style| style.bg(theme.sidebar_item_background))
             .active(|style| style.bg(theme.overlay_strong))
@@ -2485,9 +2493,21 @@ impl Waku {
                     .h(px(22.0))
                     .flex()
                     .items_center()
-                    .gap(px(5.0))
+                    .gap(px(if action_row { 6.0 } else { 5.0 }))
                     .when(show_group_icon, |element| {
-                        element.child(icon(group_icon, 14.0, theme.text_secondary))
+                        if action_row {
+                            element.child(
+                                div()
+                                    .size(px(20.0))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon(group_icon, 14.0, theme.text_secondary)),
+                            )
+                        } else {
+                            element.child(icon(group_icon, 14.0, theme.text_secondary))
+                        }
                     })
                     .child(
                         div()
