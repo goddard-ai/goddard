@@ -511,21 +511,27 @@ impl Waku {
                     status_color(&theme, session.status),
                 ))
             })
-            .when(
-                session.status == SessionStatus::Idle
-                    && self.state.unseen_completions.contains_key(&session_id),
-                |entry| {
-                    entry.child(
-                        div()
-                            .flex_none()
-                            .size(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
-                    )
-                },
-            )
+            .when(session.status == SessionStatus::Idle, |entry| {
+                let unread = self.state.unseen_completions.contains_key(&session_id);
+                entry.child(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .size(px(if unread { 7.0 } else { 4.0 }))
+                                .rounded_full()
+                                .bg(if unread {
+                                    theme.info
+                                } else {
+                                    theme.text_ghost
+                                }),
+                        ),
+                )
+            })
             .into_any_element()
     }
 
