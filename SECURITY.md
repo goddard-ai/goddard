@@ -10,7 +10,7 @@ through the in-app updater and https://goddardai.org.
 Please use GitHub private vulnerability reporting:
 https://github.com/goddard-ai/goddard/security/advisories/new
 
-If that doesn't work for you, email hi@egoist.dev.
+If that doesn't work for you, email security@goddardai.org.
 
 Please don't open a public issue for anything you believe is
 exploitable before it has been fixed. Include reproduction steps and

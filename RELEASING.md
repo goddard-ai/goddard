@@ -85,7 +85,7 @@ xcrun notarytool store-credentials NOTARY \
 ```
 
 Override the environment with `--signing-identity`, or change the notary
-profile with `--notary-profile` / `GODDARD_NOTARY_PROFILE`.
+profile with `--notary-profile` / `WAKU_NOTARY_PROFILE`.
 
 ### 3. Cloudflare R2 bucket + domain  ← **still to do once**
 
@@ -228,9 +228,9 @@ secrets first:
 
 | Secret | Purpose |
 | --- | --- |
-| `GODDARD_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
-| `GODDARD_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
-| `GODDARD_SIGNING_IDENTITY` | Developer ID identity selector |
+| `WAKU_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
+| `WAKU_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
+| `WAKU_SIGNING_IDENTITY` | Developer ID identity selector |
 | `APPLE_CERTIFICATE` | base64-encoded Developer ID Application `.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | password for that `.p12` |
 | `APPLE_ID` | Apple ID used by `notarytool` |
@@ -252,14 +252,14 @@ secrets first:
 | `--force` | — | re-publish a version that already exists in R2 |
 | `--adhoc`, `--skip-notarize` | — | local test builds (imply `--local`) |
 | `--skip-build` | — | reuse existing release binaries |
-| `--build-number <n>` / `GODDARD_BUILD_NUMBER` | derived | `CFBundleVersion` override |
-| `GODDARD_R2_REMOTE` | `r2` | rclone remote name |
-| `GODDARD_R2_BUCKET` | `goddard-releases` | R2 bucket |
-| `GODDARD_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
-| `GODDARD_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
-| `GODDARD_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
+| `--build-number <n>` / `WAKU_BUILD_NUMBER` | derived | `CFBundleVersion` override |
+| `WAKU_R2_REMOTE` | `r2` | rclone remote name |
+| `WAKU_R2_BUCKET` | `goddard-releases` | R2 bucket |
+| `WAKU_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
+| `WAKU_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
+| `WAKU_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
 | `SPARKLE_BIN` | the `~/Library/Caches/goddard-build` copy | Sparkle tools directory |
-| `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
+| `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 
 ---

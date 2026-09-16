@@ -20,12 +20,12 @@ const EVENT_QUEUE_CAPACITY: usize = 128;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[cfg(not(debug_assertions))]
-const ENDPOINT: Option<&str> = option_env!("GODDARD_ANALYTICS_ENDPOINT");
+const ENDPOINT: Option<&str> = option_env!("WAKU_ANALYTICS_ENDPOINT");
 #[cfg(debug_assertions)]
 const ENDPOINT: Option<&str> = None;
 
 #[cfg(not(debug_assertions))]
-const WEBSITE_ID: Option<&str> = option_env!("GODDARD_ANALYTICS_WEBSITE_ID");
+const WEBSITE_ID: Option<&str> = option_env!("WAKU_ANALYTICS_WEBSITE_ID");
 #[cfg(debug_assertions)]
 const WEBSITE_ID: Option<&str> = None;
 
