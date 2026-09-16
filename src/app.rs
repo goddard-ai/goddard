@@ -1997,6 +1997,11 @@ pub struct Waku {
     /// swallow the re-engage.
     transcript_tail_recheck: Rc<Cell<bool>>,
     transcript_is_scrolled: Rc<Cell<bool>>,
+    /// The last wheel scroll on either transcript list. Scrolling slides rows
+    /// under a stationary pointer and those hover transitions are not intent,
+    /// so the changed-files diff preview waits for scroll quiet before opening
+    /// or retargeting.
+    transcript_last_wheel_scroll: Rc<Cell<Option<Instant>>>,
     /// The scroll position each session held when the reader left it, so
     /// back/forward history can restore where the transcript was instead of
     /// picking a fresh landing.
@@ -3134,6 +3139,7 @@ impl Waku {
         let transcript_is_scrolled = Rc::new(Cell::new(false));
         let transcript_anchor_following = Rc::new(Cell::new(false));
         let transcript_tail_recheck = Rc::new(Cell::new(false));
+        let transcript_last_wheel_scroll = Rc::new(Cell::new(None));
         // A wheel scroll drops tail following and asks the next measured frame
         // whether it landed back on the tail. GPUI re-engages its own tail pin
         // when a bottom-aligned list reaches the end — it represents that end as
@@ -3143,10 +3149,12 @@ impl Waku {
             let transcript_is_scrolled = transcript_is_scrolled.clone();
             let transcript_anchor_following = transcript_anchor_following.clone();
             let transcript_tail_recheck = transcript_tail_recheck.clone();
+            let transcript_last_wheel_scroll = transcript_last_wheel_scroll.clone();
             move |event, window, _| {
                 transcript_is_scrolled.set(event.is_scrolled);
                 transcript_anchor_following.set(false);
                 transcript_tail_recheck.set(true);
+                transcript_last_wheel_scroll.set(Some(Instant::now()));
                 window.refresh();
             }
         });
@@ -3154,10 +3162,12 @@ impl Waku {
             let transcript_is_scrolled = transcript_is_scrolled.clone();
             let transcript_anchor_following = transcript_anchor_following.clone();
             let transcript_tail_recheck = transcript_tail_recheck.clone();
+            let transcript_last_wheel_scroll = transcript_last_wheel_scroll.clone();
             move |event, window, _| {
                 transcript_is_scrolled.set(event.is_scrolled);
                 transcript_anchor_following.set(false);
                 transcript_tail_recheck.set(true);
+                transcript_last_wheel_scroll.set(Some(Instant::now()));
                 window.refresh();
             }
         });
@@ -4093,6 +4103,7 @@ impl Waku {
                 transcript_anchor_following,
                 transcript_tail_recheck,
                 transcript_is_scrolled,
+                transcript_last_wheel_scroll,
                 transcript_scroll_positions: HashMap::new(),
                 transcript_landing: None,
                 transcript_scroll_to_bottom_visible: Cell::new(false),

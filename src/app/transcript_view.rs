@@ -16,6 +16,11 @@ const ACTIVITY_DIFF_GUTTER_WIDTH: f32 = 52.0;
 /// Hover must hold this long before a changed-file row opens its diff
 /// preview, so dragging the pointer across the card never flashes one.
 const CHANGED_FILES_DIFF_OPEN_DELAY: Duration = Duration::from_millis(350);
+/// A wheel scroll this recent still counts as "scrolling": it slides rows
+/// under a stationary pointer, and those hover transitions are not intent to
+/// inspect a file. The preview opens only after the transcript holds still
+/// for this long.
+const CHANGED_FILES_DIFF_SCROLL_QUIET: Duration = Duration::from_millis(400);
 /// The preview survives this long after the pointer leaves both the row and
 /// the card — enough to cross the overlap between them.
 const CHANGED_FILES_DIFF_CLOSE_DELAY: Duration = Duration::from_millis(150);
@@ -1658,6 +1663,21 @@ impl Waku {
             return;
         }
 
+        // While a scroll is fresh the rows under the pointer keep changing;
+        // an open preview must not chase them. A preview that is still closed
+        // falls through — the delayed open below waits out the scroll instead.
+        if self
+            .changed_files_diff_hover
+            .as_ref()
+            .is_some_and(|hover| hover.open)
+            && self
+                .transcript_last_wheel_scroll
+                .get()
+                .is_some_and(|at| at.elapsed() < CHANGED_FILES_DIFF_SCROLL_QUIET)
+        {
+            return;
+        }
+
         self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);
         let generation = self.changed_files_diff_generation;
         let mut retargeted_turn = None;
@@ -1689,24 +1709,37 @@ impl Waku {
         }
         cx.notify();
         cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(CHANGED_FILES_DIFF_OPEN_DELAY)
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.changed_files_diff_generation != generation {
-                    return;
-                }
-                let Some(hover) = this.changed_files_diff_hover.as_mut() else {
-                    return;
+            let mut delay = CHANGED_FILES_DIFF_OPEN_DELAY;
+            loop {
+                cx.background_executor().timer(delay).await;
+                let Ok(wait) = this.update(cx, |this, cx| {
+                    if this.changed_files_diff_generation != generation {
+                        return None;
+                    }
+                    let Some(hover) = this.changed_files_diff_hover.as_mut() else {
+                        return None;
+                    };
+                    if !hover.row_hovered || hover.open {
+                        return None;
+                    }
+                    let quiet_remaining = this
+                        .transcript_last_wheel_scroll
+                        .get()
+                        .and_then(|at| CHANGED_FILES_DIFF_SCROLL_QUIET.checked_sub(at.elapsed()));
+                    if quiet_remaining.is_some() {
+                        return quiet_remaining;
+                    }
+                    hover.open = true;
+                    let turn_id = hover.turn_id;
+                    this.ensure_changed_files_diff(turn_id, cx);
+                    cx.notify();
+                    None
+                }) else {
+                    break;
                 };
-                if !hover.row_hovered || hover.open {
-                    return;
-                }
-                hover.open = true;
-                let turn_id = hover.turn_id;
-                this.ensure_changed_files_diff(turn_id, cx);
-                cx.notify();
-            });
+                let Some(next_delay) = wait else { break };
+                delay = next_delay;
+            }
         })
         .detach();
     }
