@@ -87,6 +87,17 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
                 cwd: crate::projectless::migrate_workspace(&path)?.cwd,
             }
         }
+        WorkspaceOperation::ArchiveProjectlessWorkspace { path } => {
+            crate::projectless::archive_workspace(&path)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::RestoreProjectlessWorkspace { path } => WorkspaceResult::Bool {
+            value: crate::projectless::restore_workspace(&path)?,
+        },
+        WorkspaceOperation::DeleteProjectlessWorkspace { path } => {
+            crate::projectless::remove_workspace(&path)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::InspectBranches { cwd } => WorkspaceResult::Branches {
             snapshot: crate::git_branch::inspect(&cwd)?,
         },

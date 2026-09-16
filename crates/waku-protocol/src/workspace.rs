@@ -396,6 +396,29 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         path: PathBuf,
     },
+    /// Zip a projectless task's workspace into `~/.waku/archives` and
+    /// remove the live directory, so an archived chat stops costing its
+    /// files on disk while staying restorable. The directory survives a
+    /// failed capture. Returns `Ack`.
+    ArchiveProjectlessWorkspace {
+        #[ts(type = "string")]
+        path: PathBuf,
+    },
+    /// Extract a projectless task's archive back to `path`, recreating an
+    /// empty directory when no archive was captured. `Bool` reports whether
+    /// the directory exists because of this call — `false` while it still
+    /// does.
+    RestoreProjectlessWorkspace {
+        #[ts(type = "string")]
+        path: PathBuf,
+    },
+    /// Permanently drop a projectless task's workspace — the live directory
+    /// and any archive of it — once nothing about the task remains.
+    /// Returns `Ack`.
+    DeleteProjectlessWorkspace {
+        #[ts(type = "string")]
+        path: PathBuf,
+    },
     InspectBranches {
         #[ts(type = "string")]
         cwd: PathBuf,

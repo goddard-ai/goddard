@@ -530,7 +530,7 @@ impl Waku {
         self.pending_goal_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
         self.state.unseen_completions.remove(&session_id);
-        self.pending_worktree_cleanups.remove(&session_id);
+        self.pending_workspace_cleanups.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
         self.remove_right_panel_session_state(session_id, cx);
@@ -645,9 +645,11 @@ impl Waku {
     /// An active turn is stopped first — a hidden session must not keep
     /// working. A worktree-based task is then snapshotted into its archive
     /// ref and its worktree removed, so archived chats stop costing a full
-    /// checkout of disk; the daemon purges archives once they outlive the
-    /// retention window. Terminals that ran inside the worktree are closed
-    /// once the removal lands.
+    /// checkout of disk; a projectless task's workspace zips into
+    /// `~/.waku/archives` and removes the directory the same way. The
+    /// daemon purges archives once they outlive the retention window.
+    /// Terminals that ran inside the directory are closed once the removal
+    /// lands.
     /// `sidebar_position` is the session's sidebar row index when the archive
     /// was triggered from the sidebar; `finish_archive_session` uses it to
     /// hand selection to a positional neighbor instead of the unread-based
@@ -786,7 +788,7 @@ impl Waku {
             // clobber the flag.
             session.updated_at = now;
         }
-        self.queue_archived_worktree_cleanup(session_id, cx);
+        self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
             if let Some(next_id) =
                 sidebar_position.and_then(|position| self.next_sidebar_session_from_row(position))
@@ -832,11 +834,13 @@ impl Waku {
         }
         // An unarchived session keeps its worktree: a queued cleanup must
         // not fire after the task is back.
-        self.pending_worktree_cleanups.remove(&session_id);
+        self.pending_workspace_cleanups.remove(&session_id);
         // If cleanup already removed the worktree, bring it back now —
         // waiting for the next prompt's restore leaves terminals and file
-        // surfaces pointing at a directory that does not exist.
+        // surfaces pointing at a directory that does not exist. A
+        // projectless workspace unzips its archive the same way.
         self.restore_missing_worktree(session_id, cx);
+        self.restore_archived_projectless_workspace(session_id, cx);
         self.save();
         if announce {
             self.show_unarchived_toast(session_id);

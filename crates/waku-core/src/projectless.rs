@@ -95,6 +95,238 @@ pub fn is_legacy_root_path(path: &Path) -> bool {
         .is_some_and(|root| root.parent().is_some_and(|legacy_root| path == legacy_root))
 }
 
+/// `~/.waku/archives`, beside the projects root. Zipped workspaces keep the
+/// dated layout they came from: `<archives>/<date>/<slug>.zip`.
+fn archives_root_in(root: &Path) -> Option<PathBuf> {
+    root.parent().map(|parent| parent.join("archives"))
+}
+
+/// Where a workspace's archive lands. `None` for `~/.waku` itself, which
+/// the oldest layout used as a workspace and now holds configuration.
+fn archive_path_in(root: &Path, path: &Path) -> Option<PathBuf> {
+    if root.parent().is_some_and(|legacy_root| path == legacy_root) {
+        return None;
+    }
+    let slug = path.file_name()?;
+    let archives = archives_root_in(root)?;
+    let directory = match path.parent().and_then(|parent| parent.file_name()) {
+        Some(date) if is_date_component(date.to_string_lossy().as_ref()) => archives.join(date),
+        _ => archives,
+    };
+    Some(directory.join(format!("{}.zip", slug.to_string_lossy())))
+}
+
+/// The archive operations arrive over the wire, so they re-verify the path
+/// names a workspace this app owns before touching the filesystem. That
+/// bounds a mistaken or hostile request to `~/.waku`-managed directories.
+fn validate_workspace_path_in(root: &Path, path: &Path) -> io::Result<()> {
+    let legacy_root = root.parent();
+    let projectless = path.starts_with(root)
+        || legacy_root.is_some_and(|legacy_root| is_legacy_workspace_path(path, legacy_root));
+    if projectless && path != root && legacy_root.is_none_or(|legacy_root| path != legacy_root) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path is not a projectless workspace",
+        ))
+    }
+}
+
+/// Zip a projectless workspace into `~/.waku/archives` and remove the live
+/// directory. The directory survives a failed capture — the same
+/// verify-before-delete rule the worktree cleanup follows.
+pub fn archive_workspace(path: &Path) -> io::Result<PathBuf> {
+    let root = workspace_root().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not locate the home directory for ~/.waku/projects",
+        )
+    })?;
+    archive_workspace_in(&root, path)
+}
+
+fn archive_workspace_in(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    validate_workspace_path_in(root, path)?;
+    validate_real_directory(path)?;
+    let destination = archive_path_in(root, path).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "projectless workspace has no archive destination",
+        )
+    })?;
+    if let Some(parent) = destination.parent() {
+        ensure_real_directory(parent)?;
+    }
+    let staging = destination.with_extension("zip.partial");
+    let captured = write_workspace_zip(path, &staging).and_then(|()| {
+        // Reopen before the rename: a corrupt archive must not retire the
+        // directory it claims to preserve.
+        zip::ZipArchive::new(fs::File::open(&staging)?).map_err(zip_io_error)?;
+        fs::rename(&staging, &destination)
+    });
+    if let Err(error) = captured {
+        fs::remove_file(&staging).ok();
+        return Err(error);
+    }
+    fs::remove_dir_all(path)?;
+    Ok(destination)
+}
+
+/// Bring a workspace's archive back to its recorded path. Returns whether
+/// the directory exists because of this call; a missing archive still
+/// recreates an empty workspace so an unarchived chat lands on a real cwd.
+pub fn restore_workspace(path: &Path) -> io::Result<bool> {
+    let root = workspace_root().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not locate the home directory for ~/.waku/projects",
+        )
+    })?;
+    restore_workspace_in(&root, path)
+}
+
+fn restore_workspace_in(root: &Path, path: &Path) -> io::Result<bool> {
+    validate_workspace_path_in(root, path)?;
+    if path.exists() {
+        return Ok(false);
+    }
+    let Some(archive) = archive_path_in(root, path) else {
+        ensure_real_directory(path)?;
+        return Ok(true);
+    };
+    let file = match fs::File::open(&archive) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            ensure_real_directory(path)?;
+            return Ok(true);
+        }
+        Err(error) => return Err(error),
+    };
+    // Extract beside the destination first: a partial pull must not leave a
+    // half-populated directory that `path.exists()` would later accept.
+    let staging = path.with_file_name(format!(
+        ".{}-restore-{}",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        Uuid::new_v4()
+    ));
+    let extracted = extract_workspace_zip(file, &staging).and_then(|()| fs::rename(&staging, path));
+    if let Err(error) = extracted {
+        fs::remove_dir_all(&staging).ok();
+        return Err(error);
+    }
+    // The archive is single-use, same as the worktree snapshot ref.
+    fs::remove_file(&archive)?;
+    Ok(true)
+}
+
+/// Permanently drop a workspace — retention purge and session delete land
+/// here once nothing about the task remains. The live directory goes to the
+/// Trash like skill installs do; the archive, an app-internal format, is
+/// deleted outright.
+pub fn remove_workspace(path: &Path) -> io::Result<()> {
+    let root = workspace_root().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not locate the home directory for ~/.waku/projects",
+        )
+    })?;
+    remove_workspace_in(&root, path)
+}
+
+fn remove_workspace_in(root: &Path, path: &Path) -> io::Result<()> {
+    validate_workspace_path_in(root, path)?;
+    if let Some(archive) = archive_path_in(root, path) {
+        match fs::remove_file(&archive) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    match validate_real_directory(path) {
+        Ok(()) => trash::delete(path).map_err(|error| {
+            io::Error::new(io::ErrorKind::Other, format!("could not trash workspace: {error}"))
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn zip_io_error(error: zip::result::ZipError) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+/// The zip stores workspace-relative paths so extraction can land wherever
+/// the session's recorded path points. Symlinks are preserved as symlinks —
+/// agent workspaces carry them in dependency trees like `node_modules/.bin`.
+fn write_workspace_zip(root: &Path, destination: &Path) -> io::Result<()> {
+    let mut writer = zip::ZipWriter::new(fs::File::create(destination)?);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut pending = vec![PathBuf::new()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(root.join(&directory))? {
+            let entry = entry?;
+            let relative = directory.join(entry.file_name());
+            let name = relative.to_string_lossy().into_owned();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                writer
+                    .add_directory(name, options)
+                    .map_err(zip_io_error)?;
+                pending.push(relative);
+            } else if file_type.is_symlink() {
+                let target = fs::read_link(entry.path())?;
+                writer
+                    .add_symlink(name, target.to_string_lossy().into_owned(), options)
+                    .map_err(zip_io_error)?;
+            } else if file_type.is_file() {
+                writer.start_file(name, options).map_err(zip_io_error)?;
+                io::copy(&mut fs::File::open(entry.path())?, &mut writer)?;
+            }
+        }
+    }
+    writer.finish().map_err(zip_io_error)?;
+    Ok(())
+}
+
+fn extract_workspace_zip(archive: fs::File, destination: &Path) -> io::Result<()> {
+    let mut archive = zip::ZipArchive::new(archive).map_err(zip_io_error)?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(zip_io_error)?;
+        // `enclosed_name` refuses absolute paths and `..` escapes.
+        let Some(relative) = entry.enclosed_name() else {
+            continue;
+        };
+        let target = destination.join(relative);
+        #[cfg(unix)]
+        let is_symlink = entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000);
+        #[cfg(not(unix))]
+        let is_symlink = false;
+        if is_symlink {
+            #[cfg(unix)]
+            {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut link_target = String::new();
+                io::Read::read_to_string(&mut entry, &mut link_target)?;
+                std::os::unix::fs::symlink(link_target, &target)?;
+            }
+        } else if entry.is_dir() {
+            fs::create_dir_all(&target)?;
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            io::copy(&mut entry, &mut fs::File::create(&target)?)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn create_workspace(prompt: Option<&str>) -> io::Result<Workspace> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
@@ -397,5 +629,119 @@ mod tests {
         );
         assert!(!legacy.exists());
         fs::remove_dir_all(&legacy_root).ok();
+    }
+
+    #[test]
+    fn archive_round_trips_a_workspace_through_a_dated_zip() {
+        let home = test_root();
+        let root = home.join("projects");
+        let workspace = root.join("2026-09-16/fix-the-bug");
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::write(workspace.join("notes.txt"), "kept\n").unwrap();
+        fs::write(workspace.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let archive = archive_workspace_in(&root, &workspace).unwrap();
+
+        assert_eq!(archive, home.join("archives/2026-09-16/fix-the-bug.zip"));
+        assert!(!workspace.exists());
+
+        assert!(restore_workspace_in(&root, &workspace).unwrap());
+        assert_eq!(
+            fs::read_to_string(workspace.join("notes.txt")).unwrap(),
+            "kept\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("src/main.rs")).unwrap(),
+            "fn main() {}\n"
+        );
+        // The archive is single-use: a consumed zip does not shadow a
+        // workspace that churns again.
+        assert!(!archive.exists());
+        // Restoring an existing directory is a no-op.
+        assert!(!restore_workspace_in(&root, &workspace).unwrap());
+
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn restore_recreates_an_empty_workspace_without_an_archive() {
+        let home = test_root();
+        let root = home.join("projects");
+        let workspace = root.join("2026-09-16/never-archived");
+
+        assert!(restore_workspace_in(&root, &workspace).unwrap());
+        assert!(workspace.is_dir());
+
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn workspace_operations_refuse_paths_outside_the_projects_root() {
+        let home = test_root();
+        let root = home.join("projects");
+        let outside = home.join("elsewhere");
+        fs::create_dir_all(&outside).unwrap();
+
+        assert!(archive_workspace_in(&root, &outside).is_err());
+        assert!(archive_workspace_in(&root, &root).is_err());
+        // `~/.waku` itself was the oldest layout's workspace; it holds
+        // configuration now and must never be archived or removed.
+        assert!(archive_workspace_in(&root, &home).is_err());
+        assert!(restore_workspace_in(&root, &outside).is_err());
+        assert!(remove_workspace_in(&root, &outside).is_err());
+        assert!(remove_workspace_in(&root, &home).is_err());
+        assert!(outside.exists());
+
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn remove_workspace_drops_the_archive_file() {
+        let home = test_root();
+        let root = home.join("projects");
+        let workspace = root.join("2026-09-16/fix-the-bug");
+        fs::create_dir_all(&workspace).unwrap();
+        let archive = archive_workspace_in(&root, &workspace).unwrap();
+        assert!(archive.exists());
+
+        remove_workspace_in(&root, &workspace).unwrap();
+
+        assert!(!archive.exists());
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn legacy_dated_workspace_archives_under_the_same_date() {
+        let home = test_root();
+        let root = home.join("projects");
+        let legacy = home.join("2026-08-08/old-chat");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("a.txt"), "x").unwrap();
+
+        let archive = archive_workspace_in(&root, &legacy).unwrap();
+
+        assert_eq!(archive, home.join("archives/2026-08-08/old-chat.zip"));
+        assert!(!legacy.exists());
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn archive_and_restore_preserve_symlinks() {
+        let home = test_root();
+        let root = home.join("projects");
+        let workspace = root.join("2026-09-16/links");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("real.txt"), "body").unwrap();
+        std::os::unix::fs::symlink("real.txt", workspace.join("link.txt")).unwrap();
+
+        archive_workspace_in(&root, &workspace).unwrap();
+        assert!(restore_workspace_in(&root, &workspace).unwrap());
+
+        assert_eq!(
+            fs::read_link(workspace.join("link.txt")).unwrap(),
+            Path::new("real.txt")
+        );
+        fs::remove_dir_all(&home).ok();
     }
 }

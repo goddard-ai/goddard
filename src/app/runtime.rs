@@ -252,7 +252,25 @@ fn prepare_submission(
                 base_branch,
             }
         }
-        workspace => workspace,
+        workspace => {
+            // The daemon no-ops while the directory exists, so this doubles
+            // as the existence check on the daemon host — the role
+            // `EnsureWorktree` plays above. Archive cleanup may have zipped
+            // a projectless workspace away; restore brings it back.
+            if project.is_projectless()
+                && !crate::projectless::is_legacy_root_path(&project.path)
+            {
+                match workspace_client.request(
+                    waku_client::WorkspaceOperation::RestoreProjectlessWorkspace {
+                        path: project.path.clone(),
+                    },
+                )? {
+                    waku_client::WorkspaceResult::Bool { .. } => {}
+                    _ => anyhow::bail!("the daemon returned an invalid projectless response"),
+                }
+            }
+            workspace
+        }
     };
     let project_path = workspace.path().unwrap_or(&project.path);
 
@@ -1998,7 +2016,7 @@ impl Waku {
                     }
                     // The landed capture may be the ending checkpoint an
                     // archived worktree cleanup was waiting on.
-                    waku.drain_pending_worktree_cleanups(cx);
+                    waku.drain_pending_workspace_cleanups(cx);
                     cx.notify();
                     if attached_turn_id.is_some() {
                         // Let the new transcript row paint before SQLite work.
@@ -2609,7 +2627,7 @@ impl Waku {
         if !self.submission_preparations.remove(&session_id) {
             return;
         }
-        self.drain_pending_worktree_cleanups(cx);
+        self.drain_pending_workspace_cleanups(cx);
         let selected = self.state.selected_session == Some(session_id);
         let prepared = match result {
             Ok(prepared) => prepared,
@@ -3709,7 +3727,7 @@ impl Waku {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.submission_preparations.remove(&session_id);
-                self.drain_pending_worktree_cleanups(cx);
+                self.drain_pending_workspace_cleanups(cx);
                 self.track_active_turn_outcome(
                     session_id,
                     crate::analytics::TurnOutcome::PreparationFailed,
@@ -3773,7 +3791,7 @@ impl Waku {
             });
         if !can_start {
             self.submission_preparations.remove(&session_id);
-            self.drain_pending_worktree_cleanups(cx);
+            self.drain_pending_workspace_cleanups(cx);
             cx.notify();
             return;
         }
@@ -3877,7 +3895,7 @@ impl Waku {
         // cancel or a settled startup failure. The next frame must therefore
         // show Stop (or Send after failure), never the preparation spinner.
         self.submission_preparations.remove(&session_id);
-        self.drain_pending_worktree_cleanups(cx);
+        self.drain_pending_workspace_cleanups(cx);
         if failed_to_start {
             self.capture_latest_turn_checkpoint_for(session_id);
             self.start_pending_checkpoint_captures(cx);
@@ -3925,7 +3943,7 @@ impl Waku {
         self.start_pending_checkpoint_captures(cx);
         // Settling turns and drained detached work are also what archived
         // worktree cleanups wait on; re-check them on the same tick.
-        self.drain_pending_worktree_cleanups(cx);
+        self.drain_pending_workspace_cleanups(cx);
 
         if self
             .runtimes

@@ -449,16 +449,17 @@ impl Waku {
         .detach();
     }
 
-    /// Marks an archived session's worktree for snapshot-and-remove.
-    /// [`Self::drain_pending_worktree_cleanups`] runs it once nothing can
-    /// still write into the worktree.
-    pub(super) fn queue_archived_worktree_cleanup(
+    /// Marks an archived session's workspace for snapshot-and-remove —
+    /// its worktree, or its projectless directory.
+    /// [`Self::drain_pending_workspace_cleanups`] runs it once nothing can
+    /// still write into the directory.
+    pub(super) fn queue_archived_workspace_cleanup(
         &mut self,
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        self.pending_worktree_cleanups.insert(session_id);
-        self.drain_pending_worktree_cleanups(cx);
+        self.pending_workspace_cleanups.insert(session_id);
+        self.drain_pending_workspace_cleanups(cx);
     }
 
     /// Runs queued archived-worktree cleanups whose sessions have gone quiet.
@@ -468,10 +469,15 @@ impl Waku {
     /// work, and a queued ending-checkpoint capture — deleting the directory
     /// first would fail that capture into an error toast. Sessions that left
     /// the archived set, or were never on a worktree, drop out here.
-    pub(super) fn drain_pending_worktree_cleanups(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// A projectless task has no worktree to retire; when its project's
+    /// every session is archived and quiet, the daemon zips the workspace
+    /// into `~/.waku/archives` and removes it instead.
+    pub(super) fn drain_pending_workspace_cleanups(&mut self, cx: &mut Context<Self>) {
         let mut deferred = HashSet::new();
         let mut ready = Vec::new();
-        for session_id in std::mem::take(&mut self.pending_worktree_cleanups) {
+        let mut projectless_ready = Vec::new();
+        for session_id in std::mem::take(&mut self.pending_workspace_cleanups) {
             let Some(session) = self
                 .state
                 .sessions
@@ -493,9 +499,36 @@ impl Waku {
             }
             if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
                 ready.push((session_id, path.clone()));
+            } else if let Some(path) = self.archivable_projectless_workspace(session.project_id) {
+                projectless_ready.push((session_id, path));
             }
         }
-        self.pending_worktree_cleanups = deferred;
+        self.pending_workspace_cleanups = deferred;
+        for (session_id, path) in projectless_ready {
+            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+            cx.spawn(async move |waku, cx| {
+                let workspace_path = path.clone();
+                let removed = cx
+                    .background_executor()
+                    .spawn(async move {
+                        workspace
+                            .request(
+                                waku_client::WorkspaceOperation::ArchiveProjectlessWorkspace {
+                                    path: path.clone(),
+                                },
+                            )
+                            .is_ok()
+                            || !path.exists()
+                    })
+                    .await;
+                if removed {
+                    let _ = waku.update(cx, move |waku, cx| {
+                        waku.close_workspace_terminals(session_id, &workspace_path, cx);
+                    });
+                }
+            })
+            .detach();
+        }
         for (session_id, path) in ready {
             let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
             cx.spawn(async move |waku, cx| {
@@ -533,7 +566,7 @@ impl Waku {
                     .await;
                 if removed {
                     let _ = waku.update(cx, move |waku, cx| {
-                        waku.close_worktree_terminals(session_id, &worktree_path, cx);
+                        waku.close_workspace_terminals(session_id, &worktree_path, cx);
                     });
                 }
             })
@@ -541,14 +574,104 @@ impl Waku {
         }
     }
 
-    /// Close every terminal whose PTY ran inside a removed worktree — the
+    /// The workspace a projectless project's archived sessions can retire:
+    /// every session on the project is archived and past the same writers
+    /// the worktree cleanup waits for, and the path is a real workspace —
+    /// never `~/.waku` itself, which the oldest layout used as a cwd and now
+    /// holds configuration.
+    fn archivable_projectless_workspace(&self, project_id: Uuid) -> Option<PathBuf> {
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)?;
+        if !project.is_projectless()
+            || crate::projectless::is_legacy_root_path(&project.path)
+        {
+            return None;
+        }
+        let all_retired = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == project_id)
+            .all(|session| {
+                session.archived_at.is_some()
+                    && !session.is_busy()
+                    && !self.submission_preparations.contains(&session.id)
+                    && !self.session_has_live_detached_work(session.id)
+                    && !self.ending_checkpoint_pending(session.id)
+            });
+        all_retired.then(|| project.path.clone())
+    }
+
+    /// Bring back a projectless workspace archive cleanup zipped away. The
+    /// daemon extracts the recorded archive into the project path — or
+    /// recreates an empty directory when none was captured — so an
+    /// unarchived chat always lands in a real cwd.
+    pub(super) fn restore_archived_projectless_workspace(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id && session.has_started())
+            .and_then(|session| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == session.project_id)
+            })
+            .filter(|project| {
+                project.is_projectless()
+                    && !crate::projectless::is_legacy_root_path(&project.path)
+            })
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let restored = cx
+                .background_executor()
+                .spawn(async move {
+                    workspace
+                        .request(
+                            waku_client::WorkspaceOperation::RestoreProjectlessWorkspace {
+                                path,
+                            },
+                        )
+                        .is_ok_and(|result| {
+                            matches!(result, waku_client::WorkspaceResult::Bool { value: true })
+                        })
+                })
+                .await;
+            if restored {
+                let _ = waku.update(cx, move |waku, cx| {
+                    if waku.state.selected_session == Some(session_id) {
+                        waku.invalidate_workspace_queries(cx);
+                        // Terminals that skipped spawning against the missing
+                        // directory can bind the real cwd now.
+                        waku.ensure_right_panel_terminals(cx);
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Close every terminal whose PTY ran inside a removed workspace — the
     /// session's own, wherever their surfaces live, plus any global terminal
     /// spawned into the directory. A surviving shell would keep running
     /// against a deleted cwd.
-    fn close_worktree_terminals(
+    fn close_workspace_terminals(
         &mut self,
         session_id: Uuid,
-        worktree_path: &Path,
+        workspace_path: &Path,
         cx: &mut Context<Self>,
     ) {
         let terminal_ids = self
@@ -559,7 +682,7 @@ impl Waku {
                     || record
                         .working_directory
                         .as_ref()
-                        .is_some_and(|dir| dir.starts_with(worktree_path)))
+                        .is_some_and(|dir| dir.starts_with(workspace_path)))
                 .then_some(*terminal_id)
             })
             .collect::<Vec<_>>();

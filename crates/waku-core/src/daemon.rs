@@ -220,8 +220,11 @@ impl WakuBackend {
 
     /// Removes one task from daemon state and storage. The id is remembered
     /// so a stale client `SaveTaskState` cannot restore the row, and any live
-    /// runtime is dropped with it.
+    /// runtime is dropped with it. When the departed task was the last one in
+    /// a projectless workspace, that workspace leaves with it — its live
+    /// directory and any archive zip — since no session can reach it again.
     fn remove_session(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let mut removed_workspace = None;
         {
             let mut state = self.task_state.lock();
             self.removed_session_ids.lock().insert(session_id);
@@ -242,10 +245,20 @@ impl WakuBackend {
                         .iter()
                         .any(|session| session.project_id == project_id);
                 if remove_project {
+                    removed_workspace = state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == project_id)
+                        .map(|project| project.path.clone());
                     state.projects.retain(|project| project.id != project_id);
                 }
             }
             self.task_store.save(&mut state)?;
+        }
+        if let Some(path) = removed_workspace {
+            // A failed removal leaves files behind — safe — so the task's
+            // removal does not hinge on it.
+            let _ = crate::projectless::remove_workspace(&path);
         }
         let removed = self.sessions.lock().remove(&session_id);
         drop(removed);
@@ -260,7 +273,8 @@ impl WakuBackend {
     /// `LoadTaskState` — so retention does not depend on a timer inside a
     /// daemon clients may keep alive for weeks. As with ordinary removal, the
     /// task's Git worktree is deliberately left on disk; only its checkpoint
-    /// refs are deleted.
+    /// refs are deleted. A projectless workspace does leave with its last
+    /// task — `remove_session` drops the live directory and any archive zip.
     fn purge_expired_archived_sessions(&self) {
         let cutoff = crate::model::unix_time().saturating_sub(ARCHIVED_SESSION_RETENTION_SECONDS);
         let expired = {

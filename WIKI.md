@@ -182,9 +182,10 @@ overwritten.
 
 Tasks can be **pinned**, **marked unread**, **archived**, or **deleted** from
 the sidebar. Archiving a task that sits in a worktree snapshots the checkout
-first; unarchiving restores it. Archived chats are hidden from the sidebar and
-search, browsable in Settings → Archived, and permanently removed after 30
-days.
+first; unarchiving restores it. A projectless task's workspace is zipped into
+`~/.waku/archives/<date>/<slug>.zip` and removed the same way. Archived chats
+are hidden from the sidebar and search, browsable in Settings → Archived, and
+permanently removed after 30 days.
 
 ### Worktrees
 
@@ -549,8 +550,9 @@ split is what makes the other clients possible:
   live on your machine. There is no Goddard account and no required remote
   service.
 - On macOS/Linux, app state lives under `~/.waku/` (`app.json` for settings;
-  projectless workspaces under `~/.waku/projects/`); daemon provider and
-  Computer Use settings in `~/.waku/settings.json`. On Windows, task data is
+  projectless workspaces under `~/.waku/projects/`, their zipped archives
+  under `~/.waku/archives/`); daemon provider and Computer Use settings in
+  `~/.waku/settings.json`. On Windows, task data is
   `%LOCALAPPDATA%\Goddard\app.db`, blobs alongside it, settings in
   `%USERPROFILE%\.waku\app.json`.
 - Optional anonymous analytics cover feature usage and reliability only — the
