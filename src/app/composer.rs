@@ -879,7 +879,7 @@ impl Waku {
 
     pub(super) fn render_provider_model_control(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let session = self.selected_session();
+        let session = self.composer_session();
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
         let selected_model_name = self.model_display_name(provider, selected_model);
@@ -928,7 +928,7 @@ impl Waku {
                 let _ = reset_weak.update(cx, |this, cx| {
                     if open {
                         empty = this.model_picker_has_no_providers();
-                        let session = this.selected_session();
+                        let session = this.composer_session();
                         let locked_provider = session
                             .filter(|session| !session.messages.is_empty())
                             .map(|session| session.provider);
@@ -1443,7 +1443,7 @@ impl Waku {
             .model_picker_highlight
             .filter(|index| *index < models.len())
             .or_else(|| {
-                let session = self.selected_session();
+                let session = self.composer_session();
                 let provider = session.map(|session| session.provider).unwrap_or_default();
                 let model = session.and_then(|session| self.catalog_model_id_for_session(session));
                 picker_selected_model_index(provider, model, models)
@@ -1466,7 +1466,7 @@ impl Waku {
             return;
         }
         let locked_provider = self
-            .selected_session()
+            .composer_session()
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
         let tabs = visible_picker_tabs(
@@ -1490,7 +1490,7 @@ impl Waku {
     /// they arrive. Without a row to reveal it falls back to the top, so a
     /// scroll offset from an earlier open never leaks into a fresh list.
     pub(super) fn reveal_selected_picker_model(&self) {
-        let session = self.selected_session();
+        let session = self.composer_session();
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
         let locked_provider = session
@@ -1524,7 +1524,7 @@ impl Waku {
 
     pub(super) fn render_model_traits_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = Theme::current(cx);
-        let session = self.selected_session()?;
+        let session = self.composer_session()?;
         let model = self.model_metadata_for_session(session)?;
         if model.reasoning_efforts.is_empty()
             && model.service_tiers.is_empty()
@@ -1771,7 +1771,7 @@ impl Waku {
     pub(super) fn render_access_control(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let selected_mode = self
-            .selected_session()
+            .composer_session()
             .map(|session| session.runtime_mode)
             .unwrap_or_default();
         let weak = cx.entity().downgrade();
@@ -1849,7 +1849,7 @@ impl Waku {
 
     pub(super) fn render_agent_preset_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self
-            .selected_session()
+            .composer_session()
             .filter(|session| session.provider == ProviderKind::DeepSeek)?;
         if session.has_started() || session.is_busy() {
             return None;
@@ -1968,7 +1968,7 @@ impl Waku {
     /// and opens the goal dialog. `/goal` is the keyboard route to the same
     /// surface.
     pub(super) fn render_goal_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.selected_session()?;
+        let session = self.composer_session()?;
         let goal = session.thread_goal.as_ref()?;
         let session_id = session.id;
         let theme = Theme::current(cx);
@@ -2352,7 +2352,7 @@ impl Waku {
                 // Resolve command syntax while the body's leading `/` is
                 // still visible — the annotation header would hide it from
                 // the transport-boundary resolvers.
-                let body = match (annotations.is_empty(), self.selected_session()) {
+                let body = match (annotations.is_empty(), self.composer_session()) {
                     (false, Some(session)) => crate::composer_complete::resolved_submission(
                         session.provider,
                         &body,
@@ -2445,7 +2445,7 @@ impl Waku {
         use crate::composer_complete::GoalCommand;
         use crate::model::{GoalOperation, ThreadGoalStatus};
         let Some((session_id, command, current_goal)) =
-            self.selected_session().and_then(|session| {
+            self.composer_session().and_then(|session| {
                 let command = crate::composer_complete::parse_goal_submission(
                     session.provider,
                     prompt,
@@ -2510,7 +2510,7 @@ impl Waku {
     }
 
     fn execute_fast_mode_toggle(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
-        let Some(next_tier) = self.selected_session().and_then(|session| {
+        let Some(next_tier) = self.composer_session().and_then(|session| {
             if !crate::composer_complete::is_fast_mode_toggle_submission(
                 session.provider,
                 prompt,
@@ -3118,6 +3118,24 @@ impl Waku {
                 .and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
         }
         self.selected_session()
+    }
+
+    /// `composer_session` as a bare id, for commands that only need to know
+    /// which session the composer answers to.
+    pub(super) fn composer_session_id(&self) -> Option<Uuid> {
+        self.composer_session().map(|session| session.id)
+    }
+
+    /// The mutable counterpart of [`Self::composer_session`]: writes land on
+    /// the armed card's session while the overlay is open — and on no session
+    /// at all when nothing is armed — the selected session otherwise.
+    pub(super) fn composer_session_mut(&mut self) -> Option<&mut AgentSession> {
+        let id = if self.big_picture.is_open() {
+            self.big_picture.target()?
+        } else {
+            self.state.selected_session?
+        };
+        self.state.session_mut(id)
     }
 
     /// A submit click goes where Enter would: the overlay's own routing while

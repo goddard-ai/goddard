@@ -134,11 +134,11 @@ pub(super) struct BigPictureUi {
     /// draft otherwise. Tracked rather than re-resolved: the swap captures
     /// the outgoing text under the key it was loaded from, so a highlight or
     /// selection that moved mid-edit cannot file it under the wrong session.
-    draft_key: Option<ComposerDraftKey>,
+    pub(super) draft_key: Option<ComposerDraftKey>,
     /// Where an untargeted submission lands. Snapshotted from the last
     /// deliberate card choice — arming or disarming a target — so merely
     /// hovering a card in another project never migrates a half-typed draft.
-    new_task_project: Option<Uuid>,
+    pub(super) new_task_project: Option<Uuid>,
     focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     focus_generation: u64,
@@ -493,6 +493,22 @@ impl Waku {
             .or_else(|| self.selected_project().map(|project| project.id))
     }
 
+    /// Is `session_id` mounted on the grid right now — so a command like ⌘D
+    /// can arm its card instead of exiting to select it.
+    pub(super) fn big_picture_card_visible(&self, session_id: Uuid) -> bool {
+        self.big_picture
+            .slots
+            .iter()
+            .any(|slot| slot.session_id == session_id && !slot.leaving)
+    }
+
+    /// Arm a card programmatically — command-driven targeting like ⌘D, where
+    /// no click or arrow moved the highlight first.
+    pub(super) fn arm_big_picture_card(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.big_picture.highlighted = Some(session_id);
+        self.set_big_picture_target(Some(session_id), cx);
+    }
+
     /// The draft slot the armed target implies: a card's own session draft,
     /// or the standing new-task draft when nothing is armed.
     fn big_picture_draft_key(&self) -> Option<ComposerDraftKey> {
@@ -508,6 +524,36 @@ impl Waku {
                 .new_task_project
                 .map(ComposerDraftKey::NewSession),
         }
+    }
+
+    /// ⌘N/⌘⇧N inside the overlay: step the untargeted composer's destination
+    /// through the same ordering the project switcher uses. An armed card
+    /// peels off first — the chord configures the new-task draft.
+    pub(super) fn cycle_big_picture_new_task_project(
+        &mut self,
+        reverse: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.big_picture.target.is_some() {
+            self.set_big_picture_target(None, cx);
+            return;
+        }
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        let ordered = project_switcher::ordered_project_ids(
+            self.big_picture.new_task_project,
+            &recent,
+            &self.state.projects,
+        );
+        let Some(index) = task_switcher::initial_highlight_index(
+            &ordered,
+            self.big_picture.new_task_project,
+            reverse,
+        ) else {
+            return;
+        };
+        self.big_picture.new_task_project = ordered.get(index).copied();
+        self.sync_big_picture_draft(cx);
+        cx.notify();
     }
 
     /// Point the docked composer at the draft its current target owns: stash
@@ -533,7 +579,11 @@ impl Waku {
         self.apply_composer_draft(draft, cx);
     }
 
-    fn set_big_picture_target(&mut self, target: Option<Uuid>, cx: &mut Context<Self>) {
+    pub(super) fn set_big_picture_target(
+        &mut self,
+        target: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
         if self.big_picture.target == target {
             return;
         }
@@ -1274,6 +1324,75 @@ impl Waku {
             .on_action(cx.listener(Self::big_picture_right_action))
             .on_action(cx.listener(Self::big_picture_confirm_action))
             .on_action(cx.listener(Self::select_big_picture_card_action))
+            // Chords aimed at chrome the overlay covers — the sidebar and
+            // panels, other pickers and pages, the editor's find bar — have
+            // no object here. Swallow them: acting on the workspace behind
+            // the scrim would be invisible by definition.
+            .on_action(cx.listener(|_, _: &ToggleSidebar, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleRightPanel, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleGitPanel, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleTerminals, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleUsagePanel, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &ToggleProjectsPage, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &SelectProjectsTab, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &NewProject, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &OpenSettings, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleCommandPalette, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &ToggleFileFinder, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &OpenResumePicker, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &RunProjectScript, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &FocusTerminal, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &SaveFile, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &OpenFind, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &OpenFindReplace, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &FindNext, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &FindPrevious, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &CloseFind, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleFindCaseSensitive, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &ToggleFindWholeWord, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &ToggleFindRegex, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &ReplaceAllMatches, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &CopySelection, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &AddToChat, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &NavigateBack, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &NavigateForward, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &SwitchTaskForward, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &SwitchTaskBackward, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &SelectFirstTask, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &SelectLastTask, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ConfirmTaskSwitch, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &CancelTaskSwitch, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &SelectSidebarSession, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &GoToPreviousTurn, _, cx| {
+                cx.stop_propagation()
+            }))
+            .on_action(cx.listener(|_, _: &GoToNextTurn, _, cx| cx.stop_propagation()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_big_picture(window, cx)),

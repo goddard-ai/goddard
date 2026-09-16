@@ -448,13 +448,18 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.composer_session() else {
             return;
         };
         if session.has_started() || session.is_busy() {
             return;
         }
-        if self.selected_project().is_some_and(Project::is_projectless) {
+        if self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == session.project_id && project.is_projectless())
+        {
             return;
         }
         let next = if session.workspace.is_local() {
@@ -845,7 +850,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_id) = self.state.selected_session {
+        if let Some(session_id) = self.composer_session_id() {
             self.archive_session(session_id, None, window, cx);
         }
     }
@@ -884,6 +889,12 @@ impl Waku {
         // The chord pins whichever surface it plausibly means: the
         // full-width terminal while one owns the main area, the right-panel
         // terminal while it holds focus, the selected task otherwise.
+        if self.big_picture.is_open() {
+            if let Some(session_id) = self.composer_session_id() {
+                self.toggle_session_pin(session_id, cx);
+            }
+            return;
+        }
         if let Some(terminal_id) = self.selected_terminal {
             self.toggle_terminal_pin(terminal_id, cx);
             return;
@@ -911,6 +922,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // In Big Picture a new task is the untargeted composer: peel an armed
+        // card off and drop the caret in the field.
+        if self.big_picture.is_open() {
+            self.set_big_picture_target(None, cx);
+            let focus_handle = self.composer_focus(cx);
+            window.focus(&focus_handle, cx);
+            cx.notify();
+            return;
+        }
         self.settings_page = None;
         let current_project = self
             .selected_project()
@@ -1236,6 +1256,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.is_open() {
+            return;
+        }
         if self.settings_page.take().is_some() {
             let focus_handle = self.composer_focus(cx);
             window.focus(&focus_handle, cx);
@@ -1262,6 +1285,9 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.is_open() {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
@@ -1282,9 +1308,30 @@ impl Waku {
     pub(super) fn go_to_latest_unseen_completion_action(
         &mut self,
         _: &GoToLatestUnseenCompletion,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // With the overlay up the jump arms the card when it is on the grid
+        // and exits to the task when it is not — either way it never rewrites
+        // the selection invisibly behind the scrim.
+        if self.big_picture.is_open() {
+            let Some(target) = next_unread_session(
+                &self.state.sessions,
+                &self.state.unseen_completions,
+                self.state.selected_session,
+                self.pending_session_activation
+                    .map(|pending| pending.session_id),
+            ) else {
+                return;
+            };
+            if self.big_picture_card_visible(target) {
+                self.arm_big_picture_card(target, cx);
+            } else {
+                self.close_big_picture(window, cx);
+                self.select_session(target, cx);
+            }
+            return;
+        }
         let Some(target) = next_unread_session(
             &self.state.sessions,
             &self.state.unseen_completions,
@@ -1327,7 +1374,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_id) = self.state.selected_session {
+        if let Some(session_id) = self.composer_session_id() {
             self.mark_session_unread(session_id, cx);
         }
         self.go_to_latest_unseen_completion_action(&GoToLatestUnseenCompletion, window, cx);
@@ -1462,7 +1509,7 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_id) = self.state.selected_session {
+        if let Some(session_id) = self.composer_session_id() {
             self.copy_session_working_directory(session_id, cx);
         }
     }
@@ -1473,6 +1520,13 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Bare Escape never reaches here — the overlay's Dismiss binding is
+        // deeper in the context stack — but ⌥Escape does, and it must stop
+        // the armed card's turn, never the session idling underneath.
+        if self.big_picture.is_open() {
+            self.cancel_turn(cx);
+            return;
+        }
         // The switcher focus lands after its deferred overlay is painted.
         // Route the root Escape action here too so an immediate press always
         // cancels the provisional selection instead of reaching the session.
@@ -1649,7 +1703,7 @@ impl Waku {
 
     fn remember_selected_model_traits(&mut self) {
         let Some((provider, model, reasoning_effort, service_tier, context_window)) =
-            self.selected_session().and_then(|session| {
+            self.composer_session().and_then(|session| {
                 Some((
                     session.provider,
                     self.model_for_session(session)?.to_owned(),
@@ -1677,7 +1731,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let Some((session_id, provider_changed)) = self
-            .selected_session()
+            .composer_session()
             .filter(|session| {
                 session.can_choose_model(provider)
                     && (session.provider != provider
@@ -1691,7 +1745,7 @@ impl Waku {
         self.remember_selected_model_traits();
         let (reasoning_effort, service_tier, context_window) =
             self.state.model_traits_for(provider, &model);
-        if let Some(session) = self.selected_session_mut() {
+        if let Some(session) = self.composer_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
             if provider_changed {
@@ -1731,7 +1785,7 @@ impl Waku {
             return;
         }
         if !self
-            .selected_session()
+            .composer_session()
             .is_some_and(|session| session.can_choose_model(session.provider))
         {
             return;
@@ -1756,14 +1810,17 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.composer_session() else {
             return;
         };
         if session.is_busy() || self.branch_operation_pending {
             return;
         }
         if self
-            .selected_project()
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
             .filter(|project| !project.is_projectless())
             .is_none()
         {
@@ -1895,15 +1952,15 @@ impl Waku {
 
     pub(super) fn set_runtime_mode(&mut self, mode: RuntimeMode, cx: &mut Context<Self>) {
         let Some((session_id, session_changed)) = self
-            .selected_session()
+            .composer_session()
             .map(|session| (session.id, session.runtime_mode != mode))
         else {
             return;
         };
         let remembered_changed = self.state.last_runtime_mode != mode;
         if session_changed {
-            self.selected_session_mut()
-                .expect("selected session still exists")
+            self.composer_session_mut()
+                .expect("composer session still exists")
                 .runtime_mode = mode;
             self.apply_session_options(session_id, cx);
         }
@@ -1915,7 +1972,7 @@ impl Waku {
     }
 
     pub(super) fn set_reasoning_effort(&mut self, effort: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
+        if let Some(session) = self.composer_session_mut()
             && session.reasoning_effort.as_deref() != Some(effort.as_str())
         {
             let session_id = session.id;
@@ -1931,7 +1988,7 @@ impl Waku {
     /// Clears an explicitly chosen OpenCode variant back to the base model's
     /// `default` selection.
     pub(super) fn clear_reasoning_effort(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
+        if let Some(session) = self.composer_session_mut()
             && super::composer::supports_reasoning_default_reset(session.provider)
             && session.reasoning_effort.is_some()
         {
@@ -1946,7 +2003,7 @@ impl Waku {
     }
 
     pub(super) fn set_service_tier(&mut self, tier: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
+        if let Some(session) = self.composer_session_mut()
             && session.service_tier.as_deref() != Some(tier.as_str())
         {
             let session_id = session.id;
@@ -1960,7 +2017,7 @@ impl Waku {
     }
 
     pub(super) fn set_context_window(&mut self, window: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.selected_session_mut()
+        if let Some(session) = self.composer_session_mut()
             && session.context_window.as_deref() != Some(window.as_str())
         {
             let session_id = session.id;
@@ -1985,7 +2042,7 @@ impl Waku {
         if !selectable {
             return;
         }
-        if let Some(session) = self.selected_session_mut()
+        if let Some(session) = self.composer_session_mut()
             && session.provider == ProviderKind::DeepSeek
             && !session.has_started()
             && !session.is_busy()
@@ -2004,7 +2061,7 @@ impl Waku {
 
     pub(super) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.composer_session_id() else {
             return;
         };
         self.cancel_session_turn(session_id, cx);

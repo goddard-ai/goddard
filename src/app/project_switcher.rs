@@ -97,7 +97,11 @@ impl ProjectSwitcherUi {
     }
 }
 
-fn ordered_project_ids(current: Option<Uuid>, recent: &[Uuid], projects: &[Project]) -> Vec<Uuid> {
+pub(super) fn ordered_project_ids(
+    current: Option<Uuid>,
+    recent: &[Uuid],
+    projects: &[Project],
+) -> Vec<Uuid> {
     let by_id = projects
         .iter()
         .map(|project| (project.id, project))
@@ -213,6 +217,13 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Over Big Picture the ⌘N chord's "which project" job belongs to the
+        // overlay's own new-task draft — a second switcher stacked on top
+        // would answer it for the session underneath instead.
+        if self.big_picture.is_open() {
+            self.cycle_big_picture_new_task_project(reverse, cx);
+            return;
+        }
         if !self.project_switcher.open {
             // The chord shares ⌘N with New Session; when no draft can take
             // the switcher, let the keystroke fall through to it.

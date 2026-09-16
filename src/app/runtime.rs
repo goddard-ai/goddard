@@ -3425,7 +3425,7 @@ impl Waku {
     /// When that control is unavailable, leave the queue untouched rather
     /// than removing and re-queueing its first message at the back.
     pub(super) fn steer_oldest_queued_message(&mut self, cx: &mut Context<Self>) {
-        let Some((session_id, message_id)) = self.selected_session().and_then(|session| {
+        let Some((session_id, message_id)) = self.composer_session().and_then(|session| {
             if !self.session_can_steer(session) {
                 return None;
             }

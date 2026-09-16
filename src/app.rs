@@ -3308,7 +3308,7 @@ impl Waku {
                             && !this.has_annotations()
                         {
                             if this
-                                .selected_session()
+                                .composer_session()
                                 .is_some_and(composer::session_awaits_continue)
                             {
                                 // Cmd+Enter on an empty composer continues a
