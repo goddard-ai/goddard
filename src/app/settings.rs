@@ -1397,6 +1397,7 @@ impl Waku {
         });
         let token = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
+                .masked()
                 .tab_index(0)
                 .accessibility_label(tr!("daemon.remote_host_token"))
                 .placeholder(tr!("daemon.remote_host_token_placeholder"));

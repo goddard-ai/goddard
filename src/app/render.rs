@@ -1168,6 +1168,7 @@ impl Waku {
         {
             let input = cx.new(|cx| {
                 TextInput::new(window, cx)
+                    .masked()
                     .tab_index(0)
                     .accessibility_label(tr!("daemon.ssh_password_label"))
                     .placeholder(tr!("daemon.ssh_password_label"))

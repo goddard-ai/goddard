@@ -646,6 +646,9 @@ fn collapsible_paste(mode: FieldMode, text: &str) -> bool {
 /// its text scrolls under an overlay scrollbar instead of growing the card.
 const AUTO_HEIGHT_MAX: Pixels = px(300.);
 
+/// Glyph painted per character in a masked field.
+const MASK_BULLET: &str = "•";
+
 /// The shared text engine under every box that takes typing — search inputs,
 /// the address bar, file editors, and the composer wrapper: native macOS
 /// editing and IME composition, grouped undo history, mouse selection, and
@@ -654,6 +657,12 @@ pub struct TextInput {
     focus_handle: FocusHandle,
     mode: FieldMode,
     read_only: bool,
+    /// Paint `content` as one bullet per character — a password field. The
+    /// painted string has a different byte length than `content`, so every
+    /// layout index query must translate through
+    /// [`Self::display_index`]/[`Self::content_index`]. Masked fields stay
+    /// single-line; IME marking, search, and annotation paint are off.
+    masked: bool,
     /// Enter submits this multi-line field instead of inserting a newline;
     /// Shift+Enter still breaks the line. (One-line fields always submit.)
     submit_on_enter: bool,
@@ -787,6 +796,7 @@ impl TextInput {
             focus_handle,
             mode: FieldMode::SingleLine,
             read_only: false,
+            masked: false,
             submit_on_enter: false,
             list_continuation: false,
             auto_height: false,
@@ -953,6 +963,14 @@ impl TextInput {
     /// Paint-only syntax colouring for `language`, when recognised.
     pub fn syntax(mut self, language: Option<&str>) -> Self {
         self.language = language.and_then(highlight::lang_for_tag);
+        self
+    }
+
+    /// Paint the content as one bullet per character — for password and
+    /// token fields. Editing, selection, and copy all work as usual; only
+    /// the glyphs differ.
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
         self
     }
 
@@ -1201,12 +1219,40 @@ impl TextInput {
         cx.notify();
     }
 
+    /// The painted string's byte index for a content byte index. Masked
+    /// fields render one [`MASK_BULLET`] per char, so every layout query
+    /// translates; unmasked fields pass through.
+    fn display_index(&self, content_index: usize) -> usize {
+        if !self.masked {
+            return content_index;
+        }
+        self.content[..content_index.min(self.content.len())]
+            .chars()
+            .count()
+            * MASK_BULLET.len()
+    }
+
+    /// The content byte index for a painted byte index — the inverse of
+    /// [`Self::display_index`].
+    fn content_index(&self, display_index: usize) -> usize {
+        if !self.masked {
+            return display_index;
+        }
+        let chars = display_index / MASK_BULLET.len();
+        self.content
+            .char_indices()
+            .nth(chars)
+            .map(|(index, _)| index)
+            .unwrap_or(self.content.len())
+    }
+
     /// Where `offset` sits in the window as of the last paint, with the line
     /// height, so a find bar can scroll a match into view. `None` until the
     /// field has painted once.
     pub fn position_for_offset(&self, offset: usize) -> Option<(Point<Pixels>, Pixels)> {
         let layout = self.last_layout.as_ref()?;
-        let position = layout.position_for_index(offset.min(self.content.len()))?;
+        let position =
+            layout.position_for_index(self.display_index(offset.min(self.content.len())))?;
         Some((position, layout.line_height()))
     }
 
@@ -1216,7 +1262,10 @@ impl TextInput {
     /// highlights uses this so clicks off a glyph never reach them.
     pub fn offset_for_position(&self, position: Point<Pixels>) -> Option<usize> {
         let layout = self.last_layout.as_ref()?;
-        layout.index_for_position(position).ok()
+        layout
+            .index_for_position(position)
+            .ok()
+            .map(|index| self.content_index(index))
     }
 
     /// Painted glyph boxes for a byte range of the current content, in window
@@ -1228,7 +1277,8 @@ impl TextInput {
         let Some(layout) = self.last_layout.as_ref() else {
             return Vec::new();
         };
-        crate::md::render::range_rects(layout, range, 0.0, 0.0)
+        let range = self.display_index(range.start)..self.display_index(range.end);
+        crate::md::render::range_rects(layout, &range, 0.0, 0.0)
     }
 
     /// Height of each logical line as laid out, so a gutter can put one number
@@ -1414,7 +1464,7 @@ impl TextInput {
         let (current_row, goal_x) = if let Some(navigation) = continuing {
             (navigation.visual_row, navigation.goal_x)
         } else {
-            let Some(position) = layout.position_for_index(anchor) else {
+            let Some(position) = layout.position_for_index(self.display_index(anchor)) else {
                 self.vertical_navigation = None;
                 cx.propagate();
                 return;
@@ -1440,11 +1490,13 @@ impl TextInput {
             return;
         }
 
-        let Some((offset, cursor_x)) = visual_row_offset_for_x(layout, target_row, goal_x) else {
+        let Some((display_offset, cursor_x)) = visual_row_offset_for_x(layout, target_row, goal_x)
+        else {
             self.vertical_navigation = None;
             cx.propagate();
             return;
         };
+        let offset = self.content_index(display_offset);
 
         let previous_range = self.selected_range.clone();
         let previous_row = continuing.map(|navigation| navigation.visual_row);
@@ -1552,12 +1604,13 @@ impl TextInput {
             })
             .map(|navigation| navigation.visual_row)
             .or_else(|| {
-                let position = layout.position_for_index(cursor)?;
+                let position = layout.position_for_index(self.display_index(cursor))?;
                 let row = ((position.y - bounds.top()) / layout.line_height()) as usize;
                 Some(row.min(row_count - 1))
             })?;
         let goal_x = if to_end { layout_width } else { px(0.) };
-        let (offset, cursor_x) = visual_row_offset_for_x(layout, row, goal_x)?;
+        let (display_offset, cursor_x) = visual_row_offset_for_x(layout, row, goal_x)?;
+        let offset = self.content_index(display_offset);
         Some((
             offset,
             VerticalNavigation {
@@ -2092,6 +2145,11 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        // A masked field never puts its content on the clipboard.
+        if self.masked {
+            cx.propagate();
+            return;
+        }
         if self.selected_range.is_empty() {
             // Nothing here to copy. The composer holds focus almost all the
             // time, so propagating lets an outer handler — the transcript's
@@ -2106,9 +2164,11 @@ impl TextInput {
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(
-                self.content[self.selected_range.clone()].to_string(),
-            ));
+            if !self.masked {
+                cx.write_to_clipboard(ClipboardItem::new_string(
+                    self.content[self.selected_range.clone()].to_string(),
+                ));
+            }
             // Like paste, a cut never coalesces with surrounding deletions.
             self.history.seal();
             self.replace_text_in_range(None, "", window, cx);
@@ -2280,10 +2340,10 @@ impl TextInput {
         let Some(layout) = self.last_layout.as_ref() else {
             return 0;
         };
-        layout
+        let display = layout
             .index_for_position(position)
-            .unwrap_or_else(|index| index)
-            .min(self.content.len())
+            .unwrap_or_else(|index| index);
+        self.content_index(display).min(self.content.len())
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -2550,8 +2610,8 @@ impl EntityInputHandler for TextInput {
         let range = self.range_from_utf16(&range_utf16);
         let layout_len = layout.len();
 
-        let start_idx = range.start.min(layout_len);
-        let end_idx = range.end.min(layout_len);
+        let start_idx = self.display_index(range.start).min(layout_len);
+        let end_idx = self.display_index(range.end).min(layout_len);
 
         let start = layout
             .position_for_index(start_idx)
@@ -2579,10 +2639,10 @@ impl EntityInputHandler for TextInput {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let layout = self.last_layout.as_ref()?;
-        let utf8_index = layout
+        let display_index = layout
             .index_for_position(point)
-            .unwrap_or_else(|index| index)
-            .min(self.content.len());
+            .unwrap_or_else(|index| index);
+        let utf8_index = self.content_index(display_index).min(self.content.len());
         Some(self.offset_to_utf16(utf8_index))
     }
 }
@@ -2976,17 +3036,31 @@ impl Element for InputElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let input = self.input.read(cx);
         let content = input.content.clone();
+        let masked = input.masked;
         let style = window.text_style();
         let theme = Theme::current(cx);
         let content_is_empty = content.is_empty();
         let (display_text, text_color, selected_range, marked_range) = if content_is_empty {
             (input.placeholder.clone(), theme.text_ghost, None, None)
+        } else if masked {
+            (
+                SharedString::from(MASK_BULLET.repeat(content.chars().count())),
+                style.color,
+                // Selection paints over bullets, so its range translates to
+                // display indices; IME marking stays off — nothing composed
+                // should ever show.
+                Some(
+                    input.display_index(input.selected_range.start)
+                        ..input.display_index(input.selected_range.end),
+                ),
+                None,
+            )
         } else {
             (
                 content,
                 style.color,
-                Some(&input.selected_range),
-                input.marked_range.as_ref(),
+                Some(input.selected_range.clone()),
+                input.marked_range.clone(),
             )
         };
         let base_run = TextRun {
@@ -2998,7 +3072,7 @@ impl Element for InputElement {
             strikethrough: None,
         };
         let palette = crate::md::render::Palette::from_theme(&theme);
-        let search = if content_is_empty {
+        let search = if content_is_empty || masked {
             SearchPaint::none()
         } else {
             SearchPaint {
@@ -3011,7 +3085,7 @@ impl Element for InputElement {
             }
         };
         let annotation_wash = palette.annotation;
-        let annotations = if content_is_empty {
+        let annotations = if content_is_empty || masked {
             AnnotationPaint::none()
         } else {
             AnnotationPaint {
@@ -3023,10 +3097,10 @@ impl Element for InputElement {
         let runs = input_text_runs(
             display_text.len(),
             base_run,
-            selected_range,
-            marked_range,
+            selected_range.as_ref(),
+            marked_range.as_ref(),
             theme.inverse.opacity(0.18),
-            if content_is_empty {
+            if content_is_empty || masked {
                 &[]
             } else {
                 &input.highlight
@@ -3092,7 +3166,7 @@ impl Element for InputElement {
                         layout.bounds().top() + layout.line_height() * navigation.visual_row as f32,
                     )
                 })
-                .or_else(|| layout.position_for_index(cursor));
+                .or_else(|| layout.position_for_index(input.display_index(cursor)));
             let quad = (input.selected_range.is_empty() && cursor_visible)
                 .then_some(cursor_position)
                 .flatten()
@@ -3685,6 +3759,42 @@ mod tests {
         cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
         cx.run_until_parked();
         (composer, cx)
+    }
+
+    #[gpui::test]
+    fn masked_fields_translate_layout_indices(cx: &mut TestAppContext) {
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            // Multibyte content is the case where byte and char counts diverge.
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).masked();
+                input.set_content("sëcret🔒", cx);
+                input
+            });
+            InputHarness {
+                input,
+                width: px(200.),
+            }
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.run_until_parked();
+        input.read_with(cx, |input, _| {
+            let chars = "sëcret🔒".chars().count();
+            // Display space is 3 bytes per char; content space is bytes.
+            assert_eq!(input.display_index(0), 0);
+            assert_eq!(input.display_index(1), 3);
+            assert_eq!(input.display_index(input.content.len()), chars * 3);
+            for (byte_index, _) in input.content.char_indices() {
+                assert_eq!(
+                    input.content_index(input.display_index(byte_index)),
+                    byte_index
+                );
+            }
+            assert_eq!(
+                input.content_index(input.display_index(input.content.len())),
+                input.content.len()
+            );
+        });
     }
 
     #[gpui::test]
