@@ -2870,8 +2870,12 @@ impl Waku {
                             cx.stop_propagation();
                         }
                     }))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_session(session_id, cx);
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        if event.modifiers().shift {
+                            this.toggle_session_pin(session_id, cx);
+                        } else {
+                            this.select_session(session_id, cx);
+                        }
                     }))
             });
         let row = if renaming {
