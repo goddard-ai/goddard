@@ -667,6 +667,9 @@ pub struct TextInput {
     /// Row count an auto-height field grows to before its text scrolls, in
     /// place of [`AUTO_HEIGHT_MAX`].
     max_lines: Option<usize>,
+    /// Shortest an auto-height field renders, however little content it
+    /// holds.
+    min_height: Pixels,
     /// Image and file pastes surface as [`MediaPaste`] instead of being
     /// swallowed by the text path.
     accepts_media_paste: bool,
@@ -779,6 +782,7 @@ impl TextInput {
             list_continuation: false,
             auto_height: false,
             max_lines: None,
+            min_height: px(24.),
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
             clear_on_escape: false,
@@ -964,6 +968,13 @@ impl TextInput {
     /// text before it scrolls, rather than [`AUTO_HEIGHT_MAX`].
     pub fn max_lines(mut self, lines: usize) -> Self {
         self.max_lines = Some(lines);
+        self
+    }
+
+    /// Floor an [`auto_height`](Self::auto_height) field's height, so an
+    /// empty or one-line field still holds a taller target.
+    pub fn min_height(mut self, height: Pixels) -> Self {
+        self.min_height = height;
         self
     }
 
@@ -3234,7 +3245,7 @@ impl Render for TextInput {
             .when(self.auto_height, |field| {
                 let line_height = sp(22.0);
                 field
-                    .min_h(px(24.0))
+                    .min_h(self.min_height)
                     .max_h(
                         self.max_lines
                             .map_or(Length::from(AUTO_HEIGHT_MAX), |lines| {
@@ -3392,6 +3403,7 @@ impl ComposerInput {
                 .multi_line()
                 .submit_on_enter()
                 .auto_height()
+                .min_height(px(36.0))
                 .media_paste()
                 .list_continuation()
                 .syntax(Some("markdown"))
