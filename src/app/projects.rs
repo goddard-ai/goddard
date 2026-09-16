@@ -2501,7 +2501,9 @@ impl Waku {
                                 .cursor_default()
                                 .text_color(theme.danger)
                                 .hover(|style| style.bg(theme.danger_soft))
-                                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                                .focus_visible(|style| {
+                                    style.border(hairline()).border_color(theme.accent)
+                                })
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let keys: Vec<ProjectsRowKey> = this
                                         .projects_page_states
@@ -2693,7 +2695,9 @@ impl Waku {
                                     theme.overlay
                                 })
                             })
-                            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                            .focus_visible(|style| {
+                                style.border(hairline()).border_color(theme.accent)
+                            })
                             .tooltip(Tooltip::text(tr!("projects.send")))
                             .child(icon(
                                 "icons/arrow-up.svg",

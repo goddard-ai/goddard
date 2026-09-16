@@ -835,8 +835,7 @@ impl Waku {
                                             "⌘1–⌘9",
                                             "Ctrl+1–Ctrl+9"
                                         ),
-                                        modifier =
-                                            crate::platform::primary_shortcut("⌘", "Ctrl")
+                                        modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
                                     )),
                             ),
                     )
@@ -2795,7 +2794,12 @@ impl Waku {
             // same buttons, so focus makes them visible too.
             .opacity(0.0)
             .group_hover(group.clone(), |element| element.opacity(1.0))
-            .focus_visible(|element| element.opacity(1.0).border(hairline()).border_color(theme.accent))
+            .focus_visible(|element| {
+                element
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(tr!("common.unarchive"))
@@ -2827,7 +2831,12 @@ impl Waku {
             .text_color(theme.danger)
             .opacity(0.0)
             .group_hover(group.clone(), |element| element.opacity(1.0))
-            .focus_visible(|element| element.opacity(1.0).border(hairline()).border_color(theme.accent))
+            .focus_visible(|element| {
+                element
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
             .hover(|element| element.bg(theme.danger.opacity(0.12)))
             .active(|element| element.bg(theme.danger.opacity(0.18)))
             .child(tr!("common.remove"))
@@ -4547,7 +4556,9 @@ impl Waku {
                                     theme,
                                 )
                                 .tab_index(0)
-                                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                                .focus_visible(|style| {
+                                    style.border(hairline()).border_color(theme.accent)
+                                })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.dismiss_provider_setup_terminal(kind, cx);
                                 }))

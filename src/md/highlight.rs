@@ -630,25 +630,8 @@ fn spec(lang: Lang) -> LangSpec {
             block_comment: Some(("--[[", "]]")),
             strings: &[DOUBLE, SINGLE],
             keywords: &[
-                "and",
-                "break",
-                "do",
-                "else",
-                "elseif",
-                "end",
-                "for",
-                "function",
-                "goto",
-                "if",
-                "in",
-                "local",
-                "not",
-                "or",
-                "repeat",
-                "return",
-                "then",
-                "until",
-                "while",
+                "and", "break", "do", "else", "elseif", "end", "for", "function", "goto", "if",
+                "in", "local", "not", "or", "repeat", "return", "then", "until", "while",
             ],
             literals: &["true", "false", "nil", "self"],
             ..DEFAULT_SPEC
@@ -727,17 +710,8 @@ fn spec(lang: Lang) -> LangSpec {
                 "true", "false", "null", "TRUE", "FALSE", "NULL", "this", "self", "parent",
             ],
             types: &[
-                "int",
-                "float",
-                "string",
-                "bool",
-                "array",
-                "object",
-                "void",
-                "mixed",
-                "iterable",
-                "callable",
-                "never",
+                "int", "float", "string", "bool", "array", "object", "void", "mixed", "iterable",
+                "callable", "never",
             ],
             // `$var` lexes as one plain identifier rather than meta — every
             // PHP variable carries the sigil, so painting it would colour
@@ -2045,7 +2019,11 @@ mod tests {
         let (tokens, carry) = tokenize_line(Lang::Lua, "close ]] local x = 1", carry);
         assert_eq!(carry, Carry::None);
         assert_eq!(&"close ]] local x = 1"[tokens[0].range.clone()], "close ]]");
-        assert!(tokens.iter().any(|token| token.class == TokenClass::Keyword));
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.class == TokenClass::Keyword)
+        );
     }
 
     #[test]
@@ -2096,10 +2074,7 @@ mod tests {
     fn script_meta_sigil_covers_decorators_and_tsrx_directives() {
         assert_eq!(
             spans(Lang::Script, "@Component({}) @if (ready) {"),
-            vec![
-                ("@Component", TokenClass::Meta),
-                ("@if", TokenClass::Meta),
-            ]
+            vec![("@Component", TokenClass::Meta), ("@if", TokenClass::Meta),]
         );
     }
 

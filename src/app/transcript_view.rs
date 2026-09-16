@@ -2498,9 +2498,7 @@ impl Waku {
                     // The transcript itself did not change, so the fold cache
                     // must be forced to drop the ghost row.
                     this.transcript_row_kinds_fingerprint.set(None);
-                    this.splice_active_transcript_rows_after_visibility_change(
-                        &previous_kinds,
-                    );
+                    this.splice_active_transcript_rows_after_visibility_change(&previous_kinds);
                     cx.notify();
                 }
             });
@@ -2774,11 +2772,7 @@ impl Waku {
                                 .hover(|element| element.bg(activity_hover_surface))
                                 .active(|element| element.bg(activity_active_surface))
                         })
-                        .child(icon(
-                            activity_row_icon(activity),
-                            12.0,
-                            theme.text_tertiary,
-                        ))
+                        .child(icon(activity_row_icon(activity), 12.0, theme.text_tertiary))
                         .child(
                             div()
                                 .flex_none()

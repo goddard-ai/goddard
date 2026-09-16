@@ -3392,17 +3392,16 @@ impl Waku {
                             .background_executor()
                             .spawn(async move { std::fs::copy(&source, &destination) })
                             .await;
-                        waku
-                            .update(cx, |this, cx| {
-                                if let Err(error) = result {
-                                    this.show_toast(tr!(
-                                        "files.save_as_failed",
-                                        error = error.to_string()
-                                    ));
-                                    cx.notify();
-                                }
-                            })
-                            .ok();
+                        waku.update(cx, |this, cx| {
+                            if let Err(error) = result {
+                                this.show_toast(tr!(
+                                    "files.save_as_failed",
+                                    error = error.to_string()
+                                ));
+                                cx.notify();
+                            }
+                        })
+                        .ok();
                     })
                     .detach();
                 })
@@ -3415,12 +3414,11 @@ impl Waku {
             items.push(
                 MenuItem::new(tr!("files.copy_path"), move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
-                    waku
-                        .update(cx, |this, cx| {
-                            this.show_toast(tr!("common.copied"));
-                            cx.notify();
-                        })
-                        .ok();
+                    waku.update(cx, |this, cx| {
+                        this.show_toast(tr!("common.copied"));
+                        cx.notify();
+                    })
+                    .ok();
                 })
                 .icon("icons/copy.svg"),
             );
@@ -3437,20 +3435,19 @@ impl Waku {
                             .background_executor()
                             .spawn(async move { std::fs::read_to_string(&path) })
                             .await;
-                        waku
-                            .update(cx, |this, cx| {
-                                match contents {
-                                    Ok(contents) => {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(contents));
-                                        this.show_toast(tr!("common.copied"));
-                                    }
-                                    Err(_) => {
-                                        this.show_toast(tr!("files.copy_contents_failed"));
-                                    }
+                        waku.update(cx, |this, cx| {
+                            match contents {
+                                Ok(contents) => {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(contents));
+                                    this.show_toast(tr!("common.copied"));
                                 }
-                                cx.notify();
-                            })
-                            .ok();
+                                Err(_) => {
+                                    this.show_toast(tr!("files.copy_contents_failed"));
+                                }
+                            }
+                            cx.notify();
+                        })
+                        .ok();
                     })
                     .detach();
                 })
@@ -4618,7 +4615,9 @@ impl Waku {
                         label
                             .tab_index(0)
                             .cursor_default()
-                            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                            .focus_visible(|style| {
+                                style.border(hairline()).border_color(theme.accent)
+                            })
                             .hover(|style| {
                                 style
                                     .bg(theme.overlay_strong)

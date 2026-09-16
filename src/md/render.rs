@@ -2172,7 +2172,9 @@ fn table_row(
         .flex()
         .items_start()
         .when(divider, |element| {
-            element.border_b(hairline()).border_color(ctx.palette.border)
+            element
+                .border_b(hairline())
+                .border_color(ctx.palette.border)
         });
     for (index, cell) in cells.iter().enumerate() {
         let key = ctx.next_key();

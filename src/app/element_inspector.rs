@@ -30,9 +30,9 @@ pub enum InspectorMode {
 #[cfg(debug_assertions)]
 mod implementation {
     use gpui::{
-        AnyElement, App, ClipboardItem, Context, DivInspectorState, Empty, Global, Hsla,
-        Inspector, InspectorElementId, IntoElement, Pixels, Rgba, SharedString, StyleRefinement,
-        Window, div, prelude::*, px, rems,
+        AnyElement, App, ClipboardItem, Context, DivInspectorState, Empty, Global, Hsla, Inspector,
+        InspectorElementId, IntoElement, Pixels, Rgba, SharedString, StyleRefinement, Window, div,
+        prelude::*, px, rems,
     };
 
     use crate::fonts;
@@ -150,8 +150,7 @@ mod implementation {
             InspectorMode::Elements => vec![inspector_element_label(&inspector_id)],
             InspectorMode::Colors => color_lines(&state.base_style, &theme),
         };
-        cx.global_mut::<InspectorUi>().label =
-            (!lines.is_empty()).then(|| lines.join("\n"));
+        cx.global_mut::<InspectorUi>().label = (!lines.is_empty()).then(|| lines.join("\n"));
         if lines.is_empty() {
             return Empty.into_any_element();
         }
@@ -303,8 +302,14 @@ mod implementation {
         vec![
             ("theme.canvas", theme.canvas),
             ("theme.sidebar", theme.sidebar),
-            ("theme.sidebar_drag_background", theme.sidebar_drag_background),
-            ("theme.sidebar_item_background", theme.sidebar_item_background),
+            (
+                "theme.sidebar_drag_background",
+                theme.sidebar_drag_background,
+            ),
+            (
+                "theme.sidebar_item_background",
+                theme.sidebar_item_background,
+            ),
             ("theme.surface", theme.surface),
             ("theme.raised", theme.raised),
             ("theme.composer", theme.composer),

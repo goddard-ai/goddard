@@ -260,9 +260,7 @@ impl EventListener for TerminalEventProxy {
                     Some(code) => TerminalUiEvent::CommandExit(code),
                     None => match crate::shell_integration::parse_report(&title) {
                         Some(ShellReport::CommandBegin) => TerminalUiEvent::CommandBegan,
-                        Some(ShellReport::CommandEnd(code)) => {
-                            TerminalUiEvent::CommandEnded(code)
-                        }
+                        Some(ShellReport::CommandEnd(code)) => TerminalUiEvent::CommandEnded(code),
                         Some(ShellReport::Cwd(cwd)) => TerminalUiEvent::Cwd(cwd),
                         None => TerminalUiEvent::Title(title),
                     },

@@ -934,7 +934,9 @@ impl Waku {
                         .justify_center()
                         .cursor_default()
                         .hover(|element| element.bg(theme.overlay_strong))
-                        .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
+                        .focus_visible(|element| {
+                            element.border(hairline()).border_color(theme.accent)
+                        })
                         .child(icon("icons/x.svg", 10.0, theme.accent))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.set_big_picture_target(None, cx);

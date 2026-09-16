@@ -676,9 +676,13 @@ enum RightPanelSurface {
 enum SidebarPeek {
     Hidden,
     /// On screen; `entered` drives the nudge-in.
-    Shown { entered: Instant },
+    Shown {
+        entered: Instant,
+    },
     /// Hover lost; the nudge-out runs and the overlay unmounts at its end.
-    Exiting { started: Instant },
+    Exiting {
+        started: Instant,
+    },
 }
 
 /// A turn whose checkpoint still has to be captured.

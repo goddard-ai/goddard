@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     Animation, AnimationElement, AnimationExt, AnyElement, App, Bounds, ContentMask, Element,
-    ElementId, EntityId, Global, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels,
-    Point, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage, point, px,
-    size,
+    ElementId, EntityId, Global, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
+    Pixels, Point, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage,
+    point, px, size,
 };
 
 /// Repeat-tick interval, rounded up so spinner ticks never exceed 60 fps.
@@ -392,7 +392,10 @@ where
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut child = self.child.take().expect("request_layout runs once per frame");
+        let mut child = self
+            .child
+            .take()
+            .expect("request_layout runs once per frame");
         if self.progress < 1.0 {
             child = child.opacity(self.progress.max(0.0));
         }
@@ -503,7 +506,10 @@ mod tests {
 
         let start = reveal_bounds(anchor, bounds, 0.0);
         assert_eq!(start.size, size(px(0.0), px(0.0)));
-        assert_eq!(start.origin, anchor, "a fresh reveal is a point at the anchor");
+        assert_eq!(
+            start.origin, anchor,
+            "a fresh reveal is a point at the anchor"
+        );
 
         let half = reveal_bounds(anchor, bounds, 0.5);
         assert_eq!(half.size, size(px(100.0), px(50.0)));

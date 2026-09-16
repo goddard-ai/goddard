@@ -343,8 +343,7 @@ impl Waku {
             window.on_next_frame(move |window, cx| {
                 let should_focus = weak
                     .update(cx, |this, _| {
-                        this.task_switcher.open
-                            && this.task_switcher.generation == generation
+                        this.task_switcher.open && this.task_switcher.generation == generation
                     })
                     .unwrap_or(false);
                 if should_focus {

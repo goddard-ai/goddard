@@ -314,15 +314,13 @@ impl Waku {
     ) -> AnyElement {
         // Mounted in the peek overlay, the pane lays out at the overlay's
         // width; docked, at the fitted sidebar width.
-        let width = if self.sidebar_peek_allowed()
-            && !matches!(self.sidebar_peek, SidebarPeek::Hidden)
-        {
-            self.sidebar_peek_width(window)
-        } else {
-            self.effective_panel_widths(window).0
-        };
-        self.render_sidebar(width, window, cx)
-            .into_any_element()
+        let width =
+            if self.sidebar_peek_allowed() && !matches!(self.sidebar_peek, SidebarPeek::Hidden) {
+                self.sidebar_peek_width(window)
+            } else {
+                self.effective_panel_widths(window).0
+            };
+        self.render_sidebar(width, window, cx).into_any_element()
     }
 
     /// [`WakuPane`] delegate for the transcript island.
@@ -580,7 +578,9 @@ impl Render for Waku {
                     .flex_col()
                     .bg(theme.surface)
                     .when(panels.sidebar > 0.0, |element| {
-                        element.border_l(hairline()).border_color(theme.sidebar_border)
+                        element
+                            .border_l(hairline())
+                            .border_color(theme.sidebar_border)
                     })
                     // Files dropped anywhere in the session column stage as
                     // composer attachments. The group marks the column's

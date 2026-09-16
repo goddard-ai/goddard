@@ -2764,7 +2764,9 @@ impl Waku {
                     .id(SharedString::from(format!("queued-message-{message_id}")))
                     .min_h(px(30.0))
                     .overflow_hidden()
-                    .when(index > 0, |row| row.border_t(hairline()).border_color(theme.border))
+                    .when(index > 0, |row| {
+                        row.border_t(hairline()).border_color(theme.border)
+                    })
                     .pl(px(12.0))
                     .pr(px(6.0))
                     .flex()

@@ -159,7 +159,10 @@ fn ensure_script(name: &str, script: &str) -> io::Result<PathBuf> {
 pub fn launch_line(shell: &Path) -> Option<String> {
     let (name, script) = script_for(shell)?;
     let path = ensure_script(name, script).ok()?;
-    Some(format!("source {}", crate::custom_commands::shell_quote(&path)))
+    Some(format!(
+        "source {}",
+        crate::custom_commands::shell_quote(&path)
+    ))
 }
 
 #[cfg(test)]

@@ -144,7 +144,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
     ];
     #[cfg(target_os = "macos")]
     global.extend([
-        bound(tr!("menu.hide", app = crate::identity::APP_NAME), Hide, None),
+        bound(
+            tr!("menu.hide", app = crate::identity::APP_NAME),
+            Hide,
+            None,
+        ),
         bound(tr!("menu.hide_others"), HideOthers, None),
     ]);
     global.extend([
@@ -197,7 +201,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     SwitchTaskBackward,
                     Some("Waku"),
                 ),
-                bound(tr!("shortcuts.project_switcher"), SwitchProjectForward, None),
+                bound(
+                    tr!("shortcuts.project_switcher"),
+                    SwitchProjectForward,
+                    None,
+                ),
                 bound(
                     tr!("shortcuts.project_switcher_back"),
                     SwitchProjectBackward,
@@ -233,8 +241,16 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
             vec![
                 bound(tr!("shortcuts.submit"), input::Enter, Some("TextInput")),
                 bound(tr!("shortcuts.newline"), input::Newline, Some("TextInput")),
-                bound(tr!("shortcuts.steer"), input::SubmitSteer, Some("TextInput")),
-                bound(tr!("shortcuts.clear_field"), input::Clear, Some("TextInput")),
+                bound(
+                    tr!("shortcuts.steer"),
+                    input::SubmitSteer,
+                    Some("TextInput"),
+                ),
+                bound(
+                    tr!("shortcuts.clear_field"),
+                    input::Clear,
+                    Some("TextInput"),
+                ),
                 bound(tr!("menu.undo"), input::Undo, Some("TextInput")),
                 bound(tr!("menu.redo"), input::Redo, Some("TextInput")),
                 bound(tr!("menu.cut"), input::Cut, Some("TextInput")),
@@ -265,11 +281,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     input::LineStart,
                     Some("TextInput"),
                 ),
-                bound(
-                    tr!("shortcuts.line_end"),
-                    input::LineEnd,
-                    Some("TextInput"),
-                ),
+                bound(tr!("shortcuts.line_end"), input::LineEnd, Some("TextInput")),
                 bound(tr!("shortcuts.doc_start"), input::Home, Some("TextInput")),
                 bound(tr!("shortcuts.doc_end"), input::End, Some("TextInput")),
                 bound(
@@ -342,7 +354,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     input::SelectRight,
                     Some("TextInput"),
                 ),
-                bound(tr!("shortcuts.select_up"), input::SelectUp, Some("TextInput")),
+                bound(
+                    tr!("shortcuts.select_up"),
+                    input::SelectUp,
+                    Some("TextInput"),
+                ),
                 bound(
                     tr!("shortcuts.select_down"),
                     input::SelectDown,
@@ -591,7 +607,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     FocusBrowserAddress,
                     Some("Browser"),
                 ),
-                bound(tr!("shortcuts.browser_reload"), BrowserReload, Some("Browser")),
+                bound(
+                    tr!("shortcuts.browser_reload"),
+                    BrowserReload,
+                    Some("Browser"),
+                ),
                 bound(
                     tr!("shortcuts.browser_hard_reload"),
                     BrowserHardReload,
@@ -918,10 +938,7 @@ impl Waku {
         cx.stop_propagation();
     }
 
-    pub(super) fn render_shortcuts_dialog(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_shortcuts_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.shortcuts_dialog.as_ref()?;
         let theme = Theme::current(cx);
         let weak = cx.entity().downgrade();
@@ -1006,17 +1023,13 @@ impl Waku {
                     .child(tr!("shortcuts.done")),
             )
             .on_click(move |_, window, cx| {
-                let _ = done_weak.update(cx, |waku, cx| {
-                    waku.close_shortcuts_dialog(window, cx)
-                });
+                let _ = done_weak.update(cx, |waku, cx| waku.close_shortcuts_dialog(window, cx));
             })
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
                 if !event.keystroke.modifiers.modified()
                     && matches!(event.keystroke.key.as_str(), "enter" | "space")
                 {
-                    let _ = weak.update(cx, |waku, cx| {
-                        waku.close_shortcuts_dialog(window, cx)
-                    });
+                    let _ = weak.update(cx, |waku, cx| waku.close_shortcuts_dialog(window, cx));
                     cx.stop_propagation();
                 }
             });
