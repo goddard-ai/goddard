@@ -33,7 +33,8 @@ use super::{
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
-    DriverEvent, Message, MessageAttachment, MessageRole, ProviderKind, ReasoningBlock,
+    DriverEvent, Message, MessageAttachment, MessageRole, ProviderKind, QueuedMessage,
+    ReasoningBlock,
     RuntimeEventCursor, SessionStatus, TranscriptBlock, TurnStatus, UserInputOption,
     UserInputQuestion,
 };
@@ -650,6 +651,42 @@ fn next_unread_session_prefers_pinned_candidates() {
         next_unread_session(&sessions, &unseen_only, None, None),
         Some(unseen_id)
     );
+}
+
+#[test]
+fn next_unread_session_skips_sessions_with_queued_prompts() {
+    let mut queued = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    queued
+        .queued_messages
+        .push(QueuedMessage::new("follow up"));
+    let queued_id = queued.id;
+    let settled = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    let settled_id = settled.id;
+    let sessions = vec![queued, settled];
+
+    // The queued session finished more recently but is skipped anyway.
+    let unseen = HashMap::from([(queued_id, 300), (settled_id, 100)]);
+    assert_eq!(
+        next_unread_session(&sessions, &unseen, None, None),
+        Some(settled_id)
+    );
+
+    // A blocked session with queued prompts is skipped the same way.
+    let mut blocked = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    blocked.status = SessionStatus::Waiting;
+    blocked
+        .queued_messages
+        .push(QueuedMessage::new("and then this"));
+    let blocked_id = blocked.id;
+    let sessions = vec![blocked, sessions.into_iter().next().unwrap()];
+    assert_eq!(
+        next_unread_session(&sessions, &unseen, None, None),
+        Some(settled_id)
+    );
+
+    // When every candidate has queued prompts, the command is a no-op.
+    let queued_only = HashMap::from([(queued_id, 300), (blocked_id, 400)]);
+    assert_eq!(next_unread_session(&sessions, &queued_only, None, None), None);
 }
 
 #[test]

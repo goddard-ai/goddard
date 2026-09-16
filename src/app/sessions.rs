@@ -50,6 +50,9 @@ pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
 /// Pinned sessions are the user's declared keepers, so a pinned candidate —
 /// blocked or unseen — wins over every unpinned one; the ranking rules apply
 /// within each tier.
+///
+/// A session with prompts still queued is about to be busy again, so jumping
+/// to it buys nothing; queued sessions are skipped outright.
 pub(super) fn next_unread_session(
     sessions: &[AgentSession],
     unseen_completions: &HashMap<Uuid, u64>,
@@ -74,8 +77,15 @@ fn unread_session_candidate(
     off_screen: &impl Fn(Uuid) -> bool,
     pinned: Option<&HashSet<Uuid>>,
 ) -> Option<Uuid> {
+    let queued = sessions
+        .iter()
+        .filter(|session| !session.queued_messages.is_empty())
+        .map(|session| session.id)
+        .collect::<HashSet<Uuid>>();
     let eligible = |session_id: Uuid| {
-        off_screen(session_id) && pinned.is_none_or(|ids| ids.contains(&session_id))
+        off_screen(session_id)
+            && !queued.contains(&session_id)
+            && pinned.is_none_or(|ids| ids.contains(&session_id))
     };
     sessions
         .iter()
