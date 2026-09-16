@@ -93,28 +93,53 @@ impl Waku {
         self.usage_history_pending_for = Some(window);
         self.usage_history_generation += 1;
         let generation = self.usage_history_generation;
-        let daemon = self.daemon.client();
-        let project_roots: Vec<PathBuf> = self
-            .state
-            .projects
-            .iter()
-            .map(|project| project.path.clone())
+        // Each daemon scans its own transcript roots; offline hosts keep
+        // contributing their last-known slice to the merged view.
+        let mut roots_by_owner: HashMap<waku_client::DaemonKey, Vec<PathBuf>> = HashMap::new();
+        for project in &self.state.projects {
+            roots_by_owner
+                .entry(self.project_host(project.id))
+                .or_default()
+                .push(project.path.clone());
+        }
+        let scans: Vec<(
+            waku_client::DaemonKey,
+            waku_client::DaemonClient,
+            Vec<PathBuf>,
+        )> = self
+            .daemons
+            .connected()
+            .into_iter()
+            .map(|(key, supervisor)| {
+                let roots = roots_by_owner.remove(&key).unwrap_or_default();
+                (key, supervisor.client(), roots)
+            })
             .collect();
         cx.spawn(async move |this, cx| {
-            let history = cx
+            let results = cx
                 .background_executor()
                 .spawn(async move {
-                    match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::LoadUsageHistory {
-                            window,
-                            project_roots,
-                        },
-                    )? {
-                        waku_client::ResponsePayload::UsageHistory { history } => Ok(history),
-                        _ => anyhow::bail!("the daemon returned an invalid usage response"),
+                    let mut scanned = Vec::with_capacity(scans.len());
+                    for (key, daemon, project_roots) in scans {
+                        let result = match daemon.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::LoadUsageHistory {
+                                window,
+                                project_roots,
+                            },
+                        ) {
+                            Ok(waku_client::ResponsePayload::UsageHistory { history }) => {
+                                Ok(history)
+                            }
+                            Ok(_) => Err(anyhow::anyhow!(
+                                "the daemon returned an invalid usage response"
+                            )),
+                            Err(error) => Err(error),
+                        };
+                        scanned.push((key, result));
                     }
+                    scanned
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -125,18 +150,44 @@ impl Waku {
                 // The day axis may have changed length; a stale index would
                 // point at the wrong day.
                 this.usage_chart_hover = None;
-                match history {
-                    Ok(history) => {
-                        this.usage_history_scanned_at = Some(Instant::now());
-                        this.usage_history = Some(history);
+                let mut failed = Vec::new();
+                for (key, result) in results {
+                    match result {
+                        Ok(history) => {
+                            this.usage_history_parts.insert(key, history);
+                        }
+                        // A local failure surfaces; a remote one keeps the
+                        // host's last-known slice while it is unreachable.
+                        Err(error) if !key.is_remote() => failed.push(error),
+                        Err(_) => {}
                     }
-                    Err(error) => this.show_toast(error.to_string()),
+                }
+                if !this.usage_history_parts.is_empty() {
+                    this.rebuild_usage_history();
+                    this.usage_history_scanned_at = Some(Instant::now());
+                }
+                for error in failed {
+                    this.show_toast(error.to_string());
                 }
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+
+    /// Re-merge the per-daemon usage slices after one is replaced or dropped
+    /// — `usage_history` is what every frame reads.
+    pub(super) fn rebuild_usage_history(&mut self) {
+        let window = self.effective_usage_window();
+        // A part scanned for another window would skew the axis.
+        self.usage_history_parts
+            .retain(|_, part| part.window == window);
+        self.usage_history = if self.usage_history_parts.is_empty() {
+            None
+        } else {
+            Some(merge_usage_histories(&self.usage_history_parts, window))
+        };
     }
 
     fn set_usage_window(&mut self, window: UsageWindow, cx: &mut Context<Self>) {
@@ -2876,6 +2927,242 @@ fn window_choice_label(window: UsageWindow) -> String {
     }
 }
 
+/// Merge per-daemon usage scans into one windowed snapshot. Counts and
+/// costs sum; daily/monthly/project slices join on their key; provider,
+/// model, project, and quality shares recompute against the merged totals.
+/// `top_models` lists merge by name and re-sort.
+fn merge_usage_histories(
+    parts: &HashMap<waku_client::DaemonKey, UsageHistory>,
+    window: UsageWindow,
+) -> UsageHistory {
+    use crate::usage_history::{CostQuality, DaySlice, ModelSlice, ProviderSlice, TokenTotals};
+
+    // Sorted keys make merged output deterministic regardless of map order.
+    let mut keys: Vec<waku_client::DaemonKey> = parts.keys().copied().collect();
+    keys.sort();
+
+    let mut totals = TokenTotals::default();
+    let mut cost_usd = 0.0;
+    let mut records = 0u64;
+    let mut sessions = 0u64;
+    let mut providers: HashMap<UsageProvider, (f64, u64)> = HashMap::new();
+    let mut models: HashMap<(UsageProvider, String), (f64, u64)> = HashMap::new();
+    let mut daily: HashMap<NaiveDate, DaySlice> = HashMap::new();
+    let mut months: HashMap<NaiveDate, MonthSlice> = HashMap::new();
+    let mut month_models: HashMap<(NaiveDate, String), f64> = HashMap::new();
+    let mut projects: HashMap<String, ProjectSlice> = HashMap::new();
+    let mut project_models: HashMap<(String, String), f64> = HashMap::new();
+    let mut reported = 0.0;
+    let mut unpriced = 0.0;
+    let mut priced_by_model = 0.0;
+    let mut cache_savings_usd = 0.0;
+    let mut scanned_files = 0usize;
+    let mut skipped_files = 0usize;
+    let mut errors = Vec::new();
+    let mut scan_duration = Duration::ZERO;
+    let mut since_day: Option<NaiveDate> = None;
+    let mut until_day: Option<NaiveDate> = None;
+    let mut pricing = PricingStatus::Unavailable;
+
+    for key in &keys {
+        let part = &parts[key];
+        totals.add(&part.totals);
+        cost_usd += part.cost_usd;
+        records += part.records;
+        sessions += part.sessions;
+        scanned_files += part.scanned_files;
+        skipped_files += part.skipped_files;
+        errors.extend(part.errors.iter().cloned());
+        scan_duration = scan_duration.max(part.scan_duration);
+        since_day = Some(since_day.map_or(part.since_day, |day| day.min(part.since_day)));
+        until_day = Some(until_day.map_or(part.until_day, |day| day.max(part.until_day)));
+        pricing = match (pricing, part.pricing) {
+            (PricingStatus::Fresh, _) | (_, PricingStatus::Fresh) => PricingStatus::Fresh,
+            (PricingStatus::Cached, _) | (_, PricingStatus::Cached) => PricingStatus::Cached,
+            _ => PricingStatus::Unavailable,
+        };
+
+        // Quality shares are per-part fractions of its record count; the
+        // merged share weights each part by that count.
+        let weight = part.records as f64;
+        reported += part.quality.provider_reported_share * weight;
+        priced_by_model += part.quality.model_priced_share * weight;
+        unpriced += part.quality.unpriced_share * weight;
+        cache_savings_usd += part.quality.cache_savings_usd;
+
+        for slice in &part.providers {
+            let entry = providers.entry(slice.provider).or_default();
+            entry.0 += slice.cost_usd;
+            entry.1 += slice.total_tokens;
+        }
+        for slice in &part.models {
+            let entry = models
+                .entry((slice.provider, slice.model.clone()))
+                .or_default();
+            entry.0 += slice.cost_usd;
+            entry.1 += slice.total_tokens;
+        }
+        for slice in &part.daily {
+            let day = daily.entry(slice.day).or_insert_with(|| DaySlice {
+                day: slice.day,
+                cost_usd: 0.0,
+                total_tokens: 0,
+                by_provider: [ProviderDay::default(); 2],
+            });
+            day.cost_usd += slice.cost_usd;
+            day.total_tokens += slice.total_tokens;
+            for index in 0..day.by_provider.len() {
+                day.by_provider[index].cost_usd += slice.by_provider[index].cost_usd;
+                day.by_provider[index].total_tokens += slice.by_provider[index].total_tokens;
+            }
+        }
+        for slice in &part.months {
+            let month = months.entry(slice.first_day).or_insert_with(|| MonthSlice {
+                first_day: slice.first_day,
+                cost_usd: 0.0,
+                total_tokens: 0,
+                by_provider: [ProviderDay::default(); 2],
+                sessions: 0,
+                active_days: 0,
+                top_models: Vec::new(),
+            });
+            month.cost_usd += slice.cost_usd;
+            month.total_tokens += slice.total_tokens;
+            month.sessions += slice.sessions;
+            month.active_days += slice.active_days;
+            for index in 0..month.by_provider.len() {
+                month.by_provider[index].cost_usd += slice.by_provider[index].cost_usd;
+                month.by_provider[index].total_tokens += slice.by_provider[index].total_tokens;
+            }
+            for (model, cost) in &slice.top_models {
+                *month_models
+                    .entry((slice.first_day, model.clone()))
+                    .or_default() += cost;
+            }
+        }
+        for slice in &part.projects {
+            let project = projects
+                .entry(slice.path.clone())
+                .or_insert_with(|| ProjectSlice {
+                    path: slice.path.clone(),
+                    cost_usd: 0.0,
+                    total_tokens: 0,
+                    by_provider: [ProviderDay::default(); 2],
+                    sessions: 0,
+                    cost_share: 0.0,
+                    last_day: None,
+                    top_models: Vec::new(),
+                });
+            project.cost_usd += slice.cost_usd;
+            project.total_tokens += slice.total_tokens;
+            project.sessions += slice.sessions;
+            project.last_day = project.last_day.max(slice.last_day);
+            for index in 0..project.by_provider.len() {
+                project.by_provider[index].cost_usd += slice.by_provider[index].cost_usd;
+                project.by_provider[index].total_tokens += slice.by_provider[index].total_tokens;
+            }
+            for (model, cost) in &slice.top_models {
+                *project_models
+                    .entry((slice.path.clone(), model.clone()))
+                    .or_default() += cost;
+            }
+        }
+    }
+
+    let total_tokens = totals.total();
+    let share = |part: f64, whole: f64| if whole == 0.0 { 0.0 } else { part / whole };
+
+    let mut provider_slices: Vec<ProviderSlice> = providers
+        .into_iter()
+        .map(
+            |(provider, (provider_cost, provider_tokens))| ProviderSlice {
+                provider,
+                cost_usd: provider_cost,
+                total_tokens: provider_tokens,
+                cost_share: share(provider_cost, cost_usd),
+                token_share: share(provider_tokens as f64, total_tokens as f64),
+            },
+        )
+        .collect();
+    provider_slices.sort_by(|a, b| b.cost_usd.total_cmp(&a.cost_usd));
+
+    let mut model_slices: Vec<ModelSlice> = models
+        .into_iter()
+        .map(
+            |((provider, model), (model_cost, model_tokens))| ModelSlice {
+                provider,
+                model,
+                cost_usd: model_cost,
+                total_tokens: model_tokens,
+                cost_share: share(model_cost, cost_usd),
+            },
+        )
+        .collect();
+    model_slices.sort_by(|a, b| {
+        b.cost_usd
+            .total_cmp(&a.cost_usd)
+            .then(b.total_tokens.cmp(&a.total_tokens))
+    });
+
+    let mut day_slices: Vec<DaySlice> = daily.into_values().collect();
+    day_slices.sort_by_key(|slice| slice.day);
+
+    let mut month_slices: Vec<MonthSlice> = months.into_values().collect();
+    month_slices.sort_by_key(|slice| slice.first_day);
+    for month in &mut month_slices {
+        month.top_models = month_models
+            .iter()
+            .filter(|((day, _), _)| *day == month.first_day)
+            .map(|((_, model), cost)| (model.clone(), *cost))
+            .collect();
+        month.top_models.sort_by(|a, b| b.1.total_cmp(&a.1));
+    }
+
+    let mut project_slices: Vec<ProjectSlice> = projects.into_values().collect();
+    for project in &mut project_slices {
+        project.cost_share = share(project.cost_usd, cost_usd);
+        project.top_models = project_models
+            .iter()
+            .filter(|((path, _), _)| *path == project.path)
+            .map(|((_, model), cost)| (model.clone(), *cost))
+            .collect();
+        project.top_models.sort_by(|a, b| b.1.total_cmp(&a.1));
+    }
+    project_slices.sort_by(|a, b| {
+        b.cost_usd
+            .total_cmp(&a.cost_usd)
+            .then(b.total_tokens.cmp(&a.total_tokens))
+    });
+
+    let record_share = |part: f64| share(part, records as f64);
+    UsageHistory {
+        window,
+        since_day: since_day.unwrap_or_else(|| Local::now().date_naive()),
+        until_day: until_day.unwrap_or_else(|| Local::now().date_naive()),
+        totals,
+        total_tokens,
+        cost_usd,
+        records,
+        sessions,
+        providers: provider_slices,
+        models: model_slices,
+        daily: day_slices,
+        months: month_slices,
+        projects: project_slices,
+        quality: CostQuality {
+            provider_reported_share: record_share(reported),
+            model_priced_share: record_share(priced_by_model),
+            unpriced_share: record_share(unpriced),
+            cache_savings_usd,
+        },
+        pricing,
+        scanned_files,
+        skipped_files,
+        errors,
+        scan_duration,
+    }
+}
+
 /// `1 session`, `214 sessions` — grouped count with a pluralized noun.
 fn count_noun(count: u64, noun: &str) -> String {
     let (singular, plural) = match noun {
@@ -2894,6 +3181,88 @@ fn count_noun(count: u64, noun: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage_history::{CostQuality, ModelSlice, TokenTotals};
+
+    fn history_part(
+        cost: f64,
+        tokens: u64,
+        records: u64,
+        reported_share: f64,
+        project: &str,
+    ) -> UsageHistory {
+        let day = NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
+        UsageHistory {
+            window: UsageWindow::TrailingDays(30),
+            since_day: day,
+            until_day: day,
+            totals: TokenTotals {
+                output: tokens,
+                ..TokenTotals::default()
+            },
+            total_tokens: tokens,
+            cost_usd: cost,
+            records,
+            sessions: 1,
+            providers: Vec::new(),
+            models: vec![ModelSlice {
+                provider: UsageProvider::Claude,
+                model: "m".into(),
+                cost_usd: cost,
+                total_tokens: tokens,
+                cost_share: 1.0,
+            }],
+            daily: Vec::new(),
+            months: Vec::new(),
+            projects: vec![ProjectSlice {
+                path: project.into(),
+                cost_usd: cost,
+                total_tokens: tokens,
+                by_provider: [ProviderDay::default(); 2],
+                sessions: 1,
+                cost_share: 1.0,
+                last_day: Some(day),
+                top_models: vec![("m".into(), cost)],
+            }],
+            quality: CostQuality {
+                provider_reported_share: reported_share,
+                model_priced_share: 1.0 - reported_share,
+                unpriced_share: 0.0,
+                cache_savings_usd: 0.0,
+            },
+            pricing: PricingStatus::Fresh,
+            scanned_files: 1,
+            skipped_files: 0,
+            errors: Vec::new(),
+            scan_duration: Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn merged_usage_history_sums_and_reweights() {
+        let mut parts = HashMap::new();
+        parts.insert(
+            waku_client::DaemonKey::Local,
+            history_part(10.0, 100, 10, 0.5, "/a"),
+        );
+        parts.insert(
+            waku_client::DaemonKey::Remote(Uuid::new_v4()),
+            history_part(30.0, 300, 30, 0.25, "/b"),
+        );
+        let merged = merge_usage_histories(&parts, UsageWindow::TrailingDays(30));
+        assert_eq!(merged.total_tokens, 400);
+        assert_eq!(merged.cost_usd, 40.0);
+        assert_eq!(merged.records, 40);
+        assert_eq!(merged.sessions, 2);
+        // Same model across hosts folds into one slice with a merged share.
+        assert_eq!(merged.models.len(), 1);
+        assert!((merged.models[0].cost_share - 1.0).abs() < 1e-9);
+        // Record-weighted quality: (0.5*10 + 0.25*30) / 40.
+        assert!((merged.quality.provider_reported_share - 0.3125).abs() < 1e-9);
+        assert_eq!(merged.projects.len(), 2);
+        assert!((merged.projects[0].cost_share - 0.75).abs() < 1e-9);
+        assert_eq!(merged.pricing, PricingStatus::Fresh);
+        assert_eq!(merged.scanned_files, 2);
+    }
 
     #[test]
     fn token_counts_compact_to_three_significant_figures() {

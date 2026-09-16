@@ -1508,50 +1508,67 @@ impl Waku {
         let generation = self.sidebar_branch_scan_generation.get().wrapping_add(1);
         self.sidebar_branch_scan_generation.set(generation);
 
-        // This scan runs one batched git pass on the local daemon; remote
-        // rows keep no label until the scan learns per-daemon batches.
-        let local_project_ids = self
+        // Each daemon scans its own project paths; a host that is down keeps
+        // its last-known labels until it answers again.
+        let active_project_ids = self
             .state
             .sessions
             .iter()
             .filter(|session| {
-                session.has_started()
-                    && matches!(&session.workspace, SessionWorkspace::Local)
-                    && !self.is_remote_session(session.id)
+                session.has_started() && matches!(&session.workspace, SessionWorkspace::Local)
             })
             .map(|session| session.project_id)
             .collect::<HashSet<_>>();
         let projectless_root = crate::projectless::workspace_root();
-        let paths = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| local_project_ids.contains(&project.id))
-            .filter(|project| !sidebar_project_is_projectless(project, projectless_root.as_deref()))
-            .map(|project| project.path.clone())
-            .collect::<HashSet<_>>();
-        if paths.is_empty() {
+        let mut by_owner: HashMap<waku_client::DaemonKey, Vec<PathBuf>> = HashMap::new();
+        let mut all_paths = HashSet::new();
+        for project in &self.state.projects {
+            if !active_project_ids.contains(&project.id)
+                || sidebar_project_is_projectless(project, projectless_root.as_deref())
+            {
+                continue;
+            }
+            by_owner
+                .entry(self.project_host(project.id))
+                .or_default()
+                .push(project.path.clone());
+            all_paths.insert(project.path.clone());
+        }
+        if all_paths.is_empty() {
             self.sidebar_branch_labels.borrow_mut().clear();
             return;
         }
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        // (online supervisors, their paths, paths owned by offline remotes)
+        let mut scans = Vec::new();
+        let mut offline = HashSet::new();
+        for (owner, paths) in by_owner {
+            match self.daemons.supervisor(owner) {
+                Some(supervisor) => scans.push((supervisor, paths)),
+                None => offline.extend(paths),
+            }
+        }
         cx.spawn(async move |waku, cx| {
             let labels = cx
                 .background_executor()
                 .spawn(async move {
                     let mut labels = HashMap::new();
-                    for path in paths {
-                        let branch = match workspace.request(
-                            waku_client::WorkspaceOperation::InspectBranches { cwd: path.clone() },
-                        ) {
-                            Ok(waku_client::WorkspaceResult::Branches {
-                                snapshot: Some(snapshot),
-                            }) => snapshot.display_branch().map(str::to_owned),
-                            _ => None,
-                        };
-                        if let Some(branch) = branch {
-                            labels.insert(path, branch);
+                    for (supervisor, paths) in scans {
+                        let workspace = waku_client::WorkspaceClient::new(supervisor.client());
+                        for path in paths {
+                            let branch = match workspace.request(
+                                waku_client::WorkspaceOperation::InspectBranches {
+                                    cwd: path.clone(),
+                                },
+                            ) {
+                                Ok(waku_client::WorkspaceResult::Branches {
+                                    snapshot: Some(snapshot),
+                                }) => snapshot.display_branch().map(str::to_owned),
+                                _ => None,
+                            };
+                            if let Some(branch) = branch {
+                                labels.insert(path, branch);
+                            }
                         }
                     }
                     labels
@@ -1561,10 +1578,14 @@ impl Waku {
                 if waku.sidebar_branch_scan_generation.get() != generation {
                     return;
                 }
-                *waku.sidebar_branch_labels.borrow_mut() = labels
-                    .into_iter()
-                    .map(|(path, branch)| (path, SharedString::from(branch)))
-                    .collect();
+                let mut merged = waku.sidebar_branch_labels.borrow().clone();
+                merged.retain(|path, _| offline.contains(path));
+                merged.extend(
+                    labels
+                        .into_iter()
+                        .map(|(path, branch)| (path, SharedString::from(branch))),
+                );
+                *waku.sidebar_branch_labels.borrow_mut() = merged;
                 cx.notify();
             });
         })
@@ -1584,24 +1605,44 @@ impl Waku {
     /// or worktree, resolved in one background pass like the branch labels.
     /// Rows read only `sidebar_checkout_statuses`.
     fn ensure_sidebar_checkout_statuses(&self, cx: &mut Context<Self>) {
-        let mut paths = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started())
-            .filter(|session| !self.is_remote_session(session.id))
-            .filter_map(|session| self.workspace_path_for_session(session))
-            .map(Path::to_path_buf)
-            .collect::<Vec<_>>();
-        paths.sort();
-        paths.dedup();
-
-        let mut fingerprint = 0xc8ec_07a7_5a7a_5ca1;
-        for path in &paths {
-            for byte in path.as_os_str().as_encoded_bytes() {
-                fingerprint = mix(fingerprint, u64::from(*byte));
+        // Group by owning daemon so remote checkouts resolve on their host.
+        let mut by_owner: HashMap<waku_client::DaemonKey, Vec<PathBuf>> = HashMap::new();
+        for session in &self.state.sessions {
+            if !session.has_started() {
+                continue;
             }
-            fingerprint = mix(fingerprint, 0xff);
+            let Some(path) = self.workspace_path_for_session(session) else {
+                continue;
+            };
+            by_owner
+                .entry(self.session_host(session.id))
+                .or_default()
+                .push(path.to_path_buf());
+        }
+        for paths in by_owner.values_mut() {
+            paths.sort();
+            paths.dedup();
+        }
+
+        // Sort by owner so the fingerprint is independent of map order.
+        let mut owned_paths: Vec<(waku_client::DaemonKey, Vec<PathBuf>)> =
+            by_owner.into_iter().collect();
+        owned_paths.sort_by_key(|(owner, _)| *owner);
+        let mut fingerprint = 0xc8ec_07a7_5a7a_5ca1;
+        for (owner, paths) in &owned_paths {
+            match owner {
+                waku_client::DaemonKey::Local => fingerprint = mix(fingerprint, 0),
+                waku_client::DaemonKey::Remote(host) => {
+                    fingerprint = mix(fingerprint, 1);
+                    fingerprint = mix_uuid(fingerprint, *host);
+                }
+            }
+            for path in paths {
+                for byte in path.as_os_str().as_encoded_bytes() {
+                    fingerprint = mix(fingerprint, u64::from(*byte));
+                }
+                fingerprint = mix(fingerprint, 0xff);
+            }
         }
         let rescan_due = self
             .sidebar_checkout_scanned_at
@@ -1616,26 +1657,36 @@ impl Waku {
         let generation = self.sidebar_checkout_scan_generation.get().wrapping_add(1);
         self.sidebar_checkout_scan_generation.set(generation);
 
-        if paths.is_empty() {
+        if owned_paths.is_empty() {
             self.sidebar_checkout_statuses.borrow_mut().clear();
             return;
         }
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let mut scans = Vec::new();
+        let mut offline = HashSet::new();
+        for (owner, paths) in owned_paths {
+            match self.daemons.supervisor(owner) {
+                Some(supervisor) => scans.push((supervisor, paths)),
+                None => offline.extend(paths),
+            }
+        }
         cx.spawn(async move |waku, cx| {
             let statuses = cx
                 .background_executor()
                 .spawn(async move {
                     let mut statuses = HashMap::new();
-                    for path in paths {
-                        if let Ok(waku_client::WorkspaceResult::CheckoutStatus {
-                            status: Some(status),
-                        }) = workspace.request(
-                            waku_client::WorkspaceOperation::InspectCheckoutStatus {
-                                cwd: path.clone(),
-                            },
-                        ) {
-                            statuses.insert(path, status);
+                    for (supervisor, paths) in scans {
+                        let workspace = waku_client::WorkspaceClient::new(supervisor.client());
+                        for path in paths {
+                            if let Ok(waku_client::WorkspaceResult::CheckoutStatus {
+                                status: Some(status),
+                            }) = workspace.request(
+                                waku_client::WorkspaceOperation::InspectCheckoutStatus {
+                                    cwd: path.clone(),
+                                },
+                            ) {
+                                statuses.insert(path, status);
+                            }
                         }
                     }
                     statuses
@@ -1645,7 +1696,11 @@ impl Waku {
                 if waku.sidebar_checkout_scan_generation.get() != generation {
                     return;
                 }
-                *waku.sidebar_checkout_statuses.borrow_mut() = statuses;
+                // Rows whose host is offline keep their last-known status.
+                let mut merged = waku.sidebar_checkout_statuses.borrow().clone();
+                merged.retain(|path, _| offline.contains(path));
+                merged.extend(statuses);
+                *waku.sidebar_checkout_statuses.borrow_mut() = merged;
                 cx.notify();
             });
         })
@@ -1668,13 +1723,12 @@ impl Waku {
         }
 
         let mut fingerprint = 0xf1f9_9d5e_c7a3_b21d;
-        let mut targets: Vec<(Uuid, PathBuf, Option<String>)> = Vec::new();
+        // (session, checkout, worktree branch) grouped by owning daemon — gh
+        // runs on whichever host holds the checkout.
+        let mut targets: HashMap<waku_client::DaemonKey, Vec<(Uuid, PathBuf, Option<String>)>> =
+            HashMap::new();
         for session in &self.state.sessions {
             if !session.has_started() || session.archived_at.is_some() {
-                continue;
-            }
-            // PR lookups run gh against the checkout on the local daemon.
-            if self.is_remote_session(session.id) {
                 continue;
             }
             let (cwd, branch) = match &session.workspace {
@@ -1690,13 +1744,20 @@ impl Waku {
                 },
                 SessionWorkspace::NewWorktree { .. } => continue,
             };
+            let owner = self.session_host(session.id);
             fingerprint = mix_uuid(fingerprint, session.id);
+            if let waku_client::DaemonKey::Remote(host) = owner {
+                fingerprint = mix_uuid(fingerprint, host);
+            }
             fingerprint = mix(fingerprint, sidebar_status_rank(session.status));
             match &branch {
                 Some(branch) => fingerprint = mix_str(fingerprint, branch),
                 None => fingerprint = mix(fingerprint, u64::MAX),
             }
-            targets.push((session.id, cwd, branch));
+            targets
+                .entry(owner)
+                .or_default()
+                .push((session.id, cwd, branch));
         }
         fingerprint = mix(fingerprint, unix_time() / RESCAN_BUCKET_SECONDS);
         if self.sidebar_pull_request_scan_fingerprint.get() == Some(fingerprint) {
@@ -1716,59 +1777,68 @@ impl Waku {
             .wrapping_add(1);
         self.sidebar_pull_request_scan_generation.set(generation);
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let mut scans = Vec::new();
+        let mut offline = HashSet::new();
+        for (owner, sessions) in targets {
+            match self.daemons.supervisor(owner) {
+                Some(supervisor) => scans.push((supervisor, sessions)),
+                None => offline.extend(sessions.iter().map(|(session_id, _, _)| *session_id)),
+            }
+        }
         cx.spawn(async move |waku, cx| {
             let resolved =
                 cx.background_executor()
                     .spawn(async move {
-                        // Sessions on a shared local checkout resolve their branch
-                        // once per directory rather than once per session.
-                        let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
-                        for (_, cwd, branch) in &targets {
-                            if branch.is_none() && !branches.contains_key(cwd) {
-                                let resolved_branch = match workspace.request(
-                                    waku_client::WorkspaceOperation::InspectBranches {
-                                        cwd: cwd.clone(),
-                                    },
-                                ) {
-                                    Ok(waku_client::WorkspaceResult::Branches {
-                                        snapshot: Some(snapshot),
-                                    }) => snapshot.current,
-                                    _ => None,
-                                };
-                                branches.insert(cwd.clone(), resolved_branch);
-                            }
-                        }
-                        // And each (directory, branch) pair asks the host once.
-                        let mut queries: HashMap<
-                            (PathBuf, String),
-                            Option<Vec<waku_client::PullRequestSummary>>,
-                        > = HashMap::new();
                         let mut resolved = HashMap::new();
-                        for (session_id, cwd, branch) in targets {
-                            let branch = branch
-                                .or_else(|| branches.get(&cwd).cloned().flatten())
-                                .filter(|branch| !branch.is_empty());
-                            let Some(branch) = branch else {
-                                continue;
-                            };
-                            let entries = queries
-                                .entry((cwd.clone(), branch.clone()))
-                                .or_insert_with(|| {
-                                    match workspace.request(
-                                        waku_client::WorkspaceOperation::ListPullRequests {
-                                            cwd,
-                                            head_branch: branch,
+                        for (supervisor, targets) in scans {
+                            let workspace = waku_client::WorkspaceClient::new(supervisor.client());
+                            // Sessions on a shared checkout resolve their branch
+                            // once per directory rather than once per session.
+                            let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
+                            for (_, cwd, branch) in &targets {
+                                if branch.is_none() && !branches.contains_key(cwd) {
+                                    let resolved_branch = match workspace.request(
+                                        waku_client::WorkspaceOperation::InspectBranches {
+                                            cwd: cwd.clone(),
                                         },
                                     ) {
-                                        Ok(waku_client::WorkspaceResult::PullRequests {
-                                            entries: Some(entries),
-                                        }) => Some(entries),
+                                        Ok(waku_client::WorkspaceResult::Branches {
+                                            snapshot: Some(snapshot),
+                                        }) => snapshot.current,
                                         _ => None,
-                                    }
-                                });
-                            if let Some(entries) = entries {
-                                resolved.insert(session_id, entries.clone());
+                                    };
+                                    branches.insert(cwd.clone(), resolved_branch);
+                                }
+                            }
+                            // And each (directory, branch) pair asks the host once.
+                            let mut queries: HashMap<
+                                (PathBuf, String),
+                                Option<Vec<waku_client::PullRequestSummary>>,
+                            > = HashMap::new();
+                            for (session_id, cwd, branch) in targets {
+                                let branch = branch
+                                    .or_else(|| branches.get(&cwd).cloned().flatten())
+                                    .filter(|branch| !branch.is_empty());
+                                let Some(branch) = branch else {
+                                    continue;
+                                };
+                                let entries =
+                                    queries.entry((cwd.clone(), branch.clone())).or_insert_with(
+                                        || match workspace.request(
+                                            waku_client::WorkspaceOperation::ListPullRequests {
+                                                cwd,
+                                                head_branch: branch,
+                                            },
+                                        ) {
+                                            Ok(waku_client::WorkspaceResult::PullRequests {
+                                                entries: Some(entries),
+                                            }) => Some(entries),
+                                            _ => None,
+                                        },
+                                    );
+                                if let Some(entries) = entries {
+                                    resolved.insert(session_id, entries.clone());
+                                }
                             }
                         }
                         resolved
@@ -1778,10 +1848,15 @@ impl Waku {
                 if waku.sidebar_pull_request_scan_generation.get() != generation {
                     return;
                 }
-                *waku.sidebar_pull_requests.borrow_mut() = resolved
-                    .into_iter()
-                    .map(|(session_id, entries)| (session_id, Rc::new(entries)))
-                    .collect();
+                // Sessions whose host is offline keep their last-known rows.
+                let mut merged = waku.sidebar_pull_requests.borrow().clone();
+                merged.retain(|session_id, _| offline.contains(session_id));
+                merged.extend(
+                    resolved
+                        .into_iter()
+                        .map(|(session_id, entries)| (session_id, Rc::new(entries))),
+                );
+                *waku.sidebar_pull_requests.borrow_mut() = merged;
                 cx.notify();
             });
         })

@@ -1811,6 +1811,12 @@ impl Waku {
         self.remote_errors.remove(&host);
         self.remote_catalogs.remove(&host);
         self.save_remote_catalogs();
+        if self.skills_catalogs.remove(&remote).is_some() {
+            self.rebuild_skills_catalog();
+        }
+        if self.usage_history_parts.remove(&remote).is_some() {
+            self.rebuild_usage_history();
+        }
 
         for session_id in &removed_sessions {
             self.runtime_attach_pending.remove(session_id);

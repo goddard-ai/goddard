@@ -1485,6 +1485,9 @@ pub struct Waku {
     /// The settings Usage page's snapshot: historical token/cost usage
     /// scanned from provider transcripts off-thread. Frames read only this.
     usage_history: Option<crate::usage_history::UsageHistory>,
+    /// Per-daemon slices the merged `usage_history` is built from, so a host
+    /// that goes offline keeps contributing its last-known usage.
+    usage_history_parts: HashMap<waku_client::DaemonKey, crate::usage_history::UsageHistory>,
     /// The window a scan is currently in flight for, so a repeat request for
     /// the same window coalesces while a changed window supersedes it.
     usage_history_pending_for: Option<crate::usage_history::UsageWindow>,
@@ -1909,6 +1912,12 @@ pub struct Waku {
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
+    /// Per-daemon catalog slices the merged `skills_catalog` is rebuilt
+    /// from, so an offline host keeps its last-known rows.
+    skills_catalogs: HashMap<waku_client::DaemonKey, Rc<crate::skills::SkillsCatalog>>,
+    /// Which daemon owns each skill's primary directory — mutations route
+    /// through it and rows badge remote entries.
+    skill_hosts: HashMap<PathBuf, waku_client::DaemonKey>,
     /// Bumped per scan; a result from a superseded scan is discarded.
     skills_scan_generation: u64,
     skills_scan_pending: bool,
@@ -3965,6 +3974,7 @@ impl Waku {
                 plan_usage_checked_at: HashMap::new(),
                 plan_usage_stale: HashSet::new(),
                 usage_history: None,
+                usage_history_parts: HashMap::new(),
                 usage_history_pending_for: None,
                 usage_history_generation: 0,
                 usage_history_scanned_at: None,
@@ -4163,6 +4173,8 @@ impl Waku {
                 custom_command_editor: None,
                 remote_host_editor: None,
                 skills_catalog: None,
+                skills_catalogs: HashMap::new(),
+                skill_hosts: HashMap::new(),
                 skills_scan_generation: 0,
                 skills_scan_pending: false,
                 skills_scanned_at: None,

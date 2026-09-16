@@ -90,19 +90,44 @@ impl Waku {
         self.skills_scan_generation += 1;
         let generation = self.skills_scan_generation;
         let projects = self.skill_scan_projects();
-        let daemon = self.daemon.client();
+        // One LoadSkills per connected daemon; a host that is down keeps its
+        // slice of the merged catalog until it answers again.
+        let scans: Vec<(
+            waku_client::DaemonKey,
+            waku_client::DaemonClient,
+            Vec<(String, PathBuf)>,
+        )> = self
+            .daemons
+            .connected()
+            .into_iter()
+            .map(|(key, supervisor)| {
+                // An empty list still scans the host's user-scope dirs.
+                let projects = projects.get(&key).cloned().unwrap_or_default();
+                (key, supervisor.client(), projects)
+            })
+            .collect();
         cx.spawn(async move |this, cx| {
-            let catalog = cx
+            let results = cx
                 .background_executor()
                 .spawn(async move {
-                    match daemon.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::LoadSkills { projects },
-                    )? {
-                        waku_client::ResponsePayload::SkillsCatalog { catalog } => Ok(catalog),
-                        _ => anyhow::bail!("the daemon returned an invalid skills response"),
+                    let mut scanned = Vec::with_capacity(scans.len());
+                    for (key, daemon, projects) in scans {
+                        let catalog = match daemon.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::LoadSkills { projects },
+                        ) {
+                            Ok(waku_client::ResponsePayload::SkillsCatalog { catalog }) => {
+                                Ok(catalog)
+                            }
+                            Ok(_) => Err(anyhow::anyhow!(
+                                "the daemon returned an invalid skills response"
+                            )),
+                            Err(error) => Err(error),
+                        };
+                        scanned.push((key, catalog));
                     }
+                    scanned
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -112,17 +137,46 @@ impl Waku {
                     return;
                 }
                 this.skills_scan_pending = false;
-                match catalog {
-                    Ok(catalog) => {
-                        this.skills_catalog = Some(Rc::new(catalog));
-                        this.skills_scanned_at = Some(Instant::now());
+                let mut failed = Vec::new();
+                for (key, catalog) in results {
+                    match catalog {
+                        Ok(catalog) => {
+                            this.skills_catalogs.insert(key, Rc::new(catalog));
+                        }
+                        // A local failure surfaces; a remote one keeps the
+                        // host's last-known slice while it is unreachable.
+                        Err(error) if !key.is_remote() => failed.push(error),
+                        Err(_) => {}
                     }
-                    Err(error) => this.show_toast(error.to_string()),
+                }
+                this.rebuild_skills_catalog();
+                this.skills_scanned_at = Some(Instant::now());
+                for error in failed {
+                    this.show_toast(error.to_string());
                 }
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// Rebuild the merged `skills_catalog` view and the `skill_hosts`
+    /// routing map from the per-daemon slices, local host first.
+    pub(super) fn rebuild_skills_catalog(&mut self) {
+        // `skills_catalogs` is a HashMap; sort the keys so merged row order —
+        // and the indices `skills_rows` holds — stay stable across frames.
+        let mut keys: Vec<waku_client::DaemonKey> = self.skills_catalogs.keys().copied().collect();
+        keys.sort();
+        let mut skills = Vec::new();
+        let mut hosts = HashMap::new();
+        for key in keys {
+            for skill in &self.skills_catalogs[&key].skills {
+                hosts.insert(skill.primary().dir.clone(), key);
+                skills.push(skill.clone());
+            }
+        }
+        self.skill_hosts = hosts;
+        self.skills_catalog = Some(Rc::new(crate::skills::SkillsCatalog { skills }));
     }
 
     /// Drop any in-flight scan's claim and rescan now. Called after every
@@ -134,20 +188,32 @@ impl Waku {
         self.ensure_skills_catalog(true, cx);
     }
 
-    /// `(display name, path)` per scannable project. Projectless workspaces
-    /// are generated directories that never hold curated skills.
-    /// The scan runs on the local daemon's filesystem; remote projects are
-    /// excluded until the scan learns per-daemon batches.
-    fn skill_scan_projects(&self) -> Vec<(String, PathBuf)> {
-        self.state
-            .projects
-            .iter()
-            .filter(|project| !project.is_projectless() && !self.is_remote_project(project.id))
-            .map(|project| (project.display_name(), project.path.clone()))
-            .collect()
+    /// `(display name, path)` per scannable project, grouped by the daemon
+    /// that owns it. Projectless workspaces are generated directories that
+    /// never hold curated skills.
+    fn skill_scan_projects(&self) -> HashMap<waku_client::DaemonKey, Vec<(String, PathBuf)>> {
+        let mut grouped: HashMap<waku_client::DaemonKey, Vec<(String, PathBuf)>> = HashMap::new();
+        for project in &self.state.projects {
+            if project.is_projectless() {
+                continue;
+            }
+            grouped
+                .entry(self.project_host(project.id))
+                .or_default()
+                .push((project.display_name(), project.path.clone()));
+        }
+        grouped
     }
 
     // ── Mutations ──────────────────────────────────────────────────────────
+
+    /// The daemon that owns a skill directory — where mutations must land.
+    fn skill_owner(&self, primary_dir: &Path) -> waku_client::DaemonKey {
+        self.skill_hosts
+            .get(primary_dir)
+            .copied()
+            .unwrap_or(waku_client::DaemonKey::Local)
+    }
 
     /// Flip every copy of the skill keyed by `primary_dir`. A skill installed
     /// into several roots is one skill; the switch converges all of them.
@@ -157,9 +223,10 @@ impl Waku {
         enabled: bool,
         cx: &mut Context<Self>,
     ) {
+        let owner = self.skill_owner(&primary_dir);
         let dirs = self
-            .skills_catalog
-            .as_ref()
+            .skills_catalogs
+            .get(&owner)
             .and_then(|catalog| {
                 catalog
                     .skills
@@ -174,8 +241,16 @@ impl Waku {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| vec![primary_dir.clone()]);
+        let Some(daemon) = self
+            .daemons
+            .supervisor(owner)
+            .map(|supervisor| supervisor.client())
+        else {
+            self.show_toast(tr!("daemon.remote_unreachable"));
+            return;
+        };
         // The switch answers immediately; the rescan confirms from disk.
-        if let Some(catalog) = self.skills_catalog.as_ref() {
+        if let Some(catalog) = self.skills_catalogs.get(&owner) {
             let mut updated = catalog.as_ref().clone();
             for skill in &mut updated.skills {
                 if skill.primary().dir == primary_dir {
@@ -191,11 +266,11 @@ impl Waku {
                     }
                 }
             }
-            self.skills_catalog = Some(Rc::new(updated));
+            self.skills_catalogs.insert(owner, Rc::new(updated));
+            self.rebuild_skills_catalog();
         }
         self.skills_scan_generation += 1;
         self.skills_scan_pending = false;
-        let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -220,7 +295,8 @@ impl Waku {
 
     /// Trash every copy of the skill keyed by `primary_dir`.
     fn delete_skill(&mut self, primary_dir: PathBuf, cx: &mut Context<Self>) {
-        let entry = self.skills_catalog.as_ref().and_then(|catalog| {
+        let owner = self.skill_owner(&primary_dir);
+        let entry = self.skills_catalogs.get(&owner).and_then(|catalog| {
             catalog
                 .skills
                 .iter()
@@ -249,17 +325,25 @@ impl Waku {
         if self.skills_selected.as_ref() == Some(&primary_dir) {
             self.skills_selected = None;
         }
-        if let Some(catalog) = self.skills_catalog.as_ref() {
+        let Some(daemon) = self
+            .daemons
+            .supervisor(owner)
+            .map(|supervisor| supervisor.client())
+        else {
+            self.show_toast(tr!("daemon.remote_unreachable"));
+            return;
+        };
+        if let Some(catalog) = self.skills_catalogs.get(&owner) {
             let mut updated = catalog.as_ref().clone();
             updated
                 .skills
                 .retain(|skill| skill.primary().dir != primary_dir);
-            self.skills_catalog = Some(Rc::new(updated));
+            self.skills_catalogs.insert(owner, Rc::new(updated));
+            self.rebuild_skills_catalog();
         }
         self.skills_delete_arming = None;
         self.skills_scan_generation += 1;
         self.skills_scan_pending = false;
-        let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -747,6 +831,16 @@ impl Waku {
         }
     }
 
+    /// `· host` badge text for a skill living on a remote daemon.
+    fn skill_host_badge(&self, dir: &Path) -> Option<String> {
+        match self.skill_hosts.get(dir) {
+            Some(waku_client::DaemonKey::Remote(host)) => {
+                self.remote_host_name(*host).map(|name| format!("· {name}"))
+            }
+            _ => None,
+        }
+    }
+
     fn render_skills_list_row(
         &self,
         skill: &SkillEntry,
@@ -826,6 +920,15 @@ impl Waku {
                                                 .text_size(sp(12.5))
                                                 .text_color(theme.warning)
                                                 .child(tr!("skills.disabled_badge")),
+                                        )
+                                    })
+                                    .when_some(self.skill_host_badge(&dir), |element, badge| {
+                                        element.child(
+                                            div()
+                                                .flex_none()
+                                                .text_size(sp(12.5))
+                                                .text_color(theme.text_tertiary)
+                                                .child(badge),
                                         )
                                     }),
                             )
@@ -1221,6 +1324,15 @@ impl Waku {
                                                 .text_size(sp(12.5))
                                                 .text_color(theme.warning)
                                                 .child(tr!("skills.disabled_badge")),
+                                        )
+                                    })
+                                    .when_some(self.skill_host_badge(&dir), |element, badge| {
+                                        element.child(
+                                            div()
+                                                .flex_none()
+                                                .text_size(sp(12.5))
+                                                .text_color(theme.text_tertiary)
+                                                .child(badge),
                                         )
                                     }),
                             )

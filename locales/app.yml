@@ -509,6 +509,8 @@ daemon.ssh_password_label:
   en: Password or passphrase
 daemon.ssh_password_submit:
   en: Connect
+daemon.remote_unreachable:
+  en: That host is not connected
 sidebar.offline:
   en: Offline
 daemon.restart_failed:
