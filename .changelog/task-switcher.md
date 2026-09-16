@@ -1,0 +1,1 @@
+- Reshape the ⌃⇥ task switcher into a compact recently-viewed list with session status glyphs

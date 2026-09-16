@@ -1,0 +1,1 @@
+- Apply OpenCode model and effort changes to the live session instead of the next one

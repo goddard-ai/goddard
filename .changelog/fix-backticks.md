@@ -1,0 +1,1 @@
+- Fix escaped backticks rendering literally inside inline code

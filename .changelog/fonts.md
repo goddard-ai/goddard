@@ -1,0 +1,1 @@
+- Add UI and code font family pickers and a separate terminal font size to Appearance settings

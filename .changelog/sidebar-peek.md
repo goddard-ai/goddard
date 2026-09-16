@@ -1,0 +1,1 @@
+- Peek at the closed sidebar by hovering the left window edge

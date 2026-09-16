@@ -1,0 +1,1 @@
+- Add Devin and Droid (Factory) as agent providers

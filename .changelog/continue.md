@@ -1,0 +1,1 @@
+- Continue an interrupted session by typing in its empty composer
