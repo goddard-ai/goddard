@@ -10,6 +10,7 @@ export const WAKU_ICONS = {
   arrowUpRight: 'i-waku-arrow-up-right',
   bot: 'i-waku-bot',
   chartColumn: 'i-waku-chart-column',
+  chat: 'i-waku-chat',
   check: 'i-waku-check',
   chevronDown: 'i-waku-chevron-down',
   chevronRight: 'i-waku-chevron-right',

@@ -32,8 +32,9 @@ use super::{
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
-    DriverEvent, Message, MessageRole, ProviderKind, ReasoningBlock, RuntimeEventCursor,
-    SessionStatus, TranscriptBlock, TurnStatus, UserInputOption, UserInputQuestion,
+    DriverEvent, Message, MessageAttachment, MessageRole, ProviderKind, ReasoningBlock,
+    RuntimeEventCursor, SessionStatus, TranscriptBlock, TurnStatus, UserInputOption,
+    UserInputQuestion,
 };
 
 #[test]
@@ -349,21 +350,47 @@ fn dropped_files_mention_project_relative_paths() {
     );
 }
 
+fn file_attachment(mention: &str) -> MessageAttachment {
+    MessageAttachment {
+        path: std::path::PathBuf::from(mention),
+        mention: mention.to_owned(),
+        name: mention.to_owned(),
+        is_dir: false,
+        is_image: false,
+        blob_reference: None,
+        session_id: None,
+    }
+}
+
 #[test]
 fn submissions_append_attachment_mentions_after_the_prompt() {
-    let mentions = vec!["src/a.rs".to_owned(), "shot.png".to_owned()];
+    let attachments = vec![file_attachment("src/a.rs"), file_attachment("shot.png")];
     assert_eq!(
-        merged_submission("fix this", &mentions).as_deref(),
+        merged_submission("fix this", &attachments).as_deref(),
         Some("fix this @src/a.rs @shot.png")
     );
     // Attachments alone are a valid submission; blank text contributes
     // nothing but whitespace-trimming.
     assert_eq!(
-        merged_submission("  ", &mentions).as_deref(),
+        merged_submission("  ", &attachments).as_deref(),
         Some("@src/a.rs @shot.png")
     );
     assert_eq!(merged_submission(" plain ", &[]).as_deref(), Some("plain"));
     assert_eq!(merged_submission("   ", &[]), None);
+}
+
+#[test]
+fn session_attachments_submit_as_task_references() {
+    let session_id = Uuid::new_v4();
+    let attachments = vec![MessageAttachment {
+        session_id: Some(session_id),
+        name: "Fix flake".to_owned(),
+        ..file_attachment("session:unused")
+    }];
+    assert_eq!(
+        merged_submission("ask it", &attachments).as_deref(),
+        Some(format!("ask it [session \"Fix flake\" (task_id: {session_id})]").as_str())
+    );
 }
 
 #[test]

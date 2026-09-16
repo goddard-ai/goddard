@@ -601,6 +601,16 @@ impl Render for Waku {
                                 .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                                     this.stage_dropped_files(paths, window, cx);
                                 }))
+                                .on_drop(cx.listener(
+                                    |this, drag: &composer::SidebarSessionDrag, window, cx| {
+                                        this.stage_session_reference(
+                                            drag.session_id,
+                                            &drag.title,
+                                            window,
+                                            cx,
+                                        );
+                                    },
+                                ))
                         },
                     )
                     .child(self.render_header(window, cx))

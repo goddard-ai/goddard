@@ -1880,6 +1880,19 @@ function ChangedFilesCard({
 }
 
 function Attachment({ attachment }: { attachment: MessageAttachment }) {
+  if (attachment.session_id) {
+    return (
+      <span
+        className="flex h-6 max-w-60 items-center gap-[5px] rounded-lg border bg-[var(--inset)] pl-1.5 pr-2.5"
+        title={`${attachment.name} — ${attachment.session_id}`}
+      >
+        <WakuIcon className="size-[11px] text-[var(--text-tertiary)]" name="chat" />
+        <span className="truncate text-[9.5px] text-[var(--text-secondary)]">
+          {attachment.name}
+        </span>
+      </span>
+    )
+  }
   if (attachment.is_image) return <RemoteImage attachment={attachment} />
   return (
     <span

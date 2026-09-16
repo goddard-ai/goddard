@@ -1965,6 +1965,12 @@ pub struct MessageAttachment {
     /// name is retained for storage compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blob_reference: Option<String>,
+    /// When set, the attachment references another Goddard task rather than a
+    /// file: `name` holds its title and `mention` its provider-facing token.
+    /// `path`, `is_dir`, `is_image`, and `blob_reference` carry no file
+    /// meaning in that case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -3892,6 +3898,7 @@ mod tests {
             is_dir: false,
             is_image: true,
             blob_reference: Some("waku-blob:ab/reference.png".to_owned()),
+            session_id: None,
         };
 
         session.begin_turn_with_presentation(

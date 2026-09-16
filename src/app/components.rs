@@ -391,6 +391,55 @@ fn render_sent_message_attachments(
         .justify_end()
         .gap(px(8.0));
     for (index, attachment) in attachments.iter().enumerate() {
+        if let Some(session_id) = attachment.session_id {
+            let navigate_waku = waku.clone();
+            let key_waku = waku.clone();
+            let chip = div()
+                .id(SharedString::from(format!(
+                    "message-{message_id}-attachment-{index}"
+                )))
+                .h(px(24.0))
+                .max_w(px(240.0))
+                .pl(px(6.0))
+                .pr(px(10.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .tooltip(Tooltip::text(format!("{} — {session_id}", attachment.name)))
+                .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(attachment.name.clone()),
+                )
+                .on_click(move |_, _, cx| {
+                    let _ = navigate_waku.update(cx, |this, cx| {
+                        this.select_session(session_id, cx);
+                    });
+                    cx.stop_propagation();
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        let _ = key_waku.update(cx, |this, cx| {
+                            this.select_session(session_id, cx);
+                        });
+                        cx.stop_propagation();
+                    }
+                });
+            row = row.child(chip);
+            continue;
+        }
         let Some(menu) = attachment_menus.get(index) else {
             continue;
         };

@@ -1,4 +1,5 @@
 import type { FileEntry, MessageAttachment, ProviderKind, SlashCommand } from '@waku/client';
+import { attachmentPromptToken } from '@waku/client';
 import {
   composerAutocompleteRows,
   expandedComposerSubmission,
@@ -121,6 +122,6 @@ export function composerProviderPrompt(
 ): string | undefined {
   const expanded = expandedComposerSubmission(provider, prompt.trim(), commands);
   if (expanded === null) return undefined;
-  return [expanded, attachments.map((attachment) => `@${attachment.mention}`).join(' ')]
+  return [expanded, attachments.map(attachmentPromptToken).join(' ')]
     .filter(Boolean).join(' ');
 }

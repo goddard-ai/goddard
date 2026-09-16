@@ -26,6 +26,50 @@ struct ComputerUsePreviewDrag {
     cursor_offset: Cell<gpui::Point<Pixels>>,
 }
 
+/// A session row dragged out of the sidebar. Dropping it anywhere the
+/// composer is reachable stages a session-reference chip — `title` rides
+/// along so the drag preview and the chip never re-lookup the session.
+#[derive(Clone)]
+pub(super) struct SidebarSessionDrag {
+    pub(super) session_id: Uuid,
+    pub(super) title: SharedString,
+}
+
+/// The view GPUI drags under the cursor for a [`SidebarSessionDrag`]: the
+/// same chip the drop stages, minus its remove affordance.
+pub(super) struct SidebarSessionDragView {
+    pub(super) title: SharedString,
+}
+
+impl gpui::Render for SidebarSessionDragView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div()
+            .h(px(24.0))
+            .pl(px(6.0))
+            .pr(px(10.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .bg(theme.composer)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
+            .child(self.title.clone())
+    }
+}
+
+/// The provider-facing token a session chip contributes to the prompt: the
+/// task id `waku-agent prompt` addresses, with the title for legibility.
+fn session_attachment_token(attachment: &MessageAttachment) -> Option<String> {
+    attachment
+        .session_id
+        .map(|session_id| format!("[session \"{}\" (task_id: {session_id})]", attachment.name))
+}
+
 fn clamp_computer_use_preview_position(
     position: gpui::Point<Pixels>,
     size: gpui::Size<Pixels>,
@@ -2026,6 +2070,47 @@ impl Waku {
         window.focus(&focus, cx);
     }
 
+    /// The session a composer submission would go to right now — Big
+    /// Picture's targeted card when the overlay is open, otherwise the
+    /// selected session.
+    pub(super) fn composer_target_session(&self) -> Option<Uuid> {
+        self.big_picture.target().or(self.state.selected_session)
+    }
+
+    /// Stage a task dragged from the sidebar as a session-reference chip.
+    /// Dropping a task onto the composer that already addresses it is a
+    /// no-op, as is dropping one already staged.
+    pub(super) fn stage_session_reference(
+        &mut self,
+        session_id: Uuid,
+        title: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.composer_target_session() == Some(session_id)
+            || self
+                .composer_attachments
+                .iter()
+                .any(|attachment| attachment.session_id == Some(session_id))
+        {
+            return;
+        }
+        self.composer_attachments.push(ComposerAttachment {
+            path: PathBuf::new(),
+            client_preview_image: None,
+            mention: format!("session:{session_id}"),
+            name: SharedString::from(title.to_owned()),
+            is_dir: false,
+            is_image: false,
+            blob_reference: None,
+            session_id: Some(session_id),
+        });
+        self.schedule_composer_draft_save(cx);
+        let focus = self.composer.read(cx).focus();
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
     fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
         if paths.is_empty() {
             return false;
@@ -2119,6 +2204,7 @@ impl Waku {
             is_dir,
             is_image,
             blob_reference: Some(reference),
+            session_id: None,
         });
         true
     }
@@ -2338,16 +2424,12 @@ impl Waku {
             .drain(..)
             .map(MessageAttachment::from)
             .collect::<Vec<_>>();
-        let mentions = attachments
-            .iter()
-            .map(|attachment| attachment.mention.clone())
-            .collect::<Vec<_>>();
         let pasted_blocks = std::mem::take(&mut self.composer_pasted_blocks);
         // Typed text leads; collapsed paste blocks follow in paste order,
-        // ahead of the `@` mentions `merged_submission` still trails.
+        // ahead of the attachment tokens `merged_submission` still trails.
         let body = prompt_with_pasted_blocks(prompt, &pasted_blocks);
         let annotations = self.drain_annotations();
-        let submission = match merged_submission(&body, &mentions) {
+        let submission = match merged_submission(&body, &attachments) {
             Some(body) => {
                 // Resolve command syntax while the body's leading `/` is
                 // still visible — the annotation header would hide it from
@@ -2715,6 +2797,11 @@ impl Waku {
             .flex_wrap()
             .gap(px(8.0));
         for (index, attachment) in self.composer_attachments.iter().enumerate() {
+            if let Some(session_id) = attachment.session_id {
+                row = row
+                    .child(self.render_session_attachment_chip(index, session_id, attachment, cx));
+                continue;
+            }
             let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
             let icon_path = if attachment.is_dir {
                 "icons/folder.svg"
@@ -2876,6 +2963,101 @@ impl Waku {
             ));
         }
         row
+    }
+
+    /// The chip a dragged-in task gets: a chat bubble and the session title,
+    /// sized inline with the text rather than the file tiles' 64px grid.
+    /// Enter opens the task; backspace/delete unstages it.
+    fn render_session_attachment_chip(
+        &self,
+        index: usize,
+        session_id: Uuid,
+        attachment: &ComposerAttachment,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let focus = self
+            .menu_handle(format!("composer-attachment-{index}-menu"), cx)
+            .trigger_focus_handle()
+            .clone();
+        div()
+            .id(SharedString::from(format!("composer-attachment-{index}")))
+            .h(px(24.0))
+            .max_w(px(240.0))
+            .pl(px(6.0))
+            .pr(px(4.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .track_focus(&focus)
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .tooltip(Tooltip::text(format!("{} — {session_id}", attachment.name)))
+            .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(attachment.name.clone()),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "composer-attachment-remove-{index}"
+                    )))
+                    .w(px(16.0))
+                    .h(px(16.0))
+                    .flex_none()
+                    .rounded(px(5.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .tab_index(0)
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .hover(|element| element.bg(theme.overlay_strong))
+                    .active(|element| element.opacity(0.8))
+                    .child(icon("icons/x.svg", 9.0, theme.text_secondary))
+                    .tooltip(Tooltip::text(tr!("common.remove")))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if index < this.composer_attachments.len() {
+                            this.composer_attachments.remove(index);
+                            this.schedule_composer_draft_save(cx);
+                            cx.notify();
+                        }
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            if index < this.composer_attachments.len() {
+                                this.composer_attachments.remove(index);
+                                this.schedule_composer_draft_save(cx);
+                                cx.notify();
+                            }
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                let key = event.keystroke.key.as_str();
+                if matches!(key, "backspace" | "delete") {
+                    if index < this.composer_attachments.len() {
+                        this.composer_attachments.remove(index);
+                        this.schedule_composer_draft_save(cx);
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                } else if matches!(key, "enter" | "space") {
+                    this.select_session(session_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
     }
 
     /// The pending follow-up queue between the transcript and the composer: a
@@ -3212,13 +3394,22 @@ impl Waku {
                 .drag_over::<ExternalPaths>(move |style, _, _, _| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
+                .drag_over::<SidebarSessionDrag>(move |style, _, _, _| {
+                    style.bg(drop_wash).border_color(drop_ring)
+                })
                 // The same highlight when the drag is anywhere over the
                 // session column — the card is where the chips will land.
                 .group_drag_over::<ExternalPaths>(SESSION_DROP_GROUP, move |style| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
+                .group_drag_over::<SidebarSessionDrag>(SESSION_DROP_GROUP, move |style| {
+                    style.bg(drop_wash).border_color(drop_ring)
+                })
                 .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                     this.stage_dropped_files(paths, window, cx);
+                }))
+                .on_drop(cx.listener(|this, drag: &SidebarSessionDrag, window, cx| {
+                    this.stage_session_reference(drag.session_id, &drag.title, window, cx);
                 }))
                 // Anchor for the bounds probe the autocomplete popup aligns to.
                 .relative()
@@ -4682,13 +4873,17 @@ pub(super) fn prompt_with_pasted_blocks(prompt: &str, pasted_blocks: &[String]) 
         })
 }
 
-/// The prompt a submission sends: the typed text plus one `@` mention per
-/// staged attachment, appended at the end the way T3 Code appends dropped
-/// files. `None` means there is nothing to send.
-pub(super) fn merged_submission(prompt: &str, mentions: &[String]) -> Option<String> {
-    let mentions = mentions
+/// The prompt a submission sends: the typed text plus one token per staged
+/// attachment appended at the end the way T3 Code appends dropped files —
+/// `@path` for files, a `session` reference carrying title and task id for
+/// session chips. `None` means there is nothing to send.
+pub(super) fn merged_submission(prompt: &str, attachments: &[MessageAttachment]) -> Option<String> {
+    let mentions = attachments
         .iter()
-        .map(|mention| format!("@{mention}"))
+        .map(|attachment| {
+            session_attachment_token(attachment)
+                .unwrap_or_else(|| format!("@{}", attachment.mention))
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let prompt = prompt.trim();

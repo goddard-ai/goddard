@@ -19,4 +19,11 @@ mention: string, name: string, is_dir: boolean, is_image: boolean,
  * Durable daemon-issued blob or attachment reference. The legacy field
  * name is retained for storage compatibility.
  */
-blob_reference?: string | null, };
+blob_reference?: string | null,
+/**
+ * When set, the attachment references another Goddard task rather than a
+ * file: `name` holds its title and `mention` its provider-facing token.
+ * `path`, `is_dir`, `is_image`, and `blob_reference` carry no file
+ * meaning in that case.
+ */
+session_id?: string | null, };

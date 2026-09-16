@@ -1706,6 +1706,18 @@ impl Waku {
             .occlude()
             .flex()
             .flex_col()
+            // The overlay covers the session column's drop group, so it
+            // re-declares it: the docked composer card lights up wherever
+            // the drag is held and accepts the same drops.
+            .group(composer::SESSION_DROP_GROUP)
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.stage_dropped_files(paths, window, cx);
+            }))
+            .on_drop(
+                cx.listener(|this, drag: &composer::SidebarSessionDrag, window, cx| {
+                    this.stage_session_reference(drag.session_id, &drag.title, window, cx);
+                }),
+            )
             // The blurred frame snapshot paints first; the scrim dims it.
             .children(backdrop.map(|image| {
                 img(image)

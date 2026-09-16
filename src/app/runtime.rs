@@ -2389,12 +2389,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        let mentions = edit
-            .attachments
-            .iter()
-            .map(|attachment| attachment.mention.clone())
-            .collect::<Vec<_>>();
-        let provider_prompt = composer::merged_submission(&prompt, &mentions)
+        let provider_prompt = composer::merged_submission(&prompt, &edit.attachments)
             .expect("edited text or retained attachments always form a submission");
         let display_content = (!edit.attachments.is_empty()).then_some(prompt);
         self.start_message_rewind(

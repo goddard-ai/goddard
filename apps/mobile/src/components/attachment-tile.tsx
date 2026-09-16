@@ -39,6 +39,35 @@ export const AttachmentTile = memo(function AttachmentTile({
   const interactive = Boolean(source || canRetry);
   const onImageError = useCallback(() => setFailedSource(image.data ?? null), [image.data]);
 
+  if (attachment.session_id) {
+    return (
+      <View style={[styles.sessionChip, { backgroundColor: theme.inset, borderColor: theme.border }]}>
+        <AppSymbol
+          name={{ ios: 'text.bubble', android: 'chat_bubble', web: 'chat' }}
+          size={11}
+          tintColor={theme.textTertiary}
+        />
+        <Text
+          numberOfLines={1}
+          style={[styles.sessionChipName, { color: theme.textSecondary }]}>
+          {attachment.name}
+        </Text>
+        {onRemove && (
+          <Pressable
+            accessibilityLabel={`Remove ${attachment.name}`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: removeDisabled }}
+            disabled={removeDisabled}
+            onPress={onRemove}
+            style={({ pressed }) => [styles.sessionChipRemove, { opacity: removeDisabled ? 0.4 : pressed ? 0.65 : 1 }]}
+            tabIndex={removeDisabled ? -1 : 0}>
+            <AppSymbol name={{ ios: 'xmark', android: 'close', web: 'close' }} size={9} tintColor={theme.textSecondary} />
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.frame, compact && styles.compact]}>
       <Pressable
@@ -206,6 +235,9 @@ function AttachmentImagePreview({
 }
 
 const styles = StyleSheet.create({
+  sessionChip: { height: 24, maxWidth: 240, flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 8, borderWidth: 1, paddingLeft: 6, paddingRight: 4 },
+  sessionChipName: { fontSize: 12.5, flexShrink: 1 },
+  sessionChipRemove: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   frame: { width: 96, height: 80, flexShrink: 0 },
   compact: { width: 80 },
   tile: { flex: 1, borderRadius: 9, borderWidth: 1, overflow: 'hidden' },

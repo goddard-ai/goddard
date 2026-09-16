@@ -8,6 +8,7 @@ import type {
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
+import { attachmentPromptToken } from '@waku/client';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -172,7 +173,7 @@ export function providerPromptForSubmission(
 ): string {
   return [
     prompt.trim(),
-    attachments.map((attachment) => `@${attachment.mention}`).join(' '),
+    attachments.map(attachmentPromptToken).join(' '),
   ].filter(Boolean).join(' ');
 }
 

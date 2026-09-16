@@ -10,6 +10,7 @@ import type {
   SequencedEvent,
   UserInputAnswer,
 } from '@waku/client'
+import { attachmentPromptToken } from '@waku/client'
 import {
   createContext,
   useCallback,
@@ -622,7 +623,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const providerPrompt = providerPromptOverride === undefined
         ? [
             prompt,
-            attachments.map((attachment) => `@${attachment.mention}`).join(' '),
+            attachments.map(attachmentPromptToken).join(' '),
           ]
             .filter(Boolean)
             .join(' ')
@@ -1004,7 +1005,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const providerPrompt = providerPromptOverride === undefined
         ? [
             prompt,
-            attachments.map((attachment) => `@${attachment.mention}`).join(' '),
+            attachments.map(attachmentPromptToken).join(' '),
           ].filter(Boolean).join(' ')
         : providerPromptOverride.trim()
       const runtime = entries.current.get(session.id)

@@ -31,6 +31,7 @@ import type {
   WorkspaceOperation,
   WorkspaceResult,
 } from '@waku/client'
+import { attachmentPromptToken } from '@waku/client'
 
 export type TaskState = Extract<ResponsePayload, { type: 'taskState' }>
 export type DaemonDirectory = Extract<WorkspaceResult, { type: 'directory' }>
@@ -736,7 +737,7 @@ export function beginTurn(
   const now = unixTime()
   const turnId = crypto.randomUUID()
   const visiblePrompt = prompt.trim()
-  const mentions = attachments.map((attachment) => `@${attachment.mention}`).join(' ')
+  const mentions = attachments.map(attachmentPromptToken).join(' ')
   const providerPrompt = [visiblePrompt, mentions].filter(Boolean).join(' ')
   const autoTitle =
     session.messages.length === 0 && session.title === 'New task' && !session.auto_title

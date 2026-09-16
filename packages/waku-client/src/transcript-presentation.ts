@@ -1,4 +1,4 @@
-import type { ActivityItem, AgentSession } from './generated'
+import type { ActivityItem, AgentSession, MessageAttachment } from './generated'
 
 export type AssistantResponseFooter = {
   content: string
@@ -637,4 +637,12 @@ function isGenericActivityTitle(activity: ActivityItem) {
     reasoning: ['reasoning'],
   }[activity.kind]
   return generic.includes(normalized)
+}
+
+/** The token an attachment contributes to the provider-facing prompt:
+ * `@path` for files, a task reference carrying title and id for sessions. */
+export function attachmentPromptToken(attachment: MessageAttachment): string {
+  return attachment.session_id
+    ? `[session "${attachment.name}" (task_id: ${attachment.session_id})]`
+    : `@${attachment.mention}`
 }

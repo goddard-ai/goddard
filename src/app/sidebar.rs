@@ -2863,10 +2863,25 @@ impl Waku {
             .active(|element| element.bg(theme.sidebar_item_background))
             .child(self.render_session_row_body(session_id, grouped_by_project, shortcut_hint, cx))
             .when(!renaming, |element| {
+                let drag_title = SharedString::from(session.title.clone());
                 element
                     .track_focus(&row_focus)
                     .tab_index(0)
                     .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    // Dragging a row anywhere the composer is reachable
+                    // stages a session-reference chip there; dropping it back
+                    // on the session it already addresses is a no-op.
+                    .on_drag(
+                        composer::SidebarSessionDrag {
+                            session_id,
+                            title: drag_title,
+                        },
+                        move |drag, _, _, cx| {
+                            cx.new(|_| composer::SidebarSessionDragView {
+                                title: drag.title.clone(),
+                            })
+                        },
+                    )
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if matches!(key, "enter" | "space") {

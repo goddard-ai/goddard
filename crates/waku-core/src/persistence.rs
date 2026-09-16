@@ -2158,6 +2158,7 @@ mod tests {
                 is_dir: false,
                 is_image: true,
                 blob_reference: None,
+                session_id: None,
             }],
         };
         let mut drafts = ComposerDrafts::default();
@@ -2425,6 +2426,7 @@ mod tests {
             is_dir: false,
             is_image: true,
             blob_reference: Some("waku-blob:abcdef.png".to_owned()),
+            session_id: None,
         };
         state.sessions[0].begin_turn_with_presentation(
             "compare @/tmp/reference.png",
@@ -2624,6 +2626,7 @@ mod tests {
                     is_dir: false,
                     is_image: true,
                     blob_reference: Some(reference),
+                    session_id: None,
                 }],
             },
         );

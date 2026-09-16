@@ -417,6 +417,9 @@ struct ComposerAttachment {
     is_image: bool,
     /// Daemon-issued durable reference retained by task persistence.
     blob_reference: Option<String>,
+    /// When set, the chip references another task rather than a file: `name`
+    /// holds its title and `mention` its provider-facing token.
+    session_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug)]

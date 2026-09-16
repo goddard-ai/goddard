@@ -17,6 +17,10 @@ pub struct ComposerDraftAttachment {
     pub is_image: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blob_reference: Option<String>,
+    /// Task the attachment references instead of a file; see
+    /// [`crate::model::MessageAttachment::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]

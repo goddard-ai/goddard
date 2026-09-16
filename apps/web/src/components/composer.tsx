@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Popover } from '@base-ui/react/popover'
+import { attachmentPromptToken } from '@waku/client'
 import type {
   AgentSession,
   BranchSnapshot,
@@ -369,7 +370,7 @@ export function Composer({
     if (expanded === null) return undefined
     return [
       expanded,
-      submittedAttachments.map((attachment) => `@${attachment.mention}`).join(' '),
+      submittedAttachments.map(attachmentPromptToken).join(' '),
     ].filter(Boolean).join(' ')
   }
 
@@ -1300,6 +1301,29 @@ function ComposerAttachmentTile({
       .catch(() => active && setSource(null))
     return () => { active = false }
   }, [attachment.blob_reference, attachment.is_image, attachment.name, attachment.path, client, config?.address, phase])
+
+  if (attachment.session_id) {
+    return (
+      <span
+        className="relative flex h-6 max-w-60 items-center gap-[5px] rounded-lg border bg-[var(--inset)] pl-1.5 pr-6 outline-none focus-within:border-ring"
+        title={`${attachment.name} — ${attachment.session_id}`}
+      >
+        <WakuIcon className="size-[11px] text-[var(--text-tertiary)]" name="chat" />
+        <span className="truncate text-[9.5px] text-[var(--text-secondary)]">
+          {attachment.name}
+        </span>
+        <button
+          aria-label={t('composer.remove_attachment', { name: attachment.name })}
+          className="absolute right-[3px] grid size-4 place-items-center rounded-[5px] bg-background/80 text-[var(--text-secondary)] outline-none hover:bg-background focus-visible:ring-1 focus-visible:ring-ring"
+          type="button"
+          onClick={onRemove}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <WakuIcon className="size-[9px]" name="x" />
+        </button>
+      </span>
+    )
+  }
 
   const contents = attachment.is_image && source ? (
     <PreviewableImage
