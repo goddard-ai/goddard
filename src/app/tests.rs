@@ -9,7 +9,8 @@ use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
-    StreamDeltaKind, TranscriptRowKind::*, active_navigation_turn_index, activity_group_is_live,
+    StreamDeltaKind, TranscriptRowKind::*, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
+    active_navigation_turn_index, activity_group_is_live,
     activity_header_title, append_text_delta_to_session, assistant_response_footer,
     assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
     disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
@@ -18,7 +19,8 @@ use super::{
     navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
     navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
     previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
-    response_footer_message_index, response_row_turn_id, row_starts_followup_turn,
+    response_footer_message_index, response_row_turn_id, retain_fading_working_indicator,
+    row_starts_followup_turn,
     session_accepts_turn_output, session_is_reapable, session_opens_at_last_prompt,
     settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
     should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
@@ -2265,6 +2267,147 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
+}
+
+/// `retain_fading_working_indicator` holds the settled turn's indicator row
+/// for one 300ms fade: the same session must have shown it, a fresh live
+/// turn or a session switch ends it, and once retired it must not re-arm —
+/// that last transition regressed once and looped the fade forever.
+#[test]
+fn the_working_indicator_fades_out_once_then_retires() {
+    let session_id = Uuid::new_v4();
+    let turn_id = Uuid::new_v4();
+    let armed_at = Instant::now();
+
+    // The settle dropped the indicator the same session was showing: the
+    // fade arms and the row stays.
+    let mut settled_rows = vec![Message(0)];
+    let fade = retain_fading_working_indicator(
+        &mut settled_rows,
+        Some(session_id),
+        Some(turn_id),
+        Some(session_id),
+        None,
+        armed_at,
+    )
+    .expect("the settle transition arms the fade");
+    assert_eq!(settled_rows, vec![Message(0), WorkingIndicator]);
+    assert_eq!(fade.turn_id, turn_id);
+    assert!(!fade.removal_scheduled);
+
+    // Mid-fade refolds keep the ghost row until the window closes.
+    let mut mid_fade = vec![Message(0)];
+    let kept = retain_fading_working_indicator(
+        &mut mid_fade,
+        Some(session_id),
+        Some(turn_id),
+        Some(session_id),
+        Some(fade),
+        armed_at + WORKING_INDICATOR_FADE_OUT / 2,
+    );
+    assert_eq!(kept, Some(fade));
+    assert_eq!(mid_fade, vec![Message(0), WorkingIndicator]);
+
+    // Past the window the row retires for real…
+    let mut expired = vec![Message(0)];
+    assert_eq!(
+        retain_fading_working_indicator(
+            &mut expired,
+            Some(session_id),
+            Some(turn_id),
+            Some(session_id),
+            Some(fade),
+            armed_at + WORKING_INDICATOR_FADE_OUT,
+        ),
+        None,
+    );
+    assert_eq!(expired, vec![Message(0)]);
+
+    // …and with the indicator marked retired, the next refold must not read
+    // "same session, indicator dropped" and arm a second fade.
+    let mut after_retire = vec![Message(0)];
+    assert_eq!(
+        retain_fading_working_indicator(
+            &mut after_retire,
+            Some(session_id),
+            Some(turn_id),
+            None,
+            None,
+            armed_at + WORKING_INDICATOR_FADE_OUT,
+        ),
+        None,
+    );
+    assert_eq!(after_retire, vec![Message(0)]);
+}
+
+#[test]
+fn the_working_indicator_fade_does_not_follow_a_session_switch() {
+    let busy_session = Uuid::new_v4();
+    let other_session = Uuid::new_v4();
+    let now = Instant::now();
+
+    // The previous fold showed the indicator — but for another session.
+    let mut rows = vec![Message(0)];
+    assert_eq!(
+        retain_fading_working_indicator(
+            &mut rows,
+            Some(other_session),
+            Some(Uuid::new_v4()),
+            Some(busy_session),
+            None,
+            now,
+        ),
+        None,
+    );
+    assert_eq!(rows, vec![Message(0)]);
+
+    // A fade armed in one session is dropped, not kept, in another.
+    let fade = WorkingIndicatorFade {
+        session_id: busy_session,
+        turn_id: Uuid::new_v4(),
+        started: now,
+        removal_scheduled: false,
+    };
+    let mut rows = vec![Message(0)];
+    assert_eq!(
+        retain_fading_working_indicator(
+            &mut rows,
+            Some(other_session),
+            Some(Uuid::new_v4()),
+            None,
+            Some(fade),
+            now,
+        ),
+        None,
+    );
+    assert_eq!(rows, vec![Message(0)]);
+}
+
+#[test]
+fn a_new_turn_cancels_the_working_indicator_fade() {
+    let session_id = Uuid::new_v4();
+    let now = Instant::now();
+    let fade = WorkingIndicatorFade {
+        session_id,
+        turn_id: Uuid::new_v4(),
+        started: now,
+        removal_scheduled: true,
+    };
+    // The fold has a live indicator again — the fade retires instead of
+    // stacking a ghost row on the new turn's real one.
+    let mut rows = vec![Message(0), WorkingIndicator];
+    assert_eq!(
+        retain_fading_working_indicator(
+            &mut rows,
+            Some(session_id),
+            Some(Uuid::new_v4()),
+            Some(session_id),
+            Some(fade),
+            now,
+        ),
+        None,
+    );
+    assert_eq!(rows, vec![Message(0), WorkingIndicator]);
 }
 
 #[test]

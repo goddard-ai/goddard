@@ -2495,6 +2495,10 @@ impl Waku {
                 {
                     let previous_kinds = this.transcript_row_kinds.borrow().clone();
                     this.working_indicator_fade.set(None);
+                    // Without this the forced refold sees "same session,
+                    // indicator dropped" and arms a fresh fade — the row
+                    // would re-fade every 300ms instead of retiring.
+                    this.working_indicator_session.set(None);
                     // The transcript itself did not change, so the fold cache
                     // must be forced to drop the ghost row.
                     this.transcript_row_kinds_fingerprint.set(None);

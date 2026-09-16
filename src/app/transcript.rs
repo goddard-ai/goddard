@@ -22,9 +22,20 @@ impl Waku {
             });
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let mut next_kinds = self.selected_transcript_row_kinds();
-            self.retain_fading_working_indicator(&mut next_kinds);
+            let session = self.selected_session();
+            let fade = retain_fading_working_indicator(
+                &mut next_kinds,
+                session.map(|session| session.id),
+                session
+                    .and_then(|session| session.turns.last())
+                    .map(|turn| turn.id),
+                self.working_indicator_session.get(),
+                self.working_indicator_fade.get(),
+                Instant::now(),
+            );
+            self.working_indicator_fade.set(fade);
             self.working_indicator_session.set(
-                self.selected_session()
+                session
                     .map(|session| session.id)
                     .filter(|_| next_kinds.contains(&TranscriptRowKind::WorkingIndicator)),
             );
@@ -32,44 +43,6 @@ impl Waku {
             self.transcript_row_kinds_fingerprint.set(Some(fingerprint));
         }
         self.transcript_row_kinds.borrow().len()
-    }
-
-    /// A settled turn's working indicator lingers for
-    /// [`WORKING_INDICATOR_FADE_OUT`] while it fades out, instead of the jump
-    /// cut the fold alone would produce. The row renderer animates the fade
-    /// and schedules the splice that retires the row.
-    fn retain_fading_working_indicator(&self, next_kinds: &mut Vec<TranscriptRowKind>) {
-        let session_id = self.selected_session().map(|session| session.id);
-        let live = next_kinds.contains(&TranscriptRowKind::WorkingIndicator);
-        if let Some(fade) = self.working_indicator_fade.get() {
-            // A fresh live turn, a session switch, or the window's end all
-            // retire the fade.
-            let fading = !live
-                && Some(fade.session_id) == session_id
-                && fade.started.elapsed() < WORKING_INDICATOR_FADE_OUT;
-            self.working_indicator_fade.set(fading.then_some(fade));
-            if fading {
-                next_kinds.push(TranscriptRowKind::WorkingIndicator);
-            }
-            return;
-        }
-        // The fold just dropped the indicator this session was showing: a
-        // turn settled. Keep the row for the fade.
-        let Some(session_id) = session_id else { return };
-        if live || self.working_indicator_session.get() != Some(session_id) {
-            return;
-        }
-        let turn_id = self
-            .selected_session()
-            .and_then(|session| session.turns.last())
-            .map_or_else(Uuid::nil, |turn| turn.id);
-        self.working_indicator_fade.set(Some(WorkingIndicatorFade {
-            session_id,
-            turn_id,
-            started: Instant::now(),
-            removal_scheduled: false,
-        }));
-        next_kinds.push(TranscriptRowKind::WorkingIndicator);
     }
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
@@ -545,10 +518,52 @@ pub(super) enum TranscriptRowKind {
 /// out — a jump cut under the settling fold reads as a flicker.
 pub(super) const WORKING_INDICATOR_FADE_OUT: Duration = Duration::from_millis(300);
 
+/// The fade-out state machine behind `Waku::working_indicator_fade`, lifted
+/// off the entity so tests can drive the transitions. `Some(fade)` keeps the
+/// ghost row appended to `next_kinds` until its window closes; `None`
+/// retires it. Arming requires the *same* session's previous fold to have
+/// shown the indicator (`indicator_session`), which is what keeps a session
+/// switch from ghosting a row into a transcript that never had one.
+pub(super) fn retain_fading_working_indicator(
+    next_kinds: &mut Vec<TranscriptRowKind>,
+    session_id: Option<Uuid>,
+    last_turn_id: Option<Uuid>,
+    indicator_session: Option<Uuid>,
+    fade: Option<WorkingIndicatorFade>,
+    now: Instant,
+) -> Option<WorkingIndicatorFade> {
+    let live = next_kinds.contains(&TranscriptRowKind::WorkingIndicator);
+    if let Some(fade) = fade {
+        // A fresh live turn, a session switch, or the window's end all
+        // retire the fade.
+        let fading = !live
+            && Some(fade.session_id) == session_id
+            && now.saturating_duration_since(fade.started) < WORKING_INDICATOR_FADE_OUT;
+        if fading {
+            next_kinds.push(TranscriptRowKind::WorkingIndicator);
+            return Some(fade);
+        }
+        return None;
+    }
+    // The fold just dropped the indicator this session was showing: a turn
+    // settled. Keep the row for the fade.
+    let session_id = session_id?;
+    if live || indicator_session != Some(session_id) {
+        return None;
+    }
+    next_kinds.push(TranscriptRowKind::WorkingIndicator);
+    Some(WorkingIndicatorFade {
+        session_id,
+        turn_id: last_turn_id.unwrap_or_else(Uuid::nil),
+        started: now,
+        removal_scheduled: false,
+    })
+}
+
 /// A working indicator outliving its busy state: the row stays in the fold
 /// for [`WORKING_INDICATOR_FADE_OUT`] while the renderer eases its opacity
 /// to zero, then a scheduled splice retires it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WorkingIndicatorFade {
     /// The fade belongs to one session's transcript; a session switch
     /// discards it rather than trailing a ghost row into the next view.
