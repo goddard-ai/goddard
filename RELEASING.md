@@ -111,10 +111,19 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    `CFBundleShortVersionString` is the version, and `CFBundleVersion` is
    derived from it (`major*1e6 + minor*1e3 + patch`, so `0.2.0` → `2000`),
    which keeps Sparkle's build-number comparison monotonic without a manual
-   counter. Prerelease versions (`-beta.1`) are refused for publishing — the
-   appcast serves one stable channel.
-2. **Write the release notes** — add a `## [<version>]` section at the top of
-   [`CHANGELOG.md`](CHANGELOG.md).
+   counter. Prerelease versions (`-beta.1`) become GitHub prereleases through
+   CI: their versioned assets upload normally, but `sync-release` skips the
+   appcasts and `latest-*` pointers, so the update feeds keep serving the
+   stable channel. The local `bun run release` publish path still refuses
+   them outright.
+2. **Write the release notes** — changes accumulate as fragments in
+   `.changelog/` (one `.md` file per change, one bullet each). Fold them into
+   `CHANGELOG.md`:
+   ```sh
+   bun run changelog
+   ```
+   This creates the `## [<version>]` section for the Cargo version and deletes
+   the consumed fragments. Commit it with the version bump.
 3. **Run it:**
    ```sh
    bun run release
@@ -140,7 +149,9 @@ Test by keeping an older build around, launching it, and choosing
 The Release workflow runs two ways:
 
 - **Push a `v*` tag** — the tag must match the `version` in `Cargo.toml`, or the
-  run fails before anything builds.
+  run fails before anything builds. A prerelease tag like `v0.2.0-beta.1`
+  drafts a GitHub **prerelease**; publishing it uploads its assets but leaves
+  the update feeds and `latest-*` pointers on the stable channel.
 - **Actions → Release → Run workflow** — no tag needed. The run releases
   whatever `Cargo.toml` says and drafts it as `v<version>`; that tag is created
   at the built commit when you publish the draft.

@@ -443,6 +443,9 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
+          # Prereleases (-beta.1 etc.) publish to GitHub only; sync-release
+          # keeps them off the update feeds and latest-* pointers.
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
           # A manual run has no tag yet; publishing the draft creates this one
           # at the commit that was built.
           tag_name: ${{ needs.version.outputs.tag }}
