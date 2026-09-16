@@ -170,6 +170,7 @@ enum PaletteAction {
     ToggleWorkspace,
     OpenOnGitHub,
     MoveToWorktree,
+    LandChanges,
     ToggleUsage,
     CollapseSidebarGroups,
     GoToLatestUnseenCompletion,
@@ -988,6 +989,35 @@ impl Waku {
                 next(),
             );
             item.detail = Some(format!("#{worktree_name}"));
+            commands.push(item);
+        }
+
+        // Same gate as the composer's `/land`: the session the composer
+        // answers to has a checkout to land and no panel operation is
+        // already running.
+        if self.git_panel_operation.is_none()
+            && self
+                .composer_session()
+                .is_some_and(|session| self.workspace_path_for_session(session).is_some())
+        {
+            let mut item = CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.land_changes"),
+                "icons/git-merge.svg",
+                None,
+                PaletteAction::LandChanges,
+                "land changes commits onto base branch rebase merge integrate fast-forward worktree git",
+                next(),
+            );
+            item.detail = self.composer_session().and_then(|session| {
+                match &session.workspace {
+                    SessionWorkspace::Worktree {
+                        base_branch: Some(base),
+                        ..
+                    } => Some(format!("→ {base}")),
+                    _ => None,
+                }
+            });
             commands.push(item);
         }
 
@@ -2167,6 +2197,10 @@ impl Waku {
                 if let Some(session_id) = self.state.selected_session {
                     self.move_session_to_worktree(session_id, None, cx);
                 }
+            }
+            PaletteAction::LandChanges => {
+                self.settings_page = None;
+                self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
             }
             PaletteAction::RunCustomCommand(command_id) => {
                 if let Some(command) = self

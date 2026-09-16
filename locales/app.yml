@@ -138,6 +138,8 @@ command_palette.no_scripts_hint:
   en: No package.json, makefile, or justfile at the project root
 command_palette.open_on_github:
   en: Open on GitHub
+command_palette.land_changes:
+  en: Land changes
 command_palette.new_custom_command:
   en: New custom command…
 command_palette.choose_model:

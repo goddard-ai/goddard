@@ -70,6 +70,7 @@ command_palette.no_projects_hint: プロジェクトを開くとそのスクリ�
 command_palette.no_scripts: スクリプトが見つかりません
 command_palette.no_scripts_hint: プロジェクトのルートに package.json、makefile、justfile がありません
 command_palette.open_on_github: GitHub で開く
+command_palette.land_changes: 変更を取り込む
 command_palette.new_custom_command: 新規カスタムコマンド…
 command_palette.choose_model: モデルを選択…
 command_palette.copy_task_id: タスク ID をコピー

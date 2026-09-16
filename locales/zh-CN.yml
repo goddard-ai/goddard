@@ -68,6 +68,7 @@ command_palette.no_projects_hint: 打开一个项目以运行其脚本
 command_palette.no_scripts: 未找到脚本
 command_palette.no_scripts_hint: 项目根目录下没有 package.json、makefile 或 justfile
 command_palette.open_on_github: 在 GitHub 上打开
+command_palette.land_changes: 合入更改
 command_palette.new_custom_command: 新建自定义命令…
 command_palette.choose_model: 选择模型…
 command_palette.copy_task_id: 复制任务 ID
