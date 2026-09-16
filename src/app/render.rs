@@ -270,8 +270,9 @@ impl Waku {
     }
 
     /// Advance the peek nudge and retire the overlay when it ends. Returns
-    /// the `left` inset for the frame while the overlay stays mounted.
-    fn settle_sidebar_peek(&mut self, window: &Window, cx: &App) -> Option<f32> {
+    /// the `left` inset and opacity for the frame while the overlay stays
+    /// mounted.
+    fn settle_sidebar_peek(&mut self, window: &Window, cx: &App) -> Option<(f32, f32)> {
         // A sidebar that opens or starts sliding takes the pane back, and
         // settings covers the workspace outright — either way the overlay
         // retires without its nudge-out.
@@ -280,7 +281,7 @@ impl Waku {
             return None;
         }
         if cx.reduce_motion() {
-            return (!matches!(self.sidebar_peek, SidebarPeek::Hidden)).then_some(0.0);
+            return (!matches!(self.sidebar_peek, SidebarPeek::Hidden)).then_some((0.0, 1.0));
         }
         match self.sidebar_peek {
             SidebarPeek::Hidden => None,
@@ -290,7 +291,7 @@ impl Waku {
                 if progress < 1.0 {
                     window.request_animation_frame();
                 }
-                Some(-SIDEBAR_PEEK_NUDGE * (1.0 - ease_out_quint()(progress)))
+                Some((-SIDEBAR_PEEK_NUDGE * (1.0 - ease_out_quint()(progress)), 1.0))
             }
             SidebarPeek::Exiting { started } => {
                 let progress = started.elapsed().as_secs_f32() / SIDEBAR_PEEK_SLIDE.as_secs_f32();
@@ -300,8 +301,12 @@ impl Waku {
                 }
                 window.request_animation_frame();
                 // Ease-in (the entry's quint mirrored): the panel accelerates
-                // off the edge instead of braking into its disappearance.
-                Some(-SIDEBAR_PEEK_NUDGE * progress.max(0.0).powi(5))
+                // off the edge instead of braking into its disappearance,
+                // while a linear fade keeps the exit from reading as a pop.
+                Some((
+                    -SIDEBAR_PEEK_NUDGE * progress.max(0.0).powi(5),
+                    1.0 - progress.max(0.0),
+                ))
             }
         }
     }
@@ -385,7 +390,7 @@ impl Render for Waku {
             // `with_animation` would do, minus its element-id keying.
             window.request_animation_frame();
         }
-        let sidebar_peek_offset = self.settle_sidebar_peek(window, cx);
+        let sidebar_peek = self.settle_sidebar_peek(window, cx);
         // Before anything can early-return (the settings page below), settle
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
@@ -758,7 +763,7 @@ impl Render for Waku {
             // transparent — it borrows the native vibrancy strip behind the
             // window, which the opaque surface under this overlay hides — so
             // the overlay carries the sidebar's solid color itself.
-            .when_some(sidebar_peek_offset, |root, offset| {
+            .when_some(sidebar_peek, |root, (offset, opacity)| {
                 root.child(
                     div()
                         .id("sidebar-peek")
@@ -767,6 +772,7 @@ impl Render for Waku {
                         .top_0()
                         .bottom_0()
                         .left(px(offset))
+                        .opacity(opacity)
                         .w(px(self.sidebar_peek_width(window)))
                         .bg(theme.sidebar_drag_background)
                         .border_r(hairline())
