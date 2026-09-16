@@ -31,10 +31,10 @@
     <key>SUFeedURL</key>
     <string>https://releases.goddardai.org/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
+    <string>76F2RtMyXvox/bwTHU/j3hMF3nN//aMu4xRJnvfOx/4=</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>
-    <string>NSApplication</string>
+	<string>NSApplication</string>
 </dict>
 </plist>
