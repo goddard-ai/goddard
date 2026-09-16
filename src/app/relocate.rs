@@ -57,19 +57,18 @@ impl Waku {
     /// Reconcile every stored project path with the filesystem on a
     /// background pass: backfill Finder bookmarks on live folders, follow a
     /// bookmark across a rename, and mark what is genuinely missing so the
-    /// UI can offer relocation. The daemon host owns these paths, so the
-    /// pass is skipped for remote connections.
+    /// UI can offer relocation. Only local projects participate — a remote
+    /// path can only be checked by its own daemon's host.
     pub(super) fn refresh_project_locations(&mut self, cx: &mut Context<Self>) {
-        if self.daemon.is_remote() {
-            return;
-        }
         let generation = self.project_location_generation.get().wrapping_add(1);
         self.project_location_generation.set(generation);
+        // Only local paths can be reconciled against the local filesystem —
+        // a remote project's path would always read as missing here.
         let projects: Vec<Project> = self
             .state
             .projects
             .iter()
-            .filter(|project| !project.is_projectless())
+            .filter(|project| !project.is_projectless() && !self.is_remote_project(project.id))
             .cloned()
             .collect();
         cx.spawn(async move |waku, cx| {
@@ -166,7 +165,7 @@ impl Waku {
     /// The missing-folder recovery path: a native folder picker that repoints
     /// the project, keeping its id so every task on it survives.
     pub(super) fn relocate_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
-        if self.daemon.is_remote() {
+        if self.is_remote_project(project_id) {
             self.show_toast(tr!("errors.remote_project_locate"));
             cx.notify();
             return;

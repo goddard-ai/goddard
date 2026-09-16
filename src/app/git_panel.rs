@@ -665,7 +665,12 @@ impl Waku {
         panel.upstream_commits_loading = true;
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            if let Some(panel) = self.git_panel.as_mut() {
+                panel.upstream_commits_loading = false;
+            }
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1788,9 +1793,17 @@ impl Waku {
         let key = sha.to_owned();
         let requested_sha = sha.to_owned();
         let request_sha = sha.to_owned();
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.transcript_commit_details.insert(
+                sha.to_owned(),
+                TranscriptCommitDetail::Failed(SharedString::from(
+                    tr!("daemon.remote_unreachable"),
+                )),
+            );
+            return;
+        };
         self.transcript_commit_details
             .insert(key.clone(), TranscriptCommitDetail::Loading);
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

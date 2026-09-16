@@ -4320,7 +4320,7 @@ impl Waku {
         // user action, so one synchronous stat is the cheapest correct
         // check — and it catches folders that went missing after the last
         // reconciliation pass.
-        if !projectless && !self.daemon.is_remote() && !project.path.is_dir() {
+        if !projectless && !self.is_remote_project(project_id) && !project.path.is_dir() {
             self.missing_projects.insert(project_id);
             if selected {
                 self.restore_composer_submission(submission, cx);

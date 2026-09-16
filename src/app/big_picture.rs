@@ -1387,7 +1387,7 @@ impl Waku {
                             message_edit_input: None,
                             attachment_menus,
                             attachment_images,
-                            attachments_can_reveal: !self.daemon.is_remote(),
+                            attachments_can_reveal: !self.is_remote_session(session_id),
                             markdown: view,
                             ctx: &ctx,
                             menu,

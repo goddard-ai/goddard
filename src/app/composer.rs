@@ -2435,8 +2435,13 @@ impl Waku {
             cx.notify();
             return;
         }
-        let daemon = self.daemon.clone();
-        let draft_owner = self.selected_composer_draft_key();
+        let draft_owner = self.composer_draft_key();
+        let daemon = draft_owner.and_then(|key| self.daemon_for_draft_key(key));
+        let Some(daemon) = daemon else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let stored = cx
                 .background_executor()

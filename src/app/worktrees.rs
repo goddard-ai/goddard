@@ -525,7 +525,12 @@ impl Waku {
         }
         self.pending_workspace_cleanups = deferred;
         for (session_id, path) in projectless_ready {
-            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+            let Some(workspace) = self.workspace_client_for_session(session_id) else {
+                continue;
+            };
+            // The existence fallback only asks the local filesystem — a
+            // remote path always reads as absent here.
+            let local = !self.is_remote_session(session_id);
             cx.spawn(async move |waku, cx| {
                 let workspace_path = path.clone();
                 let removed = cx
@@ -538,7 +543,7 @@ impl Waku {
                                 },
                             )
                             .is_ok()
-                            || !path.exists()
+                            || (local && !path.exists())
                     })
                     .await;
                 if removed {
@@ -553,6 +558,7 @@ impl Waku {
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
             };
+            let local = !self.is_remote_session(session_id);
             cx.spawn(async move |waku, cx| {
                 let worktree_path = path.clone();
                 let removed = cx
@@ -583,7 +589,7 @@ impl Waku {
                                     force: true,
                                 })
                                 .is_ok()
-                                || !path.exists())
+                                || (local && !path.exists()))
                     })
                     .await;
                 if removed {
@@ -652,7 +658,9 @@ impl Waku {
         else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_session(session_id) else {
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let restored = cx
                 .background_executor()
