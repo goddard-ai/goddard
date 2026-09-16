@@ -1,4 +1,4 @@
-//! A horizontal slider for a 0–1 value.
+//! A horizontal slider for a 0–`max` value.
 //!
 //! Painted as quads from the canvas's own bounds with the pointer handlers
 //! registered during paint — the same single-element pattern as the overlay
@@ -19,8 +19,8 @@ use crate::theme::{Theme, hairline};
 /// Track thickness; the hitbox is the control's full height.
 const TRACK_HEIGHT: f32 = 4.0;
 const THUMB_SIZE: f32 = 13.0;
-/// Arrow keys step the value 5% so a focused slider stays usable without a
-/// long press.
+/// Arrow keys step the value 5% of the range so a focused slider stays usable
+/// without a long press.
 const KEY_STEP: f32 = 0.05;
 
 /// Cross-frame slider state. The owner holds one per slider.
@@ -52,12 +52,12 @@ impl SliderState {
 
 /// The value a pointer x position implies over `bounds`' thumb travel. Pure,
 /// so the pointer mapping is unit-testable.
-fn value_at(bounds: Bounds<Pixels>, x: Pixels) -> f32 {
+fn value_at(bounds: Bounds<Pixels>, x: Pixels, max: f32) -> f32 {
     let travel = (bounds.size.width - px(THUMB_SIZE)).max(Pixels::ZERO);
     if travel <= Pixels::ZERO {
         return 0.0;
     }
-    ((x - bounds.left() - px(THUMB_SIZE / 2.0)) / travel).clamp(0.0, 1.0)
+    ((x - bounds.left() - px(THUMB_SIZE / 2.0)) / travel).clamp(0.0, 1.0) * max
 }
 
 /// A focusable slider. Pointer drags move the drawn thumb continuously and
@@ -66,6 +66,7 @@ fn value_at(bounds: Bounds<Pixels>, x: Pixels) -> f32 {
 pub fn slider<E>(
     id: impl Into<ElementId>,
     state: &Rc<SliderState>,
+    max: f32,
     value: f32,
     cx: &mut Context<E>,
     commit: impl Fn(&mut E, f32, &mut Context<E>) + 'static,
@@ -74,7 +75,7 @@ where
     E: 'static,
 {
     let theme = Theme::current(cx);
-    let value = value.clamp(0.0, 1.0);
+    let value = value.clamp(0.0, max);
     let weak = cx.entity().downgrade();
     let commit = Rc::new(commit);
 
@@ -92,7 +93,7 @@ where
                 let commit = commit.clone();
                 move |bounds, _, window: &mut Window, cx: &mut App| {
                     let theme = Theme::current(cx);
-                    let shown = state.shown(value).clamp(0.0, 1.0);
+                    let shown = state.shown(value).clamp(0.0, max) / max;
                     let thumb_center = bounds.left()
                         + px(THUMB_SIZE / 2.0)
                         + (bounds.size.width - px(THUMB_SIZE)) * shown;
@@ -148,7 +149,7 @@ where
                             }
                             state
                                 .drag_value
-                                .set(Some(value_at(bounds, event.position.x)));
+                                .set(Some(value_at(bounds, event.position.x, max)));
                             window.refresh();
                         }
                     });
@@ -160,7 +161,7 @@ where
                             }
                             state
                                 .drag_value
-                                .set(Some(value_at(bounds, event.position.x)));
+                                .set(Some(value_at(bounds, event.position.x, max)));
                             window.refresh();
                         }
                     });
@@ -190,14 +191,14 @@ where
                     return;
                 }
                 let next = match event.keystroke.key.as_str() {
-                    "left" | "down" => Some(value - KEY_STEP),
-                    "right" | "up" => Some(value + KEY_STEP),
+                    "left" | "down" => Some(value - KEY_STEP * max),
+                    "right" | "up" => Some(value + KEY_STEP * max),
                     "home" => Some(0.0),
-                    "end" => Some(1.0),
+                    "end" => Some(max),
                     _ => None,
                 };
                 if let Some(next) = next {
-                    commit(this, next.clamp(0.0, 1.0), cx);
+                    commit(this, next.clamp(0.0, max), cx);
                     cx.stop_propagation();
                 }
             }
@@ -216,14 +217,17 @@ mod tests {
     fn pointer_positions_map_across_the_thumb_travel() {
         // The thumb center travels from one thumb-radius in to one short of
         // the far edge: 10 + 6.5 .. 10 + 113 - 6.5.
-        assert_eq!(value_at(track(), px(16.5)), 0.0);
-        assert_eq!(value_at(track(), px(66.5)), 0.5);
-        assert_eq!(value_at(track(), px(116.5)), 1.0);
+        assert_eq!(value_at(track(), px(16.5), 1.0), 0.0);
+        assert_eq!(value_at(track(), px(66.5), 1.0), 0.5);
+        assert_eq!(value_at(track(), px(116.5), 1.0), 1.0);
+        // `max` scales the same positions into the slider's own units.
+        assert_eq!(value_at(track(), px(66.5), 2.0), 1.0);
+        assert_eq!(value_at(track(), px(116.5), 2.0), 2.0);
     }
 
     #[test]
     fn pointer_positions_clamp_at_both_ends() {
-        assert_eq!(value_at(track(), px(-500.0)), 0.0);
-        assert_eq!(value_at(track(), px(9_999.0)), 1.0);
+        assert_eq!(value_at(track(), px(-500.0), 1.0), 0.0);
+        assert_eq!(value_at(track(), px(9_999.0), 1.0), 1.0);
     }
 }

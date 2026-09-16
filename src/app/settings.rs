@@ -962,6 +962,7 @@ impl Waku {
                 let volume_slider = slider::slider(
                     "completion-volume-slider",
                     &self.completion_volume_slider,
+                    crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
                     volume,
                     cx,
                     |this, volume, cx| this.set_completion_sound_volume(volume, cx),

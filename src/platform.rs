@@ -202,11 +202,11 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, cx: &gpui::App
 
 #[cfg(target_os = "macos")]
 thread_local! {
-    /// `NSSound` stops when deallocated, so the playing instance is retained
-    /// until the next play replaces it. Playback outlives this only by the
-    /// sound's own sub-second length.
+    /// `AVAudioPlayer` stops when deallocated, so the playing instance is
+    /// retained until the next play replaces it. Playback outlives this only
+    /// by the sound's own sub-second length.
     static PLAYING_COMPLETION_SOUND:
-        std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSSound>>> =
+        std::cell::RefCell<Option<objc2::rc::Retained<objc2_avf_audio::AVAudioPlayer>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -234,23 +234,30 @@ fn completion_sound_gain(sound: waku_client::persistence::CompletionSound) -> f3
     }
 }
 
-/// Play one of the bundled turn-completion sounds at `volume` (0–1). `NSSound`
-/// decodes the embedded MP3 itself and `play` returns immediately; there is no
-/// smaller portable API, so other platforms stay silent for now.
+/// Play one of the bundled turn-completion sounds at `volume` relative to its
+/// recorded level — 1.0 plays it as bundled and the slider allows up to 2.0.
+/// `AVAudioPlayer` decodes the embedded MP3 itself and its volume is a linear
+/// gain that can boost past 1.0, where `NSSound` clamps; `play` returns
+/// immediately. There is no smaller portable API, so other platforms stay
+/// silent for now.
 #[cfg(target_os = "macos")]
 pub fn play_completion_sound(sound: waku_client::persistence::CompletionSound, volume: f32) {
     use objc2::AnyThread;
-    use objc2_app_kit::NSSound;
+    use objc2_avf_audio::AVAudioPlayer;
     use objc2_foundation::NSData;
 
-    let volume = (volume * completion_sound_gain(sound)).clamp(0.0, 1.0);
+    let volume = (volume * completion_sound_gain(sound))
+        .clamp(0.0, waku_client::persistence::MAX_COMPLETION_SOUND_VOLUME);
     let data = NSData::with_bytes(completion_sound_data(sound));
-    let Some(sound) = NSSound::initWithData(NSSound::alloc(), &data) else {
+    let Ok(player) = (unsafe { AVAudioPlayer::initWithData_error(AVAudioPlayer::alloc(), &data) })
+    else {
         return;
     };
-    sound.setVolume(volume);
-    if sound.play() {
-        PLAYING_COMPLETION_SOUND.with_borrow_mut(|slot| *slot = Some(sound));
+    unsafe {
+        player.setVolume(volume);
+        if player.play() {
+            PLAYING_COMPLETION_SOUND.with_borrow_mut(|slot| *slot = Some(player));
+        }
     }
 }
 

@@ -367,8 +367,9 @@ pub struct AppSettings {
     /// its turn.
     pub completion_sound_enabled: bool,
     pub completion_sound: CompletionSound,
-    /// Volume the completion sound plays at, 0–1. Hand-edited values are
-    /// clamped when applied.
+    /// Volume the completion sound plays at relative to its recorded level:
+    /// 1.0 is the sound as bundled, up to 2.0 plays it louder. Hand-edited
+    /// values are clamped when applied.
     pub completion_sound_volume: f32,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -420,6 +421,8 @@ impl Default for AppSettings {
 pub const DEFAULT_UI_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_CODE_FONT_SIZE: f32 = 13.0;
 pub const DEFAULT_COMPLETION_SOUND_VOLUME: f32 = 1.0;
+/// The completion sound's relative volume tops out at twice its recorded level.
+pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
 
 /// Bounds a possibly hand-edited font size to something the layout survives.
 fn sanitized_font_size(size: f32, fallback: f32) -> f32 {
@@ -444,10 +447,10 @@ pub fn sanitized_terminal_font_size(size: Option<f32>) -> Option<f32> {
         .map(|size| size.clamp(9.0, 24.0))
 }
 
-/// Bounds a possibly hand-edited volume to the 0–1 range NSSound expects.
+/// Bounds a possibly hand-edited volume to the slider's relative range.
 pub fn sanitized_completion_sound_volume(volume: f32) -> f32 {
     if volume.is_finite() {
-        volume.clamp(0.0, 1.0)
+        volume.clamp(0.0, MAX_COMPLETION_SOUND_VOLUME)
     } else {
         DEFAULT_COMPLETION_SOUND_VOLUME
     }
