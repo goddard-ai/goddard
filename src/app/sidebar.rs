@@ -640,14 +640,14 @@ pub(super) enum SidebarRow {
     GroupSpacer,
 }
 
-fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
+pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
     rows.iter()
         .position(|row| *row == SidebarRow::Session(session_id))
 }
 
 /// The first session row at-or-below `position` that `is_available` accepts,
 /// scanning downward and wrapping to the top. Non-session rows are skipped.
-fn next_sidebar_session_in_rows(
+pub(super) fn next_sidebar_session_in_rows(
     rows: &[SidebarRow],
     position: usize,
     is_available: impl Fn(Uuid) -> bool,
@@ -2002,7 +2002,7 @@ impl Waku {
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
     /// recency, the presentation preferences, the collapsed-group set, and
     /// today's date and the moving project-recency boundary.
-    fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
+    pub(super) fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
         fingerprint = mix(
             fingerprint,

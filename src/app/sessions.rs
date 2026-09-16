@@ -40,6 +40,10 @@ pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
 /// are stamped when a turn finishes and cleared on activation, so the map
 /// itself is the settled candidate set; the on-screen filter only guards the
 /// window where a pending activation has not committed yet.
+///
+/// Pinned sessions are the user's declared keepers, so a pinned candidate —
+/// blocked or unseen — wins over every unpinned one; the ranking rules apply
+/// within each tier.
 pub(super) fn next_unread_session(
     sessions: &[AgentSession],
     unseen_completions: &HashMap<Uuid, u64>,
@@ -49,18 +53,56 @@ pub(super) fn next_unread_session(
     let off_screen = |session_id: Uuid| {
         !sidebar::sidebar_session_selected(selected_session, pending_activation, session_id)
     };
+    let pinned = sessions
+        .iter()
+        .filter(|session| session.pinned_at.is_some())
+        .map(|session| session.id)
+        .collect::<HashSet<Uuid>>();
+    unread_session_candidate(sessions, unseen_completions, &off_screen, Some(&pinned))
+        .or_else(|| unread_session_candidate(sessions, unseen_completions, &off_screen, None))
+}
+
+fn unread_session_candidate(
+    sessions: &[AgentSession],
+    unseen_completions: &HashMap<Uuid, u64>,
+    off_screen: &impl Fn(Uuid) -> bool,
+    pinned: Option<&HashSet<Uuid>>,
+) -> Option<Uuid> {
+    let eligible = |session_id: Uuid| {
+        off_screen(session_id) && pinned.is_none_or(|ids| ids.contains(&session_id))
+    };
     sessions
         .iter()
-        .filter(|session| session.status == SessionStatus::Waiting && off_screen(session.id))
+        .filter(|session| session.status == SessionStatus::Waiting && eligible(session.id))
         .max_by_key(|session| session.updated_at)
         .map(|session| session.id)
         .or_else(|| {
             unseen_completions
                 .iter()
-                .filter(|(session_id, _)| off_screen(**session_id))
+                .filter(|(session_id, _)| eligible(**session_id))
                 .max_by_key(|(_, completed_at)| *completed_at)
                 .map(|(session_id, _)| *session_id)
         })
+}
+
+/// The ⌘⇧D target: the next unread row below the selected session in the
+/// sidebar's displayed order, wrapping to the top. The selected session —
+/// which the action just stamped unread — is excluded so a lone unread task
+/// falls through to the New task page instead of reselecting itself.
+pub(super) fn next_unread_session_in_sidebar_order(
+    rows: &[sidebar::SidebarRow],
+    selected_session: Option<Uuid>,
+    pending_activation: Option<Uuid>,
+    is_unread: impl Fn(Uuid) -> bool,
+) -> Option<Uuid> {
+    let position = selected_session
+        .and_then(|session_id| sidebar::sidebar_session_row_index(rows, session_id))
+        .map_or(0, |index| index + 1);
+    sidebar::next_sidebar_session_in_rows(rows, position, |session_id| {
+        Some(session_id) != selected_session
+            && Some(session_id) != pending_activation
+            && is_unread(session_id)
+    })
 }
 
 impl Waku {
@@ -1315,27 +1357,6 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // With the overlay up the jump arms the card when it is on the grid
-        // and exits to the task when it is not — either way it never rewrites
-        // the selection invisibly behind the scrim.
-        if self.big_picture.is_open() {
-            let Some(target) = next_unread_session(
-                &self.state.sessions,
-                &self.state.unseen_completions,
-                self.state.selected_session,
-                self.pending_session_activation
-                    .map(|pending| pending.session_id),
-            ) else {
-                return;
-            };
-            if self.big_picture_card_visible(target) {
-                self.arm_big_picture_card(target, cx);
-            } else {
-                self.close_big_picture(window, cx);
-                self.select_session(target, cx);
-            }
-            return;
-        }
         let Some(target) = next_unread_session(
             &self.state.sessions,
             &self.state.unseen_completions,
@@ -1345,6 +1366,23 @@ impl Waku {
         ) else {
             return;
         };
+        self.go_to_unread_target(target, window, cx);
+    }
+
+    /// Shared landing for the unread-jump actions. With the overlay up the
+    /// jump arms the card when it is on the grid and exits to the task when
+    /// it is not — either way it never rewrites the selection invisibly
+    /// behind the scrim.
+    fn go_to_unread_target(&mut self, target: Uuid, window: &mut Window, cx: &mut Context<Self>) {
+        if self.big_picture.is_open() {
+            if self.big_picture_card_visible(target) {
+                self.arm_big_picture_card(target, cx);
+            } else {
+                self.close_big_picture(window, cx);
+                self.select_session(target, cx);
+            }
+            return;
+        }
         self.settings_page = None;
         self.request_session_activation(target, SessionActivationTransition::Visit, cx);
     }
@@ -1370,8 +1408,9 @@ impl Waku {
     }
 
     /// ⌘⇧D: mark the viewed task unread — it stays a GoToLatestUnseenCompletion
-    /// candidate for a later ⌘D — then run the same jump, which lands on the
-    /// next unread task since the selected one is filtered out.
+    /// candidate for a later ⌘D — then jump to the next unread session below
+    /// it in the sidebar's displayed order, wrapping to the top. With nothing
+    /// unread beyond the just-marked task, land on the New task page.
     pub(super) fn mark_unread_and_go_to_next_unseen_action(
         &mut self,
         _: &MarkUnreadAndGoToNextUnseen,
@@ -1381,7 +1420,23 @@ impl Waku {
         if let Some(session_id) = self.composer_session_id() {
             self.mark_session_unread(session_id, cx);
         }
-        self.go_to_latest_unseen_completion_action(&GoToLatestUnseenCompletion, window, cx);
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let target = next_unread_session_in_sidebar_order(
+            &rows,
+            self.state.selected_session,
+            self.pending_session_activation
+                .map(|pending| pending.session_id),
+            |session_id| {
+                self.state.unseen_completions.contains_key(&session_id)
+                    || self.state.sessions.iter().any(|session| {
+                        session.id == session_id && session.status == SessionStatus::Waiting
+                    })
+            },
+        );
+        match target {
+            Some(target) => self.go_to_unread_target(target, window, cx),
+            None => self.new_session_action(&NewSession, window, cx),
+        }
     }
 
     pub(super) fn navigation_mouse_down(

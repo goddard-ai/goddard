@@ -4,8 +4,9 @@ use super::composer::{
     visible_branch_entries,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
-use super::sessions::next_unread_session;
+use super::sessions::{next_unread_session, next_unread_session_in_sidebar_order};
 use super::settings::{filter_archived_sessions, visible_settings_pages};
+use super::sidebar::SidebarRow;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
@@ -582,6 +583,78 @@ fn next_unread_session_prefers_blocked_tasks_then_the_newest_finish() {
     assert_eq!(
         next_unread_session(&sessions, &unseen, Some(blocked_id), Some(blocked_later_id)),
         Some(blocked_id)
+    );
+}
+
+#[test]
+fn next_unread_session_prefers_pinned_candidates() {
+    let pinned_id = Uuid::new_v4();
+    let unpinned_id = Uuid::new_v4();
+    let mut pinned = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    pinned.id = pinned_id;
+    pinned.pinned_at = Some(1);
+    let mut unpinned = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    unpinned.id = unpinned_id;
+    let sessions = vec![pinned, unpinned];
+    // The unpinned finish is newer, but the pinned one still wins.
+    let unseen = HashMap::from([(pinned_id, 100), (unpinned_id, 300)]);
+    assert_eq!(
+        next_unread_session(&sessions, &unseen, None, None),
+        Some(pinned_id)
+    );
+    // With the pinned candidate on screen the unpinned one is next.
+    assert_eq!(
+        next_unread_session(&sessions, &unseen, Some(pinned_id), None),
+        Some(unpinned_id)
+    );
+    // An unseen stamp on a session missing from the list is not treated as
+    // pinned, so it competes in the unpinned tier on recency alone.
+    let unseen_id = Uuid::new_v4();
+    let unseen_only = HashMap::from([(unseen_id, 400), (unpinned_id, 300)]);
+    assert_eq!(
+        next_unread_session(&sessions, &unseen_only, None, None),
+        Some(unseen_id)
+    );
+}
+
+#[test]
+fn next_unread_session_in_sidebar_order_wraps_and_skips_the_selected() {
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let third = Uuid::new_v4();
+    let rows = vec![
+        SidebarRow::Search,
+        SidebarRow::Session(first),
+        SidebarRow::Session(second),
+        SidebarRow::GroupSpacer,
+        SidebarRow::Session(third),
+    ];
+    let unread = |id: Uuid| id == first || id == third;
+
+    // The scan starts below the selected row and skips non-session rows.
+    assert_eq!(
+        next_unread_session_in_sidebar_order(&rows, Some(second), None, unread),
+        Some(third)
+    );
+    // It wraps to the top of the sidebar.
+    assert_eq!(
+        next_unread_session_in_sidebar_order(&rows, Some(third), None, unread),
+        Some(first)
+    );
+    // The selected session never targets itself, even while unread.
+    assert_eq!(
+        next_unread_session_in_sidebar_order(&rows, Some(first), None, unread),
+        Some(third)
+    );
+    // A pending activation is treated as on-screen too.
+    assert_eq!(
+        next_unread_session_in_sidebar_order(&rows, Some(third), Some(first), unread),
+        None
+    );
+    // A selection with no sidebar row starts the scan at the top.
+    assert_eq!(
+        next_unread_session_in_sidebar_order(&rows, Some(Uuid::new_v4()), None, unread),
+        Some(first)
     );
 }
 
