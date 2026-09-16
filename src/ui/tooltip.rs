@@ -73,7 +73,10 @@ impl Tooltip {
 impl Render for Tooltip {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
-        let shortcut = self.shortcut.as_ref().and_then(|hint| hint.resolve(window));
+        let shortcut = self
+            .shortcut
+            .as_ref()
+            .and_then(|hint| hint.resolve(window, cx));
         // The outer wrapper is transparent and only offsets the card from the
         // cursor; the shadow needs a parent that does not clip it.
         div().pt(px(4.0)).pl(px(2.0)).child(

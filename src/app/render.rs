@@ -938,13 +938,13 @@ impl Waku {
             if matches!(kind, ToastActionKind::LocalhostUrl) {
                 if let Some(open) =
                     crate::ui::shortcut::ShortcutHint::action(&crate::OpenLocalhostUrl)
-                        .resolve(window)
+                        .resolve(window, cx)
                 {
                     label = format!("{label} {open}");
                 }
                 if let Some(in_tab) =
                     crate::ui::shortcut::ShortcutHint::action(&crate::OpenLocalhostUrlInTab)
-                        .resolve(window)
+                        .resolve(window, cx)
                 {
                     tooltip = Some(Tooltip::text(tr!(
                         "terminal.localhost_open_in_tab",

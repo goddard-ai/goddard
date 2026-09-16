@@ -1591,7 +1591,7 @@ impl TerminalView {
         let theme = Theme::current(cx);
         let input_focus = bar.input.read(cx).focus();
         let key_hint = |action: &dyn gpui::Action| {
-            ShortcutHint::action_in(action, &input_focus).resolve(window)
+            ShortcutHint::action_in(action, &input_focus).resolve(window, cx)
         };
         // Multi-line insert is only safe when the shell asked for
         // bracketed paste — otherwise each line would execute as it lands.

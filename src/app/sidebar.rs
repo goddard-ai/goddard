@@ -1144,7 +1144,7 @@ impl Waku {
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let group_name = SharedString::from(format!("{id}-shortcut"));
-        let shortcut = ShortcutHint::action(shortcut_action).resolve(window);
+        let shortcut = ShortcutHint::action(shortcut_action).resolve(window, cx);
         div()
             .id(id)
             .group(group_name.clone())

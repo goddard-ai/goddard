@@ -879,7 +879,7 @@ impl Waku {
         // The chord sits on the transcript's key context, so resolve it as if
         // the transcript were focused — true whenever the pill can show.
         let shortcut_label =
-            ShortcutHint::action_in(&AddToChat, &self.transcript_focus).resolve(window);
+            ShortcutHint::action_in(&AddToChat, &self.transcript_focus).resolve(window, cx);
         let button = self.add_to_chat_button(
             "annotation-add-to-chat",
             "annotation-add-to-chat",
@@ -923,7 +923,8 @@ impl Waku {
             .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())?;
         // Resolve the chord as if the field were focused — the FileEditorPane
         // binding, not the transcript's.
-        let shortcut_label = ShortcutHint::action_in(&AddToChat, &field.focus()).resolve(window);
+        let shortcut_label =
+            ShortcutHint::action_in(&AddToChat, &field.focus()).resolve(window, cx);
         let path = relative_path.to_owned();
         let button = self.add_to_chat_button(
             "file-annotation-add-to-chat",

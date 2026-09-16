@@ -2475,7 +2475,10 @@ impl Waku {
                     item.detail.clone()
                 };
                 let content_match = item.content_match.clone();
-                let shortcut = item.shortcut.as_ref().and_then(|hint| hint.resolve(window));
+                let shortcut = item
+                    .shortcut
+                    .as_ref()
+                    .and_then(|hint| hint.resolve(window, cx));
                 results = results.child(
                     div()
                         .id(SharedString::from(format!("command-palette-row-{index}")))

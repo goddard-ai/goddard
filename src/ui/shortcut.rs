@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use gpui::{Action, FocusHandle, KeyBinding, KeybindingKeystroke, SharedString, Window};
+use gpui::{Action, App, FocusHandle, KeyBinding, KeyContext, KeybindingKeystroke, SharedString, Window};
 
 /// A shortcut hint shown beside a menu row, tooltip, or palette entry.
 #[derive(Clone)]
@@ -44,7 +44,7 @@ impl ShortcutHint {
 
     /// The display string, or `None` when the action has no binding in the
     /// relevant context.
-    pub fn resolve(&self, window: &Window) -> Option<String> {
+    pub fn resolve(&self, window: &Window, cx: &App) -> Option<String> {
         match self {
             Self::Text(label) => Some(label.to_string()),
             Self::Action { action, focus } => {
@@ -52,12 +52,43 @@ impl ShortcutHint {
                     Some(focus) => {
                         window.highest_precedence_binding_for_action_in(action.as_ref(), focus)
                     }
-                    None => window.highest_precedence_binding_for_action(action.as_ref()),
+                    None => highest_precedence_binding(
+                        action.as_ref(),
+                        &window.context_stack(),
+                        cx,
+                    ),
                 }?;
                 Some(binding_label(&binding))
             }
         }
     }
+}
+
+/// `Window::highest_precedence_binding_for_action` resolves against the
+/// dispatch tree's leftover build stack — the context path of whatever painted
+/// last — not the focused element's path. A tooltip paints last, grafted at
+/// the tree's root with no key contexts, so one frame after it appears the
+/// stack is empty and context-scoped bindings drop out. This is the same
+/// lookup, run against `Window::context_stack` — the focused node's real
+/// dispatch path.
+fn highest_precedence_binding(
+    action: &dyn Action,
+    context_stack: &[KeyContext],
+    cx: &App,
+) -> Option<KeyBinding> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    keymap
+        .bindings_for_action(action)
+        .rev()
+        .find(|binding| {
+            keymap
+                .bindings_for_input(binding.keystrokes(), context_stack)
+                .0
+                .first()
+                .is_some_and(|found| found.action().partial_eq(binding.action()))
+        })
+        .cloned()
 }
 
 impl std::fmt::Debug for ShortcutHint {
@@ -260,27 +291,27 @@ mod tests {
         });
 
         cx.update(|window, cx| window.focus(&other_focus, cx));
-        cx.update(|window, _| {
+        cx.update(|window, cx| {
             assert_eq!(
                 ShortcutHint::action(&crate::NewSession)
-                    .resolve(window)
+                    .resolve(window, cx)
                     .as_deref(),
                 Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N"))
             );
             // Copy's binding lives on the unfocused TextInput context, so the
             // focused stack cannot see it.
             assert_eq!(
-                ShortcutHint::action(&crate::input::Copy).resolve(window),
+                ShortcutHint::action(&crate::input::Copy).resolve(window, cx),
                 None
             );
             assert_eq!(
                 ShortcutHint::action_in(&crate::input::Copy, &field_focus)
-                    .resolve(window)
+                    .resolve(window, cx)
                     .as_deref(),
                 Some(crate::platform::primary_shortcut("⌘C", "Ctrl+C"))
             );
             assert_eq!(
-                ShortcutHint::text("⌘V").resolve(window).as_deref(),
+                ShortcutHint::text("⌘V").resolve(window, cx).as_deref(),
                 Some("⌘V")
             );
         });

@@ -1319,7 +1319,7 @@ fn render_menu_item(
                 (false, true) => theme.text,
                 (false, false) => theme.text_secondary,
             };
-            let shortcut_label = shortcut.and_then(|hint| hint.resolve(window));
+            let shortcut_label = shortcut.and_then(|hint| hint.resolve(window, cx));
             let shortcut_color = if disabled {
                 theme.text_ghost
             } else {
