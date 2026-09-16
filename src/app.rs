@@ -1657,6 +1657,11 @@ pub struct Waku {
     git_panel_hover_generation: u64,
     git_panel_commit_hover: Option<git_panel::GitPanelCommitHover>,
     git_panel_commit_hover_generation: u64,
+    /// A commit SHA under the transcript pointer, and the metadata fetched
+    /// for SHAs seen in the selected session.
+    transcript_commit_hover: Option<git_panel::TranscriptCommitHover>,
+    transcript_commit_details: HashMap<String, git_panel::TranscriptCommitDetail>,
+    transcript_commit_press: Option<git_panel::TranscriptCommitPress>,
     /// The conflicted-sync modal: which integration is stopped mid-flight.
     git_panel_sync_conflict: Option<git_panel::SyncConflict>,
     /// The "nothing staged" prompt's open flag.
@@ -3910,6 +3915,9 @@ impl Waku {
                 git_panel_hover_generation: 0,
                 git_panel_commit_hover: None,
                 git_panel_commit_hover_generation: 0,
+                transcript_commit_hover: None,
+                transcript_commit_details: HashMap::new(),
+                transcript_commit_press: None,
                 git_panel_sync_conflict: None,
                 git_panel_unstaged_prompt: false,
                 git_panel_commit_diff: None,

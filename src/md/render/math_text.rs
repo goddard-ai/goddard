@@ -21,7 +21,7 @@ pub struct MathSpan {
 
 #[derive(Debug)]
 pub struct MathData {
-    spans: Vec<MathSpan>,
+    pub(super) spans: Vec<MathSpan>,
     cache: RefCell<LayoutCache>,
     active_link: Rc<Cell<Option<usize>>>,
 }
@@ -539,6 +539,24 @@ impl Element for MathText {
                 }
             }
         }
+        if !self.flat.commit_refs.is_empty() {
+            let hovered = self.selection.hovered_commit.borrow().clone();
+            for (range, _) in &self.flat.commit_refs {
+                let emphasised = hovered
+                    .as_ref()
+                    .is_some_and(|(key, hover_range)| {
+                        *key == self.key && *hover_range == *range
+                    });
+                let color = if emphasised {
+                    self.palette.secondary
+                } else {
+                    self.palette.tertiary
+                };
+                for rect in self.geometry.range_rects(range) {
+                    super::paint_dotted_underline(window, rect, color);
+                }
+            }
+        }
         if let Some(range) = self.selection.selection.borrow().wash_range(&self.key) {
             for rect in self.geometry.range_rects(&range) {
                 wash(rect, self.palette.selection, 0.0, window);
@@ -600,6 +618,7 @@ impl Element for MathText {
             text: Rc::from(self.flat.text.as_ref()),
             block_break: self.block_break,
             annotation_refs: Vec::new(),
+            commit_refs: self.flat.commit_refs.clone(),
             geometry: TextGeometry::Math(self.geometry.clone()),
         });
     }

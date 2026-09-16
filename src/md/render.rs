@@ -292,6 +292,9 @@ pub struct FlatText {
     /// set: byte ranges paired with the label's 1-based index. Painted as a
     /// dotted underline; hovering previews the annotation.
     pub annotation_refs: Vec<(Range<usize>, usize)>,
+    /// Git commit SHAs: byte ranges paired with the written SHA. Painted as a
+    /// dotted underline; hovering previews the commit.
+    pub commit_refs: Vec<(Range<usize>, String)>,
     pub math: Option<Rc<math_text::MathData>>,
 }
 
@@ -408,6 +411,7 @@ pub fn flatten(
         links,
         code_ranges,
         annotation_refs: Vec::new(),
+        commit_refs: Vec::new(),
         math: (!math.is_empty()).then(|| Rc::new(math_text::MathData::new(math))),
     }
 }
@@ -424,15 +428,7 @@ static ANNOTATION_REFERENCE: LazyLock<Regex> =
 /// `limit` resolves to nothing, so it stays plain text rather than promising
 /// a tooltip that does not exist.
 fn annotation_references(flat: &FlatText, limit: usize) -> Vec<(Range<usize>, usize)> {
-    let overlaps = |range: &Range<usize>| {
-        flat.code_ranges
-            .iter()
-            .any(|code| code.start < range.end && range.start < code.end)
-            || flat
-                .links
-                .iter()
-                .any(|(link, _)| link.start < range.end && range.start < link.end)
-    };
+    let overlaps = |range: &Range<usize>| decorated_range(flat, range);
     ANNOTATION_REFERENCE
         .captures_iter(flat.text.as_ref())
         .filter_map(|captures| {
@@ -441,6 +437,43 @@ fn annotation_references(flat: &FlatText, limit: usize) -> Vec<(Range<usize>, us
             (index >= 1 && index <= limit && !overlaps(&range)).then_some((range, index))
         })
         .collect()
+}
+
+/// A word-bounded hexadecimal run long enough to name a Git commit. Links and
+/// rendered math keep their existing affordance; inline code still counts
+/// because agents conventionally put SHAs in backticks.
+static COMMIT_REFERENCE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b[0-9a-f]{7,40}\b").unwrap());
+
+fn commit_references(flat: &FlatText) -> Vec<(Range<usize>, String)> {
+    COMMIT_REFERENCE
+        .find_iter(flat.text.as_ref())
+        .filter_map(|found| {
+            let range = found.range();
+            // Inline code remains a SHA reference; fenced blocks never reach
+            // this pass. Links and rendered math own their own interaction.
+            (!linked_or_math_range(flat, &range))
+                .then(|| (range, found.as_str().to_ascii_lowercase()))
+        })
+        .collect()
+}
+
+fn decorated_range(flat: &FlatText, range: &Range<usize>) -> bool {
+    flat.code_ranges
+        .iter()
+        .any(|code| code.start < range.end && range.start < code.end)
+        || linked_or_math_range(flat, range)
+}
+
+fn linked_or_math_range(flat: &FlatText, range: &Range<usize>) -> bool {
+    flat.links
+        .iter()
+        .any(|(link, _)| link.start < range.end && range.start < link.end)
+        || flat.math.as_ref().is_some_and(|math| {
+            math.spans
+                .iter()
+                .any(|span| span.range.start < range.end && range.start < span.range.end)
+        })
 }
 
 /// A flat string with uniform styling, for non-markdown transcript text.
@@ -471,6 +504,7 @@ pub fn flatten_plain(
         links: Vec::new(),
         code_ranges: Vec::new(),
         annotation_refs: Vec::new(),
+        commit_refs: Vec::new(),
         math: None,
     }
 }
@@ -651,6 +685,9 @@ pub struct Ctx<'a> {
     /// annotation set its most recent annotated submission carried. Zero on
     /// rows and surfaces that cannot cite annotations.
     annotation_ref_labels: usize,
+    /// Whether hexadecimal commit references get the transcript's hover and
+    /// click affordance.
+    commit_refs: bool,
     /// Cross-frame flatten cache, when this render has one to consult.
     cache: Option<&'a MarkdownView>,
     next_ordinal: Cell<usize>,
@@ -681,6 +718,7 @@ impl<'a> Ctx<'a> {
             image_resolver: None,
             image_placeholder: None,
             annotation_ref_labels: 0,
+            commit_refs: false,
             cache: None,
             next_ordinal: Cell::new(0),
             starts_block: Cell::new(true),
@@ -725,6 +763,12 @@ impl<'a> Ctx<'a> {
     /// resolvable annotation set's size; a larger label gets no affordance.
     pub fn with_annotation_labels(mut self, count: usize) -> Self {
         self.annotation_ref_labels = count;
+        self
+    }
+
+    /// Enable commit-SHA references for this surface.
+    pub fn with_commit_refs(mut self, enabled: bool) -> Self {
+        self.commit_refs = enabled;
         self
     }
 
@@ -774,6 +818,7 @@ impl<'a> Ctx<'a> {
             image_resolver: self.image_resolver.clone(),
             image_placeholder: self.image_placeholder.clone(),
             annotation_ref_labels: self.annotation_ref_labels,
+            commit_refs: self.commit_refs,
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
             starts_block: Cell::new(self.starts_block.get()),
@@ -802,9 +847,9 @@ impl<'a> Ctx<'a> {
         self.flat_inner(ordinal, true, build)
     }
 
-    /// [`Self::flat`] without citation detection — a code block's contents are
-    /// quoted text, not the agent's voice, so `Annotation N` inside one is no
-    /// citation.
+    /// [`Self::flat`] without reference detection — a code block's contents are
+    /// quoted text, not the agent's voice, so citations and SHAs inside one get
+    /// no transcript affordance.
     fn flat_undecorated(&self, ordinal: usize, build: impl FnOnce() -> FlatText) -> Rc<FlatText> {
         self.flat_inner(ordinal, false, build)
     }
@@ -817,8 +862,13 @@ impl<'a> Ctx<'a> {
     ) -> Rc<FlatText> {
         let build = || {
             let mut flat = build();
-            if detect_refs && self.annotation_ref_labels > 0 {
-                flat.annotation_refs = annotation_references(&flat, self.annotation_ref_labels);
+            if detect_refs {
+                if self.annotation_ref_labels > 0 {
+                    flat.annotation_refs = annotation_references(&flat, self.annotation_ref_labels);
+                }
+                if self.commit_refs {
+                    flat.commit_refs = commit_references(&flat);
+                }
             }
             flat
         };
@@ -878,6 +928,7 @@ fn text_element_with_selection(
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
         let annotation_refs = flat.annotation_refs.clone();
+        let commit_refs = flat.commit_refs.clone();
         let layout = layout.clone();
         let key = key.clone();
         move |_, _, window, _| {
@@ -973,6 +1024,25 @@ fn text_element_with_selection(
                     }
                 }
             }
+            if !commit_refs.is_empty() {
+                let hovered_ref = selection.hovered_commit.borrow().clone();
+                for (range, _) in &commit_refs {
+                    let emphasised =
+                        hovered_ref
+                            .as_ref()
+                            .is_some_and(|(hover_key, hover_range)| {
+                                *hover_key == key && *hover_range == *range
+                            });
+                    let color = if emphasised {
+                        ref_underline_hovered
+                    } else {
+                        ref_underline
+                    };
+                    for rect in range_rects(&layout, range, 0.0, 0.0) {
+                        paint_dotted_underline(window, rect, color);
+                    }
+                }
+            }
             if let Some(range) = selection.selection.borrow().wash_range(&key) {
                 for rect in range_rects(&layout, &range, 0.0, 0.0) {
                     window.paint_quad(quad(
@@ -992,6 +1062,7 @@ fn text_element_with_selection(
                 text: Rc::from(text.as_ref()),
                 block_break,
                 annotation_refs: annotation_refs.clone(),
+                commit_refs: commit_refs.clone(),
                 geometry: TextGeometry::Text(layout.clone()),
             });
         }
@@ -1944,6 +2015,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             links: Vec::new(),
             code_ranges: Vec::new(),
             annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
             math: None,
         }
     });
@@ -2687,5 +2759,49 @@ mod tests {
         flat.code_ranges.clear();
         flat.links.push((4..17, "https://example.com".to_owned()));
         assert_eq!(annotation_references(&flat, 2), vec![(24..36, 2)]);
+    }
+
+    fn commit_refs(text: &str) -> Vec<(Range<usize>, String)> {
+        commit_references(&flatten_plain(
+            text.to_owned(),
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        ))
+    }
+
+    #[test]
+    fn commit_references_match_word_bounded_shas() {
+        assert_eq!(
+            commit_refs("fixed in 0123456789abcdef0123456789abcdef01234567"),
+            vec![(9..49, "0123456789abcdef0123456789abcdef01234567".to_owned())]
+        );
+        assert_eq!(
+            commit_refs("see ABCDEF1"),
+            vec![(4..11, "abcdef1".to_owned())]
+        );
+        assert!(commit_refs("see abcdef").is_empty());
+        assert!(commit_refs("x0123456 g123456").is_empty());
+    }
+
+    #[test]
+    fn commit_references_keep_inline_code_but_skip_links() {
+        let mut flat = flatten_plain(
+            "run `0123456` then abcdef1".to_owned(),
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        flat.code_ranges.push(4..13);
+        assert_eq!(
+            commit_references(&flat),
+            vec![(5..12, "0123456".to_owned()), (19..26, "abcdef1".to_owned())]
+        );
+        flat.code_ranges.clear();
+        flat.links.push((4..13, "https://example.com".to_owned()));
+        assert_eq!(
+            commit_references(&flat),
+            vec![(19..26, "abcdef1".to_owned())]
+        );
     }
 }

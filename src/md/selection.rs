@@ -257,6 +257,9 @@ pub struct RegisteredText<G = ()> {
     /// with the label's 1-based index. Only transcript rows that resolve
     /// against a submitted annotation set carry any.
     pub annotation_refs: Vec<(Range<usize>, usize)>,
+    /// Commit references painted in this element: byte ranges paired with the
+    /// SHA text as it appears in the message.
+    pub commit_refs: Vec<(Range<usize>, String)>,
     pub geometry: G,
 }
 
@@ -443,6 +446,9 @@ pub struct SelectionState<G = ()> {
     /// transcript's selection state populates this; the toast, diff and
     /// skills registries never carry annotations.
     pub annotations: Rc<RefCell<Annotations>>,
+    /// The commit reference under the pointer, identified by its element and
+    /// byte range so the renderer can emphasise its dotted underline.
+    pub hovered_commit: Rc<RefCell<Option<(TextKey, Range<usize>)>>>,
 }
 
 impl<G> Clone for SelectionState<G> {
@@ -451,6 +457,7 @@ impl<G> Clone for SelectionState<G> {
             selection: self.selection.clone(),
             registry: self.registry.clone(),
             annotations: self.annotations.clone(),
+            hovered_commit: self.hovered_commit.clone(),
         }
     }
 }
@@ -461,6 +468,7 @@ impl<G> Default for SelectionState<G> {
             selection: Rc::default(),
             registry: Rc::default(),
             annotations: Rc::default(),
+            hovered_commit: Rc::default(),
         }
     }
 }
@@ -524,6 +532,7 @@ mod tests {
                 text: Rc::from(*text),
                 block_break: index > 0,
                 annotation_refs: Vec::new(),
+                commit_refs: Vec::new(),
                 geometry: (),
             });
         }
@@ -821,6 +830,7 @@ mod tests {
             text: Rc::from("a"),
             block_break: false,
             annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
             geometry: (),
         });
         assert_eq!(registry.position(&TextKey::new("row-a", 0)), Some(0));

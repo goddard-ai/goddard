@@ -213,6 +213,7 @@ impl Waku {
         let annotation_editor = self.render_annotation_editor(cx);
         let annotation_tooltip = self.render_annotation_tooltip(cx);
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
+        let commit_popover = self.render_transcript_commit_popover(cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -423,6 +424,7 @@ impl Waku {
             .children(annotation_editor)
             .children(annotation_tooltip)
             .children(annotation_ref_tooltip)
+            .children(commit_popover)
             .into_any_element()
     }
 
@@ -1441,7 +1443,8 @@ impl Waku {
                             animate_streaming,
                             cx,
                         )
-                        .with_context_menu(menu.clone());
+                        .with_context_menu(menu.clone())
+                        .with_commit_refs(message.role == MessageRole::Assistant);
                     if let Some(highlights) = self.transcript_search_highlights(message_index) {
                         ctx = ctx.with_search_highlights(highlights);
                     }

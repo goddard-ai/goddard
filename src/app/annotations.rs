@@ -1332,6 +1332,17 @@ impl Waku {
                             target: AnnotationTarget::Transcript,
                         });
                     });
+                } else if let Some(hit) =
+                    git_panel::transcript_commit_hit_at(&selection, event.position)
+                {
+                    let _ = waku.update(cx, |this, _| {
+                        this.transcript_commit_press = Some(git_panel::TranscriptCommitPress {
+                            key: hit.key,
+                            range: hit.range,
+                            sha: hit.sha,
+                            position: event.position,
+                        });
+                    });
                 }
             }
         });
@@ -1352,16 +1363,29 @@ impl Waku {
                 } else {
                     None
                 };
+                let commit_hit = if hit.is_none() && ref_hit.is_none() {
+                    git_panel::transcript_commit_hit_at(&selection, event.position)
+                } else {
+                    None
+                };
+                let hovered_commit = commit_hit
+                    .as_ref()
+                    .map(|hit| (hit.key.clone(), hit.range.clone()));
                 let changed = {
                     let mut annotations = selection.annotations.borrow_mut();
+                    let mut hovered_commit_state = selection.hovered_commit.borrow_mut();
                     let hovered_ref = ref_hit
                         .as_ref()
                         .map(|hit| (hit.key.clone(), hit.range.clone()));
-                    if annotations.hovered == hit && annotations.hovered_ref == hovered_ref {
+                    if annotations.hovered == hit
+                        && annotations.hovered_ref == hovered_ref
+                        && *hovered_commit_state == hovered_commit
+                    {
                         false
                     } else {
                         annotations.hovered = hit;
                         annotations.hovered_ref = hovered_ref;
+                        *hovered_commit_state = hovered_commit;
                         true
                     }
                 };
@@ -1372,6 +1396,7 @@ impl Waku {
                             cx,
                         );
                         this.annotation_ref_hover_changed(ref_hit, cx);
+                        this.transcript_commit_hover_changed(commit_hit, cx);
                     });
                     window.refresh();
                 }
@@ -1383,6 +1408,34 @@ impl Waku {
             let waku = waku.clone();
             move |event: &MouseUpEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                    return;
+                }
+                let commit_press = waku
+                    .update(cx, |this, _| this.transcript_commit_press.take())
+                    .ok()
+                    .flatten();
+                if let Some(press) = commit_press {
+                    let still_hit = git_panel::transcript_commit_hit_at(&selection, event.position)
+                        .is_some_and(|hit| {
+                            hit.key == press.key && hit.range == press.range && hit.sha == press.sha
+                        });
+                    let moved = event.position - press.position;
+                    if selection.selection.borrow().is_empty()
+                        && still_hit
+                        && moved.x.abs() <= px(4.0)
+                        && moved.y.abs() <= px(4.0)
+                    {
+                        let _ = waku.update(cx, |this, cx| {
+                            this.open_transcript_commit_diff(
+                                git_panel::TranscriptCommitHit {
+                                    key: press.key,
+                                    range: press.range,
+                                    sha: press.sha,
+                                },
+                                cx,
+                            );
+                        });
+                    }
                     return;
                 }
                 let press = waku

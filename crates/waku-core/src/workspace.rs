@@ -257,6 +257,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::CommitDiff { cwd, sha } => WorkspaceResult::ReviewDiff {
             data: commit_diff(&cwd, &sha)?,
         },
+        WorkspaceOperation::CommitEntry { cwd, sha } => WorkspaceResult::CommitEntry {
+            entry: crate::git_panel::commit(&cwd, &sha)?,
+        },
         WorkspaceOperation::CaptureTurnStart {
             cwd,
             session_id,

@@ -655,6 +655,12 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         sha: String,
     },
+    /// One commit's metadata for transcript references and the diff modal.
+    CommitEntry {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        sha: String,
+    },
     CaptureTurnStart {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -860,6 +866,9 @@ pub enum WorkspaceResult {
     },
     Commits {
         entries: Vec<CommitEntry>,
+    },
+    CommitEntry {
+        entry: CommitEntry,
     },
     Checkpoint {
         checkpoint: Checkpoint,

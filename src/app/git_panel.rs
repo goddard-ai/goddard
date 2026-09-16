@@ -9,7 +9,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    ElementId, HighlightStyle, InteractiveText, KeyBinding, StyledText, UnderlineStyle, actions,
+    ElementId, HighlightStyle, InteractiveText, KeyBinding, Point, StyledText, UnderlineStyle,
+    actions,
 };
 
 use waku_client::git::{
@@ -192,11 +193,51 @@ pub(super) struct GitPanelCommitHover {
     pub open: bool,
 }
 
+/// A SHA hit-tested inside an assistant message: the painted element and byte
+/// range anchor its popover, while `sha` is what Git resolves.
+#[derive(Clone, Debug)]
+pub(super) struct TranscriptCommitHit {
+    pub key: crate::md::selection::TextKey,
+    pub range: Range<usize>,
+    pub sha: String,
+}
+
+/// The transcript commit under the pointer, pending or showing its popover.
+#[derive(Clone, Debug)]
+pub(super) struct TranscriptCommitHover {
+    pub key: crate::md::selection::TextKey,
+    pub range: Range<usize>,
+    pub sha: String,
+    pub open: bool,
+}
+
+/// Metadata for a SHA mentioned by the transcript. `Ready` entries render the
+/// same card the Git panel's commit rows use.
+pub(super) enum TranscriptCommitDetail {
+    Loading,
+    Ready(CommitEntry),
+    Failed(SharedString),
+}
+
+/// Mouse-down on a transcript SHA, held until mouse-up proves it was a click
+/// rather than the start of a text selection.
+#[derive(Clone, Debug)]
+pub(super) struct TranscriptCommitPress {
+    pub key: crate::md::selection::TextKey,
+    pub range: Range<usize>,
+    pub sha: String,
+    pub position: Point<Pixels>,
+}
+
 /// The open commit view's state. While set, the panel slot expands to fill
 /// the workspace: the diff column on the left, the panel — its commit box
 /// and changes swapped for the commit's file tree — on the right.
 pub(super) struct GitPanelCommitDiff {
+    /// The text sent to Git for this modal; `sha` may later become the full
+    /// resolved hash while this remains the request's stale-result guard.
+    pub requested_sha: String,
     pub sha: String,
+    pub workspace: PathBuf,
     pub subject: String,
     pub body: String,
     pub state: GitPanelCommitDiffState,
@@ -1495,14 +1536,29 @@ impl Waku {
             cx.notify();
             return;
         }
-        let Some(panel) = self.git_panel.as_ref() else {
+        let Some(workspace) = self.git_panel.as_ref().map(|panel| panel.workspace.clone()) else {
             return;
         };
-        let workspace = panel.workspace.clone();
+        self.open_commit_diff(workspace, entry, cx);
+    }
+
+    /// Shared by Git panel rows and transcript SHAs: open the modal for
+    /// `entry` and fetch its diff on the background executor.
+    fn open_commit_diff(
+        &mut self,
+        workspace: PathBuf,
+        entry: &CommitEntry,
+        cx: &mut Context<Self>,
+    ) {
+        self.git_panel_commit_hover = None;
+        self.transcript_commit_hover = None;
+        *self.transcript_selection.hovered_commit.borrow_mut() = None;
         let sha = entry.sha.clone();
         let requested_sha = sha.clone();
         self.git_panel_commit_diff = Some(GitPanelCommitDiff {
+            requested_sha: sha.clone(),
             sha: sha.clone(),
+            workspace: workspace.clone(),
             subject: entry.subject.clone(),
             body: entry.body.clone(),
             state: GitPanelCommitDiffState::Loading,
@@ -1550,7 +1606,7 @@ impl Waku {
                 let Some(modal) = waku.git_panel_commit_diff.as_mut() else {
                     return;
                 };
-                if modal.sha != requested_sha {
+                if modal.requested_sha != requested_sha {
                     return;
                 }
                 match result {
@@ -1580,6 +1636,272 @@ impl Waku {
         .detach();
     }
 
+    /// The commit entry already known for `sha`, either from the Git panel's
+    /// loaded history or a transcript lookup that has landed.
+    fn transcript_commit_entry(&self, sha: &str) -> Option<CommitEntry> {
+        if let Some(TranscriptCommitDetail::Ready(entry)) = self.transcript_commit_details.get(sha)
+        {
+            return Some(entry.clone());
+        }
+        self.git_panel.as_ref().and_then(|panel| {
+            panel
+                .commits
+                .iter()
+                .find(|entry| commit_entry_matches(entry, sha))
+                .cloned()
+        })
+    }
+
+    /// Fetch a transcript SHA's metadata once. The request goes through the
+    /// daemon so render and hit-testing never touch Git or the filesystem.
+    fn ensure_transcript_commit_detail(&mut self, sha: &str, cx: &mut Context<Self>) {
+        if self.transcript_commit_details.contains_key(sha) {
+            return;
+        }
+        if let Some(entry) = self.git_panel.as_ref().and_then(|panel| {
+            panel
+                .commits
+                .iter()
+                .find(|entry| commit_entry_matches(entry, sha))
+                .cloned()
+        }) {
+            self.transcript_commit_details
+                .insert(sha.to_owned(), TranscriptCommitDetail::Ready(entry));
+            return;
+        }
+        let Some(workspace) = self
+            .selected_workspace_path()
+            .map(std::path::Path::to_path_buf)
+        else {
+            self.transcript_commit_details.insert(
+                sha.to_owned(),
+                TranscriptCommitDetail::Failed(SharedString::from("workspace unavailable")),
+            );
+            return;
+        };
+        let session_id = self.selected_session().map(|session| session.id);
+        let key = sha.to_owned();
+        let requested_sha = sha.to_owned();
+        let request_sha = sha.to_owned();
+        self.transcript_commit_details
+            .insert(key.clone(), TranscriptCommitDetail::Loading);
+        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::CommitEntry {
+                        cwd: workspace,
+                        sha: request_sha,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                if waku.selected_session().map(|session| session.id) != session_id {
+                    return;
+                }
+                let detail = match result {
+                    Ok(WorkspaceResult::CommitEntry { entry }) => {
+                        // A transcript-clicked SHA may have opened the modal
+                        // with only the written abbreviation for a title. Land
+                        // its metadata there too.
+                        if let Some(modal) = waku.git_panel_commit_diff.as_mut()
+                            && (modal.requested_sha == requested_sha || modal.sha == entry.sha)
+                        {
+                            modal.sha = entry.sha.clone();
+                            modal.subject = entry.subject.clone();
+                            modal.body = entry.body.clone();
+                        }
+                        TranscriptCommitDetail::Ready(entry)
+                    }
+                    Ok(_) => TranscriptCommitDetail::Failed(SharedString::from(
+                        "unexpected workspace result",
+                    )),
+                    Err(error) => {
+                        TranscriptCommitDetail::Failed(SharedString::from(error.to_string()))
+                    }
+                };
+                waku.transcript_commit_details.insert(key, detail);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A transcript SHA's hover: fetch its metadata immediately, then reveal
+    /// the card after the same dwell the commit rows use.
+    pub(super) fn transcript_commit_hover_changed(
+        &mut self,
+        hit: Option<TranscriptCommitHit>,
+        cx: &mut Context<Self>,
+    ) {
+        self.transcript_commit_hover = hit.map(|hit| TranscriptCommitHover {
+            key: hit.key,
+            range: hit.range,
+            sha: hit.sha,
+            open: false,
+        });
+        if let Some(hover) = &self.transcript_commit_hover {
+            let key = hover.key.clone();
+            let range = hover.range.clone();
+            let sha = hover.sha.clone();
+            self.ensure_transcript_commit_detail(&sha, cx);
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(GIT_PANEL_HOVER_OPEN_DELAY)
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.transcript_commit_hover.as_ref().is_some_and(|hover| {
+                        !hover.open && hover.key == key && hover.range == range && hover.sha == sha
+                    }) && let Some(hover) = this.transcript_commit_hover.as_mut()
+                    {
+                        hover.open = true;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    /// A transcript SHA's click: reuse the commit modal path, using the
+    /// fetched entry when it is already known and patching its title when the
+    /// lookup lands otherwise.
+    pub(super) fn open_transcript_commit_diff(
+        &mut self,
+        hit: TranscriptCommitHit,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self
+            .selected_workspace_path()
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        let entry = self.transcript_commit_entry(&hit.sha).unwrap_or_else(|| {
+            self.ensure_transcript_commit_detail(&hit.sha, cx);
+            CommitEntry {
+                short_sha: hit.sha.chars().take(7).collect(),
+                sha: hit.sha.clone(),
+                subject: hit.sha.clone(),
+                body: String::new(),
+                author: String::new(),
+                author_email: String::new(),
+                authored_at: 0,
+                additions: 0,
+                deletions: 0,
+            }
+        });
+        self.open_commit_diff(workspace, &entry, cx);
+    }
+
+    /// First on-screen glyph rect of a transcript SHA, for anchoring its card.
+    fn transcript_commit_anchor(
+        &self,
+        key: &crate::md::selection::TextKey,
+        range: &Range<usize>,
+    ) -> Option<Bounds<Pixels>> {
+        let registry = self.transcript_selection.registry.borrow();
+        let entry = registry.entries().iter().find(|entry| entry.key == *key)?;
+        if entry.geometry.is_missing() {
+            return None;
+        }
+        let viewport = self.active_transcript_rows().viewport_bounds();
+        crate::md::render::text_range_bounds(&entry.geometry, range)
+            .into_iter()
+            .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())
+    }
+
+    /// The transcript SHA popover — the same commit card as the panel row,
+    /// anchored to the underlined text. Loading and failure retain the card's
+    /// chrome so a slow lookup still acknowledges the hover.
+    pub(super) fn render_transcript_commit_popover(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self
+            .transcript_commit_hover
+            .as_ref()
+            .filter(|hover| hover.open)?;
+        let anchor = self.transcript_commit_anchor(&hover.key, &hover.range)?;
+        let theme = Theme::current(cx);
+        let detail = self.transcript_commit_details.get(&hover.sha);
+        let card = match detail {
+            Some(TranscriptCommitDetail::Ready(entry)) => git_panel_commit_card(entry, &theme),
+            Some(TranscriptCommitDetail::Failed(error)) => div()
+                .overflow_hidden()
+                .rounded(px(10.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .bg(theme.raised)
+                .shadow_lg()
+                .px(px(12.0))
+                .py(px(8.0))
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .font_family(crate::fonts::current(cx).code)
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(hover.sha.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.danger)
+                        .child(error.clone()),
+                )
+                .into_any_element(),
+            _ => div()
+                .overflow_hidden()
+                .rounded(px(10.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .bg(theme.raised)
+                .shadow_lg()
+                .px(px(12.0))
+                .py(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_tertiary,
+                )))
+                .child(
+                    div()
+                        .font_family(crate::fonts::current(cx).code)
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(hover.sha.clone()),
+                )
+                .into_any_element(),
+        };
+        Some(
+            deferred(FloatingSurface::new(
+                div()
+                    .id("transcript-commit-popover")
+                    .w(px(360.0))
+                    .child(card)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
     /// The app a commit file opens in: the persisted "open in" choice while
     /// it is an editor, otherwise the first installed editor — the catalog
     /// also lists the file manager and terminals, which cannot take a file.
@@ -1600,10 +1922,10 @@ impl Waku {
     /// file, `Some` lands the editor on that line when the app takes a line
     /// deep link.
     fn open_commit_file(&self, relative_path: &str, line: Option<u32>, cx: &mut Context<Self>) {
-        let Some(workspace) = self.git_panel.as_ref().map(|panel| panel.workspace.clone()) else {
+        let Some(modal) = self.git_panel_commit_diff.as_ref() else {
             return;
         };
-        let path = workspace.join(relative_path);
+        let path = modal.workspace.join(relative_path);
         match self.preferred_file_app() {
             Some(app) => crate::platform::open_file_in_app(&path, line, app, cx),
             None => crate::platform::open_with_default_app(&path, cx),
@@ -3098,89 +3420,7 @@ impl Waku {
                     .find(|entry| entry.sha == hover.sha)
             })
             .cloned()?;
-        let body = commit_body_text(&entry.body);
-        let ago = format_time_ago(unix_time().saturating_sub(entry.authored_at));
-        let byline = if entry.author.is_empty() {
-            ago
-        } else {
-            format!("{} · {}", entry.author, ago)
-        };
-        let mut meta = div()
-            .flex_none()
-            .px(px(12.0))
-            .py(px(5.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .border_t(hairline())
-            .border_color(theme.border)
-            .text_size(sp(11.0))
-            .text_color(theme.text_tertiary)
-            .when_some(commit_author_avatar(&entry.author_email), |meta, source| {
-                meta.child(
-                    img(source)
-                        .w(px(14.0))
-                        .h(px(14.0))
-                        .flex_none()
-                        .rounded(px(4.0)),
-                )
-            })
-            .child(div().min_w_0().flex_1().truncate().child(byline));
-        if entry.additions + entry.deletions > 0 {
-            meta = meta
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(theme.success)
-                        .child(format!("+{}", entry.additions)),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(theme.danger)
-                        .child(format!("-{}", entry.deletions)),
-                );
-        }
-        let card = div()
-            .id("git-panel-commit-message-card")
-            // The card floats over neighboring rows; don't let clicks land on
-            // the commit underneath.
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(|_, _, cx| cx.stop_propagation())
-            .overflow_hidden()
-            .rounded(px(10.0))
-            .border(hairline())
-            .border_color(theme.border)
-            .bg(theme.raised)
-            .shadow_lg()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(12.0))
-                    .pt(px(8.0))
-                    .pb(px(6.0))
-                    .text_size(sp(12.5))
-                    .line_height(sp(16.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .child(entry.subject.clone()),
-            )
-            .when(!body.is_empty(), |card| {
-                card.child(
-                    div()
-                        .flex_none()
-                        .px(px(12.0))
-                        .pb(px(8.0))
-                        .text_size(sp(12.0))
-                        .line_height(sp(16.0))
-                        .text_color(theme.text_secondary)
-                        .line_clamp(4)
-                        .child(body),
-                )
-            })
-            .child(meta);
+        let card = git_panel_commit_card(&entry, &theme);
         Some(
             deferred(FloatingSurface::anchored_to_parent(
                 div()
@@ -3773,6 +4013,128 @@ fn commit_author_avatar(email: &str) -> Option<SharedString> {
     }
     let digest = format!("{:x}", <md5::Md5 as md5::Digest>::digest(lower));
     Some(format!("https://www.gravatar.com/avatar/{digest}?s=64&d=identicon").into())
+}
+
+/// Whether a log entry is the commit `sha` names — full or abbreviated —
+/// without asking Git.
+fn commit_entry_matches(entry: &CommitEntry, sha: &str) -> bool {
+    let sha = sha.to_ascii_lowercase();
+    !sha.is_empty() && entry.sha.to_ascii_lowercase().starts_with(&sha)
+}
+
+/// The transcript commit reference containing `position`, consulting this
+/// frame's painted geometry.
+pub(super) fn transcript_commit_hit_at(
+    selection: &TranscriptSelection,
+    position: Point<Pixels>,
+) -> Option<TranscriptCommitHit> {
+    let registry = selection.registry.borrow();
+    for entry in registry.entries() {
+        if entry.commit_refs.is_empty() || entry.geometry.is_missing() {
+            continue;
+        }
+        for (range, sha) in &entry.commit_refs {
+            let hit = crate::md::render::text_range_bounds(&entry.geometry, range)
+                .iter()
+                .any(|rect| rect.contains(&position));
+            if hit {
+                return Some(TranscriptCommitHit {
+                    key: entry.key.clone(),
+                    range: range.clone(),
+                    sha: sha.clone(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// The commit card shared by the Git panel row tooltip and transcript SHA
+/// popover: full subject, clamped body, author/time, and `+/-` totals.
+fn git_panel_commit_card(entry: &CommitEntry, theme: &Theme) -> AnyElement {
+    let body = commit_body_text(&entry.body);
+    let ago = format_time_ago(unix_time().saturating_sub(entry.authored_at));
+    let byline = if entry.author.is_empty() {
+        ago
+    } else {
+        format!("{} · {}", entry.author, ago)
+    };
+    let mut meta = div()
+        .flex_none()
+        .px(px(12.0))
+        .py(px(5.0))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .border_t(hairline())
+        .border_color(theme.border)
+        .text_size(sp(11.0))
+        .text_color(theme.text_tertiary)
+        .when_some(commit_author_avatar(&entry.author_email), |meta, source| {
+            meta.child(
+                img(source)
+                    .w(px(14.0))
+                    .h(px(14.0))
+                    .flex_none()
+                    .rounded(px(4.0)),
+            )
+        })
+        .child(div().min_w_0().flex_1().truncate().child(byline));
+    if entry.additions + entry.deletions > 0 {
+        meta = meta
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(theme.success)
+                    .child(format!("+{}", entry.additions)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(theme.danger)
+                    .child(format!("-{}", entry.deletions)),
+            );
+    }
+    div()
+        .id("git-panel-commit-message-card")
+        // The card floats over neighboring text; don't let clicks land under it.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(|_, _, cx| cx.stop_propagation())
+        .overflow_hidden()
+        .rounded(px(10.0))
+        .border(hairline())
+        .border_color(theme.border)
+        .bg(theme.raised)
+        .shadow_lg()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .flex_none()
+                .px(px(12.0))
+                .pt(px(8.0))
+                .pb(px(6.0))
+                .text_size(sp(12.5))
+                .line_height(sp(16.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(entry.subject.clone()),
+        )
+        .when(!body.is_empty(), |card| {
+            card.child(
+                div()
+                    .flex_none()
+                    .px(px(12.0))
+                    .pb(px(8.0))
+                    .text_size(sp(12.0))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .line_clamp(4)
+                    .child(body),
+            )
+        })
+        .child(meta)
+        .into_any_element()
 }
 
 /// `#<number>` issue/PR references in commit text. A `#` qualifies with a

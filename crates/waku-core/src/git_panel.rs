@@ -375,6 +375,41 @@ fn checkouts(cwd: &Path) -> anyhow::Result<Vec<Checkout>> {
     Ok(entries)
 }
 
+/// One commit's metadata for a transcript reference or diff modal. `sha` may
+/// be any revision Git resolves to a commit, including an abbreviated hash.
+pub fn commit(cwd: &Path, sha: &str) -> anyhow::Result<CommitEntry> {
+    ensure_repository(cwd)?;
+    let output = git_stdout(
+        cwd,
+        &[
+            "show",
+            "-s",
+            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b",
+            sha,
+        ],
+    )?;
+    let mut fields = output.split('\x1f');
+    let full_sha = fields.next().unwrap_or_default().trim().to_owned();
+    if full_sha.is_empty() {
+        bail!("unknown commit {sha}");
+    }
+    let (additions, deletions) = commit_numstat(cwd, sha)?;
+    Ok(CommitEntry {
+        sha: full_sha,
+        short_sha: fields.next().unwrap_or_default().to_owned(),
+        author: fields.next().unwrap_or_default().to_owned(),
+        author_email: fields.next().unwrap_or_default().to_owned(),
+        authored_at: fields
+            .next()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .unwrap_or(0),
+        subject: fields.next().unwrap_or_default().to_owned(),
+        body: fields.next().unwrap_or_default().trim().to_owned(),
+        additions,
+        deletions,
+    })
+}
+
 /// `git log` on HEAD, paged. A repository with no commits yet reads as an
 /// empty history rather than an error.
 pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<CommitEntry>> {
@@ -453,6 +488,27 @@ fn log_commits(
             })
         })
         .collect())
+}
+
+/// One commit's `+/-` totals. `--numstat` reports `-\t-` for binary files,
+/// which simply contribute no line counts here, matching the commit list.
+fn commit_numstat(cwd: &Path, sha: &str) -> anyhow::Result<(u64, u64)> {
+    let output = git_stdout(cwd, &["show", "--numstat", "--format=", sha])?;
+    Ok(output.lines().fold((0, 0), |(additions, deletions), line| {
+        let mut fields = line.split('\t');
+        (
+            additions
+                + fields
+                    .next()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0),
+            deletions
+                + fields
+                    .next()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0),
+        )
+    }))
 }
 
 /// Per-commit `+/-` totals for the same `git log` page, keyed by full sha.
@@ -685,6 +741,23 @@ mod tests {
     fn commits_is_empty_before_the_first_commit() {
         let cwd = repository();
         assert!(commits(&cwd, 0, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn commit_resolves_full_and_abbreviated_shas() {
+        let cwd = repository();
+        std::fs::write(cwd.join("file.txt"), "one\ntwo\n").unwrap();
+        run_git(&cwd, &["add", "file.txt"]);
+        run_git(&cwd, &["commit", "-qm", "init"]);
+        let listed = commits(&cwd, 0, 1).unwrap().remove(0);
+
+        for sha in [&listed.sha, &listed.short_sha] {
+            let entry = commit(&cwd, sha).unwrap();
+            assert_eq!(entry.sha, listed.sha);
+            assert_eq!(entry.subject, "init");
+            assert_eq!(entry.author, "Test");
+            assert_eq!((entry.additions, entry.deletions), (2, 0));
+        }
     }
 
     /// A repository whose primary checkout is on `main` plus a linked

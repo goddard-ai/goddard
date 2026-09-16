@@ -1658,6 +1658,10 @@ impl Waku {
         // Selection belongs to the session being left.
         self.transcript_selection.selection.borrow_mut().clear();
         self.transcript_selection.registry.borrow_mut().clear();
+        *self.transcript_selection.hovered_commit.borrow_mut() = None;
+        self.transcript_commit_hover = None;
+        self.transcript_commit_details.clear();
+        self.transcript_commit_press = None;
         // Annotations are session-scoped too, but survive a round trip: park
         // the departing set under its session id, then load the arriving
         // session's parked set (usually none). `annotation_session` tracks who
