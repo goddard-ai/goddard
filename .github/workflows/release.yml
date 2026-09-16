@@ -118,8 +118,8 @@ jobs:
 
       - name: Bundle
         env:
-          WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.GODDARD_ANALYTICS_ENDPOINT }}
+          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
         run: ./scripts/bundle-linux.sh
 
       - uses: actions/upload-artifact@v7
@@ -181,8 +181,8 @@ jobs:
 
       - name: Bundle
         env:
-          WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.GODDARD_ANALYTICS_ENDPOINT }}
+          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
         run: ./scripts/bundle-linux.sh
 
       - uses: actions/upload-artifact@v7
@@ -229,8 +229,8 @@ jobs:
 
       - name: Bundle
         env:
-          WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.GODDARD_ANALYTICS_ENDPOINT }}
+          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: bun scripts/bundle-windows.ts
@@ -281,8 +281,8 @@ jobs:
 
       - name: Bundle
         env:
-          WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.GODDARD_ANALYTICS_ENDPOINT }}
+          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: bun scripts/bundle-windows.ts
@@ -353,9 +353,9 @@ jobs:
 
       - name: Release
         env:
-          WAKU_SIGNING_IDENTITY: ${{ secrets.WAKU_SIGNING_IDENTITY }}
-          WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_SIGNING_IDENTITY: ${{ secrets.GODDARD_SIGNING_IDENTITY }}
+          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.GODDARD_ANALYTICS_ENDPOINT }}
+          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: bun run release --local
 
