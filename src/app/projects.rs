@@ -806,21 +806,17 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.close_projects_page(cx);
-        self.create_session_for(project_id, self.state.last_provider, cx);
-        if let Some(session_id) = self.state.selected_session
-            && let Some(session) = self.state.session_mut(session_id)
-            && !session.has_started()
-        {
-            session.workspace = SessionWorkspace::Worktree {
+        self.bind_new_draft_to_worktree(
+            project_id,
+            SessionWorkspace::Worktree {
                 path,
                 name,
                 branch,
                 base_branch: None,
-            };
-            self.save();
-        }
-        let focus = self.composer_focus(cx);
-        window.focus(&focus, cx);
+            },
+            window,
+            cx,
+        );
     }
 
     /// A draft whose worktree materializes from `base_ref` at first submit.

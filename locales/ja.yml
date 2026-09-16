@@ -53,6 +53,7 @@ command_palette.commands: コマンド
 command_palette.custom_commands: カスタムコマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
+command_palette.new_task_in_same_worktree: 同じワークツリーで新しいタスク
 command_palette.resume: 再開…
 command_palette.change_provider: プロバイダーを変更
 command_palette.current_provider: 現在のプロバイダー

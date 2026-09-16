@@ -158,6 +158,7 @@ impl PaletteIdentifier {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PaletteAction {
     NewTask,
+    NewTaskInSameWorktree,
     Resume,
     ChooseResumeProvider,
     SelectResumeProvider(ProviderKind),
@@ -967,6 +968,26 @@ impl Waku {
                 "move transfer worktree workspace checkout task",
                 next(),
             ));
+        }
+        if let Some(worktree_name) = self.selected_session().and_then(|session| {
+            match &session.workspace {
+                SessionWorkspace::Worktree { name, .. } if session.has_started() => {
+                    Some(name.clone())
+                }
+                _ => None,
+            }
+        }) {
+            let mut item = CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_task_in_same_worktree"),
+                "icons/fork.svg",
+                None,
+                PaletteAction::NewTaskInSameWorktree,
+                "new task session chat worktree same current shared checkout branch",
+                next(),
+            );
+            item.detail = Some(format!("#{worktree_name}"));
+            commands.push(item);
         }
 
         if self
@@ -2090,6 +2111,9 @@ impl Waku {
         self.close_command_palette(window, cx);
         match action {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
+            PaletteAction::NewTaskInSameWorktree => {
+                self.new_task_in_same_worktree(window, cx)
+            }
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CopyIdentifier(identifier) => {

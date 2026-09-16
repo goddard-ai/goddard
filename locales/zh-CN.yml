@@ -51,6 +51,7 @@ command_palette.commands: 命令
 command_palette.custom_commands: 自定义命令
 command_palette.settings: 设置
 command_palette.new_task: 新建任务
+command_palette.new_task_in_same_worktree: 在同一工作树中新建任务
 command_palette.resume: 恢复…
 command_palette.change_provider: 更改服务商
 command_palette.current_provider: 当前服务商

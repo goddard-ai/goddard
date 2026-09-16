@@ -933,6 +933,51 @@ impl Waku {
         window.focus(&focus_handle, cx);
     }
 
+    /// "New task in same worktree": hand the selected task's materialized
+    /// worktree to the project's next draft. The palette only offers this
+    /// while the selected task has one; the lookup repeats here because the
+    /// clicked item is a snapshot.
+    pub(super) fn new_task_in_same_worktree(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        let Some((project_id, workspace)) = self.selected_session().and_then(|session| {
+            match &session.workspace {
+                workspace @ SessionWorkspace::Worktree { .. } if session.has_started() => {
+                    Some((session.project_id, workspace.clone()))
+                }
+                _ => None,
+            }
+        }) else {
+            return;
+        };
+        self.bind_new_draft_to_worktree(project_id, workspace, window, cx);
+    }
+
+    /// The project's new-task draft — an unstarted one it already had, or a
+    /// fresh session — bound to a materialized worktree, with the composer
+    /// focused. The draft owns the checkout from there.
+    pub(super) fn bind_new_draft_to_worktree(
+        &mut self,
+        project_id: Uuid,
+        workspace: SessionWorkspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.create_session_for(project_id, self.state.last_provider, cx);
+        if let Some(session_id) = self.state.selected_session
+            && let Some(session) = self.state.session_mut(session_id)
+            && !session.has_started()
+        {
+            session.workspace = workspace;
+            self.save();
+        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+    }
+
     pub(super) fn new_project_action(
         &mut self,
         _: &NewProject,
