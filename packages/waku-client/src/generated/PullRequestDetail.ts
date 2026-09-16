@@ -2,6 +2,7 @@
 import type { PullRequestCheck } from "./PullRequestCheck";
 import type { PullRequestCommit } from "./PullRequestCommit";
 import type { PullRequestFile } from "./PullRequestFile";
+import type { PullRequestReviewComment } from "./PullRequestReviewComment";
 import type { PullRequestSummary } from "./PullRequestSummary";
 import type { WorkItemComment } from "./WorkItemComment";
 
@@ -9,4 +10,4 @@ import type { WorkItemComment } from "./WorkItemComment";
  * A pull request with its body, comment thread, checks, commits, and
  * changed files.
  */
-export type PullRequestDetail = { summary: PullRequestSummary, body?: string | null, comments: Array<WorkItemComment>, checks: Array<PullRequestCheck>, commits: Array<PullRequestCommit>, files: Array<PullRequestFile>, };
+export type PullRequestDetail = { summary: PullRequestSummary, body?: string | null, comments: Array<WorkItemComment>, reviewComments: Array<PullRequestReviewComment>, checks: Array<PullRequestCheck>, commits: Array<PullRequestCommit>, files: Array<PullRequestFile>, };

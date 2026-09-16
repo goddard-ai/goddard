@@ -438,6 +438,9 @@ github.open_external: 在 GitHub 上打开
 github.copy_url: 复制 URL
 github.start_task: 开始任务
 github.fix_checks: 修复失败的检查
+github.fix: 修复
+github.fix_tooltip: 在新任务中修复审查发现的问题
+github.fix_preparing: 正在准备…
 github.resolving_repo: 正在解析仓库…
 github.install_gh: 安装 GitHub CLI 以浏览此仓库
 github.auth_gh: "运行 `gh auth login` 以浏览此仓库"

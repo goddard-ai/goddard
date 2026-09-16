@@ -78,6 +78,7 @@ export type { PullRequestCheckStatus } from "./PullRequestCheckStatus";
 export type { PullRequestCommit } from "./PullRequestCommit";
 export type { PullRequestDetail } from "./PullRequestDetail";
 export type { PullRequestFile } from "./PullRequestFile";
+export type { PullRequestReviewComment } from "./PullRequestReviewComment";
 export type { PullRequestReviewDecision } from "./PullRequestReviewDecision";
 export type { PullRequestState } from "./PullRequestState";
 export type { PullRequestSummary } from "./PullRequestSummary";

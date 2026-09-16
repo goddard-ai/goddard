@@ -62,7 +62,7 @@ pub use settings::DaemonSettings;
 pub use workspace::{
     BranchDeleteFailure, GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary,
     PullRequestCheck, PullRequestCheckStatus, PullRequestCommit, PullRequestDetail,
-    PullRequestFile, PullRequestReviewDecision, PullRequestState, PullRequestSummary, RepoBranch,
-    RepoWorktree, WorkItemComment, WorkItemKind, WorkItemQueryState, WorkspaceOperation,
-    WorkspaceResult,
+    PullRequestFile, PullRequestReviewComment, PullRequestReviewDecision, PullRequestState,
+    PullRequestSummary, RepoBranch, RepoWorktree, WorkItemComment, WorkItemKind,
+    WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
 };

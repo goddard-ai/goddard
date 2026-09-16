@@ -248,6 +248,26 @@ pub struct PullRequestCheck {
     pub duration_seconds: Option<u64>,
 }
 
+/// An inline review comment on a pull request's diff — the
+/// `pulls/<N>/comments` read `gh pr view --json` does not expose.
+/// `line_label` is the human-facing range ("4", "4-9") resolved from the
+/// comment's line fields.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewComment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+}
+
 /// A pull request with its body, comment thread, checks, commits, and
 /// changed files.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -258,6 +278,8 @@ pub struct PullRequestDetail {
     pub body: Option<String>,
     #[serde(default)]
     pub comments: Vec<WorkItemComment>,
+    #[serde(default)]
+    pub review_comments: Vec<PullRequestReviewComment>,
     #[serde(default)]
     pub checks: Vec<PullRequestCheck>,
     #[serde(default)]
@@ -707,6 +729,16 @@ pub enum WorkspaceOperation {
         kind: WorkItemKind,
         number: u64,
         body: String,
+    },
+    /// `git fetch origin +pull/<number>/head:<branch>`: materialize a pull
+    /// request's head as a local branch so a task can work it without
+    /// touching the user's checkout. `pull/*` refs resolve on `origin` for
+    /// same-repo and fork pull requests alike. Returns `Ack`.
+    FetchPullRequestHead {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        number: u64,
+        branch: String,
     },
 }
 

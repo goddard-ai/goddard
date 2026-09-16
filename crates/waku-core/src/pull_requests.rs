@@ -13,7 +13,8 @@ use serde::Deserialize;
 
 use waku_protocol::workspace::{
     PullRequestCheck, PullRequestCheckStatus, PullRequestDetail, PullRequestFile,
-    PullRequestReviewDecision, PullRequestState, PullRequestSummary, WorkItemQueryState,
+    PullRequestReviewComment, PullRequestReviewDecision, PullRequestState, PullRequestSummary,
+    WorkItemQueryState,
 };
 
 use crate::github::{GhComment, GhUser, gh_output, gh_query_state, gh_time, parse_gh_stdout};
@@ -106,7 +107,108 @@ pub fn view(cwd: &Path, number: u64) -> anyhow::Result<Option<PullRequestDetail>
         return Ok(None);
     };
     let entry: GhPullRequest = parse_gh_stdout(&output, "gh pr view")?;
-    Ok(Some(entry.into_detail()))
+    let mut detail = entry.into_detail();
+    detail.review_comments = review_comments(cwd, number);
+    Ok(Some(detail))
+}
+
+/// Fetch `pull/<number>/head` into `branch` so a task can work the pull
+/// request's head commit. The `pull/*` refs live on `origin` for same-repo
+/// and fork pull requests alike, and the force prefix lets a re-fetch move
+/// the branch forward on a repeat run.
+pub fn fetch_head(cwd: &Path, number: u64, branch: &str) -> anyhow::Result<()> {
+    let output = crate::command_env::plain_command("git")
+        .args(["fetch", "origin"])
+        .arg(format!("+pull/{number}/head:{branch}"))
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git fetch")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "fetching the pull request branch failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// Inline review comments — the `pulls/<N>/comments` read `gh pr view
+/// --json` does not expose. `gh api` fills the `{owner}`/`{repo}`
+/// placeholders from the current directory's remote, so Enterprise hosts
+/// resolve the same way `pr view` does. Best-effort: a failed read or an
+/// unfamiliar payload degrades to empty rather than losing the whole
+/// detail over a supplemental field.
+fn review_comments(cwd: &Path, number: u64) -> Vec<PullRequestReviewComment> {
+    let args = [
+        OsString::from("api"),
+        OsString::from("--paginate"),
+        OsString::from("--slurp"),
+        OsString::from(format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments")),
+    ];
+    let arg_refs: Vec<_> = args.iter().map(OsString::as_os_str).collect();
+    let Some(output) = gh_output(cwd, &arg_refs) else {
+        return Vec::new();
+    };
+    let pages: Vec<Vec<GhReviewComment>> =
+        serde_json::from_slice(&output.stdout).unwrap_or_default();
+    let mut comments: Vec<PullRequestReviewComment> = pages
+        .into_iter()
+        .flatten()
+        .map(GhReviewComment::into_comment)
+        .collect();
+    // Newest first: the latest review pass is usually the one to satisfy.
+    comments.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    comments
+}
+
+/// One entry of the `pulls/<N>/comments` REST read — snake_case fields,
+/// unlike `gh pr view --json`. `line`/`start_line` describe the comment
+/// against the current head; the `original_*` pair is where it sat when it
+/// was written — a diff that moved since keeps only the originals.
+#[derive(Deserialize)]
+struct GhReviewComment {
+    #[serde(default)]
+    user: Option<GhUser>,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    line: Option<u64>,
+    #[serde(default)]
+    start_line: Option<u64>,
+    #[serde(default)]
+    original_line: Option<u64>,
+    #[serde(default)]
+    original_start_line: Option<u64>,
+    #[serde(default)]
+    html_url: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
+}
+
+impl GhReviewComment {
+    fn into_comment(self) -> PullRequestReviewComment {
+        let line_label = if let (Some(start), Some(end)) = (self.start_line, self.line) {
+            Some(format!("{start}-{end}"))
+        } else if let (Some(start), Some(end)) = (self.original_start_line, self.original_line) {
+            Some(format!("{start}-{end}"))
+        } else {
+            self.line
+                .or(self.original_line)
+                .map(|line| line.to_string())
+        };
+        PullRequestReviewComment {
+            author: self
+                .user
+                .map(|user| user.login.trim_end_matches("[bot]").to_owned()),
+            body: self.body,
+            path: self.path,
+            line_label,
+            url: self.html_url,
+            created_at: gh_time(self.created_at),
+        }
+    }
 }
 
 /// Post a top-level comment — `gh pr comment <number> --body <body>`.
@@ -212,6 +314,8 @@ impl GhPullRequest {
                 .into_iter()
                 .map(GhComment::into_comment)
                 .collect(),
+            // Filled by `view` — a separate read that needs `cwd`.
+            review_comments: Vec::new(),
             checks: self
                 .status_check_rollup
                 .iter()

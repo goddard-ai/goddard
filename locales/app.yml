@@ -900,6 +900,12 @@ github.start_task:
   en: Start a task
 github.fix_checks:
   en: Fix failing checks
+github.fix:
+  en: Fix
+github.fix_tooltip:
+  en: Fix review findings in a new task
+github.fix_preparing:
+  en: Preparing…
 github.resolving_repo:
   en: Resolving repository…
 github.install_gh:

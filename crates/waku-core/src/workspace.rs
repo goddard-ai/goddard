@@ -345,6 +345,14 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             }
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::FetchPullRequestHead {
+            cwd,
+            number,
+            branch,
+        } => {
+            crate::pull_requests::fetch_head(&cwd, number, &branch)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },

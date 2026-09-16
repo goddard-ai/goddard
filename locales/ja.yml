@@ -443,6 +443,9 @@ github.open_external: GitHub で開く
 github.copy_url: URL をコピー
 github.start_task: タスクを開始
 github.fix_checks: 失敗したチェックを修正
+github.fix: 修正
+github.fix_tooltip: 新しいタスクでレビューの指摘を修正
+github.fix_preparing: 準備中…
 github.resolving_repo: リポジトリを解決中…
 github.install_gh: このリポジトリを見るには GitHub CLI をインストールしてください
 github.auth_gh: "`gh auth login` を実行するとこのリポジトリを見られます"
