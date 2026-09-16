@@ -63,7 +63,7 @@ pub fn local_hostname() -> Option<String> {
         .find(|hostname| !hostname.is_empty())
 }
 
-fn daemon_executable_path() -> anyhow::Result<PathBuf> {
+pub(crate) fn daemon_executable_path() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GODDARD_DAEMON_PATH").filter(|path| !path.is_empty()) {
         return Ok(path.into());
     }

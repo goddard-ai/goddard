@@ -1898,6 +1898,12 @@ impl Waku {
                     if !keep {
                         return;
                     }
+                } else {
+                    let _ = waku.update(cx, |waku, cx| {
+                        if waku.remote_errors.remove(&host_id).is_some() {
+                            cx.notify();
+                        }
+                    });
                 }
             }
         })

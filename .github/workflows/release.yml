@@ -122,13 +122,21 @@ jobs:
           GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
         run: ./scripts/bundle-linux.sh
 
+      # SSH remotes install the daemon alone; the app fetches this
+      # version-matched tarball and verifies its checksum before installing.
+      - name: Package goddard-daemon
+        run: ./scripts/bundle-daemon.sh
+
       - uses: actions/upload-artifact@v7
         with:
           name: linux-x86_64
           # Named exactly, not globbed: `if-no-files-found: error` is then a
           # real check that this version built, rather than something an older
           # bundle can satisfy.
-          path: target/release/Goddard-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+          path: |
+            target/release/Goddard-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+            target/release/goddard-daemon-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+            target/release/goddard-daemon-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz.sha256
           if-no-files-found: error
 
   linux-arm64:
@@ -185,10 +193,16 @@ jobs:
           GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.GODDARD_ANALYTICS_WEBSITE_ID }}
         run: ./scripts/bundle-linux.sh
 
+      - name: Package goddard-daemon
+        run: ./scripts/bundle-daemon.sh
+
       - uses: actions/upload-artifact@v7
         with:
           name: linux-arm64
-          path: target/release/Goddard-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
+          path: |
+            target/release/Goddard-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
+            target/release/goddard-daemon-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
+            target/release/goddard-daemon-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz.sha256
           if-no-files-found: error
 
   windows-x86_64:
@@ -359,6 +373,9 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: bun run release --local
 
+      - name: Package goddard-daemon
+        run: ./scripts/bundle-daemon.sh
+
       - uses: actions/upload-artifact@v7
         with:
           name: macos
@@ -367,6 +384,8 @@ jobs:
             dist/Goddard-${{ needs.version.outputs.version }}.md
             dist/Goddard-${{ needs.version.outputs.version }}.zip
             dist/appcast.xml
+            target/release/goddard-daemon-${{ needs.version.outputs.version }}-aarch64-apple-darwin.tar.gz
+            target/release/goddard-daemon-${{ needs.version.outputs.version }}-aarch64-apple-darwin.tar.gz.sha256
           if-no-files-found: error
 
   draft-release:
@@ -470,6 +489,7 @@ jobs:
           files=()
           for pattern in \
             'artifacts/*.tar.gz' \
+            'artifacts/*.sha256' \
             'artifacts/*.dmg' \
             'artifacts/*.md' \
             'artifacts/*.zip' \

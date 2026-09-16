@@ -48,7 +48,7 @@ impl SshAskpassRequest {
 /// reads — which is what ssh consumes on stdout. `%QUEUE%` is replaced with
 /// the queue fifo's absolute path when the script is written.
 const ASKPASS_SCRIPT: &str = r#"#!/bin/sh
-dir=$(mktemp -d "${TMPDIR:-/tmp}/waku-askpass.XXXXXX") || exit 1
+dir=$(mktemp -d "${TMPDIR:-/tmp}/goddard-askpass.XXXXXX") || exit 1
 mkfifo "$dir/in" "$dir/out" 2>/dev/null || { rm -rf "$dir"; exit 1; }
 printf '%s\n' "$dir" > "%QUEUE%"
 printf '%s\n' "$1" > "$dir/in"
@@ -58,12 +58,22 @@ rm -rf "$dir"
 exit $status
 "#;
 
-/// Provision and start the remote daemon, printing `token\nport` on
-/// success. The token persists at `~/.waku/daemon-token` so re-connects
-/// reuse it, and the daemon is started detached so it survives the ssh
+/// Provision and start the remote daemon, printing `token\nport\nprotocol`
+/// on success. `%VERSION%` and `%PROTOCOL%` are substituted with the app's
+/// release version and wire protocol when the script runs.
+///
+/// The token persists at `~/.goddard/daemon-token` so re-connects reuse it.
+/// When no binary is on PATH or under `~/.goddard/bin`, or the installed copy
+/// was fetched for a different app version, the version-matched tarball is
+/// fetched from the release bucket and checksum-verified — exit 8 tells the
+/// app to upload its bundled daemon instead. A running daemon whose ready
+/// line reports another protocol is stopped and replaced. The daemon is
+/// started detached (`nohup`, stdin/out redirected) so it survives the ssh
 /// session ending.
 const REMOTE_BOOTSTRAP: &str = r#"set -u
-waku_dir="$HOME/.waku"
+app_version="%VERSION%"
+want_protocol="%PROTOCOL%"
+waku_dir="$HOME/.goddard"
 mkdir -p "$waku_dir" 2>/dev/null || { echo "cannot create $waku_dir" >&2; exit 4; }
 chmod 700 "$waku_dir" 2>/dev/null || true
 
@@ -76,46 +86,133 @@ token=$(cat "$token_file")
 
 pid_file="$waku_dir/daemon.pid"
 ready_file="$waku_dir/daemon.ready"
+bin_dir="$waku_dir/bin"
+bin_file="$bin_dir/goddard-daemon"
+version_file="$bin_dir/.version"
+
+fetch() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL "$1";
+  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1";
+  else return 127; fi
+}
+
+install_daemon() {
+  os=$(uname -s); machine=$(uname -m)
+  case "$os/$machine" in
+    Linux/x86_64) target=x86_64-unknown-linux-gnu ;;
+    Linux/aarch64 | Linux/arm64) target=aarch64-unknown-linux-gnu ;;
+    Darwin/arm64) target=aarch64-apple-darwin ;;
+    Darwin/x86_64) target=x86_64-apple-darwin ;;
+    *) echo "no release mapping for remote platform $os/$machine" >&2; return 1 ;;
+  esac
+  name="goddard-daemon-$app_version-$target"
+  base="${GODDARD_RELEASES_URL:-https://releases.goddardai.org}"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/goddard-daemon.XXXXXX") || return 1
+  if ! fetch "$base/$name.tar.gz" >"$tmp/pkg.tar.gz" 2>/dev/null; then
+    rm -rf "$tmp"
+    echo "no published daemon artifact $name" >&2
+    return 8
+  fi
+  if fetch "$base/$name.tar.gz.sha256" >"$tmp/pkg.sha256" 2>/dev/null; then
+    expected=$(sed -n 's/^\([a-fA-F0-9]*\).*/\1/p' "$tmp/pkg.sha256" | head -1)
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual=$(sha256sum "$tmp/pkg.tar.gz" | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+      actual=$(shasum -a 256 "$tmp/pkg.tar.gz" | cut -d' ' -f1)
+    else
+      actual=""
+    fi
+    if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
+      rm -rf "$tmp"
+      echo "checksum mismatch on $name" >&2
+      return 1
+    fi
+  fi
+  mkdir -p "$bin_dir" || { rm -rf "$tmp"; return 1; }
+  tar -xzf "$tmp/pkg.tar.gz" -C "$bin_dir" || { rm -rf "$tmp"; return 1; }
+  chmod 755 "$bin_file" 2>/dev/null || true
+  printf '%s' "$app_version" >"$version_file"
+  rm -rf "$tmp"
+}
+
+ready_protocol() {
+  sed -n 's/.*"protocol_version":\([0-9][0-9]*\).*/\1/p' "$ready_file" 2>/dev/null | head -1
+}
+
+stop_daemon() {
+  if [ -f "$pid_file" ]; then
+    pid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+    rm -f "$pid_file"
+  fi
+  : >"$ready_file" 2>/dev/null || true
+}
+
+start_daemon() {
+  : >"$ready_file" 2>/dev/null || true
+  GODDARD_DAEMON_TOKEN="$token" nohup "$1" --bind 127.0.0.1:0 \
+    >"$ready_file" 2>>"$waku_dir/daemon.log" </dev/null &
+  echo $! >"$pid_file"
+}
+
+bin=$(command -v goddard-daemon 2>/dev/null || true)
+if [ -z "$bin" ]; then
+  if [ ! -x "$bin_file" ] || \
+     [ "$(cat "$version_file" 2>/dev/null || true)" != "$app_version" ]; then
+    install_daemon
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "goddard-daemon unavailable on the remote host" >&2
+      # Exit 8 means "no published artifact" — the app uploads its bundled
+      # daemon. Other codes (checksum failure, no fetcher) are hard errors.
+      exit "$rc"
+    fi
+  fi
+  bin="$bin_file"
+fi
 
 running=0
 if [ -f "$pid_file" ]; then
   pid=$(cat "$pid_file" 2>/dev/null || true)
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    running=1
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then running=1; fi
+fi
+if [ "$running" -eq 1 ]; then
+  proto=$(ready_protocol)
+  if [ -n "$proto" ] && [ "$proto" != "$want_protocol" ]; then
+    # A stale daemon answers with an incompatible wire protocol — stop it and
+    # prefer the version-matched copy under ~/.goddard.
+    stop_daemon
+    running=0
+    if [ "$(cat "$version_file" 2>/dev/null || true)" != "$app_version" ]; then
+      install_daemon || true
+    fi
   fi
 fi
-
+if [ "$running" -eq 0 ] && [ -x "$bin_file" ] && \
+   [ "$(cat "$version_file" 2>/dev/null || true)" = "$app_version" ]; then
+  bin="$bin_file"
+fi
 if [ "$running" -eq 0 ]; then
-  bin=$(command -v waku-daemon 2>/dev/null || true)
-  if [ -z "$bin" ] && [ -x "$waku_dir/bin/waku-daemon" ]; then
-    bin="$waku_dir/bin/waku-daemon"
-  fi
-  if [ -z "$bin" ]; then
-    echo "waku-daemon binary not found on the remote host" >&2
-    exit 3
-  fi
-  : > "$ready_file" 2>/dev/null || true
-  WAKU_DAEMON_TOKEN="$token" nohup "$bin" --bind 127.0.0.1:0 \
-    >"$ready_file" 2>>"$waku_dir/daemon.log" </dev/null &
-  echo $! > "$pid_file"
+  start_daemon "$bin"
 fi
 
 i=0
 while [ ! -s "$ready_file" ]; do
   i=$((i + 1))
   if [ "$i" -gt 100 ]; then
-    echo "waku-daemon did not report ready" >&2
+    echo "goddard-daemon did not report ready" >&2
     exit 6
   fi
   sleep 0.1 2>/dev/null || sleep 1
 done
 
+proto=$(ready_protocol)
 port=$(sed -n 's/.*"address":"[^"]*:\([0-9][0-9]*\)".*/\1/p' "$ready_file" | head -1)
 if [ -z "$port" ]; then
-  echo "waku-daemon reported no bound port" >&2
+  echo "goddard-daemon reported no bound port" >&2
   exit 7
 fi
-printf '%s\n%s\n' "$token" "$port"
+printf '%s\n%s\n%s\n' "$token" "$port" "$proto"
 "#;
 
 /// State directory shared by control sockets and the askpass queue.
@@ -136,7 +233,7 @@ fn askpass_script_path() -> PathBuf {
 /// script is refreshed on every call so an updated app replaces it.
 pub(super) fn prepare_askpass() -> anyhow::Result<()> {
     let dir = ssh_dir();
-    std::fs::create_dir_all(&dir).context("could not create ~/.waku/ssh")?;
+    std::fs::create_dir_all(&dir).context("could not create ~/.goddard/ssh")?;
     let script = ASKPASS_SCRIPT.replace("%QUEUE%", &askpass_queue_path().to_string_lossy());
     std::fs::write(askpass_script_path(), script).context("could not write askpass helper")?;
     let mut permissions = std::fs::metadata(askpass_script_path())?.permissions();
@@ -262,8 +359,9 @@ impl SshTransport {
                 .is_ok_and(|status| status.success())
     }
 
-    /// Run a script on the remote through the master connection.
-    fn run_remote(&self, script: &str) -> anyhow::Result<String> {
+    /// Run a script on the remote through the master connection, returning
+    /// its exit code and captured output.
+    fn run_remote_status(&self, script: &str) -> anyhow::Result<(i32, String, String)> {
         self.ensure_master()?;
         let mut child = self
             .command()
@@ -278,21 +376,48 @@ impl SshTransport {
             .context("ssh stdin was not piped")?
             .write_all(script.as_bytes())?;
         let output = child.wait_with_output()?;
-        if !output.status.success() {
+        Ok((
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
+    }
+
+    /// Ensure the remote daemon is running: install or upgrade the binary
+    /// when needed, then return its token plus bound loopback port. The
+    /// bootstrap's exit 8 means the remote platform has no published
+    /// artifact — the caller uploads the bundled binary and retries.
+    fn provision(&self) -> anyhow::Result<(String, u16)> {
+        let script = REMOTE_BOOTSTRAP
+            .replace("%VERSION%", env!("CARGO_PKG_VERSION"))
+            .replace("%PROTOCOL%", &waku_client::PROTOCOL_VERSION.to_string());
+        let (code, stdout, stderr) = self.run_remote_status(&script)?;
+        if code == 8 {
+            self.upload_daemon()?;
+            let (code, stdout, stderr) = self.run_remote_status(&script)?;
+            if code != 0 {
+                bail!(
+                    "remote provisioning on {} failed after binary upload: {}",
+                    self.destination,
+                    stderr.trim()
+                );
+            }
+            return Self::parse_provision(&stdout);
+        }
+        if code != 0 {
             bail!(
                 "remote provisioning on {} failed: {}",
                 self.destination,
-                String::from_utf8_lossy(&output.stderr).trim()
+                stderr.trim()
             );
         }
-        String::from_utf8(output.stdout).context("remote provisioning returned non-utf8 output")
+        Self::parse_provision(&stdout)
     }
 
-    /// Ensure the remote daemon is running and return its token plus the
-    /// port it bound on the remote loopback.
-    fn provision(&self) -> anyhow::Result<(String, u16)> {
-        let output = self.run_remote(REMOTE_BOOTSTRAP)?;
-        let mut lines = output.lines();
+    /// Parse the bootstrap's `token\nport\nprotocol` output and refuse a
+    /// wire-incompatible daemon.
+    fn parse_provision(stdout: &str) -> anyhow::Result<(String, u16)> {
+        let mut lines = stdout.lines();
         let token = lines
             .next()
             .map(str::trim)
@@ -303,7 +428,79 @@ impl SshTransport {
             .next()
             .and_then(|line| line.trim().parse::<u16>().ok())
             .context("remote provisioning returned no port")?;
+        let protocol = lines
+            .next()
+            .and_then(|line| line.trim().parse::<u32>().ok());
+        if let Some(protocol) = protocol {
+            if protocol != waku_client::PROTOCOL_VERSION {
+                bail!(
+                    "remote goddard-daemon speaks protocol {protocol}, this build requires {}",
+                    waku_client::PROTOCOL_VERSION
+                );
+            }
+        }
         Ok((token, port))
+    }
+
+    /// Push the app's bundled daemon binary to `~/.goddard/bin`. Only viable
+    /// when the remote shares this machine's OS and architecture.
+    fn upload_daemon(&self) -> anyhow::Result<()> {
+        self.ensure_master()?;
+        let uname = self.remote_uname()?;
+        if !remote_matches_local(&uname) {
+            bail!(
+                "remote platform {uname} does not match this machine — install goddard-daemon there manually"
+            );
+        }
+        let binary = crate::daemon::daemon_executable_path()
+            .context("could not locate the bundled goddard-daemon to upload")?;
+        let bytes = std::fs::read(&binary)
+            .with_context(|| format!("could not read {}", binary.display()))?;
+        let mut child = self
+            .command()
+            .arg(&self.destination)
+            .arg(
+                "mkdir -p \"$HOME/.goddard/bin\" \
+                 && cat >\"$HOME/.goddard/bin/goddard-daemon.new\" \
+                 && chmod 755 \"$HOME/.goddard/bin/goddard-daemon.new\" \
+                 && mv \"$HOME/.goddard/bin/goddard-daemon.new\" \"$HOME/.goddard/bin/goddard-daemon\"",
+            )
+            .stdin(Stdio::piped())
+            .spawn()
+            .context("could not upload goddard-daemon over ssh")?;
+        child
+            .stdin
+            .take()
+            .context("ssh stdin was not piped")?
+            .write_all(&bytes)?;
+        let output = child.wait_with_output()?;
+        if !output.status.success() {
+            bail!(
+                "daemon upload to {} failed: {}",
+                self.destination,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    /// `uname -s`/`uname -m` on the remote, for the upload platform check.
+    fn remote_uname(&self) -> anyhow::Result<String> {
+        let child = self
+            .command()
+            .arg(&self.destination)
+            .arg("uname -sm")
+            .spawn()
+            .context("could not run uname over ssh")?;
+        let output = child.wait_with_output()?;
+        if !output.status.success() {
+            bail!(
+                "uname on {} failed: {}",
+                self.destination,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
     /// Point a local ephemeral port at the remote daemon's loopback port on
@@ -360,6 +557,26 @@ impl SshTransport {
             .stderr(Stdio::null())
             .status();
     }
+}
+
+/// Whether the remote's `uname -sm` output matches this machine's platform
+/// — the upload fallback only makes sense when it does.
+fn remote_matches_local(uname: &str) -> bool {
+    let mut parts = uname.split_whitespace();
+    let (Some(system), Some(machine)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    let os = match system {
+        "Linux" => "linux",
+        "Darwin" => "macos",
+        _ => return false,
+    };
+    let arch = match machine {
+        "x86_64" | "amd64" => "x86_64",
+        "aarch64" | "arm64" => "aarch64",
+        _ => return false,
+    };
+    os == std::env::consts::OS && arch == std::env::consts::ARCH
 }
 
 /// `Host` aliases declared in `~/.ssh/config`, minus wildcard stanzas.
