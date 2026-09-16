@@ -137,6 +137,8 @@ your responses in your own words.
 - List the checks you ran.
 - Call out known limitations or follow-up work.
 - Link the related issue, if one exists.
+- Add a `.changelog/<slug>.md` fragment (one bullet) for user-visible changes;
+  `bun run changelog` folds them into `CHANGELOG.md` at release time.
 
 ### AI policy
 

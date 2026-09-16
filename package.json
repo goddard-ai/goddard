@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "bun ./scripts/dev.ts",
     "release": "bun ./scripts/release.ts",
+    "changelog": "bun ./scripts/changelog.ts collect",
     "protocol:generate": "cargo run -p waku-protocol --bin export_types",
     "protocol:check": "cargo run -p waku-protocol --bin export_types -- --check",
     "db:generate": "drizzle-kit generate",

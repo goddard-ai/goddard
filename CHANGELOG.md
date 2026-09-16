@@ -6,9 +6,11 @@ extracts the section whose heading matches the version being released
 (`MARKETING_VERSION`) and publishes it next to the update, so Sparkle shows it in
 the update prompt.
 
-Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
-`## [<version>]` section at the top for each release, matching the version you
-set in the Xcode project.
+Format follows [Keep a Changelog](https://keepachangelog.com). Don't edit this
+file directly for pending changes — add a `.changelog/<slug>.md` fragment per
+change (one bullet per file) so parallel work never conflicts here. At release
+time `bun run changelog` folds every fragment plus any `## [unreleased]`
+bullets into a `## [<version>]` section for the version in `Cargo.toml`.
 
 Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
