@@ -2544,29 +2544,11 @@ impl Waku {
                     .px(px(12.0))
                     .pt(px(8.0))
                     .pb(px(6.0))
-                    .flex()
-                    // Baseline so the hash sits on the subject's first line
-                    // when the subject wraps rather than truncating.
-                    .items_baseline()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_family(crate::fonts::current(cx).code)
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(entry.short_sha.clone()),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(sp(12.5))
-                            .line_height(sp(16.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(entry.subject.clone()),
-                    ),
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(entry.subject.clone()),
             )
             .when(!body.is_empty(), |card| {
                 card.child(
