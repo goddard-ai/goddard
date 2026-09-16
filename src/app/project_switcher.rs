@@ -680,6 +680,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: String::new(),
             path: PathBuf::new(),
+            bookmark: None,
             created_at,
         };
         let current = project(0);
@@ -709,6 +710,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: String::new(),
             path: PathBuf::new(),
+            bookmark: None,
             created_at,
         };
         let current = project(10);
@@ -745,6 +747,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: String::new(),
             path: root.join("2026-08-08").join(name),
+            bookmark: None,
             created_at,
         };
         let first = projectless("first", 10);
@@ -753,6 +756,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: String::new(),
             path: PathBuf::from("/tmp/dev/ordinary"),
+            bookmark: None,
             created_at: 30,
         };
         let projects = vec![first.clone(), second.clone(), ordinary.clone()];

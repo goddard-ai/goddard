@@ -521,6 +521,17 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    /// `git worktree repair`: re-link worktree administrative files after
+    /// the main checkout or its linked worktrees moved — a relocated project
+    /// leaves each worktree's `.git` file pointing at the old path. `paths`
+    /// are the linked worktrees' current roots.
+    RepairWorktrees {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(type = "string[]")]
+        paths: Vec<PathBuf>,
+    },
     InspectCommit {
         #[ts(type = "string")]
         cwd: PathBuf,

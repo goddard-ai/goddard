@@ -983,6 +983,16 @@ project.without_a_project:
   en: without a project
 project.your_project:
   en: your project
+project.folder_missing:
+  en: Folder not found
+project.locate:
+  en: Locate Folder…
+project.locate_prompt:
+  en: Locate %{name}
+project.relocated:
+  en: "%{name} followed its renamed folder"
+project.relocated_to:
+  en: Relocated to %{path}
 
 projects.title:
   en: Projects
@@ -1833,6 +1843,12 @@ project.add_project:
   en: Add project
 errors.remote_project_picker:
   en: Adding a daemon-host project needs a remote path picker, which is not available yet
+errors.remote_project_locate:
+  en: Locating a daemon-host project needs a remote path picker, which is not available yet
+errors.project_folder_missing:
+  en: "%{name}'s folder can't be found — locate it to run this task"
+errors.project_path_in_use:
+  en: That folder is already added as %{name}
 
 session.stopped:
   en: Stopped

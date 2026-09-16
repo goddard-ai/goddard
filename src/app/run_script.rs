@@ -410,6 +410,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: String::new(),
             path: PathBuf::new(),
+            bookmark: None,
             created_at,
         };
         let current = project(0);

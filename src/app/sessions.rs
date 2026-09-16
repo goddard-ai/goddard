@@ -2520,7 +2520,8 @@ impl Waku {
                         this.select_project(existing.id, cx);
                         return;
                     }
-                    let project = Project::from_path(path);
+                    let mut project = Project::from_path(path);
+                    project.bookmark = crate::bookmarks::create(&project.path);
                     let project_id = project.id;
                     this.state.projects.push(project);
                     this.analytics.track(crate::analytics::Event::ProjectAdded);

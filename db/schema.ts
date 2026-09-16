@@ -12,12 +12,14 @@
  * fetched only when a session is opened.
  */
 
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   path: text("path").notNull(),
+  /** Finder-bookmark data that re-resolves the folder after a rename. */
+  bookmark: blob("bookmark"),
   /** Order shown in the sidebar. */
   position: integer("position").notNull(),
   /** When the project was added, unix seconds. */

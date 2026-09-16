@@ -2382,6 +2382,8 @@ impl Waku {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("project.chat"),
         };
+        let folder_missing =
+            matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));
         let updated_chevron = matches!(
             group,
             SidebarGroup::Date(_) | SidebarGroup::Pinned | SidebarGroup::Terminals
@@ -2522,6 +2524,15 @@ impl Waku {
                         .items_center()
                         .gap(px(2.0))
                         .child(div().min_w_0().truncate().child(label))
+                        .when(folder_missing, |element| {
+                            element.child(
+                                div()
+                                    .id(SharedString::from(format!("sidebar-missing-{group_key}")))
+                                    .flex_none()
+                                    .tooltip(Tooltip::text(tr!("project.folder_missing")))
+                                    .child(icon("icons/alert.svg", 11.0, theme.warning)),
+                            )
+                        })
                         .when_some(updated_chevron, |element, chevron| element.child(chevron)),
                 )
                 .child(div().flex_1()),
@@ -4166,12 +4177,14 @@ mod tests {
             id: Uuid::from_u128(1),
             name: "Task".to_owned(),
             path: root.join("2026-08-23/task"),
+            bookmark: None,
             created_at: 0,
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
             name: "Ordinary".to_owned(),
             path: PathBuf::from("/tmp/dev/ordinary"),
+            bookmark: None,
             created_at: 0,
         };
 

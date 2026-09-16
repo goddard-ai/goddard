@@ -1032,6 +1032,10 @@ impl Waku {
                                 window,
                                 cx,
                             ),
+                            ToastActionKind::RelocateProject(project_id) => {
+                                this.hide_toast();
+                                this.relocate_project(*project_id, cx);
+                            }
                         }
                         cx.stop_propagation();
                     }
@@ -1047,6 +1051,10 @@ impl Waku {
                                 window,
                                 cx,
                             ),
+                            ToastActionKind::RelocateProject(project_id) => {
+                                this.hide_toast();
+                                this.relocate_project(*project_id, cx);
+                            }
                         }
                         cx.stop_propagation();
                     }

@@ -167,6 +167,10 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::repo::prune_worktrees(&cwd)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::RepairWorktrees { cwd, paths } => {
+            crate::repo::repair_worktrees(&cwd, &paths)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },

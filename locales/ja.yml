@@ -485,6 +485,11 @@ project.default_folder: デフォルトフォルダ
 project.project_lower: プロジェクト
 project.without_a_project: プロジェクトなし
 project.your_project: あなたのプロジェクト
+project.folder_missing: フォルダが見つかりません
+project.locate: フォルダを選択…
+project.locate_prompt: "%{name} の場所を指定"
+project.relocated: "%{name} は名前が変更されたフォルダを追跡しました"
+project.relocated_to: "%{path} に移動しました"
 
 projects.title: プロジェクト
 projects.tab_worktrees: ワークツリー
@@ -911,6 +916,9 @@ terminal.starting: ターミナルを起動中…
 
 project.add_project: プロジェクトを追加
 errors.remote_project_picker: デーモンホスト上のプロジェクトを追加するにはリモートパス選択が必要ですが、まだ利用できません
+errors.remote_project_locate: デーモンホスト上のプロジェクトの場所を指定するにはリモートパス選択が必要ですが、まだ利用できません
+errors.project_folder_missing: "%{name} のフォルダが見つかりません。このタスクを実行するには場所を指定してください"
+errors.project_path_in_use: そのフォルダはすでに %{name} として追加されています
 
 session.stopped: 停止しました
 session.turn_completed: ターンが完了しました

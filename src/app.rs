@@ -356,6 +356,8 @@ enum ToastActionKind {
     /// Open the detected localhost URL — externally, or in a browser tab
     /// when shift is held.
     LocalhostUrl,
+    /// A missing project folder's "Locate Folder…" picker.
+    RelocateProject(Uuid),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1914,6 +1916,14 @@ pub struct Waku {
     projects_page: Option<Uuid>,
     /// Per-project page state kept across page toggles.
     projects_page_states: HashMap<Uuid, projects::ProjectsPageState>,
+    /// Projects whose stored path the last `refresh_project_locations` pass
+    /// could not find — by missing folder, not by missing entity. The
+    /// Projects page and sidebar badge read the set; submissions check the
+    /// path again rather than trusting it.
+    missing_projects: HashSet<Uuid>,
+    /// Guards `refresh_project_locations`: a pass that started before a
+    /// manual relocation discards its stale outcomes.
+    project_location_generation: Cell<u64>,
     transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
@@ -2127,6 +2137,7 @@ mod goal_dialog;
 mod image_preview;
 mod project_switcher;
 mod projects;
+mod relocate;
 mod render;
 mod right_panel;
 mod run_script;
@@ -4014,6 +4025,8 @@ impl Waku {
                 github_browsers: HashMap::new(),
                 projects_page: None,
                 projects_page_states: HashMap::new(),
+                missing_projects: HashSet::new(),
+                project_location_generation: Cell::new(0),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 working_indicator_session: Cell::new(None),
@@ -4116,6 +4129,9 @@ impl Waku {
             // And the header's "open project in app" targets, so its menu
             // lists installed apps and icons without ever probing on a frame.
             this.detect_open_in_apps(cx);
+            // Reconcile project paths with the filesystem: bookmark backfill,
+            // rename auto-heal, and missing-folder marking.
+            this.refresh_project_locations(cx);
         });
         entity
     }

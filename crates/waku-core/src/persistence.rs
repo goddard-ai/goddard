@@ -1152,7 +1152,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, bookmark FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1161,15 +1161,17 @@ impl StateStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, Option<Vec<u8>>>(4)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
-            .filter_map(|(id, name, path, created_at)| {
+            .filter_map(|(id, name, path, created_at, bookmark)| {
                 Some(Project {
                     id: Uuid::parse_str(&id).ok()?,
                     name,
                     path: PathBuf::from(path),
+                    bookmark,
                     created_at: created_at as u64,
                 })
             })
@@ -1398,6 +1400,7 @@ impl StateStore {
                             project.id.to_string(),
                             project.name,
                             project.path.to_string_lossy(),
+                            project.bookmark,
                             position as i64,
                             project.created_at as i64
                         ],
@@ -1852,11 +1855,12 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          archived_at   = excluded.archived_at,
          pinned_at     = excluded.pinned_at";
 
-const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at)
-     VALUES(?1, ?2, ?3, ?4, ?5)
+const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, bookmark, position, created_at)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
+         bookmark   = excluded.bookmark,
          position   = excluded.position,
          created_at = excluded.created_at";
 

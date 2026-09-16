@@ -299,6 +299,42 @@ pub fn delete_branches(
     Ok(failures)
 }
 
+/// `git worktree repair`: re-link administrative files after the main
+/// checkout or its linked worktrees moved. `paths` are the linked
+/// worktrees' current roots — passed explicitly so Git can update stale
+/// `gitdir` records — while the trailing bare repair rewrites each linked
+/// worktree's `.git` file to point back at the main checkout.
+pub fn repair_worktrees(cwd: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
+    // Only a registered worktree root can be repaired: a linked worktree's
+    // `.git` is a file, never the repository's `.git` directory.
+    let existing: Vec<PathBuf> = paths
+        .iter()
+        .filter(|path| path.join(".git").is_file())
+        .cloned()
+        .collect();
+    if !existing.is_empty() {
+        let output = crate::command_env::plain_command("git")
+            .arg("worktree")
+            .arg("repair")
+            .args(&existing)
+            .current_dir(cwd)
+            .output()
+            .context("failed to execute git worktree repair")?;
+        if !output.status.success() {
+            bail!("{}", command_error(&output));
+        }
+    }
+    let output = crate::command_env::plain_command("git")
+        .args(["worktree", "repair"])
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git worktree repair")?;
+    if !output.status.success() {
+        bail!("{}", command_error(&output));
+    }
+    Ok(())
+}
+
 /// `git worktree prune`: drop registrations whose directories were deleted
 /// outside the app.
 pub fn prune_worktrees(cwd: &Path) -> anyhow::Result<()> {

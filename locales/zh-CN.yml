@@ -480,6 +480,11 @@ project.default_folder: 默认文件夹
 project.project_lower: 项目
 project.without_a_project: 不使用项目
 project.your_project: 你的项目
+project.folder_missing: 找不到文件夹
+project.locate: 定位文件夹…
+project.locate_prompt: 定位 %{name}
+project.relocated: "%{name} 已跟随重命名后的文件夹"
+project.relocated_to: 已重新定位到 %{path}
 
 projects.title: 项目
 projects.tab_worktrees: 工作树
@@ -888,6 +893,9 @@ sync.command_hint: "在终端中运行 %{command}"
 terminal.starting: 正在启动终端…
 project.add_project: 添加项目
 errors.remote_project_picker: 添加守护进程主机上的项目需要远程路径选择器，但该功能尚不可用
+errors.remote_project_locate: 定位守护进程主机上的项目需要远程路径选择器，但该功能尚不可用
+errors.project_folder_missing: 找不到 %{name} 的文件夹 — 请定位该文件夹以运行此任务
+errors.project_path_in_use: 该文件夹已作为 %{name} 添加
 session.stopped: 已停止
 session.turn_completed: 本轮已完成
 session.turn_waiting_background: 正在等待后台任务

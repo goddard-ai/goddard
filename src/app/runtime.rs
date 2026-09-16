@@ -3586,6 +3586,30 @@ impl Waku {
             return;
         };
         let projectless = project.is_projectless();
+        // A renamed or deleted folder would surface as an opaque spawn or
+        // Git failure in `prepare_submission`. A submission is a one-shot
+        // user action, so one synchronous stat is the cheapest correct
+        // check — and it catches folders that went missing after the last
+        // reconciliation pass.
+        if !projectless && !self.daemon.is_remote() && !project.path.is_dir() {
+            self.missing_projects.insert(project_id);
+            if selected {
+                self.restore_composer_submission(submission, cx);
+            }
+            self.show_toast_with_tone(
+                tr!(
+                    "errors.project_folder_missing",
+                    name = project.display_name()
+                ),
+                ToastTone::Alert,
+                Some(ToastAction {
+                    label: tr!("project.locate").into(),
+                    kind: ToastActionKind::RelocateProject(project_id),
+                }),
+            );
+            cx.notify();
+            return;
+        }
         // Busy is visible before any Git work begins. The separate transient
         // set keeps this non-cancellable phase visually distinct from a
         // connecting provider, whose runtime already has a working Stop path.

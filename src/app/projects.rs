@@ -1251,18 +1251,23 @@ impl Waku {
         } else {
             state.tab
         };
-        let content = match tab {
-            ProjectsTab::Worktrees | ProjectsTab::Branches => {
-                self.render_projects_table(project_id, window, cx)
-            }
-            tab => {
-                let github_tab = tab.github_tab().unwrap_or(github::GitHubTab::PullRequests);
-                let filter = self
-                    .projects_page_states
-                    .get(&project_id)
-                    .map(|state| state.filter_text(tab, cx))
-                    .unwrap_or_default();
-                self.render_github_list(project_id, github_tab, &filter, window, cx)
+        let missing = self.missing_projects.contains(&project_id);
+        let content = if missing {
+            self.render_projects_missing(project_id, cx)
+        } else {
+            match tab {
+                ProjectsTab::Worktrees | ProjectsTab::Branches => {
+                    self.render_projects_table(project_id, window, cx)
+                }
+                tab => {
+                    let github_tab = tab.github_tab().unwrap_or(github::GitHubTab::PullRequests);
+                    let filter = self
+                        .projects_page_states
+                        .get(&project_id)
+                        .map(|state| state.filter_text(tab, cx))
+                        .unwrap_or_default();
+                    self.render_github_list(project_id, github_tab, &filter, window, cx)
+                }
             }
         };
 
@@ -1287,11 +1292,78 @@ impl Waku {
                     .px(px(PROJECTS_CONTENT_MARGIN))
                     .flex()
                     .flex_col()
-                    .child(self.render_projects_toolbar(project_id, tab, cx))
+                    .when(!missing, |element| {
+                        element.child(self.render_projects_toolbar(project_id, tab, cx))
+                    })
                     .child(content)
                     .children(self.render_projects_bulk_bar(project_id, cx))
                     .child(self.render_projects_composer(project_id, cx)),
             )
+            .into_any_element()
+    }
+
+    /// The page's missing-folder state: what the reconciliation pass found,
+    /// the stale path it recorded, and the picker that repoints the project.
+    fn render_projects_missing(&mut self, project_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let path = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| {
+                settings::abbreviate_home_path(&project.path, self.home_directory.as_deref())
+            })
+            .unwrap_or_default();
+        let locate = div()
+            .id("projects-locate-folder")
+            .tab_index(0)
+            .h(px(30.0))
+            .px(px(14.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .cursor_default()
+            .bg(theme.inverse)
+            .text_color(theme.on_inverse)
+            .text_size(sp(12.5))
+            .font_weight(FontWeight::SEMIBOLD)
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .hover(|element| element.opacity(0.9))
+            .active(|element| element.opacity(0.8))
+            .child(tr!("project.locate"))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.relocate_project(project_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.relocate_project(project_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        div()
+            .flex_1()
+            .min_h_0()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(10.0))
+            .child(icon("icons/folder.svg", 16.0, theme.text_tertiary))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("project.folder_missing")),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(path),
+            )
+            .child(locate)
             .into_any_element()
     }
 

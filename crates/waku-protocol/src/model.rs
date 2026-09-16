@@ -782,6 +782,10 @@ pub struct Project {
     pub id: Uuid,
     pub name: String,
     pub path: PathBuf,
+    /// Finder-bookmark data that re-resolves the folder after a rename or
+    /// same-volume move. `None` where the platform API is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bookmark: Option<Vec<u8>>,
     /// When the project was added, unix seconds.
     #[serde(default)]
     pub created_at: u64,
@@ -879,6 +883,7 @@ impl Project {
             id: Uuid::new_v4(),
             name,
             path,
+            bookmark: None,
             created_at: unix_time(),
         }
     }

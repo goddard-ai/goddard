@@ -2,6 +2,11 @@
 
 export type Project = { id: string, name: string, path: string,
 /**
+ * Finder-bookmark data that re-resolves the folder after a rename or
+ * same-volume move. `None` where the platform API is unavailable.
+ */
+bookmark?: Array<number> | null,
+/**
  * When the project was added, unix seconds.
  */
 created_at: number, };
