@@ -1621,6 +1621,9 @@ pub struct Waku {
     /// Stable keyboard focus for each session row's hover-revealed archive
     /// control.
     sidebar_session_archive_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
+    /// Stable keyboard focus for each session row's hover-revealed pin
+    /// control.
+    sidebar_session_pin_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     /// Stable keyboard focus for each virtualized project-history reveal row.
     sidebar_show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     sidebar_visible: bool,
@@ -3831,6 +3834,7 @@ impl Waku {
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
+                sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
                 sidebar_visible,
                 sidebar_width,

@@ -3273,6 +3273,66 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }));
+        let pin_focus = self
+            .sidebar_session_pin_focuses
+            .borrow_mut()
+            .entry(session_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // The pin control shares the archive control's reveal: zero-width
+        // until the row is hovered or the button takes keyboard focus.
+        let pin_button = div()
+            .id(SharedString::from(format!("session-pin-{session_id}")))
+            .track_focus(&pin_focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
+                if pinned {
+                    tr!("session.unpin")
+                } else {
+                    tr!("session.pin")
+                },
+                &ToggleSessionPin,
+            ))
+            .child(icon(
+                if pinned {
+                    "icons/pin-filled.svg"
+                } else {
+                    "icons/pin.svg"
+                },
+                12.0,
+                theme.text_secondary,
+            ))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.toggle_session_pin(session_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_session_pin(session_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
         div()
             .group(group_name.clone())
             .w_full()
@@ -3300,7 +3360,9 @@ impl Waku {
                                 .child(indicator),
                         )
                     })
-                    .when(!shortcut_hint, |element| element.child(archive_button)),
+                    .when(!shortcut_hint, |element| {
+                        element.child(archive_button).child(pin_button)
+                    }),
             )
             .child(
                 div()
@@ -3410,17 +3472,6 @@ impl Waku {
                             )
                         },
                     )
-                    .when(pinned && !shortcut_hint, |element| {
-                        element.child(icon(
-                            "icons/pin-filled.svg",
-                            12.0,
-                            if session.is_busy() {
-                                theme.text_tertiary
-                            } else {
-                                theme.text_ghost
-                            },
-                        ))
-                    })
                     .when_some(
                         session_time_label(session, unix_time()).filter(|_| !shortcut_hint),
                         |element, label| {
