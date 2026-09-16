@@ -200,16 +200,27 @@ pub fn abort_sync(cwd: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Whether a rebase or merge stopped on conflicts. `REBASE_HEAD` only exists
-/// while a rebase is in progress; `MERGE_HEAD` likewise for merges.
+/// Whether a rebase or merge stopped on conflicts. Rebase state lives in
+/// the `rebase-merge`/`rebase-apply` directories inside the worktree's git
+/// dir — `REBASE_HEAD` itself lingers after a stopped rebase is continued
+/// to completion, so it cannot stand in for them. `MERGE_HEAD` is removed
+/// when the merge concludes, so the ref check is reliable there.
 fn sync_in_progress(cwd: &Path) -> anyhow::Result<Option<SyncInProgress>> {
-    if ref_exists(cwd, "REBASE_HEAD")? {
+    if git_path_exists(cwd, "rebase-merge")? || git_path_exists(cwd, "rebase-apply")? {
         return Ok(Some(SyncInProgress::Rebase));
     }
     if ref_exists(cwd, "MERGE_HEAD")? {
         return Ok(Some(SyncInProgress::Merge));
     }
     Ok(None)
+}
+
+/// Whether `name` exists inside the worktree's git dir. `rev-parse
+/// --git-path` resolves per-worktree metadata, so a linked worktree's own
+/// `rebase-merge` answers correctly.
+fn git_path_exists(cwd: &Path, name: &str) -> anyhow::Result<bool> {
+    let path = git_stdout(cwd, &["rev-parse", "--git-path", name])?;
+    Ok(cwd.join(path).exists())
 }
 
 /// Land the checkout's commits on its base branch: rebase onto it — or merge
@@ -883,6 +894,34 @@ mod tests {
         assert_eq!(
             git_stdout(&worktree, &["status", "--porcelain"]).unwrap(),
             ""
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_after_a_continued_rebase_lands_instead_of_reconflicting() {
+        let (root, repository, worktree) = land_repository();
+        std::fs::write(repository.join("file.txt"), "base changed\n").unwrap();
+        run_git(&repository, &["commit", "-qam", "base changes"]);
+        std::fs::write(worktree.join("file.txt"), "session changed\n").unwrap();
+        run_git(&worktree, &["commit", "-qam", "session changes"]);
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert!(matches!(outcome, LandOutcome::Conflict { .. }));
+
+        // The Resolve in chat path: the agent resolves, continues, and the
+        // rebase finishes — but REBASE_HEAD still resolves.
+        std::fs::write(worktree.join("file.txt"), "resolved\n").unwrap();
+        run_git(&worktree, &["add", "file.txt"]);
+        run_git(&worktree, &["-c", "core.editor=true", "rebase", "--continue"]);
+        assert!(ref_exists(&worktree, "REBASE_HEAD").unwrap());
+
+        let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            LandOutcome::Landed {
+                base: "main".to_owned()
+            }
         );
         std::fs::remove_dir_all(root).ok();
     }
