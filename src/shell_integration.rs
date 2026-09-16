@@ -7,11 +7,14 @@
 //! `Event::Title`. Each report is a sentinel the proxy swallows before it
 //! can rename the surface.
 //!
-//! The hooks install by a `source <script>` line fed as the PTY's first
-//! input — the same mechanism custom commands use — which runs after the
-//! user's rc files, so every hook appends to or precedes user hooks
-//! without replacing them. Shells without a script get no integration and
-//! degrade gracefully: no status icon, no live cwd.
+//! The hooks install through the user's own startup files: a guarded
+//! marker block appended to `.zshrc`/`.bash_profile`/`.bashrc`, or a
+//! `conf.d` snippet for fish, so the `source` never echoes at a waku
+//! prompt the way a typed launch line would. The guard is `$WAKU`, set
+//! only on the PTYs waku spawns for plain shells — every other shell on
+//! the machine skips the block, and the `-f` test keeps a stale path
+//! harmless after an uninstall. Shells without a script get no
+//! integration and degrade gracefully: no status icon, no live cwd.
 
 use std::fs;
 use std::io;
@@ -61,6 +64,8 @@ const ZSH_SCRIPT: &str = r#"# waku shell integration for zsh.
 # any user hook can clobber $?, and returns that status so hooks after it
 # see it too. preexec marks a run in flight so the first prompt does not
 # report a phantom exit.
+(( ${__waku_loaded:-0} )) && return 0
+__waku_loaded=1
 __waku_running=0
 __waku_preexec() {
     __waku_running=1
@@ -85,6 +90,8 @@ const BASH_SCRIPT: &str = r#"# waku shell integration for bash.
 # is still the command's status, and hands it back to later entries via
 # `return`. PS0 supplies the pre-command marker on bash 4.4+; older bash
 # ignores the variable, losing the spinner but keeping cwd and status.
+[[ ${__waku_loaded:-0} -eq 1 ]] && return 0
+__waku_loaded=1
 __waku_precmd() {
     local __waku_status=$?
     builtin printf '\e]2;waku-shell:end:%d\e\\' "$__waku_status"
@@ -152,17 +159,111 @@ fn ensure_script(name: &str, script: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// The launch line installing a shell's hooks, `source <script>` — read
-/// by the interactive shell as its first input, after every rc file. The
-/// line echoes once at the first prompt the way a custom command's does.
-/// `None` for shells with no integration script.
-pub fn launch_line(shell: &Path) -> Option<String> {
-    let (name, script) = script_for(shell)?;
-    let path = ensure_script(name, script).ok()?;
-    Some(format!(
-        "source {}",
-        crate::custom_commands::shell_quote(&path)
-    ))
+const BLOCK_BEGIN: &str = "# >>> waku shell integration >>>";
+const BLOCK_END: &str = "# <<< waku shell integration <<<";
+
+/// The guarded block appended to a POSIX rc file. `$WAKU` is set only on
+/// terminals waku spawns, so every other shell — Terminal.app, SSH, cron
+/// — skips it; the `-f` test makes a stale path a no-op rather than an
+/// error banner at every prompt.
+fn rc_block(script: &Path) -> String {
+    let quoted = crate::custom_commands::shell_quote(script);
+    format!("{BLOCK_BEGIN}\n[[ -n \"$WAKU\" && -f {quoted} ]] && source {quoted}\n{BLOCK_END}\n")
+}
+
+/// `contents` minus any waku block, so installs are idempotent and a
+/// moved script path rewrites the block instead of stacking copies.
+fn strip_block(contents: &str) -> String {
+    let mut kept = String::with_capacity(contents.len());
+    let mut in_block = false;
+    for line in contents.lines() {
+        if line.trim() == BLOCK_BEGIN {
+            in_block = true;
+            continue;
+        }
+        if line.trim() == BLOCK_END {
+            in_block = false;
+            continue;
+        }
+        if !in_block {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    kept
+}
+
+fn install_rc_block(path: &Path, block: &str) -> io::Result<()> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let mut updated = strip_block(&existing).trim_end().to_string();
+    if !updated.is_empty() {
+        updated.push('\n');
+    }
+    updated.push_str(block);
+    if updated == existing {
+        return Ok(());
+    }
+    fs::write(path, updated)
+}
+
+/// zsh reads `$ZDOTDIR/.zshrc` when `ZDOTDIR` is set. The app's own
+/// environment only carries it for users who export it session-wide —
+/// ones set inside `.zshenv` are invisible here and get the plain `~`
+/// path, which their zsh then ignores. That misses them; the launch line
+/// did not. Accepted: `ZDOTDIR` set in `.zshenv` is rare and the failure
+/// is silent degradation, not breakage.
+fn zsh_rc_path() -> Option<PathBuf> {
+    let directory = std::env::var_os("ZDOTDIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)?;
+    Some(directory.join(".zshrc"))
+}
+
+/// Install the integration so the next spawned shell picks it up
+/// silently — no typed `source` line, nothing echoed at the prompt.
+/// Returns `true` when the shell has an integration and the caller
+/// should export `WAKU=1` to the PTY so the rc guard passes.
+pub fn install(shell: &Path) -> bool {
+    let Some((name, script)) = script_for(shell) else {
+        return false;
+    };
+    let Ok(script_path) = ensure_script(name, script) else {
+        return false;
+    };
+    match name {
+        "waku-integration.zsh" => zsh_rc_path()
+            .is_some_and(|rc| install_rc_block(&rc, &rc_block(&script_path)).is_ok()),
+        "waku-integration.bash" => dirs::home_dir().is_some_and(|home| {
+            // waku spawns `bash -l`, which reads `.bash_profile` and skips
+            // `.bashrc`; nested interactive shells do the reverse. Both get
+            // the block — the script's `__waku_loaded` guard makes a second
+            // source in the same shell a no-op.
+            let block = rc_block(&script_path);
+            install_rc_block(&home.join(".bash_profile"), &block).is_ok()
+                && install_rc_block(&home.join(".bashrc"), &block).is_ok()
+        }),
+        // conf.d snippets are sourced at every fish startup, so a single
+        // file under waku control needs no edit of user-owned config.
+        "waku-integration.fish" => dirs::home_dir().is_some_and(|home| {
+            let snippet = home
+                .join(".config/fish/conf.d")
+                .join("waku-integration.fish");
+            let contents = format!(
+                "# waku shell integration — delete this file to disable.\nstatus is-interactive; and set -q WAKU; and source {}\n",
+                crate::custom_commands::shell_quote(&script_path)
+            );
+            fs::create_dir_all(snippet.parent().unwrap_or(&home))
+                .and_then(|()| {
+                    if fs::read(&snippet).is_ok_and(|old| old == contents.as_bytes()) {
+                        return Ok(());
+                    }
+                    fs::write(&snippet, contents)
+                })
+                .is_ok()
+        }),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -192,6 +293,18 @@ mod tests {
         assert!(parse_report("waku-shell:unknown").is_none());
         // A custom command's exit sentinel stays a title, not a report.
         assert!(parse_report("waku-command-exit:0").is_none());
+    }
+
+    #[test]
+    fn strip_block_removes_only_the_waku_block() {
+        let contents = "export EDITOR=vim\n# >>> waku shell integration >>>\n[[ -n \"$WAKU\" ]] && source '/a/b.zsh'\n# <<< waku shell integration <<<\nalias ll='ls -l'\n";
+        assert_eq!(
+            strip_block(contents),
+            "export EDITOR=vim\nalias ll='ls -l'\n"
+        );
+        // An unterminated block eats to EOF; a file without one is untouched.
+        assert_eq!(strip_block("a\n# >>> waku shell integration >>>\nb\n"), "a\n");
+        assert_eq!(strip_block("a\nb\n"), "a\nb\n");
     }
 
     #[test]

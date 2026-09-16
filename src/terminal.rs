@@ -376,11 +376,11 @@ impl TerminalSession {
             proxy.clone(),
         )));
 
-        let (shell, startup_line) = match launch {
+        let (shell, startup_line, shell_integration) = match launch {
             TerminalLaunch::Shell => {
                 let shell = crate::command_env::default_terminal_shell();
-                let startup_line = crate::shell_integration::launch_line(&shell);
-                (shell, startup_line)
+                let installed = crate::shell_integration::install(&shell);
+                (shell, None, installed)
             }
             TerminalLaunch::CustomCommand(command) => {
                 let shell = crate::custom_commands::command_shell(command);
@@ -391,7 +391,7 @@ impl TerminalSession {
                     &script_path,
                     command.close_on_success,
                 );
-                (shell, Some(line))
+                (shell, Some(line), false)
             }
         };
         let shell_args = crate::command_env::default_terminal_shell_args(&shell);
@@ -403,6 +403,11 @@ impl TerminalSession {
         };
         options.env.insert("TERM".into(), "xterm-256color".into());
         options.env.insert("COLORTERM".into(), "truecolor".into());
+        if shell_integration {
+            // The rc block the integration installs keys on $WAKU so only
+            // waku-spawned shells source the script.
+            options.env.insert("WAKU".into(), "1".into());
+        }
         if let Some(path) = crate::command_env::executable_search_path() {
             options
                 .env
