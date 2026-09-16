@@ -40,10 +40,10 @@ Options:
   --local                       Accepted for CI clarity; all builds are local
   --output <path>               DMG output path (default: dist/Goddard-<version>.dmg)
   --signing-identity <name>     Developer ID Application identity selector
-                                (or WAKU_SIGNING_IDENTITY; required unless --adhoc)
+                                (or GODDARD_SIGNING_IDENTITY; required unless --adhoc)
   --notary-profile <name>       notarytool keychain profile
-                                (default: NOTARY; or WAKU_NOTARY_PROFILE)
-  --build-number <number>       CFBundleVersion override (or WAKU_BUILD_NUMBER;
+                                (default: NOTARY; or GODDARD_NOTARY_PROFILE)
+  --build-number <number>       CFBundleVersion override (or GODDARD_BUILD_NUMBER;
                                 default derives a monotonic number from the
                                 Cargo version)
   --volume-name <name>          Mounted DMG name (default: Goddard)
@@ -54,11 +54,11 @@ Options:
   --help                        Show this help
 
 Environment:
-  WAKU_SIGNING_IDENTITY         Developer ID Application identity selector
-  WAKU_ANALYTICS_ENDPOINT       analytics endpoint embedded at build time
-  WAKU_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
+  GODDARD_SIGNING_IDENTITY         Developer ID Application identity selector
+  GODDARD_ANALYTICS_ENDPOINT       analytics endpoint embedded at build time
+  GODDARD_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
                                 (unset builds compile analytics out)
-  WAKU_DOWNLOAD_URL_PREFIX      base URL the appcast links to
+  GODDARD_DOWNLOAD_URL_PREFIX      base URL the appcast links to
                                 (default: ${defaultDownloadUrlPrefix})
   SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
                                 under ~/Library/Caches/goddard-build/sparkle)
@@ -136,24 +136,24 @@ function derivedBuildNumber(version: string): string {
 const adhoc = values.adhoc ?? false;
 const skipNotarize = values["skip-notarize"] ?? false;
 const configuredSigningIdentity =
-  values["signing-identity"] ?? process.env.WAKU_SIGNING_IDENTITY;
+  values["signing-identity"] ?? process.env.GODDARD_SIGNING_IDENTITY;
 const notaryProfile =
   values["notary-profile"] ??
-  process.env.WAKU_NOTARY_PROFILE ??
+  process.env.GODDARD_NOTARY_PROFILE ??
   defaultNotaryProfile;
 const explicitBuildNumber =
-  values["build-number"] ?? process.env.WAKU_BUILD_NUMBER;
-const analyticsEndpoint = process.env.WAKU_ANALYTICS_ENDPOINT?.trim();
-const analyticsWebsiteId = process.env.WAKU_ANALYTICS_WEBSITE_ID?.trim();
+  values["build-number"] ?? process.env.GODDARD_BUILD_NUMBER;
+const analyticsEndpoint = process.env.GODDARD_ANALYTICS_ENDPOINT?.trim();
+const analyticsWebsiteId = process.env.GODDARD_ANALYTICS_WEBSITE_ID?.trim();
 const downloadUrlPrefix =
-  process.env.WAKU_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
+  process.env.GODDARD_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
 
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
 }
 if (!adhoc && !configuredSigningIdentity) {
   throw new Error(
-    "Set WAKU_SIGNING_IDENTITY or pass --signing-identity (or use --adhoc).",
+    "Set GODDARD_SIGNING_IDENTITY or pass --signing-identity (or use --adhoc).",
   );
 }
 if (explicitBuildNumber && !/^\d+(?:\.\d+){0,2}$/.test(explicitBuildNumber)) {
@@ -163,7 +163,7 @@ if (explicitBuildNumber && !/^\d+(?:\.\d+){0,2}$/.test(explicitBuildNumber)) {
 }
 if (!values["skip-build"] && (!analyticsEndpoint || !analyticsWebsiteId)) {
   console.warn(
-    "WAKU_ANALYTICS_ENDPOINT/WAKU_ANALYTICS_WEBSITE_ID unset — " +
+    "GODDARD_ANALYTICS_ENDPOINT/GODDARD_ANALYTICS_WEBSITE_ID unset — " +
       "building with analytics disabled.",
   );
 }
@@ -377,7 +377,7 @@ try {
       ? "Assembling the app bundle"
       : "Building and assembling the app bundle",
   );
-  await $`env WAKU_CODESIGN_IDENTITY=${identity} WAKU_ANALYTICS_ENDPOINT=${analyticsEndpoint ?? ""} WAKU_ANALYTICS_WEBSITE_ID=${analyticsWebsiteId ?? ""} WAKU_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
+  await $`env GODDARD_CODESIGN_IDENTITY=${identity} GODDARD_ANALYTICS_ENDPOINT=${analyticsEndpoint ?? ""} GODDARD_ANALYTICS_WEBSITE_ID=${analyticsWebsiteId ?? ""} GODDARD_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
   for (const artifact of [
     join(contentsDirectory, "MacOS", executableName),
     bundledDaemonExecutable,

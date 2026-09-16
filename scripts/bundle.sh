@@ -6,11 +6,11 @@ cargo_target_dir="${CARGO_TARGET_DIR:-target}"
 # Shared build cache (see scripts/cache-dir.ts): worktrees share the codesign
 # identity, downloaded SDKs, and compiled helpers instead of resolving them
 # per checkout.
-waku_cache="${WAKU_CACHE_DIR:-$HOME/Library/Caches/goddard-build}"
+waku_cache="${GODDARD_CACHE_DIR:-$HOME/Library/Caches/goddard-build}"
 debug_identity_cache="$waku_cache/codesign/debug-identity"
 codesign_identity_from_environment=0
-if [ -n "${WAKU_CODESIGN_IDENTITY:-}" ]; then
-  codesign_identity="$WAKU_CODESIGN_IDENTITY"
+if [ -n "${GODDARD_CODESIGN_IDENTITY:-}" ]; then
+  codesign_identity="$GODDARD_CODESIGN_IDENTITY"
   codesign_identity_from_environment=1
 else
   if [ "$profile" = "debug" ]; then
@@ -63,7 +63,7 @@ if [ "$profile" = "debug" ] && [ "$codesign_identity_from_environment" = "0" ] &
   printf '%s\n' "$codesign_identity" > "$debug_identity_cache"
 fi
 debug_adhoc_requirement="=designated => identifier \"$bundle_identifier\""
-if [ "${WAKU_SKIP_CARGO_BUILD:-0}" != "1" ]; then
+if [ "${GODDARD_SKIP_CARGO_BUILD:-0}" != "1" ]; then
   if [ "$profile" = "release" ]; then
     cargo build --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
   else

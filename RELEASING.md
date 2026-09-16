@@ -83,7 +83,7 @@ xcrun notarytool store-credentials NOTARY \
 ```
 
 Override the environment with `--signing-identity`, or change the notary
-profile with `--notary-profile` / `WAKU_NOTARY_PROFILE`.
+profile with `--notary-profile` / `GODDARD_NOTARY_PROFILE`.
 
 ### 3. Cloudflare R2 bucket + domain  ← **still to do once**
 
@@ -235,9 +235,9 @@ secrets first:
 
 | Secret | Purpose |
 | --- | --- |
-| `WAKU_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
-| `WAKU_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
-| `WAKU_SIGNING_IDENTITY` | Developer ID identity selector |
+| `GODDARD_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
+| `GODDARD_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
+| `GODDARD_SIGNING_IDENTITY` | Developer ID identity selector |
 | `APPLE_CERTIFICATE` | base64-encoded Developer ID Application `.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | password for that `.p12` |
 | `APPLE_ID` | Apple ID used by `notarytool` |
@@ -258,10 +258,10 @@ secrets first:
 | `--local` | — | accepted for CI clarity; every run is local |
 | `--adhoc`, `--skip-notarize` | — | unsigned/notarization-free test builds |
 | `--skip-build` | — | reuse existing release binaries |
-| `--build-number <n>` / `WAKU_BUILD_NUMBER` | derived | `CFBundleVersion` override |
-| `WAKU_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
+| `--build-number <n>` / `GODDARD_BUILD_NUMBER` | derived | `CFBundleVersion` override |
+| `GODDARD_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
 | `SPARKLE_BIN` | the `~/Library/Caches/goddard-build` copy | Sparkle tools directory |
-| `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; builds without them compile analytics out |
+| `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID` | — | embedded at build time; builds without them compile analytics out |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 
 ---
