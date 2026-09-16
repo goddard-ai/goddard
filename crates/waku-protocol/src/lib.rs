@@ -61,7 +61,8 @@ pub use protocol::{
 pub use settings::DaemonSettings;
 pub use workspace::{
     BranchDeleteFailure, GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary,
-    PullRequestCheck, PullRequestCheckStatus, PullRequestDetail, PullRequestFile,
-    PullRequestReviewDecision, PullRequestState, PullRequestSummary, RepoBranch, RepoWorktree,
-    WorkItemComment, WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
+    PullRequestCheck, PullRequestCheckStatus, PullRequestCommit, PullRequestDetail,
+    PullRequestFile, PullRequestReviewDecision, PullRequestState, PullRequestSummary, RepoBranch,
+    RepoWorktree, WorkItemComment, WorkItemKind, WorkItemQueryState, WorkspaceOperation,
+    WorkspaceResult,
 };

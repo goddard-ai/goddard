@@ -22,12 +22,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font,
+    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Div, Font,
     FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString,
     StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font,
@@ -639,6 +640,13 @@ pub struct Ctx<'a> {
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
+    /// Remote image URL → already-downloaded local file, for surfaces that
+    /// cache media off-thread (the GitHub detail). A miss falls through to
+    /// `image_placeholder`, then to GPUI fetching the URL itself.
+    image_resolver: Option<Rc<dyn Fn(&str) -> Option<PathBuf>>>,
+    /// Element standing in for an image still being fetched. Consulted only
+    /// when `image_resolver` has no answer yet.
+    image_placeholder: Option<Rc<dyn Fn(&str) -> Option<AnyElement>>>,
     /// How many `Annotation N` labels this row can cite — the size of the
     /// annotation set its most recent annotated submission carried. Zero on
     /// rows and surfaces that cannot cite annotations.
@@ -670,6 +678,8 @@ impl<'a> Ctx<'a> {
             selection,
             search: None,
             link_handler: None,
+            image_resolver: None,
+            image_placeholder: None,
             annotation_ref_labels: 0,
             cache: None,
             next_ordinal: Cell::new(0),
@@ -692,6 +702,22 @@ impl<'a> Ctx<'a> {
 
     pub fn with_link_handler(mut self, handler: LinkHandler) -> Self {
         self.link_handler = Some(handler);
+        self
+    }
+
+    /// Map remote image URLs to local files — see `image_resolver`.
+    pub fn with_image_resolver(mut self, resolver: Rc<dyn Fn(&str) -> Option<PathBuf>>) -> Self {
+        self.image_resolver = Some(resolver);
+        self
+    }
+
+    /// Substitute an element for an image whose fetch is still in flight —
+    /// see `image_placeholder`.
+    pub fn with_image_placeholder(
+        mut self,
+        placeholder: Rc<dyn Fn(&str) -> Option<AnyElement>>,
+    ) -> Self {
+        self.image_placeholder = Some(placeholder);
         self
     }
 
@@ -745,6 +771,8 @@ impl<'a> Ctx<'a> {
             selection: self.selection.clone(),
             search: self.search.clone(),
             link_handler: self.link_handler.clone(),
+            image_resolver: self.image_resolver.clone(),
+            image_placeholder: self.image_placeholder.clone(),
             annotation_ref_labels: self.annotation_ref_labels,
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
@@ -1790,32 +1818,16 @@ fn checkbox(checked: bool, ctx: &Ctx) -> AnyElement {
         .into_any_element()
 }
 
-/// An inline image. Data URLs decode in place; anything else is handed to GPUI
-/// to load. The alt text renders beneath as a caption when there is one, so a
-/// failed or slow load still says what it was.
+/// An inline image. Data URLs decode in place; a cached local file wins over
+/// the remote URL when the surface resolved one; a pending fetch paints the
+/// surface's placeholder; anything else is handed to GPUI to load. The alt
+/// text renders beneath as a caption when there is one, so a failed or slow
+/// load still says what it was.
 fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
     const MAX_HEIGHT: f32 = 320.0;
 
-    let key = ctx.next_key();
-    let id = SharedString::from(format!("image-{}-{}", key.row, key.index));
-    let image = match decode_data_url(url) {
-        Some(decoded) => img(decoded).id(id),
-        None => img(url.to_owned()).id(id),
-    };
-    div()
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .gap(px(4.0))
-        .child(
-            image
-                .max_w(relative(1.0))
-                .max_h(px(MAX_HEIGHT))
-                .rounded(px(8.0))
-                .object_fit(gpui::ObjectFit::ScaleDown),
-        )
-        .when(!alt.trim().is_empty(), |element| {
+    let caption = |element: Div| {
+        element.when(!alt.trim().is_empty(), |element| {
             element.child(
                 div()
                     .text_size(px((ctx.metrics.text_size - 2.0).max(12.5)))
@@ -1824,6 +1836,47 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
                     .child(SharedString::from(alt.to_owned())),
             )
         })
+    };
+
+    // The key is consumed before branching so a placeholder → image swap does
+    // not shift later blocks' ordinals.
+    let key = ctx.next_key();
+    let id = SharedString::from(format!("image-{}-{}", key.row, key.index));
+
+    let decoded = decode_data_url(url);
+    let resolved = if decoded.is_none() {
+        ctx.image_resolver.as_ref().and_then(|resolve| resolve(url))
+    } else {
+        None
+    };
+
+    // A fetch in flight gets the surface's placeholder instead of asking GPUI
+    // to race the same URL.
+    if decoded.is_none()
+        && resolved.is_none()
+        && let Some(placeholder) = ctx
+            .image_placeholder
+            .as_ref()
+            .and_then(|placeholder| placeholder(url))
+    {
+        return caption(div().w_full().min_w_0().flex().flex_col().gap(px(4.0)))
+            .child(placeholder)
+            .into_any_element();
+    }
+
+    let image = match (decoded, resolved) {
+        (Some(decoded), _) => img(decoded).id(id),
+        (None, Some(path)) => img(path).id(id),
+        (None, None) => img(url.to_owned()).id(id),
+    };
+    caption(div().w_full().min_w_0().flex().flex_col().gap(px(4.0)))
+        .child(
+            image
+                .max_w(relative(1.0))
+                .max_h(px(MAX_HEIGHT))
+                .rounded(px(8.0))
+                .object_fit(gpui::ObjectFit::ScaleDown),
+        )
         .into_any_element()
 }
 

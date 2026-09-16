@@ -27,6 +27,26 @@ pub(crate) fn gh_output(cwd: &Path, args: &[&OsStr]) -> Option<Output> {
     output.status.success().then_some(output)
 }
 
+/// Run `gh` in `cwd` for a write, failing with the CLI's own stderr wording.
+/// The reads' `None` "host could not answer" contract does not apply here —
+/// a post the user is waiting on must say why it did not land.
+pub(crate) fn gh_write(cwd: &Path, args: &[&OsStr]) -> anyhow::Result<()> {
+    let output = crate::command_env::plain_command("gh")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .context("could not run `gh`")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        if stderr.is_empty() {
+            anyhow::bail!("the GitHub CLI rejected the request");
+        }
+        anyhow::bail!("{stderr}");
+    }
+    Ok(())
+}
+
 /// `gh` timestamps arrive RFC 3339; the wire and everything reading it speaks
 /// unix seconds.
 pub(crate) fn gh_time(value: Option<String>) -> Option<u64> {

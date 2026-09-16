@@ -149,6 +149,14 @@ pub enum WorkItemQueryState {
     All,
 }
 
+/// Issue or pull request — which `gh` noun a work-item operation addresses.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkItemKind {
+    Issue,
+    PullRequest,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum IssueState {
@@ -211,6 +219,19 @@ pub struct PullRequestFile {
     pub deletions: Option<u64>,
 }
 
+/// One commit on a pull request's head branch.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCommit {
+    pub sha: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Unix seconds, matching the other work-item timestamps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_at: Option<u64>,
+}
+
 /// One check run or commit status on a pull request's head. `run_id` is the
 /// Actions run the check belongs to — what `gh run view` needs for its log —
 /// recovered from the check's details URL.
@@ -227,7 +248,8 @@ pub struct PullRequestCheck {
     pub duration_seconds: Option<u64>,
 }
 
-/// A pull request with its body, comment thread, checks, and changed files.
+/// A pull request with its body, comment thread, checks, commits, and
+/// changed files.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestDetail {
@@ -238,6 +260,8 @@ pub struct PullRequestDetail {
     pub comments: Vec<WorkItemComment>,
     #[serde(default)]
     pub checks: Vec<PullRequestCheck>,
+    #[serde(default)]
+    pub commits: Vec<PullRequestCommit>,
     #[serde(default)]
     pub files: Vec<PullRequestFile>,
 }
@@ -667,11 +691,22 @@ pub enum WorkspaceOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         query: Option<String>,
     },
-    /// One pull request with body, comments, checks, and changed files.
+    /// One pull request with body, comments, checks, commits, and changed
+    /// files.
     GetPullRequest {
         #[ts(type = "string")]
         cwd: PathBuf,
         number: u64,
+    },
+    /// Post a comment on an issue or pull request — the GitHub surface's one
+    /// write. Unlike the reads a failure is an error carrying the CLI's own
+    /// wording, since the user is waiting on the result.
+    PostWorkItemComment {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        kind: WorkItemKind,
+        number: u64,
+        body: String,
     },
 }
 

@@ -329,6 +329,22 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::GetPullRequest { cwd, number } => WorkspaceResult::PullRequest {
             detail: crate::pull_requests::view(&cwd, number)?,
         },
+        WorkspaceOperation::PostWorkItemComment {
+            cwd,
+            kind,
+            number,
+            body,
+        } => {
+            match kind {
+                waku_protocol::workspace::WorkItemKind::PullRequest => {
+                    crate::pull_requests::comment(&cwd, number, &body)?
+                }
+                waku_protocol::workspace::WorkItemKind::Issue => {
+                    crate::issues::comment(&cwd, number, &body)?
+                }
+            }
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },

@@ -460,6 +460,15 @@ github.issue_open: オープン
 github.issue_closed: クローズ済み
 github.no_description: 説明はありません。
 github.unknown_author: 不明
+github.comments: コメント
+github.checks: チェック
+github.no_checks: チェックは報告されていません
+github.commits: コミット
+github.no_commits: コミットはありません
+github.more_commits: "… ほか {count} 件"
+github.comment_placeholder: コメントを書く
+github.post_comment: コメントを送信
+github.loading_media: メディアを読み込み中…
 
 project.new_project: 新規プロジェクト…
 project.no_project: プロジェクトを使用しない

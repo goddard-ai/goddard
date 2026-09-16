@@ -3,7 +3,7 @@
 //! Same contract as `pull_requests`: `None` is "the host could not answer",
 //! an empty `Some` is "the host checked and found nothing".
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -70,6 +70,15 @@ pub fn view(cwd: &Path, number: u64) -> anyhow::Result<Option<IssueDetail>> {
     };
     let entry: GhIssue = parse_gh_stdout(&output, "gh issue view")?;
     Ok(entry.into_detail())
+}
+
+/// Post a top-level comment — `gh issue comment <number> --body <body>`.
+pub fn comment(cwd: &Path, number: u64, body: &str) -> anyhow::Result<()> {
+    let number = number.to_string();
+    crate::github::gh_write(
+        cwd,
+        &["issue", "comment", &number, "--body", body].map(OsStr::new),
+    )
 }
 
 #[derive(Deserialize)]

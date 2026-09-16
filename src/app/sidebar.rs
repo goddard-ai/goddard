@@ -524,7 +524,7 @@ pub(super) fn sidebar_check_status_color(
     }
 }
 
-fn sidebar_check_status_label(status: waku_client::PullRequestCheckStatus) -> String {
+pub(super) fn sidebar_check_status_label(status: waku_client::PullRequestCheckStatus) -> String {
     match status {
         waku_client::PullRequestCheckStatus::Passing => {
             tr!("sidebar.pull_request_checks_passing")

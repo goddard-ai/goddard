@@ -9,13 +9,13 @@
 //! them in.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::*;
 use waku_client::{
-    GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary, PullRequestDetail,
-    PullRequestSummary, WorkItemComment, WorkItemQueryState,
+    GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary, PullRequestCheck,
+    PullRequestCommit, PullRequestDetail, PullRequestSummary, WorkItemComment, WorkItemQueryState,
 };
 
 /// The list the browser is showing.
@@ -109,12 +109,46 @@ pub(super) struct GitHubBrowser {
     /// Parsed markdown per detail body/comment, keyed `body` / `comment-<i>`.
     pub markdown: RefCell<HashMap<Rc<str>, MarkdownView>>,
     pub markdown_selection: TranscriptSelection,
+    /// The comment composer docked at the foot of an open detail's thread.
+    pub comment_input: Entity<TextInput>,
+    /// Details with a comment post in flight — the composer's send spins.
+    pub comment_posting: HashSet<GitHubDetailRef>,
+    /// A failed post's message per detail, shown under the composer. The
+    /// typed text stays in the field.
+    pub comment_post_errors: HashMap<GitHubDetailRef, String>,
+    /// Unsent composer text per detail — GitHub keeps a draft per thread, so
+    /// navigating away and back does not lose or leak it.
+    pub comment_drafts: HashMap<GitHubDetailRef, String>,
+    /// Remote media URL → downloaded file, filled by background fetches so
+    /// render only ever paints what already landed.
+    pub media_paths: Rc<RefCell<HashMap<String, PathBuf>>>,
+    /// Media URLs whose download is in flight — the renderer's placeholder
+    /// signal.
+    pub media_loading: Rc<RefCell<HashSet<String>>>,
 }
 
 const GITHUB_LIST_ROW_HEIGHT: f32 = 30.0;
 
 impl GitHubBrowser {
-    pub(super) fn new(cx: &mut Context<Waku>) -> Self {
+    pub(super) fn new(project_id: Uuid, window: &mut Window, cx: &mut Context<Waku>) -> Self {
+        let comment_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .placeholder(tr!("github.comment_placeholder"))
+                .multi_line()
+                .auto_height()
+                .submit_on_enter()
+                .max_lines(6)
+                .clear_on_escape()
+        });
+        cx.subscribe(
+            &comment_input,
+            move |this: &mut Waku, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Submit(_)) {
+                    this.github_submit_comment(project_id, cx);
+                }
+            },
+        )
+        .detach();
         Self {
             query_state: WorkItemQueryState::Open,
             repo: None,
@@ -132,6 +166,12 @@ impl GitHubBrowser {
             generation: 0,
             markdown: RefCell::new(HashMap::new()),
             markdown_selection: TranscriptSelection::default(),
+            comment_input,
+            comment_posting: HashSet::new(),
+            comment_post_errors: HashMap::new(),
+            comment_drafts: HashMap::new(),
+            media_paths: Rc::new(RefCell::new(HashMap::new())),
+            media_loading: Rc::new(RefCell::new(HashSet::new())),
         }
     }
 }
@@ -214,24 +254,32 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                let Some(browser) = waku.github_browsers.get_mut(&project_id) else {
-                    return;
-                };
-                if browser.generation != generation {
-                    return;
+                let mut media_detail = None;
+                {
+                    let Some(browser) = waku.github_browsers.get_mut(&project_id) else {
+                        return;
+                    };
+                    if browser.generation != generation {
+                        return;
+                    }
+                    let (repo, pull_requests, issues, detail) = resolved;
+                    if let Some(repo) = repo {
+                        browser.repo = Some(repo);
+                    }
+                    browser.pull_requests = GitHubFetch::Loaded(pull_requests.map(Rc::new));
+                    browser.issues = GitHubFetch::Loaded(issues.map(Rc::new));
+                    if let Some((detail_ref, value)) = detail {
+                        let fetched = value.map(Rc::new);
+                        media_detail = fetched.clone();
+                        browser
+                            .details
+                            .insert(detail_ref, GitHubFetch::Loaded(fetched));
+                    }
+                    cx.notify();
                 }
-                let (repo, pull_requests, issues, detail) = resolved;
-                if let Some(repo) = repo {
-                    browser.repo = Some(repo);
+                if let Some(detail) = media_detail {
+                    waku.github_queue_media(project_id, &detail, cx);
                 }
-                browser.pull_requests = GitHubFetch::Loaded(pull_requests.map(Rc::new));
-                browser.issues = GitHubFetch::Loaded(issues.map(Rc::new));
-                if let Some((detail_ref, value)) = detail {
-                    browser
-                        .details
-                        .insert(detail_ref, GitHubFetch::Loaded(value.map(Rc::new)));
-                }
-                cx.notify();
             });
         })
         .detach();
@@ -273,12 +321,209 @@ impl Waku {
             // No generation check: bumping the refresh generation here would
             // discard list results still in flight.
             let _ = waku.update(cx, |waku, cx| {
+                if let Some(value) = &value {
+                    waku.github_queue_media(project_id, value, cx);
+                }
                 if let Some(browser) = waku.github_browsers.get_mut(&project_id) {
                     browser
                         .details
                         .insert(detail, GitHubFetch::Loaded(value.map(Rc::new)));
                     cx.notify();
                 }
+            });
+        })
+        .detach();
+    }
+
+    /// Refetch one detail in place — after a comment posts, the stale copy
+    /// stays on screen until the fresh one lands instead of dropping back to
+    /// the loader.
+    fn github_refresh_detail(
+        &mut self,
+        project_id: Uuid,
+        detail: GitHubDetailRef,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cwd) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let value = cx
+                .background_executor()
+                .spawn(async move { github_fetch_detail(&workspace, &cwd, detail) })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                // A failed refetch keeps the stale detail — replacing a
+                // readable thread with "unavailable" is worse than one
+                // out-of-date comment list.
+                let Some(value) = value else {
+                    return;
+                };
+                let content = Rc::new(value);
+                waku.github_queue_media(project_id, &content, cx);
+                if let Some(browser) = waku.github_browsers.get_mut(&project_id) {
+                    browser
+                        .details
+                        .insert(detail, GitHubFetch::Loaded(Some(content)));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Post the composer's comment to the open detail, then refetch it so
+    /// the thread shows the new comment. A failure lands beside the composer
+    /// rather than losing the typed text.
+    fn github_submit_comment(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(browser) = self.github_browsers.get(&project_id) else {
+            return;
+        };
+        let Some(detail) = browser.detail else {
+            return;
+        };
+        let body = browser.comment_input.read(cx).content().trim().to_owned();
+        if body.is_empty() || browser.comment_posting.contains(&detail) {
+            return;
+        }
+        let Some(cwd) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let kind = match detail.kind {
+            GitHubItemKind::PullRequest => waku_client::WorkItemKind::PullRequest,
+            GitHubItemKind::Issue => waku_client::WorkItemKind::Issue,
+        };
+        let Some(browser) = self.github_browsers.get_mut(&project_id) else {
+            return;
+        };
+        browser.comment_posting.insert(detail);
+        browser.comment_post_errors.remove(&detail);
+        cx.notify();
+
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let submitted = body.clone();
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    workspace.request(waku_client::WorkspaceOperation::PostWorkItemComment {
+                        cwd,
+                        kind,
+                        number: detail.number,
+                        body,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let posted = result.is_ok();
+                if let Some(browser) = waku.github_browsers.get_mut(&project_id) {
+                    browser.comment_posting.remove(&detail);
+                    match result {
+                        Ok(_) => {
+                            // Clear only the text actually posted — a user
+                            // who kept typing while the request flew keeps
+                            // the newer draft. The stashed draft clears too:
+                            // it is the same text.
+                            browser.comment_drafts.remove(&detail);
+                            if browser.detail == Some(detail)
+                                && browser.comment_input.read(cx).content().trim() == submitted
+                            {
+                                browser
+                                    .comment_input
+                                    .update(cx, |input, cx| input.clear(cx));
+                            }
+                        }
+                        Err(error) => {
+                            browser
+                                .comment_post_errors
+                                .insert(detail, error.to_string());
+                        }
+                    }
+                }
+                if posted {
+                    waku.github_refresh_detail(project_id, detail, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Kick background downloads for the remote media in a detail's body and
+    /// comments. Render resolves each URL through `media_paths`; a miss
+    /// while `media_loading` holds the URL paints a placeholder.
+    fn github_queue_media(
+        &mut self,
+        project_id: Uuid,
+        detail: &GitHubItemDetail,
+        cx: &mut Context<Self>,
+    ) {
+        let mut urls = Vec::new();
+        let mut collect = |text: &str| {
+            urls.extend(github_media::media_urls(&github_media::clean(text)));
+        };
+        match detail {
+            GitHubItemDetail::PullRequest(pr) => {
+                if let Some(body) = &pr.body {
+                    collect(body);
+                }
+                for comment in &pr.comments {
+                    collect(&comment.body);
+                }
+            }
+            GitHubItemDetail::Issue(issue) => {
+                if let Some(body) = &issue.body {
+                    collect(body);
+                }
+                for comment in &issue.comments {
+                    collect(&comment.body);
+                }
+            }
+        }
+        let Some(browser) = self.github_browsers.get(&project_id) else {
+            return;
+        };
+        let urls: Vec<String> = urls
+            .into_iter()
+            .filter(|url| {
+                !browser.media_paths.borrow().contains_key(url)
+                    && browser.media_loading.borrow_mut().insert(url.clone())
+            })
+            .collect();
+        if urls.is_empty() {
+            return;
+        }
+        cx.spawn(async move |waku, cx| {
+            let requested = urls.clone();
+            let loaded = cx
+                .background_executor()
+                .spawn(async move { github_media::cache(urls) })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(browser) = waku.github_browsers.get(&project_id) else {
+                    return;
+                };
+                {
+                    let mut loading = browser.media_loading.borrow_mut();
+                    for url in requested {
+                        loading.remove(&url);
+                    }
+                }
+                browser.media_paths.borrow_mut().extend(loaded);
+                cx.notify();
             });
         })
         .detach();
@@ -295,6 +540,26 @@ impl Waku {
         let Some(browser) = self.github_browsers.get_mut(&project_id) else {
             return;
         };
+        if browser.detail != Some(detail) {
+            // Swap composer drafts: stash the outgoing thread's text, restore
+            // the incoming one — a draft belongs to its thread, not the view.
+            if let Some(previous) = browser.detail {
+                let text = browser.comment_input.read(cx).content().to_owned();
+                if text.is_empty() {
+                    browser.comment_drafts.remove(&previous);
+                } else {
+                    browser.comment_drafts.insert(previous, text);
+                }
+            }
+            let draft = browser
+                .comment_drafts
+                .get(&detail)
+                .cloned()
+                .unwrap_or_default();
+            browser
+                .comment_input
+                .update(cx, |input, cx| input.set_content(draft, cx));
+        }
         browser.detail = Some(detail);
         browser.markdown.borrow_mut().clear();
         browser.detail_scroll.set_offset(point(px(0.0), px(0.0)));
@@ -713,6 +978,7 @@ impl Waku {
         let focus = browser.detail_focus.clone();
         let scroll = browser.detail_scroll.clone();
         let scrollbar = browser.detail_scrollbar.clone();
+        let comment_input = browser.comment_input.clone();
         let markdown_selection = browser.markdown_selection.clone();
         let selection_for_input = markdown_selection.clone();
 
@@ -755,6 +1021,12 @@ impl Waku {
                     .track_scroll(&scroll)
                     .track_focus(&focus)
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        // Caret motion and escape belong to the comment field
+                        // while it is focused — only then do they double as
+                        // detail navigation.
+                        if comment_input.read(cx).focus().is_focused(window) {
+                            return;
+                        }
                         match event.keystroke.key.as_str() {
                             "escape" => {
                                 this.github_close_detail(project_id, cx);
@@ -819,6 +1091,8 @@ impl Waku {
             body,
             comments,
             checks_failing,
+            checks,
+            commits,
         ) = match content {
             GitHubItemDetail::PullRequest(pr) => {
                 let summary = &pr.summary;
@@ -836,6 +1110,8 @@ impl Waku {
                     pr.body.clone(),
                     &pr.comments,
                     pr.summary.check_status == Some(waku_client::PullRequestCheckStatus::Failing),
+                    Some(&pr.checks),
+                    Some(&pr.commits),
                 )
             }
             GitHubItemDetail::Issue(issue) => {
@@ -860,6 +1136,8 @@ impl Waku {
                     issue.body.clone(),
                     &issue.comments,
                     false,
+                    None,
+                    None,
                 )
             }
         };
@@ -977,16 +1255,43 @@ impl Waku {
             );
         }
 
+        if let Some(checks) = checks {
+            section = section.child(github_checks_section(checks, &theme));
+        }
+        if let Some(commits) = commits {
+            let repo_url = self
+                .github_browsers
+                .get(&project_id)
+                .and_then(|browser| browser.repo.as_ref())
+                .and_then(|(repo, _)| repo.as_ref())
+                .map(|repo| repo.web_url.clone());
+            section = section.child(github_commits_section(
+                commits,
+                repo_url,
+                crate::fonts::current(cx).code,
+                &theme,
+            ));
+        }
+
+        if !comments.is_empty() {
+            section = section.child(github_section_header(
+                tr!("github.comments"),
+                Some(comments.len()),
+                &theme,
+            ));
+        }
         for (index, comment) in comments.iter().enumerate() {
             section =
                 section.child(self.github_comment_card(project_id, index, comment, &palette, cx));
         }
+        section = section.child(self.github_comment_composer(project_id, detail, cx));
 
         section
     }
 
     /// A markdown block rendered through the transcript engine, cached per
-    /// key so unchanged text never re-parses.
+    /// key so unchanged text never re-parses. GitHub's raw HTML is cleaned
+    /// first, and remote media resolves through the browser's download cache.
     fn github_markdown_section(
         &self,
         project_id: Uuid,
@@ -998,9 +1303,13 @@ impl Waku {
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return div().into_any_element();
         };
+        let text = github_media::clean(text);
         let mut cache = browser.markdown.borrow_mut();
         let view = cache.entry(key.clone()).or_insert_with(MarkdownView::new);
-        view.set_text(text, false);
+        view.set_text(&text, false);
+        let media_paths = browser.media_paths.clone();
+        let media_loading = browser.media_loading.clone();
+        let theme = Theme::current(cx);
         let ctx = MarkdownCtx::new(
             key.to_string(),
             palette,
@@ -1009,7 +1318,14 @@ impl Waku {
         )
         .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
-        .with_link_handler(self.markdown_link_handler.clone());
+        .with_link_handler(self.markdown_link_handler.clone())
+        .with_image_resolver(Rc::new(move |url| media_paths.borrow().get(url).cloned()))
+        .with_image_placeholder(Rc::new(move |url| {
+            media_loading
+                .borrow()
+                .contains(url)
+                .then(|| github_media_placeholder(&theme))
+        }));
         md::render::markdown(view, &ctx).unwrap_or_else(|| div().into_any_element())
     }
 
@@ -1074,6 +1390,105 @@ impl Waku {
                         cx,
                     )),
             )
+    }
+
+    /// The comment box at the foot of the thread — posts through `gh`, spins
+    /// while in flight, and shows the daemon's error beneath itself. Enter
+    /// submits inside the field; the button is a tab stop for the mouse path.
+    fn github_comment_composer(
+        &mut self,
+        project_id: Uuid,
+        detail: GitHubDetailRef,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let Some(browser) = self.github_browsers.get(&project_id) else {
+            return div();
+        };
+        let input = browser.comment_input.clone();
+        let posting = browser.comment_posting.contains(&detail);
+        let error = browser.comment_post_errors.get(&detail).cloned();
+        let has_content = !input.read(cx).content().trim().is_empty();
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .w_full()
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.inset)
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .flex()
+                    .items_end()
+                    .gap(px(8.0))
+                    .child(div().flex_1().min_w_0().child(input))
+                    .child(
+                        div()
+                            .id("github-comment-send")
+                            .w(px(26.0))
+                            .h(px(26.0))
+                            .rounded(px(7.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .tab_index(0)
+                            .tab_stop(true)
+                            .when(has_content && !posting, |element| element.bg(theme.accent))
+                            .when(!has_content || posting, |element| element.bg(theme.overlay))
+                            .hover(|style| {
+                                style.bg(if has_content && !posting {
+                                    theme.accent
+                                } else {
+                                    theme.overlay_strong
+                                })
+                            })
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .tooltip(Tooltip::text(tr!("github.post_comment")))
+                            .child(if posting {
+                                motion::spin(icon(
+                                    "icons/loader-circle.svg",
+                                    13.0,
+                                    theme.text_secondary,
+                                ))
+                            } else {
+                                icon(
+                                    "icons/arrow-up.svg",
+                                    13.0,
+                                    if has_content {
+                                        theme.on_inverse
+                                    } else {
+                                        theme.text_tertiary
+                                    },
+                                )
+                                .into_any_element()
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.github_submit_comment(project_id, cx);
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.github_submit_comment(project_id, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    ),
+            )
+            .when_some(error, |element, error| {
+                element.child(
+                    div()
+                        .px(px(2.0))
+                        .text_size(sp(11.5))
+                        .text_color(theme.danger)
+                        .child(error),
+                )
+            })
     }
 }
 
@@ -1336,6 +1751,240 @@ pub(super) fn github_centered(
                 .text_size(sp(13.0))
                 .text_color(theme.text_secondary)
                 .child(message),
+        )
+        .into_any_element()
+}
+
+/// A small label introducing a detail section — "Checks 4".
+fn github_section_header(label: String, count: Option<usize>, theme: &Theme) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(
+            div()
+                .text_size(sp(12.0))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .when_some(count, |element, count| {
+            element.child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(count.to_string()),
+            )
+        })
+}
+
+/// One check run or commit status per row: status glyph, name, state label
+/// and duration, opening the check's details URL on click. An empty list is
+/// the host's answer, not a missing section — it still says so.
+fn github_checks_section(checks: &[PullRequestCheck], theme: &Theme) -> Div {
+    let section = div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(github_section_header(
+            tr!("github.checks"),
+            Some(checks.len()),
+            theme,
+        ));
+    if checks.is_empty() {
+        return section.child(
+            div()
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(tr!("github.no_checks")),
+        );
+    }
+    checks
+        .iter()
+        .enumerate()
+        .fold(section, |section, (index, check)| {
+            let mut row = div()
+                .id(SharedString::from(format!("github-check-{index}")))
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(2.0))
+                .py(px(3.0))
+                .rounded(px(6.0))
+                .child(icon(
+                    sidebar::sidebar_check_status_icon(check.status),
+                    13.0,
+                    sidebar::sidebar_check_status_color(theme, check.status),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(check.name.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(match check.duration_seconds {
+                            Some(seconds) => github_check_duration(seconds),
+                            None => sidebar::sidebar_check_status_label(check.status),
+                        }),
+                );
+            if let Some(url) = check.url.as_ref().filter(|url| !url.is_empty()) {
+                let url = url.clone();
+                row = row
+                    .cursor_pointer()
+                    .hover(|style| style.bg(theme.overlay))
+                    .on_click(move |_, _, cx| cx.open_url(&url));
+            }
+            section.child(row)
+        })
+}
+
+/// A check duration as `1m 23s` / `45s` — short enough to sit at a row's
+/// trailing edge.
+fn github_check_duration(seconds: u64) -> String {
+    if seconds >= 3600 {
+        format!("{}h {}m", seconds / 3600, seconds % 3600 / 60)
+    } else if seconds >= 60 {
+        format!("{}m {}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+/// The pull request's commits: abbreviated sha, headline, author and age,
+/// opening the commit on the host when the repo URL is known. Long lists are
+/// capped — a 500-commit PR is not a 500-row document.
+fn github_commits_section(
+    commits: &[PullRequestCommit],
+    repo_url: Option<String>,
+    code: SharedString,
+    theme: &Theme,
+) -> Div {
+    const MAX_ROWS: usize = 50;
+
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(github_section_header(
+            tr!("github.commits"),
+            Some(commits.len()),
+            theme,
+        ));
+    if commits.is_empty() {
+        return section.child(
+            div()
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(tr!("github.no_commits")),
+        );
+    }
+    for (index, commit) in commits.iter().take(MAX_ROWS).enumerate() {
+        let mut meta: Vec<String> = Vec::new();
+        if let Some(author) = &commit.author {
+            meta.push(author.clone());
+        }
+        if let Some(authored) = commit.authored_at {
+            meta.push(sidebar::format_time_ago(
+                unix_time().saturating_sub(authored),
+            ));
+        }
+        let mut row = div()
+            .id(SharedString::from(format!("github-commit-{index}")))
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(2.0))
+            .py(px(3.0))
+            .rounded(px(6.0))
+            .child(
+                div()
+                    .flex_none()
+                    .font_family(code.clone())
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .child(commit.sha.chars().take(8).collect::<String>()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text)
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(if commit.message.is_empty() {
+                        commit.sha.chars().take(8).collect()
+                    } else {
+                        commit.message.clone()
+                    }),
+            )
+            .when(!meta.is_empty(), |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .whitespace_nowrap()
+                        .child(meta.join(" · ")),
+                )
+            });
+        if let Some(repo_url) = &repo_url {
+            let url = format!("{repo_url}/commit/{}", commit.sha);
+            row = row
+                .cursor_pointer()
+                .hover(|style| style.bg(theme.overlay))
+                .on_click(move |_, _, cx| cx.open_url(&url));
+        }
+        section = section.child(row);
+    }
+    if commits.len() > MAX_ROWS {
+        section = section.child(
+            div()
+                .text_size(sp(11.5))
+                .text_color(theme.text_tertiary)
+                .child(tr!("github.more_commits", count = commits.len() - MAX_ROWS)),
+        );
+    }
+    section
+}
+
+/// The element standing in for a media URL while its download is in flight —
+/// a spinner in an inset box so the thread already reserves the space.
+fn github_media_placeholder(theme: &Theme) -> AnyElement {
+    div()
+        .w_full()
+        .h(px(120.0))
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.inset)
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(8.0))
+        .child(motion::spin(icon(
+            "icons/loader-circle.svg",
+            14.0,
+            theme.text_tertiary,
+        )))
+        .child(
+            div()
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(tr!("github.loading_media")),
         )
         .into_any_element()
 }

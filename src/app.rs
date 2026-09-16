@@ -2080,6 +2080,7 @@ mod file_finder;
 mod file_search;
 mod git_panel;
 mod github;
+mod github_media;
 mod goal_dialog;
 mod image_preview;
 mod project_switcher;

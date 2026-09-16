@@ -455,6 +455,15 @@ github.issue_open: 开放
 github.issue_closed: 已关闭
 github.no_description: 无描述。
 github.unknown_author: 未知用户
+github.comments: 评论
+github.checks: 检查
+github.no_checks: 未报告任何检查
+github.commits: 提交
+github.no_commits: 没有提交
+github.more_commits: "… 还有 {count} 个"
+github.comment_placeholder: 撰写评论
+github.post_comment: 发表评论
+github.loading_media: 正在加载媒体…
 
 project.new_project: 新建项目…
 project.no_project: 不使用项目

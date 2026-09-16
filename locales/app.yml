@@ -934,6 +934,24 @@ github.no_description:
   en: No description.
 github.unknown_author:
   en: someone
+github.comments:
+  en: Comments
+github.checks:
+  en: Checks
+github.no_checks:
+  en: No checks reported
+github.commits:
+  en: Commits
+github.no_commits:
+  en: No commits
+github.more_commits:
+  en: "… and {count} more"
+github.comment_placeholder:
+  en: Write a comment
+github.post_comment:
+  en: Post comment
+github.loading_media:
+  en: Loading media…
 
 project.new_project:
   en: New project…

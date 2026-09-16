@@ -551,7 +551,7 @@ impl Waku {
             .or_insert_with(|| ProjectsPageState::new(window, cx));
         self.github_browsers
             .entry(project_id)
-            .or_insert_with(|| github::GitHubBrowser::new(cx));
+            .or_insert_with(|| github::GitHubBrowser::new(project_id, window, cx));
     }
 
     /// Switch the page's tab, focusing its filter — a tab's filter is where

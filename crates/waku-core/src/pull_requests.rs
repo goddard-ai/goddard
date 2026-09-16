@@ -5,7 +5,7 @@
 //! — callers render that as "unknown", which is a different answer from an
 //! empty list ("the host checked and found nothing").
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use anyhow::Context as _;
@@ -89,14 +89,17 @@ pub fn list_for_repo(
     ))
 }
 
-/// One pull request with its body, comments, checks, and changed files.
+/// One pull request with its body, comments, checks, commits, and changed
+/// files.
 pub fn view(cwd: &Path, number: u64) -> anyhow::Result<Option<PullRequestDetail>> {
     let args = [
         OsString::from("pr"),
         OsString::from("view"),
         OsString::from(number.to_string()),
         OsString::from("--json"),
-        OsString::from(format!("{PULL_REQUEST_LIST_FIELDS},body,comments,files")),
+        OsString::from(format!(
+            "{PULL_REQUEST_LIST_FIELDS},body,comments,files,commits"
+        )),
     ];
     let arg_refs: Vec<_> = args.iter().map(OsString::as_os_str).collect();
     let Some(output) = gh_output(cwd, &arg_refs) else {
@@ -104,6 +107,15 @@ pub fn view(cwd: &Path, number: u64) -> anyhow::Result<Option<PullRequestDetail>
     };
     let entry: GhPullRequest = parse_gh_stdout(&output, "gh pr view")?;
     Ok(Some(entry.into_detail()))
+}
+
+/// Post a top-level comment — `gh pr comment <number> --body <body>`.
+pub fn comment(cwd: &Path, number: u64, body: &str) -> anyhow::Result<()> {
+    let number = number.to_string();
+    crate::github::gh_write(
+        cwd,
+        &["pr", "comment", &number, "--body", body].map(OsStr::new),
+    )
 }
 
 #[derive(Deserialize)]
@@ -137,6 +149,8 @@ struct GhPullRequest {
     body: Option<String>,
     #[serde(default)]
     comments: Vec<GhComment>,
+    #[serde(default)]
+    commits: Vec<GhPullRequestCommit>,
     #[serde(default)]
     files: Vec<GhPullRequestFile>,
 }
@@ -203,6 +217,11 @@ impl GhPullRequest {
                 .iter()
                 .filter_map(GhCheckRollupEntry::as_check)
                 .collect(),
+            commits: self
+                .commits
+                .into_iter()
+                .map(GhPullRequestCommit::into_commit)
+                .collect(),
             files: self
                 .files
                 .into_iter()
@@ -224,6 +243,35 @@ struct GhPullRequestFile {
     additions: Option<u64>,
     #[serde(default)]
     deletions: Option<u64>,
+}
+
+/// One `commits` entry as `gh pr view` reports it. `messageHeadline` and
+/// author logins can be absent or empty — the UI falls back to the sha.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhPullRequestCommit {
+    oid: String,
+    #[serde(default)]
+    message_headline: Option<String>,
+    #[serde(default)]
+    authored_date: Option<String>,
+    #[serde(default)]
+    authors: Vec<GhUser>,
+}
+
+impl GhPullRequestCommit {
+    fn into_commit(self) -> waku_protocol::workspace::PullRequestCommit {
+        waku_protocol::workspace::PullRequestCommit {
+            sha: self.oid,
+            message: self.message_headline.unwrap_or_default(),
+            author: self
+                .authors
+                .into_iter()
+                .map(|author| author.login)
+                .find(|login| !login.is_empty()),
+            authored_at: gh_time(self.authored_date),
+        }
+    }
 }
 
 /// One `statusCheckRollup` entry. `gh` mixes two shapes in the same list:
