@@ -540,6 +540,7 @@ common.copy_selection: 選択範囲をコピー
 common.copy_to_composer: 入力欄にコピー
 common.copy_code: コードをコピー
 common.copy_expression: 数式をコピー
+common.search_with_google: Google で検索
 common.cancel: キャンセル
 common.send: 送信
 

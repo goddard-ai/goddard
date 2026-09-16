@@ -115,7 +115,7 @@ fn resolve_address(raw: &str) -> Option<AddressTarget> {
     Some(AddressTarget::Url(format!("{scheme}://{trimmed}")))
 }
 
-fn search_url(query: &str) -> String {
+pub(crate) fn search_url(query: &str) -> String {
     let mut encoded = String::with_capacity(query.len() * 3);
     for byte in query.bytes() {
         match byte {

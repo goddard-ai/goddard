@@ -974,12 +974,16 @@ fn message_menu_items(
     let mut items = Vec::new();
 
     if let Some(selected) = selection.selection.borrow().selected_text() {
+        let copy = selected.clone();
         items.push(
             MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(selected.clone()));
+                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
             })
             .shortcut_action(&CopySelection),
         );
+        items.push(MenuItem::new(tr!("common.search_with_google"), move |_, cx| {
+            cx.open_url(&crate::browser::search_url(&selected));
+        }));
     }
 
     let copy_content = content.to_owned();

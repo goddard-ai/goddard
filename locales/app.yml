@@ -1090,6 +1090,8 @@ common.copy_code:
   en: Copy Code
 common.copy_expression:
   en: Copy Expression
+common.search_with_google:
+  en: Search with Google
 common.cancel:
   en: Cancel
 common.send:
