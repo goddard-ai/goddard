@@ -35,6 +35,9 @@ gpui_platform = { git = "https://github.com/goddard-ai/zed", branch = "main", fe
   "font-kit",
   "wayland",
   "x11",
+  # Compiles the Metal shaders at renderer init instead of embedding a
+  # metallib, so builds work without Xcode's metal/metallib toolchain.
+  "runtime_shaders",
 ] }
 parking_lot = "0.12"
 rquickjs = "0.12.2"
