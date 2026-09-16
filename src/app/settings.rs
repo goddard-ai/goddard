@@ -130,6 +130,19 @@ pub(super) struct CustomCommandEditor {
     pub(super) exit_settings_on_save: bool,
 }
 
+/// The Daemon settings page's open remote-host form. Input entities live for
+/// the editor's lifetime rather than being pre-created with the other
+/// settings fields.
+pub(super) struct RemoteHostEditor {
+    /// `Some` when re-pointing an existing record; `None` adds a host.
+    pub(super) id: Option<Uuid>,
+    name: Entity<TextInput>,
+    address: Entity<TextInput>,
+    token: Entity<TextInput>,
+    /// Set when Save was pressed with a blank address or token.
+    missing_fields: bool,
+}
+
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
 pub(super) fn visible_settings_pages(
@@ -1343,6 +1356,86 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn open_remote_host_editor(
+        &mut self,
+        host: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let record = host.and_then(|id| {
+            self.state
+                .remote_hosts
+                .iter()
+                .find(|record| record.id == id)
+        });
+        let name = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("daemon.remote_host_name"))
+                .placeholder(tr!("daemon.remote_host_name_placeholder"));
+            if let Some(name) = record.map(|record| record.name.as_str()) {
+                input.set_content(name, cx);
+            }
+            input
+        });
+        let address = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("daemon.remote_host_address"))
+                .placeholder(tr!("daemon.remote_host_address_placeholder"));
+            if let Some(address) = record.map(|record| record.address.as_str()) {
+                input.set_content(address, cx);
+            }
+            input
+        });
+        let token = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("daemon.remote_host_token"))
+                .placeholder(tr!("daemon.remote_host_token_placeholder"));
+            if let Some(token) = record.map(|record| record.token.as_str()) {
+                input.set_content(token, cx);
+            }
+            input
+        });
+        self.remote_host_editor = Some(RemoteHostEditor {
+            id: host,
+            name: name.clone(),
+            address,
+            token,
+            missing_fields: false,
+        });
+        let focus = name.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    fn save_remote_host_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = &self.remote_host_editor else {
+            return;
+        };
+        let name = editor.name.read(cx).content().trim().to_owned();
+        let address = editor.address.read(cx).content().trim().to_owned();
+        let token = editor.token.read(cx).content().trim().to_owned();
+        if address.is_empty() || token.is_empty() {
+            self.remote_host_editor.as_mut().unwrap().missing_fields = true;
+            cx.notify();
+            return;
+        }
+        let name = if name.is_empty() {
+            address.clone()
+        } else {
+            name
+        };
+        if let Some(id) = editor.id {
+            self.update_remote_host(id, name, address, token, cx);
+        } else {
+            self.add_remote_host(name, address, token, cx);
+        }
+        self.remote_host_editor = None;
+        cx.notify();
+    }
+
     fn render_commands_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let mut column = div()
@@ -1744,6 +1837,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let agent_tools_card = self.agent_tools_card(theme, cx);
         let agent_settings_card = self.agent_settings_card(theme, cx);
+        let remote_hosts_card = self.render_remote_hosts_card(theme, cx);
         if self.daemon.is_externally_managed() {
             return div()
                 .mt(px(15.0))
@@ -1751,6 +1845,7 @@ impl Waku {
                 .flex()
                 .flex_col()
                 .gap(px(12.0))
+                .child(remote_hosts_card)
                 .child(
                     div()
                         .px(px(20.0))
@@ -2283,9 +2378,316 @@ impl Waku {
                         ),
                 )
             })
+            .child(remote_hosts_card)
             .child(agent_tools_card)
             .child(agent_settings_card)
             .into_any_element()
+    }
+
+    /// Saved remote daemons merged into this window's catalog. Each row shows
+    /// the record's live connection state; editing re-points the same id so
+    /// its projects and sessions keep their owner.
+    fn render_remote_hosts_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let mut rows = div().flex().flex_col();
+        for (index, host) in self.state.remote_hosts.iter().enumerate() {
+            let host_id = host.id;
+            let error = self.remote_errors.get(&host_id).cloned();
+            let status = match self
+                .daemons
+                .supervisor(waku_client::DaemonKey::Remote(host_id))
+            {
+                Some(supervisor) => match supervisor.status() {
+                    waku_client::DaemonStatus::Connected => {
+                        (tr!("daemon.phase_connected"), theme.success)
+                    }
+                    waku_client::DaemonStatus::Recovering => {
+                        (tr!("daemon.phase_connecting"), theme.warning)
+                    }
+                    waku_client::DaemonStatus::Unreachable => {
+                        (tr!("daemon.phase_disconnected"), theme.danger)
+                    }
+                },
+                None => match &error {
+                    Some(_) => (tr!("daemon.phase_error"), theme.danger),
+                    None => (tr!("daemon.phase_connecting"), theme.text_tertiary),
+                },
+            };
+            let action_button = |id: SharedString, icon_path: &'static str, label: String| {
+                div()
+                    .id(id)
+                    .tab_index(0)
+                    .size(px(24.0))
+                    .rounded(px(7.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .text_color(theme.text_secondary)
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
+                    .tooltip(Tooltip::text(label))
+                    .child(icon(icon_path, 13.0, theme.text_tertiary))
+            };
+            let edit_button = action_button(
+                SharedString::from(format!("remote-host-edit-{host_id}")),
+                "icons/pencil.svg",
+                tr!("daemon.remote_host_edit"),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_remote_host_editor(Some(host_id), window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.open_remote_host_editor(Some(host_id), window, cx);
+                    cx.stop_propagation();
+                }
+            }));
+            let remove_button = action_button(
+                SharedString::from(format!("remote-host-remove-{host_id}")),
+                "icons/trash.svg",
+                tr!("daemon.remote_host_remove"),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.remove_remote_host(host_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.remove_remote_host(host_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
+            rows = rows.child(
+                div()
+                    .when(index > 0, |element| {
+                        element.border_t(hairline()).border_color(theme.border)
+                    })
+                    .py(px(9.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icon("icons/server.svg", 14.0, theme.text_secondary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(13.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(SharedString::from(host.name.clone())),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .px(px(6.0))
+                                            .py(px(1.0))
+                                            .rounded_full()
+                                            .text_size(sp(11.5))
+                                            .text_color(status.1)
+                                            .bg(theme.overlay)
+                                            .child(status.0),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(1.0))
+                                    .truncate()
+                                    .font_family(crate::fonts::current(cx).code)
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from(host.address.clone())),
+                            )
+                            .when_some(error, |element, error| {
+                                element.child(
+                                    div()
+                                        .mt(px(1.0))
+                                        .whitespace_normal()
+                                        .line_height(sp(15.0))
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.danger)
+                                        .child(SharedString::from(error)),
+                                )
+                            }),
+                    )
+                    .child(edit_button)
+                    .child(remove_button),
+            );
+        }
+
+        let add_button = div()
+            .id("remote-host-add")
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(10.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .hover(|element| element.bg(theme.overlay))
+            .focus_visible(|element| element.border_color(theme.accent))
+            .child(icon("icons/plus.svg", 12.0, theme.text_tertiary))
+            .child(tr!("daemon.remote_host_add"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.open_remote_host_editor(None, window, cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.open_remote_host_editor(None, window, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        let mut card = div()
+            .px(px(20.0))
+            .py(px(15.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("daemon.remote_hosts_title")),
+            )
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .min_w_0()
+                    .whitespace_normal()
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("daemon.remote_hosts_description")),
+            );
+        if let Some(editor) = &self.remote_host_editor {
+            card = card.child(self.render_remote_host_editor(editor, theme, cx));
+        } else {
+            card = card
+                .when(!self.state.remote_hosts.is_empty(), |card| {
+                    card.child(div().mt(px(6.0)).child(rows))
+                })
+                .child(div().mt(px(12.0)).flex().justify_end().child(add_button));
+        }
+        card.into_any_element()
+    }
+
+    fn render_remote_host_editor(
+        &self,
+        editor: &RemoteHostEditor,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let editing = editor.id.is_some();
+        let field_label = |text: String| {
+            div()
+                .mt(px(12.0))
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(text)
+        };
+        let ghost_button = |id: &'static str, label: String| {
+            div()
+                .id(id)
+                .tab_index(0)
+                .h(px(27.0))
+                .px(px(10.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay))
+                .focus_visible(|style| style.border_color(theme.accent))
+                .child(label)
+        };
+        div()
+            .mt(px(12.0))
+            .pt(px(4.0))
+            .border_t(hairline())
+            .border_color(theme.border)
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(if editing {
+                        tr!("daemon.remote_host_edit")
+                    } else {
+                        tr!("daemon.remote_host_new")
+                    }),
+            )
+            .child(field_label(tr!("daemon.remote_host_name")))
+            .child(
+                div()
+                    .mt(px(5.0))
+                    .child(TextField::new("remote-host-name", editor.name.clone()).w_full()),
+            )
+            .child(field_label(tr!("daemon.remote_host_address")))
+            .child(
+                div()
+                    .mt(px(5.0))
+                    .child(TextField::new("remote-host-address", editor.address.clone()).w_full()),
+            )
+            .child(field_label(tr!("daemon.remote_host_token")))
+            .child(
+                div()
+                    .mt(px(5.0))
+                    .child(TextField::new("remote-host-token", editor.token.clone()).w_full()),
+            )
+            .when(editor.missing_fields, |element| {
+                element.child(
+                    div()
+                        .mt(px(6.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.danger)
+                        .child(tr!("daemon.remote_host_required")),
+                )
+            })
+            .child(
+                div()
+                    .mt(px(14.0))
+                    .flex()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .child(
+                        ghost_button("remote-host-cancel", tr!("common.cancel")).on_activation(
+                            cx,
+                            |this, _, cx| {
+                                this.remote_host_editor = None;
+                                cx.notify();
+                            },
+                        ),
+                    )
+                    .child(
+                        ghost_button("remote-host-save", tr!("daemon.remote_host_save"))
+                            .on_activation(cx, |this, _, cx| this.save_remote_host_editor(cx)),
+                    ),
+            )
     }
 
     /// The daemon-scoped opt-in for agent-to-agent commands. Toggling it only

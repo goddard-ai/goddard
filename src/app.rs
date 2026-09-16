@@ -1893,6 +1893,8 @@ pub struct Waku {
     settings_page: Option<SettingsPage>,
     /// The Commands settings page's open editor; `None` shows the list.
     custom_command_editor: Option<settings::CustomCommandEditor>,
+    /// The Daemon page's open remote-host editor; `None` shows the list.
+    remote_host_editor: Option<settings::RemoteHostEditor>,
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -4142,6 +4144,7 @@ impl Waku {
                 scene_overlay_enabled,
                 settings_page: None,
                 custom_command_editor: None,
+                remote_host_editor: None,
                 skills_catalog: None,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,

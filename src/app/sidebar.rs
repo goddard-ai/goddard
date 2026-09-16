@@ -2400,6 +2400,22 @@ impl Waku {
         };
         let folder_missing =
             matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));
+        // Remote projects carry their host's name — and an offline marker
+        // while that host is disconnected — so the merged catalog never
+        // hides which machine a row belongs to.
+        let host_badge = match group {
+            SidebarGroup::Project(project_id) => match self.project_host(project_id) {
+                waku_client::DaemonKey::Remote(host) => self.remote_host_name(host).map(|name| {
+                    if self.remote_host_connected(host) {
+                        format!("· {name}")
+                    } else {
+                        format!("· {name} · {}", tr!("sidebar.offline"))
+                    }
+                }),
+                waku_client::DaemonKey::Local => None,
+            },
+            _ => None,
+        };
         let updated_chevron = matches!(
             group,
             SidebarGroup::Date(_) | SidebarGroup::Pinned | SidebarGroup::Terminals
@@ -2555,6 +2571,14 @@ impl Waku {
                                     .flex_none()
                                     .tooltip(Tooltip::text(tr!("project.folder_missing")))
                                     .child(icon("icons/alert.svg", 11.0, theme.warning)),
+                            )
+                        })
+                        .when_some(host_badge, |element, badge| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .text_color(theme.text_tertiary)
+                                    .child(badge),
                             )
                         })
                         .when_some(updated_chevron, |element, chevron| element.child(chevron)),
@@ -3169,6 +3193,21 @@ impl Waku {
                 },
             ))
         };
+        // Date grouping and Big Picture cards have no project header to carry
+        // the host name, so the detail line wears it. Project grouping leaves
+        // it to the group header's badge.
+        let (detail_label, session_remote) = match self.session_host(session_id) {
+            waku_client::DaemonKey::Remote(host) if !grouped_by_project => {
+                let host_name = self.remote_host_name(host);
+                let label = match (detail_label, host_name) {
+                    (Some(label), Some(host)) => format!("{label} · {host}"),
+                    (None, Some(host)) => host,
+                    (label, None) => label.map(|label| label.to_string()).unwrap_or_default(),
+                };
+                (Some(SharedString::from(label)), true)
+            }
+            _ => (detail_label, false),
+        };
         let has_detail_label = detail_label.is_some();
         let checkout_status = if session.has_started() {
             self.workspace_path_for_session(session)
@@ -3178,6 +3217,8 @@ impl Waku {
         };
         let detail_icon = if grouped_by_project {
             "icons/git-branch.svg"
+        } else if session_remote {
+            "icons/server.svg"
         } else if project.is_some_and(Project::is_projectless) {
             "icons/chat.svg"
         } else {

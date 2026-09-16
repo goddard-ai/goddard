@@ -1482,20 +1482,6 @@ impl Waku {
         }
     }
 
-    /// Whether the composer draft target's owner is a remote host.
-    // Used by the hosts UI in a follow-up commit.
-    #[allow(dead_code)]
-    pub(super) fn is_remote_draft_key(&self, key: crate::persistence::ComposerDraftKey) -> bool {
-        match key {
-            crate::persistence::ComposerDraftKey::Session(session_id) => {
-                self.is_remote_session(session_id)
-            }
-            crate::persistence::ComposerDraftKey::NewSession(project_id) => {
-                self.is_remote_project(project_id)
-            }
-        }
-    }
-
     /// Whether a catalog row lives on another host — true when the row's
     /// owner is a remote host, or when the app itself is bound to a remote
     /// primary daemon (the env-var connection mode, where every row is).
@@ -1551,6 +1537,15 @@ impl Waku {
         }
     }
 
+    /// The saved record still points at what this loop tried — an edited or
+    /// removed record makes an in-flight loop stale, and its attempts must
+    /// not install a supervisor for coordinates the user replaced.
+    fn remote_host_record_matches(&self, host_id: Uuid, address: &str, token: &str) -> bool {
+        self.state.remote_hosts.iter().any(|record| {
+            record.id == host_id && record.address == address && record.token == token
+        })
+    }
+
     fn connect_remote_host(
         &mut self,
         host: waku_client::persistence::RemoteHost,
@@ -1574,23 +1569,26 @@ impl Waku {
                 match attempt {
                     Ok(supervisor) => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.install_remote_daemon(host_id, supervisor, cx)
+                            if waku.remote_host_record_matches(host_id, &host.address, &host.token)
+                            {
+                                waku.install_remote_daemon(host_id, supervisor, cx);
+                            }
                         });
                         return;
                     }
                     Err(error) => {
                         let keep_trying = waku
                             .update(cx, |waku, cx| {
-                                let configured = waku
-                                    .state
-                                    .remote_hosts
-                                    .iter()
-                                    .any(|host| host.id == host_id);
-                                if configured {
+                                let current = waku.remote_host_record_matches(
+                                    host_id,
+                                    &host.address,
+                                    &host.token,
+                                );
+                                if current {
                                     waku.remote_errors.insert(host_id, error.to_string());
                                     cx.notify();
                                 }
-                                configured
+                                current
                             })
                             .unwrap_or(false);
                         if !keep_trying {
@@ -1652,8 +1650,6 @@ impl Waku {
     }
 
     /// Save a remote host record and start its connect loop.
-    // Called from the hosts settings UI in a follow-up commit.
-    #[allow(dead_code)]
     pub(super) fn add_remote_host(
         &mut self,
         name: String,
@@ -1673,12 +1669,41 @@ impl Waku {
         cx.notify();
     }
 
+    /// Re-point a host record. The id is the catalog's ownership anchor and
+    /// never changes, so renames and re-addressed records keep their rows;
+    /// the connect loop restarts against the new coordinates and the
+    /// matched-record check retires the old loop's in-flight attempts.
+    pub(super) fn update_remote_host(
+        &mut self,
+        host_id: Uuid,
+        name: String,
+        address: String,
+        token: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(record) = self
+            .state
+            .remote_hosts
+            .iter_mut()
+            .find(|record| record.id == host_id)
+        else {
+            return;
+        };
+        record.name = name;
+        record.address = address;
+        record.token = token;
+        let record = record.clone();
+        self.save();
+        self.daemons.remove_remote(host_id);
+        self.remote_errors.remove(&host_id);
+        self.connect_remote_host(record, cx);
+        cx.notify();
+    }
+
     /// Drop a host record: its supervisor and sync worker stop, its catalog
     /// leaves the merged lists, and its cache entry is forgotten. The remote
     /// daemon's own persisted state is untouched — re-adding the host brings
     /// the rows back.
-    // Called from the hosts settings UI in a follow-up commit.
-    #[allow(dead_code)]
     pub(super) fn remove_remote_host(&mut self, host: Uuid, cx: &mut Context<Self>) {
         if !self
             .state
@@ -1689,6 +1714,13 @@ impl Waku {
             return;
         }
         self.state.remote_hosts.retain(|record| record.id != host);
+        if self
+            .remote_host_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id == Some(host))
+        {
+            self.remote_host_editor = None;
+        }
         self.save();
 
         let remote = waku_client::DaemonKey::Remote(host);
@@ -1750,26 +1782,20 @@ impl Waku {
             .map(|record| record.name.clone())
     }
 
-    /// Whether the host's supervisor is currently registered — its catalog
-    /// may still be showing cached rows when this is false.
-    // Used by the hosts UI in a follow-up commit.
-    #[allow(dead_code)]
+    /// Whether the host's supervisor is registered and answering — its
+    /// catalog may still be showing cached rows when this is false.
     pub(super) fn remote_host_connected(&self, host: Uuid) -> bool {
         self.daemons
             .supervisor(waku_client::DaemonKey::Remote(host))
-            .is_some()
+            .is_some_and(|supervisor| supervisor.status() == waku_client::DaemonStatus::Connected)
     }
 
     /// Which remote host owns a session, for badge/label lookups.
-    // Used by the hosts UI in a follow-up commit.
-    #[allow(dead_code)]
     pub(super) fn session_host(&self, session_id: Uuid) -> waku_client::DaemonKey {
         self.daemons.session_owner(session_id)
     }
 
     /// Which remote host owns a project, for badge/label lookups.
-    // Used by the hosts UI in a follow-up commit.
-    #[allow(dead_code)]
     pub(super) fn project_host(&self, project_id: Uuid) -> waku_client::DaemonKey {
         self.daemons.project_owner(project_id)
     }
