@@ -670,6 +670,12 @@ pub struct TextInput {
     /// Shortest an auto-height field renders, however little content it
     /// holds.
     min_height: Pixels,
+    /// Glyph size an auto-height field sets, in `sp` units; other fields
+    /// inherit the embedding view's metrics.
+    font_size: f32,
+    /// Row height an auto-height field lays text out on, in `sp` units;
+    /// `max_lines` counts in it.
+    line_height: f32,
     /// Image and file pastes surface as [`MediaPaste`] instead of being
     /// swallowed by the text path.
     accepts_media_paste: bool,
@@ -783,6 +789,8 @@ impl TextInput {
             auto_height: false,
             max_lines: None,
             min_height: px(24.),
+            font_size: 13.5,
+            line_height: 22.0,
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
             clear_on_escape: false,
@@ -975,6 +983,14 @@ impl TextInput {
     /// empty or one-line field still holds a taller target.
     pub fn min_height(mut self, height: Pixels) -> Self {
         self.min_height = height;
+        self
+    }
+
+    /// Text metrics an [`auto_height`](Self::auto_height) field owns, in
+    /// `sp` units: glyph size and the row height `max_lines` counts in.
+    pub fn text_metrics(mut self, size: f32, line_height: f32) -> Self {
+        self.font_size = size;
+        self.line_height = line_height;
         self
     }
 
@@ -2502,12 +2518,17 @@ impl EntityInputHandler for TextInput {
         &mut self,
         range_utf16: Range<usize>,
         bounds: Bounds<Pixels>,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let layout = match self.last_layout.as_ref() {
             Some(l) => l,
-            None => return Some(Bounds::new(bounds.origin, size(px(2.0), px(22.0)))),
+            None => {
+                return Some(Bounds::new(
+                    bounds.origin,
+                    size(px(2.0), sp(self.line_height).to_pixels(window.rem_size())),
+                ));
+            }
         };
 
         let line_height = layout.line_height();
@@ -3243,7 +3264,7 @@ impl Render for TextInput {
             // field inherits the caller's, so a gutter beside an editor can
             // rely on the same line height.
             .when(self.auto_height, |field| {
-                let line_height = sp(22.0);
+                let line_height = sp(self.line_height);
                 field
                     .min_h(self.min_height)
                     .max_h(
@@ -3256,7 +3277,7 @@ impl Render for TextInput {
                     .track_scroll(&scroll_handle)
                     .px(padding_x)
                     .line_height(line_height)
-                    .text_size(sp(13.5))
+                    .text_size(sp(self.font_size))
             })
             // A single-line field never wraps: the overlong remainder slides
             // horizontally under this clipped viewport to follow the caret —
@@ -3404,6 +3425,7 @@ impl ComposerInput {
                 .submit_on_enter()
                 .auto_height()
                 .min_height(px(36.0))
+                .text_metrics(14.0, 24.0)
                 .media_paste()
                 .list_continuation()
                 .syntax(Some("markdown"))
