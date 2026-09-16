@@ -71,7 +71,22 @@ impl Waku {
             .map(crate::persistence::ComposerDraftKey::for_session)
     }
 
-    fn current_composer_draft(&self, cx: &App) -> crate::persistence::ComposerDraft {
+    /// The draft slot the live composer is editing right now. While Big
+    /// Picture is open the composer belongs to the overlay's armed target —
+    /// a card's session or the standing new-task project — and the overlay
+    /// tracks which key it loaded the current text from, because a capture
+    /// must file under the outgoing key, not wherever state has moved to.
+    pub(super) fn composer_draft_key(&self) -> Option<crate::persistence::ComposerDraftKey> {
+        if self.big_picture.is_open() {
+            return self.big_picture.draft_key;
+        }
+        self.selected_composer_draft_key()
+    }
+
+    pub(super) fn current_composer_draft(
+        &self,
+        cx: &App,
+    ) -> crate::persistence::ComposerDraft {
         crate::persistence::ComposerDraft {
             // Collapsed paste blocks have no draft slot of their own — the
             // shared schema is just text — so they fold in here and come back
@@ -91,7 +106,7 @@ impl Waku {
     /// Copy the visible composer into its in-memory slot. No I/O happens here;
     /// callers can use this on every real edit and on navigation boundaries.
     pub(super) fn capture_current_composer_draft(&mut self, cx: &App) -> bool {
-        let Some(key) = self.selected_composer_draft_key() else {
+        let Some(key) = self.composer_draft_key() else {
             return false;
         };
         let draft = self.current_composer_draft(cx);
@@ -115,7 +130,7 @@ impl Waku {
         let Some(source) = source else {
             return;
         };
-        let Some(destination) = self.selected_composer_draft_key() else {
+        let Some(destination) = self.composer_draft_key() else {
             return;
         };
         if self.composer_drafts.move_to_empty(source, destination) {
@@ -129,13 +144,19 @@ impl Waku {
         project_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let source = self.selected_composer_draft_key();
+        let source = self.composer_draft_key();
         self.select_project(project_id, cx);
+        if self.big_picture.is_open() {
+            // The composer card's project picker is Big Picture's destination
+            // control: the untargeted draft follows the choice.
+            self.big_picture.new_task_project = Some(project_id);
+            self.sync_big_picture_draft(cx);
+        }
         self.move_composer_draft_after_project_change(source, cx);
     }
 
     pub(super) fn create_projectless_session_from_composer(&mut self, cx: &mut Context<Self>) {
-        let source = self.selected_composer_draft_key();
+        let source = self.composer_draft_key();
         self.create_projectless_session(cx);
         self.move_composer_draft_after_project_change(source, cx);
     }
@@ -144,7 +165,7 @@ impl Waku {
     /// durable session identity, so its project-scoped text cannot reappear
     /// the next time the user opens New Task.
     pub(super) fn discard_current_composer_draft(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.selected_composer_draft_key() else {
+        let Some(key) = self.composer_draft_key() else {
             return;
         };
         if self.composer_drafts.remove(key) {
@@ -167,10 +188,19 @@ impl Waku {
     /// metadata so a session switch never stats their paths.
     pub(super) fn restore_selected_composer_draft(&mut self, cx: &mut Context<Self>) {
         let draft = self
-            .selected_composer_draft_key()
+            .composer_draft_key()
             .and_then(|key| self.composer_drafts.get(key))
             .cloned()
             .unwrap_or_default();
+        self.apply_composer_draft(draft, cx);
+    }
+
+    /// Push a draft into the live composer — text and attachment chips alike.
+    pub(super) fn apply_composer_draft(
+        &mut self,
+        draft: crate::persistence::ComposerDraft,
+        cx: &mut Context<Self>,
+    ) {
         self.composer_attachments = draft
             .attachments
             .into_iter()

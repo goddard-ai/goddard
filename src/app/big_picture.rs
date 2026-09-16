@@ -16,6 +16,8 @@
 
 use gpui::{KeyBinding, actions};
 
+use crate::persistence::ComposerDraftKey;
+
 use super::*;
 
 pub const MAX_CARDS: usize = 8;
@@ -127,6 +129,16 @@ pub(super) struct BigPictureUi {
     highlighted: Option<Uuid>,
     /// The session the docked composer follows up on; `None` starts a task.
     target: Option<Uuid>,
+    /// The draft slot the docked composer's content currently belongs to —
+    /// a card's own session draft while targeted, the standing new-task
+    /// draft otherwise. Tracked rather than re-resolved: the swap captures
+    /// the outgoing text under the key it was loaded from, so a highlight or
+    /// selection that moved mid-edit cannot file it under the wrong session.
+    draft_key: Option<ComposerDraftKey>,
+    /// Where an untargeted submission lands. Snapshotted from the last
+    /// deliberate card choice — arming or disarming a target — so merely
+    /// hovering a card in another project never migrates a half-typed draft.
+    new_task_project: Option<Uuid>,
     focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     focus_generation: u64,
@@ -155,6 +167,8 @@ impl BigPictureUi {
             slots: Vec::new(),
             highlighted: None,
             target: None,
+            draft_key: None,
+            new_task_project: None,
             focus,
             previous_focus: None,
             focus_generation: 0,
@@ -354,6 +368,10 @@ impl Waku {
             self.cancel_project_switcher(window, cx);
         }
         self.big_picture.previous_focus = window.focused(cx);
+        // Stash the background session's half-typed draft before the overlay
+        // takes the composer over — capture resolves against the selection
+        // only while `open` is still false.
+        self.capture_and_save_current_composer_draft(cx);
         self.big_picture.open = true;
         self.big_picture.slots.clear();
         self.big_picture.target = None;
@@ -365,6 +383,12 @@ impl Waku {
             big_picture_order(&self.state.sessions, &self.state.unseen_completions, MAX_CARDS)
                 .first()
                 .copied();
+        self.big_picture.new_task_project = self.big_picture_new_task_project();
+        // The overlay's draft machinery starts unloaded so the first sync
+        // restores the new-task draft rather than leaving the background
+        // session's text on screen.
+        self.big_picture.draft_key = None;
+        self.sync_big_picture_draft(cx);
         self.sync_big_picture_placeholder(cx);
         self.big_picture.backdrop = None;
         // Snapshot the frame before the scrim covers it — capture, repack,
@@ -410,6 +434,15 @@ impl Waku {
         if !self.big_picture.open {
             return;
         }
+        // File the composer's content under whichever overlay slot owned it —
+        // a card's session draft or the new-task draft — before the selected
+        // session's draft takes the composer back.
+        if let Some(key) = self.big_picture.draft_key.take() {
+            let draft = self.current_composer_draft(cx);
+            if self.composer_drafts.set(key, draft) {
+                self.schedule_composer_draft_save(cx);
+            }
+        }
         self.big_picture.open = false;
         self.big_picture.slots.clear();
         self.big_picture.highlighted = None;
@@ -419,6 +452,7 @@ impl Waku {
         self.composer.update(cx, |composer, cx| {
             composer.set_placeholder(tr!("input.do_anything"), cx);
         });
+        self.restore_selected_composer_draft(cx);
         if let Some(previous_focus) = self.big_picture.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -448,11 +482,76 @@ impl Waku {
         });
     }
 
+    /// The project an untargeted submission lands in — the highlighted card's
+    /// first, then whatever the workspace underneath had selected.
+    fn big_picture_new_task_project(&self) -> Option<Uuid> {
+        self.big_picture
+            .highlighted
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
+            .map(|session| session.project_id)
+            .or_else(|| self.selected_session().map(|session| session.project_id))
+            .or_else(|| self.selected_project().map(|project| project.id))
+    }
+
+    /// The draft slot the armed target implies: a card's own session draft,
+    /// or the standing new-task draft when nothing is armed.
+    fn big_picture_draft_key(&self) -> Option<ComposerDraftKey> {
+        match self.big_picture.target {
+            Some(session_id) => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(ComposerDraftKey::for_session),
+            None => self
+                .big_picture
+                .new_task_project
+                .map(ComposerDraftKey::NewSession),
+        }
+    }
+
+    /// Point the docked composer at the draft its current target owns: stash
+    /// the visible text under the key it was loaded from, then load the new
+    /// slot. Every deliberate target move — arrows, clicks, ⌘n, Escape —
+    /// comes through here; passive highlight changes do not.
+    pub(super) fn sync_big_picture_draft(&mut self, cx: &mut Context<Self>) {
+        let next = self.big_picture_draft_key();
+        if next == self.big_picture.draft_key {
+            return;
+        }
+        if let Some(previous) = self.big_picture.draft_key {
+            let draft = self.current_composer_draft(cx);
+            if self.composer_drafts.set(previous, draft) {
+                self.schedule_composer_draft_save(cx);
+            }
+        }
+        self.big_picture.draft_key = next;
+        let draft = next
+            .and_then(|key| self.composer_drafts.get(key))
+            .cloned()
+            .unwrap_or_default();
+        self.apply_composer_draft(draft, cx);
+    }
+
     fn set_big_picture_target(&mut self, target: Option<Uuid>, cx: &mut Context<Self>) {
         if self.big_picture.target == target {
             return;
         }
         self.big_picture.target = target;
+        // The standing new-task destination follows the last deliberate card
+        // choice: armed card's project while targeted, the card under the
+        // highlight once the target peels off.
+        self.big_picture.new_task_project = target
+            .or(self.big_picture.highlighted)
+            .and_then(|id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == id)
+                    .map(|session| session.project_id)
+            })
+            .or(self.big_picture.new_task_project);
+        self.sync_big_picture_draft(cx);
         self.sync_big_picture_placeholder(cx);
         cx.notify();
     }
@@ -688,8 +787,7 @@ impl Waku {
             .target
             .is_some_and(|id| !self.state.sessions.iter().any(|s| s.id == id))
         {
-            self.big_picture.target = None;
-            self.sync_big_picture_placeholder(cx);
+            self.set_big_picture_target(None, cx);
         }
     }
 
@@ -708,12 +806,7 @@ impl Waku {
             }
             None => {
                 let project = self
-                    .big_picture
-                    .highlighted
-                    .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
-                    .map(|session| session.project_id)
-                    .or_else(|| self.selected_session().map(|session| session.project_id))
-                    .or_else(|| self.selected_project().map(|project| project.id))
+                    .big_picture_new_task_project()
                     .and_then(|project_id| {
                         self.state
                             .projects
@@ -761,8 +854,7 @@ impl Waku {
             self.submit_composer_submission(submission, cx);
             if let Some(session_id) = self.state.selected_session {
                 self.big_picture.highlighted = Some(session_id);
-                self.big_picture.target = Some(session_id);
-                self.sync_big_picture_placeholder(cx);
+                self.set_big_picture_target(Some(session_id), cx);
             }
         }
     }

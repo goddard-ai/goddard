@@ -2032,7 +2032,7 @@ impl Waku {
         }
         let paths = paths.to_vec();
         let daemon = self.daemon.clone();
-        let draft_owner = self.selected_composer_draft_key();
+        let draft_owner = self.composer_draft_key();
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -2063,7 +2063,7 @@ impl Waku {
                 .await;
             let _ = waku.update(cx, |waku, cx| match result {
                 Ok(stored) => {
-                    if waku.selected_composer_draft_key() != draft_owner {
+                    if waku.composer_draft_key() != draft_owner {
                         return;
                     }
                     let mut changed = false;
@@ -2148,7 +2148,7 @@ impl Waku {
         }
 
         let daemon = self.daemon.clone();
-        let draft_owner = self.selected_composer_draft_key();
+        let draft_owner = self.composer_draft_key();
         cx.spawn(async move |waku, cx| {
             let stored = cx
                 .background_executor()
@@ -2192,7 +2192,7 @@ impl Waku {
                 .await;
             let _ = waku.update(cx, |waku, cx| match stored {
                 Ok(stored) => {
-                    if waku.selected_composer_draft_key() != draft_owner {
+                    if waku.composer_draft_key() != draft_owner {
                         return;
                     }
                     let mut staged = false;
