@@ -1,8 +1,8 @@
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Hsla, Img, InteractiveElement, Interactivity,
-    KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString,
-    Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb,
-    svg,
+    AnyElement, App, Bounds, Context, Div, DivFrameState, Element, ElementId, GlobalElementId,
+    Hitbox, Hsla, Img, InspectorElementId, InteractiveElement, Interactivity, KeyDownEvent,
+    LayoutId, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString, Stateful,
+    StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb, svg,
 };
 
 pub mod menu;
@@ -81,6 +81,103 @@ pub fn contain_scroll(handle: &ScrollHandle, cx: &mut App) {
 
 fn nested_scroll_consumed_delta(offset: Pixels, max_offset: Pixels) -> bool {
     max_offset > px(0.5) && offset >= -max_offset && offset <= px(0.0)
+}
+
+/// An element that renders its children at a fraction of the window's rem
+/// size — every `sp()` measurement inside scales, `px()` does not.
+///
+/// Big Picture cards use it to draw a session's transcript at reading-glance
+/// size without re-authoring the row renderers.
+pub struct RemScale {
+    div: Div,
+    scale: f32,
+}
+
+/// Wrap `child`'s subtree in a [`RemScale`] of `scale`.
+pub fn rem_scale(scale: f32) -> RemScale {
+    RemScale {
+        div: div(),
+        scale,
+    }
+}
+
+impl Styled for RemScale {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.div.style()
+    }
+}
+
+impl ParentElement for RemScale {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.div.extend(elements)
+    }
+}
+
+impl Element for RemScale {
+    type RequestLayoutState = DivFrameState;
+    type PrepaintState = Option<Hitbox>;
+
+    fn id(&self) -> Option<ElementId> {
+        Element::id(&self.div)
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        Element::source_location(&self.div)
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let rem_size = window.rem_size() * self.scale;
+        window.with_rem_size(Some(rem_size), |window| {
+            self.div.request_layout(id, inspector_id, window, cx)
+        })
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let rem_size = window.rem_size() * self.scale;
+        window.with_rem_size(Some(rem_size), |window| {
+            self.div
+                .prepaint(id, inspector_id, bounds, request_layout, window, cx)
+        })
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let rem_size = window.rem_size() * self.scale;
+        window.with_rem_size(Some(rem_size), |window| {
+            self.div
+                .paint(id, inspector_id, bounds, request_layout, prepaint, window, cx)
+        })
+    }
+}
+
+impl IntoElement for RemScale {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
 }
 
 /// Add conventional mouse and keyboard activation to a focusable element.

@@ -69,8 +69,8 @@ use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, contain_scroll, file_icon,
-    goddard_logo, icon, icon_button, motion, provider_color, provider_mark, status_color, thinking,
-    toggle_switch,
+    goddard_logo, icon, icon_button, motion, provider_color, provider_mark, rem_scale,
+    status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,

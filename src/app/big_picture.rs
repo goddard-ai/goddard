@@ -55,8 +55,9 @@ const CARD_EXIT_LINGER: Duration = Duration::from_millis(260);
 /// How far the composer travels on open, and how long that takes.
 const COMPOSER_RISE: f32 = 28.0;
 const COMPOSER_TRANSITION: Duration = Duration::from_millis(300);
-const PREVIEW_MESSAGES: usize = 5;
-const PREVIEW_SNIPPET_GRAPHEMES: usize = 220;
+/// Card transcripts render the lane's row kinds at this fraction of its
+/// sizes — the same transcript, small enough to glance across a grid.
+const CARD_TEXT_SCALE: f32 = 0.75;
 
 actions!(
     waku_big_picture,
@@ -158,6 +159,30 @@ pub(super) struct BigPictureUi {
     /// Blurred snapshot of the frame underneath, captured as the overlay
     /// opens and painted under the scrim.
     backdrop: Option<Arc<gpui::RenderImage>>,
+    /// Each card's transcript list and scrollbar, keyed by session so a
+    /// scrolled card keeps its place across opens and reorders.
+    card_transcripts: RefCell<HashMap<Uuid, CardTranscript>>,
+    /// The folded row-kind vector per card, cached on the lane's own
+    /// transcript fingerprint so it is only refolded when the shape changes.
+    card_kinds: RefCell<HashMap<Uuid, (u64, Rc<Vec<TranscriptRowKind>>)>>,
+    /// The registry card markdown reports selectable text into — separate
+    /// from the lane's so ⌘C never picks up card text.
+    card_selection: TranscriptSelection,
+    /// Card links paint like links but do nothing — cards are read-only.
+    card_link_handler: crate::md::render::LinkHandler,
+    /// Card bodies parse into their own views: the flatten cache keys on
+    /// metrics, and cards render at `CARD_TEXT_SCALE`, so sharing
+    /// `message_markdown` would drop every flat each time the lane and a
+    /// card alternated scales. Keyed by message id, like the lane's.
+    card_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
+}
+
+/// One card's scroll surface. `ListState` and the scrollbar are handles into
+/// window state, so the entry clones freely.
+#[derive(Clone)]
+struct CardTranscript {
+    rows: ListState,
+    scrollbar: Rc<ScrollbarState>,
 }
 
 impl BigPictureUi {
@@ -178,6 +203,11 @@ impl BigPictureUi {
             hydrate_requested: HashSet::new(),
             last_row_count: 0,
             backdrop: None,
+            card_transcripts: RefCell::new(HashMap::new()),
+            card_kinds: RefCell::new(HashMap::new()),
+            card_selection: TranscriptSelection::default(),
+            card_link_handler: Rc::new(|_, _, _| {}),
+            card_markdown: RefCell::new(HashMap::new()),
         }
     }
 
@@ -302,44 +332,6 @@ fn big_picture_card_geometry(
     cards
 }
 
-/// A card's transcript tail: the last few visible messages, newest last,
-/// pinned to the bottom of the card by the column's `justify_end`.
-fn big_picture_preview_lines(session: &AgentSession) -> Vec<(MessageRole, String)> {
-    session
-        .messages
-        .iter()
-        .rev()
-        .filter(|message| {
-            !message.hidden
-                && message.role != MessageRole::System
-                && !message.visible_content().trim().is_empty()
-        })
-        .take(PREVIEW_MESSAGES)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .map(|message| {
-            let snippet = message
-                .visible_content()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-            // Agent text renders whole — a clipped sentence mid-reply reads
-            // as a bug. Only user prompts keep a cap: a pasted wall of text
-            // would otherwise swallow the card's other lines.
-            let snippet = if message.role == MessageRole::User {
-                snippet
-                    .graphemes(true)
-                    .take(PREVIEW_SNIPPET_GRAPHEMES)
-                    .collect::<String>()
-            } else {
-                snippet
-            };
-            (message.role, snippet)
-        })
-        .collect()
-}
-
 impl Waku {
     pub(super) fn toggle_big_picture_action(
         &mut self,
@@ -376,6 +368,29 @@ impl Waku {
         self.big_picture.slots.clear();
         self.big_picture.target = None;
         self.big_picture.hydrate_requested.clear();
+        // Card scroll state survives opens so a card the reader scrolled
+        // keeps its place — but only for sessions that still exist.
+        {
+            let sessions = &self.state.sessions;
+            self.big_picture
+                .card_transcripts
+                .borrow_mut()
+                .retain(|id, _| sessions.iter().any(|session| session.id == *id));
+            self.big_picture
+                .card_kinds
+                .borrow_mut()
+                .retain(|id, _| sessions.iter().any(|session| session.id == *id));
+        }
+        // Parsed card bodies are bounded like the lane's `message_markdown`.
+        let mut card_markdown = self.big_picture.card_markdown.borrow_mut();
+        let cached_bytes: usize = card_markdown
+            .values()
+            .map(MarkdownView::source_len)
+            .sum();
+        if cached_bytes > MAX_CACHED_MESSAGE_SOURCE_BYTES {
+            card_markdown.clear();
+        }
+        drop(card_markdown);
         self.big_picture.focus_generation = self.big_picture.focus_generation.wrapping_add(1);
         self.big_picture.open_seq = self.big_picture.open_seq.wrapping_add(1);
         self.big_picture.last_row_count = 0;
@@ -933,7 +948,6 @@ impl Waku {
         let session_id = session.id;
         let is_target = self.big_picture.target == Some(session_id);
         let is_highlighted = self.big_picture.highlighted == Some(session_id);
-        let status = session.status;
         let leaving = slot.leaving;
         let entering = slot.entering;
         let left = slot.left;
@@ -947,25 +961,6 @@ impl Waku {
         let enter_delay = slot.enter_delay;
         let anim_id =
             SharedString::from(format!("big-picture-card-{session_id}-{}", slot.anim_seq));
-        let preview = if session.detail_loaded {
-            big_picture_preview_lines(session)
-        } else {
-            Vec::new()
-        };
-        // The newest in-flight activity — what the agent is doing right now —
-        // pinned below the message tail like the transcript's live group.
-        let active_tool = session
-            .status
-            .is_busy()
-            .then(|| {
-                session
-                    .transcript_blocks
-                    .iter()
-                    .rev()
-                    .flat_map(|block| block.activities.iter().rev())
-                    .find(|activity| !activity.complete)
-            })
-            .flatten();
         let border = if is_target {
             theme.accent
         } else if is_highlighted {
@@ -975,70 +970,16 @@ impl Waku {
         };
         let body: AnyElement = if !session.detail_loaded {
             div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
                 .text_size(sp(11.5))
                 .text_color(theme.text_ghost)
                 .child(tr!("big_picture.loading"))
                 .into_any_element()
-        } else if preview.is_empty() && active_tool.is_none() {
-            div()
-                .text_size(sp(11.5))
-                .text_color(theme.text_ghost)
-                .child(tr!("big_picture.empty_transcript"))
-                .into_any_element()
         } else {
-            div()
-                .flex()
-                .flex_col()
-                .justify_end()
-                .gap(px(6.0))
-                .size_full()
-                .children(preview.into_iter().map(|(role, snippet)| {
-                    div()
-                        .text_size(sp(11.5))
-                        .line_height(sp(15.0))
-                        .whitespace_normal()
-                        .text_color(match role {
-                            MessageRole::User => theme.text,
-                            _ => theme.text_secondary,
-                        })
-                        .when(role == MessageRole::User, |element| {
-                            element
-                                .bg(theme.overlay)
-                                .rounded(px(8.0))
-                                .px(px(8.0))
-                                .py(px(4.0))
-                        })
-                        .child(snippet)
-                        .into_any_element()
-                }))
-                .when_some(active_tool, |element, activity| {
-                    let title = activity.reasoning.as_ref().map_or_else(
-                        || activity_display_title(activity),
-                        |reasoning| reasoning_activity_title(reasoning, true),
-                    );
-                    element.child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(motion::spin_slow(icon(
-                                "icons/loader-circle.svg",
-                                10.0,
-                                status_color(&theme, status),
-                            )))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(sp(11.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(title),
-                            ),
-                    )
-                })
-                .into_any_element()
+            self.render_big_picture_transcript(session, cx)
         };
         let mut card = div()
             .id(SharedString::from(format!("big-picture-card-{session_id}")))
@@ -1089,8 +1030,12 @@ impl Waku {
                         cx.stop_propagation();
                         // Double-click commits: leave the overlay on the card's
                         // session. The first click's target toggle is harmless —
-                        // the target resets on close anyway.
-                        if event.click_count == 2 && this.big_picture.open {
+                        // the target resets on close anyway. A press that began
+                        // on the card's scrollbar is a scroll, not a commit.
+                        if event.click_count == 2
+                            && this.big_picture.open
+                            && !this.card_scrollbar_engaged(session_id)
+                        {
                             this.close_big_picture(window, cx);
                             this.select_session(session_id, cx);
                         }
@@ -1103,7 +1048,10 @@ impl Waku {
                     }
                 }))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.big_picture.open {
+                    // The scrollbar is an overlay painted over the card — a
+                    // click on its track still lands here. Scrolling a card
+                    // must not retarget the composer.
+                    if this.big_picture.open && !this.card_scrollbar_engaged(session_id) {
                         this.toggle_big_picture_target(session_id, cx);
                         cx.stop_propagation();
                     }
@@ -1153,6 +1101,455 @@ impl Waku {
                             1.0
                         })
                 },
+            )
+            .into_any_element()
+    }
+
+    /// Is the pointer on a card's scrollbar track, or mid-drag on its thumb.
+    /// The bar is an overlay, so presses it handles still reach the card.
+    fn card_scrollbar_engaged(&self, session_id: Uuid) -> bool {
+        self.big_picture
+            .card_transcripts
+            .borrow()
+            .get(&session_id)
+            .is_some_and(|card| card.scrollbar.engaged())
+    }
+
+    /// A card's transcript: the lane's folded row kinds on a virtualized,
+    /// bottom-pinned list rendered at `CARD_TEXT_SCALE`. Footer and
+    /// changed-files rows are dropped — a card shows conversation and
+    /// activity, not actions.
+    fn render_big_picture_transcript(
+        &self,
+        session: &AgentSession,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let session_id = session.id;
+        let card = {
+            let mut cards = self.big_picture.card_transcripts.borrow_mut();
+            cards
+                .entry(session_id)
+                .or_insert_with(|| {
+                    let rows = ListState::new(0, ListAlignment::Bottom, px(2048.0));
+                    rows.set_scroll_handler(|_, window, _| window.refresh());
+                    CardTranscript {
+                        rows,
+                        scrollbar: ScrollbarState::new(),
+                    }
+                })
+                .clone()
+        };
+        let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns);
+        let (kinds, refolded) = {
+            let mut cache = self.big_picture.card_kinds.borrow_mut();
+            let entry = cache
+                .entry(session_id)
+                .or_insert_with(|| (0, Rc::new(Vec::new())));
+            if entry.0 != fingerprint {
+                let mut folded = folded_transcript_row_kinds(session, &self.expanded_turns);
+                folded.retain(|kind| {
+                    !matches!(
+                        kind,
+                        TranscriptRowKind::ResponseFooter(..)
+                            | TranscriptRowKind::ChangedFiles(_)
+                    )
+                });
+                *entry = (fingerprint, Rc::new(folded));
+                (entry.1.clone(), true)
+            } else {
+                (entry.1.clone(), false)
+            }
+        };
+        let count = kinds.len();
+        let current = card.rows.item_count();
+        if count > current {
+            // Appends keep the card's place — or the tail, while pinned.
+            card.rows.splice(current..current, count - current);
+            if refolded {
+                card.rows.remeasure_items(0..current);
+            }
+        } else if count < current {
+            card.rows.reset(count);
+        } else if refolded {
+            card.rows.remeasure_items(0..count);
+        }
+        if count == 0 {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(sp(11.5))
+                .text_color(theme.text_ghost)
+                .child(tr!("big_picture.empty_transcript"))
+                .into_any_element();
+        }
+        // Streaming grows the tail without moving the fold. Re-measure the
+        // last few rows while the session works so fresh text is not clipped
+        // — the same tail the lane re-measures on every commit.
+        if session.status.is_busy() {
+            card.rows.remeasure_items(count.saturating_sub(STREAM_REMEASURE_TAIL_ROWS)..count);
+        }
+        let entity = cx.entity().downgrade();
+        let rows = card.rows.clone();
+        div()
+            .size_full()
+            .relative()
+            .child(
+                rem_scale(CARD_TEXT_SCALE).size_full().child(
+                    list(card.rows.clone(), move |index, window, cx| {
+                        entity
+                            .upgrade()
+                            .map(|entity| {
+                                entity.update(cx, |this, cx| {
+                                    this.big_picture_card_row(session_id, index, window, cx)
+                                })
+                            })
+                            .unwrap_or_else(|| div().into_any_element())
+                    })
+                    .size_full(),
+                ),
+            )
+            .child(scrollbar::edge_fade(
+                rows.clone(),
+                scrollbar::FadeEdge::Top,
+                theme.raised,
+            ))
+            .child(scrollbar::edge_fade(
+                rows.clone(),
+                scrollbar::FadeEdge::Bottom,
+                theme.raised,
+            ))
+            .child(scrollbar::vertical(&rows, &card.scrollbar))
+            .into_any_element()
+    }
+
+    /// The markdown render context for one card row — the card's own
+    /// selection registry and an inert link handler.
+    fn card_markdown_ctx<'a>(
+        &self,
+        row: String,
+        palette: &'a MarkdownPalette,
+        metrics: MarkdownMetrics,
+        animate_streaming: bool,
+        cx: &App,
+    ) -> MarkdownCtx<'a> {
+        MarkdownCtx::new(row, palette, metrics, self.big_picture.card_selection.clone())
+            .with_families(crate::fonts::current(cx))
+            .with_math_enabled(self.state.render_math)
+            .with_link_handler(self.big_picture.card_link_handler.clone())
+            .with_streaming_animation(animate_streaming)
+    }
+
+    /// Metrics rescaled to the card's text scale on top of the user's font
+    /// size settings. Markdown sizes are `px`, so the `RemScale` wrapper
+    /// cannot reach them — they scale here instead.
+    fn card_markdown_metrics(&self, metrics: MarkdownMetrics) -> MarkdownMetrics {
+        metrics.scaled(
+            self.state.ui_font_size * CARD_TEXT_SCALE,
+            self.state.code_font_size * CARD_TEXT_SCALE,
+        )
+    }
+
+    /// One row of a card transcript. `index` is a position in the card's
+    /// `card_kinds` vector, synced this frame by `render_big_picture_transcript`.
+    fn big_picture_card_row(
+        &self,
+        session_id: Uuid,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let palette = MarkdownPalette::from_theme(&theme);
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return div().into_any_element();
+        };
+        let (row_count, kind, starts_followup_turn) = {
+            let cache = self.big_picture.card_kinds.borrow();
+            let Some((_, kinds)) = cache.get(&session_id) else {
+                return div().into_any_element();
+            };
+            (
+                kinds.len(),
+                kinds
+                    .get(index)
+                    .copied()
+                    .unwrap_or(TranscriptRowKind::Message(index)),
+                row_starts_followup_turn(session, kinds, index),
+            )
+        };
+        let inner = match kind {
+            TranscriptRowKind::Message(message_index) => session
+                .messages
+                .get(message_index)
+                .cloned()
+                .map(|message| {
+                    let copied = self.copied_message_feedback.contains_key(&message.id);
+                    let menu =
+                        self.menu_handle(format!("big-picture-message-{}", message.id), cx);
+                    let attachment_menus = (0..message.attachments.len())
+                        .map(|index| {
+                            self.menu_handle(
+                                format!("big-picture-message-{}-attachment-{index}", message.id),
+                                cx,
+                            )
+                        })
+                        .collect();
+                    let attachment_images = message
+                        .attachments
+                        .iter()
+                        .map(|attachment| {
+                            if !attachment.is_image {
+                                return None;
+                            }
+                            let Some(reference) = attachment.blob_reference.as_deref() else {
+                                return None;
+                            };
+                            self.image_for_reference(
+                                reference,
+                                Some(&attachment.path),
+                                Some(&attachment.name),
+                                cx,
+                            )
+                        })
+                        .collect();
+                    let metrics = self.card_markdown_metrics(
+                        if message.role == MessageRole::User {
+                            MarkdownMetrics::USER_MESSAGE
+                        } else {
+                            MarkdownMetrics::BODY
+                        },
+                    );
+                    let animate_streaming = message.streaming && !cx.reduce_motion();
+                    let ctx = self.card_markdown_ctx(
+                        format!("big-picture-message-{}", message.id),
+                        &palette,
+                        metrics,
+                        animate_streaming,
+                        cx,
+                    );
+                    let mut markdown = self.big_picture.card_markdown.borrow_mut();
+                    let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
+                        .then(|| {
+                            // A seeded view paints the text that arrived while
+                            // the overlay was closed at full opacity instead of
+                            // dissolving the whole reply on open.
+                            let view = markdown
+                                .entry(message.id)
+                                .or_insert_with(MarkdownView::seeded);
+                            view.set_text(message.visible_content(), message.streaming);
+                            &*view
+                        });
+                    let rendered = render_message(
+                        MessageRender {
+                            theme: &theme,
+                            message: &message,
+                            assistant_footer_copy_content: None,
+                            assistant_footer_time: None,
+                            copied,
+                            show_response_token_speed: false,
+                            assistant_message_action: None,
+                            user_message_action: None,
+                            user_message_viewport: None,
+                            user_message_expanded: false,
+                            user_message_expand_focus: None,
+                            message_edit_input: None,
+                            attachment_menus,
+                            attachment_images,
+                            attachments_can_reveal: !self.daemon.is_remote(),
+                            markdown: view,
+                            ctx: &ctx,
+                            menu,
+                            waku: cx.entity().downgrade(),
+                            composer: self.composer.clone(),
+                        },
+                        cx,
+                    );
+                    if animate_streaming && view.is_some_and(MarkdownView::is_fading) {
+                        motion::pulse_lease(window.current_view(), cx);
+                    }
+                    rendered
+                })
+                .unwrap_or_else(|| div().into_any_element()),
+            TranscriptRowKind::TurnBlock(block_index) => {
+                self.render_card_activities_row(session, block_index, &theme)
+            }
+            TranscriptRowKind::TurnFold(turn_id) => {
+                self.render_card_turn_fold_row(session, turn_id, &theme)
+            }
+            TranscriptRowKind::WorkingIndicator => {
+                self.render_card_working_indicator_row(session, &theme)
+            }
+            // Folded out of `card_kinds` entirely; the fallback renders nothing.
+            TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
+                div().into_any_element()
+            }
+        };
+        div()
+            .id(SharedString::from(format!(
+                "big-picture-row-{session_id}-{index}"
+            )))
+            .w_full()
+            .py(px(4.0))
+            .when(index == 0, |element| element.pt(px(6.0)))
+            .when(starts_followup_turn, |element| {
+                element.pt(px(FOLLOWUP_TURN_TOP_GAP * CARD_TEXT_SCALE))
+            })
+            .when(index + 1 == row_count, |element| element.pb(px(6.0)))
+            .child(inner)
+            .into_any_element()
+    }
+
+    /// A card's tool-activity block as one summary line — the disclosure's
+    /// collapsed header — with a spinner while the group is live.
+    fn render_card_activities_row(
+        &self,
+        session: &AgentSession,
+        block_index: usize,
+        theme: &Theme,
+    ) -> AnyElement {
+        let Some(block) = session.transcript_blocks.get(block_index) else {
+            return div().into_any_element();
+        };
+        if block.activities.is_empty() {
+            return div().into_any_element();
+        }
+        let last_block = block_index + 1 == session.transcript_blocks.len();
+        let live_group = activity_group_is_live(
+            session
+                .active_turn_id()
+                .is_some_and(|turn_id| block.turn_id == Some(turn_id)),
+            last_block,
+            block.after_message,
+            session.messages.len(),
+        );
+        let live_reasoning_id = (self
+            .runtimes
+            .get(&session.id)
+            .is_some_and(|runtime| runtime.stream_phase == Some(StreamPhase::Reasoning))
+            && session.status == SessionStatus::Working
+            && last_block)
+            .then(|| {
+                block
+                    .activities
+                    .iter()
+                    .rev()
+                    .find(|activity| activity.reasoning.is_some())
+                    .map(|activity| activity.id)
+            })
+            .flatten();
+        let title = activity_header_title(&block.activities, live_group, live_reasoning_id);
+        div()
+            .h(px(22.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .when(live_group, |element| {
+                element.child(motion::spin_slow(icon(
+                    "icons/loader-circle.svg",
+                    10.0,
+                    status_color(theme, session.status),
+                )))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(title)),
+            )
+            .into_any_element()
+    }
+
+    /// A card's "Worked for Ns" divider — the lane's fold row minus the
+    /// toggle, since cards are read-only.
+    fn render_card_turn_fold_row(
+        &self,
+        session: &AgentSession,
+        turn_id: Uuid,
+        theme: &Theme,
+    ) -> AnyElement {
+        let expanded = self.expanded_turns.contains(&turn_id);
+        let label = turn_fold_label(session, turn_id);
+        div()
+            .w_full()
+            .h(px(24.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(div().h(hairline()).flex_1().bg(theme.border))
+            .child(
+                div()
+                    .h(px(24.0))
+                    .px(px(2.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .text_size(sp(13.5))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(label))
+                    .child(icon(
+                        if expanded {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
+                        11.5,
+                        theme.text_tertiary,
+                    )),
+            )
+            .child(div().h(hairline()).flex_1().bg(theme.border))
+            .into_any_element()
+    }
+
+    /// The live turn's closing row, drawn from the card's own session.
+    fn render_card_working_indicator_row(
+        &self,
+        session: &AgentSession,
+        theme: &Theme,
+    ) -> AnyElement {
+        let elapsed = session
+            .turns
+            .last()
+            .filter(|turn| turn.status == TurnStatus::Running)
+            .map(|turn| unix_time().saturating_sub(turn.started_at))
+            .unwrap_or(0);
+        // A parked turn is waiting on detached work, not working.
+        let label = if session.status == SessionStatus::Background {
+            tr!("transcript.waiting_background")
+        } else {
+            tr!(
+                "transcript.working_for",
+                duration = format_working_elapsed(elapsed)
+            )
+        };
+        div()
+            .h(px(22.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(thinking::goddard_thinking(theme.text_tertiary))
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(label)),
             )
             .into_any_element()
     }
@@ -1404,7 +1801,18 @@ impl Waku {
                     .pt(px(TOP_MARGIN))
                     .px(px(EDGE_MARGIN))
                     .pb(px(CARD_COMPOSER_GAP))
-                    .child(div().relative().size_full().children(cards)),
+                    .child(
+                        div()
+                            .relative()
+                            .size_full()
+                            // Painted before any card so the frame's card
+                            // selection registry holds exactly this frame's
+                            // card text, in order.
+                            .child(md::render::frame_reset(
+                                self.big_picture.card_selection.clone(),
+                            ))
+                            .children(cards),
+                    ),
             )
             .child(
                 // Composer and hint rise together on every open.
