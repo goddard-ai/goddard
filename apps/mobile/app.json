@@ -1,15 +1,15 @@
 {
   "expo": {
     "name": "Goddard",
-    "slug": "waku-mobile",
+    "slug": "goddard-mobile",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "waku",
+    "scheme": "goddard",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "sh.waku.mobile",
+      "bundleIdentifier": "org.goddardai.app.mobile",
       "supportsTablet": true,
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Goddard connects directly to daemon hosts you add on your local or private network.",
@@ -19,7 +19,7 @@
       }
     },
     "android": {
-      "package": "sh.waku.mobile",
+      "package": "org.goddardai.app.mobile",
       "predictiveBackGestureEnabled": false
     },
     "web": {

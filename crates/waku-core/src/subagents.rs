@@ -1,7 +1,7 @@
 //! Named subagent definitions injected into a session's harness at launch.
 //!
 //! Goddard cannot dispatch subagents itself — every harness answers that
-//! differently — so this module owns only the shared parts: the `waku-`
+//! differently — so this module owns only the shared parts: the `goddard-`
 //! naming convention (which doubles as the UI attribution key on
 //! `BackgroundWorkItem.role`), the default agent set, and the text that
 //! teaches a session's model when to delegate. Each driver turns the spec
@@ -21,7 +21,7 @@ use crate::usage_history::{RateTable, lookup_rate};
 
 /// Agent names carrying this prefix are Goddard-defined; the transcript's
 /// background-work rows attribute their runs to us with no extra plumbing.
-pub(crate) const NAME_PREFIX: &str = "waku-";
+pub(crate) const NAME_PREFIX: &str = "goddard-";
 
 fn default_explore() -> SubagentDef {
     SubagentDef {
@@ -144,8 +144,8 @@ fn annotate_cost(agents: &mut [SubagentDef], rates: &RateTable) {
     }
 }
 
-/// The agent set for one session launch: the built-in `waku-explore` plus a
-/// `waku-<tier>` agent per configured tier, each carrying the provider's
+/// The agent set for one session launch: the built-in `goddard-explore` plus a
+/// `goddard-<tier>` agent per configured tier, each carrying the provider's
 /// configured model and effort. An `explore` tier customizes the built-in
 /// instead of adding a second explorer.
 pub(crate) fn spec_for(
@@ -297,7 +297,7 @@ pub(crate) const CODEX_HINT: &str = "This session can delegate focused, \
      not worth delegating.";
 
 /// Pi's delegate tool ships as an extension file written into daemon-owned
-/// storage at launch. The tool reads the spec from `WAKU_SUBAGENTS` so the
+/// storage at launch. The tool reads the spec from `GODDARD_SUBAGENTS` so the
 /// same source serves every tier set.
 pub(crate) const PI_EXTENSION_SOURCE: &str = r#"import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -313,9 +313,9 @@ interface AgentDef {
 }
 
 const spec: { agents: AgentDef[] } = JSON.parse(
-  process.env.WAKU_SUBAGENTS ?? '{"agents":[]}',
+  process.env.GODDARD_SUBAGENTS ?? '{"agents":[]}',
 );
-const piBinary = process.env.WAKU_PI_BINARY ?? "pi";
+const piBinary = process.env.GODDARD_PI_BINARY ?? "pi";
 
 function run(agent: AgentDef, prompt: string): Promise<string> {
   const args = ["-p", "--no-session", "--no-extensions", "--no-skills",
@@ -338,11 +338,11 @@ function run(agent: AgentDef, prompt: string): Promise<string> {
   });
 }
 
-export default function wakuSubagents(pi: ExtensionAPI) {
+export default function goddardSubagents(pi: ExtensionAPI) {
   if (!spec.agents.length) return;
   const names = spec.agents.map((agent) => agent.name);
   pi.registerTool({
-    name: "waku_delegate",
+    name: "goddard_delegate",
     label: "Delegate to agent",
     description:
       "Delegate a focused, self-contained subtask to a helper agent and return its reply. The helper shares no context with this session, so the prompt must contain everything it needs. Available agents:\n" +
@@ -374,7 +374,7 @@ export default function wakuSubagents(pi: ExtensionAPI) {
 pub(crate) fn write_pi_extension(directory: &Path) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("could not create {}", directory.display()))?;
-    let path = directory.join("waku-subagents.ts");
+    let path = directory.join("goddard-subagents.ts");
     std::fs::write(&path, PI_EXTENSION_SOURCE)
         .with_context(|| format!("could not write {}", path.display()))?;
     Ok(path)
@@ -422,7 +422,7 @@ mod tests {
         ))
         .expect("agents serialize");
         let value: Value = serde_json::from_str(&json).unwrap();
-        let explore = &value["waku-explore"];
+        let explore = &value["goddard-explore"];
         assert!(!explore["prompt"].as_str().unwrap().is_empty());
         assert!(
             explore["tools"]
@@ -442,7 +442,7 @@ mod tests {
         ))
         .expect("config serializes");
         let value: Value = serde_json::from_str(&json).unwrap();
-        let explore = &value["agent"]["waku-explore"];
+        let explore = &value["agent"]["goddard-explore"];
         assert_eq!(explore["mode"], "subagent");
         assert_eq!(explore["permission"]["edit"], "deny");
     }
@@ -473,7 +473,7 @@ mod tests {
         assert_eq!(spec.agents.len(), 2, "an explore tier customizes, not adds");
         assert_eq!(spec.agents[0].model.as_deref(), Some("claude-haiku-4-5"));
         assert_eq!(spec.agents[0].effort.as_deref(), Some("low"));
-        assert_eq!(spec.agents[1].name, "waku-heavy");
+        assert_eq!(spec.agents[1].name, "goddard-heavy");
         assert_eq!(spec.agents[1].model.as_deref(), Some("claude-opus-4-5"));
         assert!(!spec.agents[1].read_only);
     }
@@ -482,7 +482,7 @@ mod tests {
     fn priced_models_get_relative_cost_labels() {
         let mut agents = vec![
             SubagentDef {
-                name: "waku-fast".into(),
+                name: "goddard-fast".into(),
                 description: "cheap".into(),
                 prompt: String::new(),
                 read_only: false,
@@ -490,7 +490,7 @@ mod tests {
                 effort: None,
             },
             SubagentDef {
-                name: "waku-heavy".into(),
+                name: "goddard-heavy".into(),
                 description: "deep".into(),
                 prompt: String::new(),
                 read_only: false,

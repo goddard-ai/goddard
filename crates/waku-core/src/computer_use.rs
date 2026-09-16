@@ -136,7 +136,7 @@ pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
     // A release daemon never installs or launches the helper app, not even to
     // read permission status, so production never opens its TCC prompts.
     if !is_available() {
-        bail!("Waku Computer Use is not available in this build");
+        bail!("Goddard Computer Use is not available in this build");
     }
     let operation = if prompt {
         json!({"operation": "requestPermissions"})
@@ -253,9 +253,9 @@ pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
 
 fn helper_executable_name() -> &'static str {
     if cfg!(windows) {
-        "waku_computer_use.exe"
+        "goddard_computer_use.exe"
     } else {
-        "waku_computer_use"
+        "goddard_computer_use"
     }
 }
 
@@ -271,7 +271,7 @@ fn resources_directory(executable: &Path, os: &str) -> anyhow::Result<PathBuf> {
         "linux" if directory.file_name().is_some_and(|name| name == "bin") => directory
             .parent()
             .ok_or_else(|| anyhow!("Goddard installation is malformed"))?
-            .join("share/waku"),
+            .join("share/goddard"),
         _ => directory.join("resources"),
     })
 }
@@ -289,12 +289,12 @@ fn packaged_file(path: &Path, name: &str) -> anyhow::Result<PathBuf> {
 pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
     let executable = host_executable_path()?;
     let path = if cfg!(target_os = "macos") {
-        resources_directory(&executable, "macos")?.join("waku_js_repl")
+        resources_directory(&executable, "macos")?.join("goddard_js_repl")
     } else {
         executable.with_file_name(if cfg!(windows) {
-            "waku_js_repl.exe"
+            "goddard_js_repl.exe"
         } else {
-            "waku_js_repl"
+            "goddard_js_repl"
         })
     };
     packaged_file(&path, "Goddard JavaScript REPL")
@@ -317,7 +317,7 @@ pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
 fn install_helper_app(source: &Path) -> anyhow::Result<PathBuf> {
     let application_support =
         dirs::data_dir().ok_or_else(|| anyhow!("Application Support directory is unavailable"))?;
-    let install_root = application_support.join("Waku").join("Computer Use");
+    let install_root = application_support.join("Goddard").join("Computer Use");
     crate::fs_ext::create_private_dir_all(&install_root)
         .with_context(|| format!("could not create {}", install_root.display()))?;
     let bundle_name = source
@@ -353,7 +353,7 @@ fn helper_install_matches(source: &Path, destination: &Path) -> anyhow::Result<b
     if !destination.is_dir() {
         return Ok(false);
     }
-    let fingerprint = Path::new("Contents/Resources/.waku-helper-fingerprint");
+    let fingerprint = Path::new("Contents/Resources/.goddard-helper-fingerprint");
     let source_fingerprint = fs::read(source.join(fingerprint))?;
     let Ok(installed_fingerprint) = fs::read(destination.join(fingerprint)) else {
         return Ok(false);
@@ -388,7 +388,7 @@ fn copy_directory(source: &Path, destination: &Path) -> anyhow::Result<()> {
 pub fn skill_root_path() -> anyhow::Result<PathBuf> {
     let path = resources_directory(&host_executable_path()?, std::env::consts::OS)?.join("skills");
     packaged_file(
-        &path.join("waku-computer-use/SKILL.md"),
+        &path.join("goddard-computer-use/SKILL.md"),
         "Goddard Computer Use skill",
     )?;
     Ok(path)
@@ -416,13 +416,17 @@ mod tests {
                 "macos",
                 "/Applications/Goddard.app/Contents/Resources",
             ),
-            ("/opt/waku/bin/waku", "linux", "/opt/waku/share/waku"),
             (
-                "/dev/waku/target/debug/waku",
+                "/opt/goddard/bin/goddard",
+                "linux",
+                "/opt/goddard/share/goddard",
+            ),
+            (
+                "/dev/waku/target/debug/goddard",
                 "linux",
                 "/dev/waku/target/debug/resources",
             ),
-            ("/Goddard/waku.exe", "windows", "/Goddard/resources"),
+            ("/Goddard/goddard.exe", "windows", "/Goddard/resources"),
         ] {
             assert_eq!(
                 resources_directory(Path::new(executable), os).unwrap(),

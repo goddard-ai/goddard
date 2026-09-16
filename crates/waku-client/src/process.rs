@@ -186,7 +186,7 @@ impl DaemonProcess {
             .context("Goddard daemon did not expose its readiness stream")?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
-            .name("waku-daemon-ready".into())
+            .name("goddard-daemon-ready".into())
             .spawn(move || {
                 let mut line = String::new();
                 let result = BufReader::new(stdout)
@@ -410,7 +410,7 @@ impl DaemonSupervisor {
         )?;
         let weak_inner = Arc::downgrade(&supervisor.inner);
         std::thread::Builder::new()
-            .name("waku-daemon-supervisor".into())
+            .name("goddard-daemon-supervisor".into())
             .spawn(move || monitor_daemon(weak_inner, Some(initial_stamp), watch_for_rebuilds))
             .context("could not start Goddard daemon supervisor")?;
         Ok(supervisor)
@@ -465,7 +465,7 @@ impl DaemonSupervisor {
         });
         let weak_inner = Arc::downgrade(&inner);
         std::thread::Builder::new()
-            .name("waku-daemon-settings".into())
+            .name("goddard-daemon-settings".into())
             .spawn(move || persist_settings(weak_inner, settings_update_rx))
             .context("could not start Goddard daemon settings writer")?;
         Ok(Self { inner })

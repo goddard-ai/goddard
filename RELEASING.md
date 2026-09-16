@@ -1,7 +1,7 @@
 # Releasing Goddard
 
 Goddard ships signed in-app updates on macOS, Linux, and Windows. Releases live in
-a **Cloudflare R2** bucket served at **`https://releases.waku.sh`**. macOS uses
+a **Cloudflare R2** bucket served at **`https://releases.goddardai.org`**. macOS uses
 [Sparkle](https://sparkle-project.org), including binary deltas when available;
 the native Linux and Windows updaters read architecture-specific feeds and
 verify artifacts with the same EdDSA key. One release workflow produces all
@@ -23,7 +23,7 @@ bun run release
 - Framework embedding + pinned Sparkle version:
   [`scripts/bundle.sh`](scripts/bundle.sh) (bump `sparkle_version` and
   `sparkle_sha256` together; the distribution is cached under
-  `~/Library/Caches/waku-build/sparkle/`).
+  `~/Library/Caches/goddard-build/sparkle/`).
 - Release automation: [`scripts/release.ts`](scripts/release.ts),
   [`scripts/appcast.ts`](scripts/appcast.ts),
   [`scripts/changelog.ts`](scripts/changelog.ts).
@@ -52,7 +52,7 @@ Sparkle key as kero, and the matching public key is already in Info.plist.
 Nothing to do.
 
 On a fresh machine, restore the key from the password-manager backup with the
-Sparkle tools (they land in `~/Library/Caches/waku-build/sparkle/<version>/bin`
+Sparkle tools (they land in `~/Library/Caches/goddard-build/sparkle/<version>/bin`
 after any build, or download the release from
 [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases)):
 
@@ -65,8 +65,8 @@ after any build, or download the release from
 > ⚠️ Lose the private key and existing installs can never update again. Keep
 > the backup current.
 
-To split Goddard onto its own key later: `generate_keys --account waku`, put the
-new public key in Info.plist, and pass `--account waku` through to
+To split Goddard onto its own key later: `generate_keys --account goddard`, put the
+new public key in Info.plist, and pass `--account goddard` through to
 `generate_appcast` in `scripts/appcast.ts`. Users on old builds only trust the
 old key, so do this on a release that still signs with the old key… in other
 words, don't do it casually.
@@ -85,19 +85,19 @@ xcrun notarytool store-credentials NOTARY \
 ```
 
 Override the environment with `--signing-identity`, or change the notary
-profile with `--notary-profile` / `WAKU_NOTARY_PROFILE`.
+profile with `--notary-profile` / `GODDARD_NOTARY_PROFILE`.
 
 ### 3. Cloudflare R2 bucket + domain  ← **still to do once**
 
-1. Create the bucket **`waku-releases`** (Cloudflare dashboard → R2 → Create
+1. Create the bucket **`goddard-releases`** (Cloudflare dashboard → R2 → Create
    bucket). The release script will not create it — a bucket-scoped API token
    can't.
-2. Attach the custom domain **`releases.waku.sh`** to the bucket (bucket →
+2. Attach the custom domain **`releases.goddardai.org`** to the bucket (bucket →
    Settings → Custom Domains). This serves objects publicly at
-   `https://releases.waku.sh/<file>`.
+   `https://releases.goddardai.org/<file>`.
 3. Make sure the R2 API token behind the `r2` rclone remote covers this bucket
    (R2 → Manage API Tokens → Object Read & Write). The remote already exists
-   for kero; if `rclone lsf r2:waku-releases --s3-no-check-bucket` returns
+   for kero; if `rclone lsf r2:goddard-releases --s3-no-check-bucket` returns
    *AccessDenied* after the bucket exists, extend the token's bucket list.
 
 The rclone remote itself (`~/.config/rclone/rclone.conf`, type S3, provider
@@ -129,7 +129,7 @@ section as release notes, regenerates the signed `appcast.xml`, and uploads
 everything with immutable cache headers (the appcast itself stays
 `max-age=300`). When it finishes:
 
-- **Download link**: `https://releases.waku.sh/Goddard-<version>.dmg`
+- **Download link**: `https://releases.goddardai.org/Goddard-<version>.dmg`
 - **In-app updates**: served from the same origin via the appcast.
 
 Test by keeping an older build around, launching it, and choosing
@@ -188,7 +188,7 @@ Windows and Linux have no Sparkle, so [`src/updater.rs`](src/updater.rs) runs
 the same contract itself: fetch the appcast, compare versions, download, and
 verify the EdDSA signature. Windows hands the installer to Inno Setup with
 `/SILENT`. Linux safely unpacks the tarball beside the managed user-local
-prefix, then `waku-updater` swaps it after the app's normal quit saves and
+prefix, then `goddard-updater` swaps it after the app's normal quit saves and
 rolls back if the replacement cannot open its main window.
 
 - **One feed per architecture.** A Sparkle appcast cannot say which binary an
@@ -220,17 +220,17 @@ assets — including every signed update feed — to R2.
 and upload with a short cache lifetime; everything else is versioned and
 cached forever. Linux users install from that bucket via
 [`website/public/install.sh`](website/public/install.sh), served at
-`https://waku.sh/install.sh` — see [docs/linux.md](docs/linux.md).
+`https://goddardai.org/install.sh` — see [docs/linux.md](docs/linux.md).
 
 Publishing that GitHub release (or running **Sync release** from Actions)
-uploads the assets to the `waku-releases` R2 bucket. Configure these repository
+uploads the assets to the `goddard-releases` R2 bucket. Configure these repository
 secrets first:
 
 | Secret | Purpose |
 | --- | --- |
-| `WAKU_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
-| `WAKU_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
-| `WAKU_SIGNING_IDENTITY` | Developer ID identity selector |
+| `GODDARD_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
+| `GODDARD_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
+| `GODDARD_SIGNING_IDENTITY` | Developer ID identity selector |
 | `APPLE_CERTIFICATE` | base64-encoded Developer ID Application `.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | password for that `.p12` |
 | `APPLE_ID` | Apple ID used by `notarytool` |
@@ -242,7 +242,7 @@ secrets first:
 | `R2_ACCOUNT_ID` | Cloudflare account id for the R2 API |
 | `R2_ACCESS_KEY_ID` | R2 Object Read & Write token |
 | `R2_SECRET_ACCESS_KEY` | matching secret |
-| `R2_BUCKET` | optional; defaults to `waku-releases` |
+| `R2_BUCKET` | optional; defaults to `goddard-releases` |
 
 ### Options
 
@@ -252,14 +252,14 @@ secrets first:
 | `--force` | — | re-publish a version that already exists in R2 |
 | `--adhoc`, `--skip-notarize` | — | local test builds (imply `--local`) |
 | `--skip-build` | — | reuse existing release binaries |
-| `--build-number <n>` / `WAKU_BUILD_NUMBER` | derived | `CFBundleVersion` override |
-| `WAKU_R2_REMOTE` | `r2` | rclone remote name |
-| `WAKU_R2_BUCKET` | `waku-releases` | R2 bucket |
-| `WAKU_DOWNLOAD_URL_PREFIX` | `https://releases.waku.sh/` | base URL in the appcast |
-| `WAKU_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
-| `WAKU_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
-| `SPARKLE_BIN` | the `~/Library/Caches/waku-build` copy | Sparkle tools directory |
-| `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
+| `--build-number <n>` / `GODDARD_BUILD_NUMBER` | derived | `CFBundleVersion` override |
+| `GODDARD_R2_REMOTE` | `r2` | rclone remote name |
+| `GODDARD_R2_BUCKET` | `goddard-releases` | R2 bucket |
+| `GODDARD_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
+| `GODDARD_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
+| `GODDARD_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
+| `SPARKLE_BIN` | the `~/Library/Caches/goddard-build` copy | Sparkle tools directory |
+| `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 
 ---
@@ -272,10 +272,10 @@ secrets first:
   at the DMG.
 - **Debug builds never update themselves.** `Updater::init` returns `None`
   under `debug_assertions`, so the dev watcher's app can't offer to replace
-  itself with a production Goddard. Set `WAKU_FORCE_UPDATER=1` to exercise the
+  itself with a production Goddard. Set `GODDARD_FORCE_UPDATER=1` to exercise the
   real Sparkle flow from a debug bundle anyway. A bare `cargo run` binary has
   no embedded framework and also degrades to no updater. For UI-only testing,
-  start the watcher with `WAKU_PREVIEW_UPDATE=1`; the sidebar immediately
+  start the watcher with `GODDARD_PREVIEW_UPDATE=1`; the sidebar immediately
   shows an available update and clicking it changes to the spinner without
   installing anything. The preview flag fakes only that sidebar result;
   **Check for Updates…** still uses the embedded Sparkle framework and its

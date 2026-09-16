@@ -29,9 +29,9 @@ class WakuMcpClient {
   }
 
   private async start(): Promise<void> {
-    const executable = process.env.WAKU_JS_REPL_SERVER;
+    const executable = process.env.GODDARD_JS_REPL_SERVER;
     if (!executable) {
-      throw new Error("WAKU_JS_REPL_SERVER is not configured");
+      throw new Error("GODDARD_JS_REPL_SERVER is not configured");
     }
     const child = spawn(executable, [], {
       env: process.env,
@@ -57,7 +57,7 @@ class WakuMcpClient {
     await this.requestWithoutStart("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "waku-pi", version: "1" },
+      clientInfo: { name: "goddard-pi", version: "1" },
     });
     this.notify("notifications/initialized", {});
   }

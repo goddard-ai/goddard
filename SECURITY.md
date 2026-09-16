@@ -3,12 +3,12 @@
 ## Supported Versions
 
 Only the latest release of Goddard receives security fixes. Updates ship
-through the in-app updater and https://waku.sh.
+through the in-app updater and https://goddardai.org.
 
 ## Reporting a Vulnerability
 
 Please use GitHub private vulnerability reporting:
-https://github.com/egoist/waku/security/advisories/new
+https://github.com/goddard-ai/goddard/security/advisories/new
 
 If that doesn't work for you, email hi@egoist.dev.
 

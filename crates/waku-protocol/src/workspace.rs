@@ -396,7 +396,7 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         path: PathBuf,
     },
-    /// Zip a projectless task's workspace into `~/.waku/archives` and
+    /// Zip a projectless task's workspace into `~/.goddard/archives` and
     /// remove the live directory, so an archived chat stops costing its
     /// files on disk while staying restorable. The directory survives a
     /// failed capture. Returns `Ack`.

@@ -1687,33 +1687,38 @@ mod tests {
                     .unwrap();
             }
         });
-        let config = json!({"type":"local","command":["/app/waku_js_repl"],"codemode":false});
+        let config = json!({"type":"local","command":["/app/goddard_js_repl"],"codemode":false});
         add_mcp(
             &endpoint,
             "/work/project with space",
-            "waku_js_repl_test",
+            "goddard_js_repl_test",
             &config,
         )
         .unwrap();
         put_instruction_entry(
             &endpoint,
             "ses_test",
-            "waku-computer-use",
+            "goddard-computer-use",
             "Use cua.list_apps() through js.",
         )
         .unwrap();
-        remove_instruction_entry(&endpoint, "ses_test", "waku-computer-use").unwrap();
-        remove_mcp(&endpoint, "/work/project with space", "waku_js_repl_test").unwrap();
+        remove_instruction_entry(&endpoint, "ses_test", "goddard-computer-use").unwrap();
+        remove_mcp(
+            &endpoint,
+            "/work/project with space",
+            "goddard_js_repl_test",
+        )
+        .unwrap();
         server.join().unwrap();
         let requests: Vec<_> = received.try_iter().collect();
         assert_eq!(
             requests[0].0,
-            "PUT /api/mcp/waku_js_repl_test?location%5Bdirectory%5D=%2Fwork%2Fproject%20with%20space HTTP/1.1\r\n"
+            "PUT /api/mcp/goddard_js_repl_test?location%5Bdirectory%5D=%2Fwork%2Fproject%20with%20space HTTP/1.1\r\n"
         );
         assert_eq!(requests[0].1, json!({"config":config}));
         assert_eq!(
             requests[1].0,
-            "PUT /api/session/ses_test/instructions/entries/waku-computer-use HTTP/1.1\r\n"
+            "PUT /api/session/ses_test/instructions/entries/goddard-computer-use HTTP/1.1\r\n"
         );
         assert_eq!(
             requests[1].1,
@@ -1721,12 +1726,12 @@ mod tests {
         );
         assert_eq!(
             requests[2].0,
-            "DELETE /api/session/ses_test/instructions/entries/waku-computer-use HTTP/1.1\r\n"
+            "DELETE /api/session/ses_test/instructions/entries/goddard-computer-use HTTP/1.1\r\n"
         );
         assert!(
             requests[3]
                 .0
-                .starts_with("DELETE /api/mcp/waku_js_repl_test?location%5Bdirectory%5D=")
+                .starts_with("DELETE /api/mcp/goddard_js_repl_test?location%5Bdirectory%5D=")
         );
     }
 

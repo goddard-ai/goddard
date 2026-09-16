@@ -4172,7 +4172,7 @@ mod tests {
 
     #[test]
     fn projectless_sidebar_projects_are_paths_under_the_workspace_root() {
-        let root = Path::new("/tmp/.waku/projects");
+        let root = Path::new("/tmp/.goddard/projects");
         let projectless = Project {
             id: Uuid::from_u128(1),
             name: "Task".to_owned(),

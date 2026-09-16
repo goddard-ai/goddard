@@ -30,6 +30,6 @@ custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
 /**
  * Named subagent tiers injected into every session's harness, keyed by
  * tier name ("explore", "fast", "medium", "heavy"). Empty → only the
- * built-in read-only `waku-explore` agent is injected.
+ * built-in read-only `goddard-explore` agent is injected.
  */
 subagent_tiers?: { [key in string]: SubagentTier }, provider_binary_overrides: { [key in ProviderKind]?: string }, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

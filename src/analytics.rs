@@ -20,12 +20,12 @@ const EVENT_QUEUE_CAPACITY: usize = 128;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[cfg(not(debug_assertions))]
-const ENDPOINT: Option<&str> = option_env!("WAKU_ANALYTICS_ENDPOINT");
+const ENDPOINT: Option<&str> = option_env!("GODDARD_ANALYTICS_ENDPOINT");
 #[cfg(debug_assertions)]
 const ENDPOINT: Option<&str> = None;
 
 #[cfg(not(debug_assertions))]
-const WEBSITE_ID: Option<&str> = option_env!("WAKU_ANALYTICS_WEBSITE_ID");
+const WEBSITE_ID: Option<&str> = option_env!("GODDARD_ANALYTICS_WEBSITE_ID");
 #[cfg(debug_assertions)]
 const WEBSITE_ID: Option<&str> = None;
 
@@ -40,7 +40,7 @@ pub struct Analytics {
 impl Analytics {
     /// Starts analytics only for release builds with configuration embedded
     /// at compile time. Any build can opt out with
-    /// `WAKU_DISABLE_ANALYTICS=1`.
+    /// `GODDARD_DISABLE_ANALYTICS=1`.
     pub fn new(language: &'static str, distinct_id: Uuid, sharing_enabled: bool) -> Self {
         let (events, receiver) = sync_channel(EVENT_QUEUE_CAPACITY);
         let available = analytics_available();
@@ -241,7 +241,7 @@ impl Event {
 
 fn analytics_available() -> bool {
     !cfg!(debug_assertions)
-        && !env_flag("WAKU_DISABLE_ANALYTICS")
+        && !env_flag("GODDARD_DISABLE_ANALYTICS")
         && ENDPOINT.is_some_and(|value| !value.trim().is_empty())
         && WEBSITE_ID.is_some_and(|value| !value.trim().is_empty())
 }
@@ -278,7 +278,7 @@ fn run(
         Client::builder(endpoint, website_id)
             .default_context(
                 Context::new()
-                    .hostname("waku.sh")
+                    .hostname("goddardai.org")
                     .url("/desktop")
                     .title("Goddard")
                     .language(language)

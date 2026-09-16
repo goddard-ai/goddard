@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Waku. This file is the **source of truth for the release
+All notable changes to Goddard. This file is the **source of truth for the release
 notes shown in the in-app updater**: [`scripts/release.ts`](scripts/release.ts)
 extracts the section whose heading matches the version being released
 (`MARKETING_VERSION`) and publishes it next to the update, so Sparkle shows it in
@@ -39,9 +39,9 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [0.1.16]
 
-- Import and continue conversations started in agent CLIs with `/resume` or the command palette across every provider, in both Waku and Waku Web
+- Import and continue conversations started in agent CLIs with `/resume` or the command palette across every provider, in both Goddard and Goddard Web
 - Linux: add signed in-app updates with clean relaunch and automatic rollback
-- Copy Waku task IDs and agent CLI thread IDs from task info or the command palette
+- Copy Goddard task IDs and agent CLI thread IDs from task info or the command palette
 - Keep each response's actions and changed-file summary after its final tool activity
 - Keep the selected task visible when navigating the sidebar
 - Let nested transcript and command-output scrollers hand wheel gestures to the page only at their boundaries
@@ -49,7 +49,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [0.1.15]
 
-- Codex thread goals: type /goal to set a persistent objective the task keeps pursuing — before or after the first message — with its autonomous pursuit streaming into the transcript, a status chip showing live budget or elapsed time, and a dialog to edit, pause, resume, or clear the goal (also in Waku Web)
+- Codex thread goals: type /goal to set a persistent objective the task keeps pursuing — before or after the first message — with its autonomous pursuit streaming into the transcript, a status chip showing live budget or elapsed time, and a dialog to edit, pause, resume, or clear the goal (also in Goddard Web)
 - Discover provider-native slash commands and skills from installed agent CLIs, including multiline YAML descriptions
 - Add reasoning effort selection for Grok
 - Reconnect remote daemon sessions automatically after connection interruptions
@@ -125,7 +125,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [0.1.0]
 
-- Add standalone Waku daemon and browser client
+- Add standalone Goddard daemon and browser client
 - Add Linux support (X11 and Wayland, you need to build from source for now)
 - Answer agent questions directly in the composer
 - Redesign queued follow-ups as composer cards with per-message steering

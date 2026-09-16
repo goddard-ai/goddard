@@ -195,7 +195,7 @@ daemon.port_description: 启用暴露后，Goddard 会在所有网络接口的�
 daemon.port_placeholder: "34123"
 daemon.allowed_origins: 允许的浏览器来源
 daemon.allowed_origins_description: 可打开 WebSocket 的确切 http:// 或 https:// 来源。
-daemon.allowed_origins_placeholder: https://waku.example.com, http://localhost:3001
+daemon.allowed_origins_placeholder: https://goddard.example.com, http://localhost:3001
 daemon.apply: 应用
 daemon.restarting: 正在重启…
 daemon.credentials_title: 连接信息
@@ -211,7 +211,7 @@ daemon.external_description: 此桌面应用连接到由 Goddard 之外管理的
 daemon.web_external_description: Goddard Web 连接到由浏览器之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。
 daemon.web_connection_description: 此浏览器不会启动或停止守护进程。
 daemon.agent_tools_title: 智能体工具
-daemon.agent_tools_description: 允许会话中的智能体创建任务并向其他任务发送消息。开启期间启动的会话将获得按会话隔离的 waku-agent 命令，其发送的提示会在目标转录中标记。
+daemon.agent_tools_description: 允许会话中的智能体创建任务并向其他任务发送消息。开启期间启动的会话将获得按会话隔离的 goddard-agent 命令，其发送的提示会在目标转录中标记。
 daemon.agent_settings_title: 智能体设置
 daemon.agent_settings_description: 允许智能体为你创建和编辑自定义命令。默认开启；智能体添加的命令会有标记，守护进程会记录是哪个任务做出的更改。
 daemon.not_configured: 未配置
@@ -908,9 +908,9 @@ session.agent_ran_out_of_context: 智能体在本轮任务中耗尽了上下文�
 session.agent_declined_turn: 智能体拒绝执行本轮任务
 session.agent_stopped_reason: "智能体已停止：%{reason}"
 errors.open_session: "无法打开该任务：%{error}"
-errors.create_projectless_task: "无法在 ~/.waku/projects 下创建任务：%{error}"
+errors.create_projectless_task: "无法在 ~/.goddard/projects 下创建任务：%{error}"
 errors.save_projectless_migration: "无法保存无项目任务的迁移结果：%{error}"
-errors.move_projectless_task: "无法将旧的根目录无项目任务移至 ~/.waku/projects：%{error}"
+errors.move_projectless_task: "无法将旧的根目录无项目任务移至 ~/.goddard/projects：%{error}"
 errors.remote_host_path: 此路径属于守护进程主机，无法在桌面应用中打开
 errors.change_branch: "无法切换分支：%{error}"
 errors.capture_pre_turn_checkpoint: "无法创建任务开始前的检查点：%{error}"

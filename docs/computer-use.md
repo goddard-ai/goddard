@@ -22,7 +22,7 @@ identity and Goddard's Screen Recording/Accessibility onboarding. The bundled
 library is signed with the same identity as the helper. Permission requests
 remain host-owned: direct SDK permission checks do not open macOS prompts.
 
-On Windows and Linux, `waku_computer_use` loads the packaged SDK library into
+On Windows and Linux, `goddard_computer_use` loads the packaged SDK library into
 its own process. It communicates with the REPL over inherited stdin/stdout.
 Windows also packages Cua's UIA support executable. No Cua daemon, installation,
 Python runtime, Node runtime, or separately running service is required.
@@ -74,7 +74,7 @@ No OpenCode configuration files or service descriptors are written.
   unless `CUA_DRIVER_RS_ENABLE_WAYLAND` is already set. Window targeting and
   input depend on the compositor's supported routes and installed desktop
   integrations. Cua's GNOME helper files ship under
-  `share/waku/computer-use/wayland-helper`; Goddard does not automatically install
+  `share/goddard/computer-use/wayland-helper`; Goddard does not automatically install
   shell extensions or compositor plugins. `check_permissions` and the native
   tool catalog describe what is available. Unsupported background delivery
   remains an explicit refusal.
@@ -107,7 +107,7 @@ configuration reads, a request missing required arguments, a synthetic image,
 and REPL reset/reconnect:
 
 ```sh
-cargo build -p waku --bin waku_js_repl -p waku-computer-use --bin waku_computer_use
+cargo build -p waku --bin goddard_js_repl -p waku-computer-use --bin goddard_computer_use
 bun scripts/cua-driver.ts bundle target/debug target/debug/resources debug
 bun scripts/test-computer-use.ts
 ```

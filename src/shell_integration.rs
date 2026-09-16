@@ -9,9 +9,9 @@
 //!
 //! The hooks install through the user's own startup files: a guarded
 //! marker block appended to `.zshrc`/`.bash_profile`/`.bashrc`, or a
-//! `conf.d` snippet for fish, so the `source` never echoes at a waku
-//! prompt the way a typed launch line would. The guard is `$WAKU`, set
-//! only on the PTYs waku spawns for plain shells — every other shell on
+//! `conf.d` snippet for fish, so the `source` never echoes at a Goddard
+//! prompt the way a typed launch line would. The guard is `$GODDARD`, set
+//! only on the PTYs Goddard spawns for plain shells — every other shell on
 //! the machine skips the block, and the `-f` test keeps a stale path
 //! harmless after an uninstall. Shells without a script get no
 //! integration and degrade gracefully: no status icon, no live cwd.
@@ -34,96 +34,97 @@ pub enum ShellReport {
     Cwd(PathBuf),
 }
 
-const BEGIN_TITLE: &str = "waku-shell:begin";
-const END_TITLE_PREFIX: &str = "waku-shell:end:";
-const CWD_TITLE_PREFIX: &str = "waku-shell:cwd:";
-
-/// A sentinel title's report, if this title is one.
+/// A sentinel title's report, if this title is one. Scripts materialized by
+/// pre-Goddard builds keep emitting `waku-shell:` until their shell restarts,
+/// so both prefixes parse.
 pub fn parse_report(title: &str) -> Option<ShellReport> {
-    if title == BEGIN_TITLE {
+    let report = title
+        .strip_prefix("goddard-shell:")
+        .or_else(|| title.strip_prefix("waku-shell:"))?;
+    if report == "begin" {
         return Some(ShellReport::CommandBegin);
     }
-    if let Some(code) = title.strip_prefix(END_TITLE_PREFIX) {
+    if let Some(code) = report.strip_prefix("end:") {
         return code.trim().parse().ok().map(ShellReport::CommandEnd);
     }
-    title
-        .strip_prefix(CWD_TITLE_PREFIX)
+    report
+        .strip_prefix("cwd:")
         .filter(|cwd| !cwd.is_empty())
         .map(|cwd| ShellReport::Cwd(PathBuf::from(cwd)))
 }
 
-// `waku-shell:begin` precedes a command run, `waku-shell:end:<code>`
-// follows it, `waku-shell:cwd:<path>` rides every prompt. End sentinels
+// `goddard-shell:begin` precedes a command run, `goddard-shell:end:<code>`
+// follows it, `goddard-shell:cwd:<path>` rides every prompt. End sentinels
 // only carry weight when a begin marked a run in flight — the scripts
 // gate on that themselves, except bash, which cannot (see below), so the
 // view ignores an end no begin announced.
 
-const ZSH_SCRIPT: &str = r#"# waku shell integration for zsh.
+const ZSH_SCRIPT: &str = r#"# goddard shell integration for zsh.
 #
 # precmd runs first so it still sees the command's real exit status before
 # any user hook can clobber $?, and returns that status so hooks after it
 # see it too. preexec marks a run in flight so the first prompt does not
 # report a phantom exit.
-(( ${__waku_loaded:-0} )) && return 0
-__waku_loaded=1
-__waku_running=0
-__waku_preexec() {
-    __waku_running=1
-    builtin printf '\e]2;waku-shell:begin\e\\'
+(( ${__goddard_loaded:-0} )) && return 0
+__goddard_loaded=1
+__goddard_running=0
+__goddard_preexec() {
+    __goddard_running=1
+    builtin printf '\e]2;goddard-shell:begin\e\\'
 }
-__waku_precmd() {
-    local __waku_status=$?
-    if (( __waku_running )); then
-        __waku_running=0
-        builtin printf '\e]2;waku-shell:end:%d\e\\' "$__waku_status"
+__goddard_precmd() {
+    local __goddard_status=$?
+    if (( __goddard_running )); then
+        __goddard_running=0
+        builtin printf '\e]2;goddard-shell:end:%d\e\\' "$__goddard_status"
     fi
-    builtin printf '\e]2;waku-shell:cwd:%s\e\\' "$PWD"
-    return "$__waku_status"
+    builtin printf '\e]2;goddard-shell:cwd:%s\e\\' "$PWD"
+    return "$__goddard_status"
 }
-precmd_functions=(__waku_precmd ${precmd_functions:#__waku_precmd})
-preexec_functions=(__waku_preexec ${preexec_functions:#__waku_preexec})
+precmd_functions=(__goddard_precmd ${precmd_functions:#__goddard_precmd})
+preexec_functions=(__goddard_preexec ${preexec_functions:#__goddard_preexec})
 "#;
 
-const BASH_SCRIPT: &str = r#"# waku shell integration for bash.
+const BASH_SCRIPT: &str = r#"# goddard shell integration for bash.
 #
 # PROMPT_COMMAND supplies the post-command report; ours runs first so $?
 # is still the command's status, and hands it back to later entries via
 # `return`. PS0 supplies the pre-command marker on bash 4.4+; older bash
 # ignores the variable, losing the spinner but keeping cwd and status.
-[[ ${__waku_loaded:-0} -eq 1 ]] && return 0
-__waku_loaded=1
-__waku_precmd() {
-    local __waku_status=$?
-    builtin printf '\e]2;waku-shell:end:%d\e\\' "$__waku_status"
-    builtin printf '\e]2;waku-shell:cwd:%s\e\\' "$PWD"
-    return "$__waku_status"
+[[ ${__goddard_loaded:-0} -eq 1 ]] && return 0
+__goddard_loaded=1
+__goddard_precmd() {
+    local __goddard_status=$?
+    builtin printf '\e]2;goddard-shell:end:%d\e\\' "$__goddard_status"
+    builtin printf '\e]2;goddard-shell:cwd:%s\e\\' "$PWD"
+    return "$__goddard_status"
 }
 case "$(declare -p PROMPT_COMMAND 2>/dev/null)" in
     "declare -a"*)
         # bash 5.1+ allows PROMPT_COMMAND as an array of entries.
-        PROMPT_COMMAND=(__waku_precmd ${PROMPT_COMMAND[@]+"${PROMPT_COMMAND[@]}"})
+        PROMPT_COMMAND=(__goddard_precmd ${PROMPT_COMMAND[@]+"${PROMPT_COMMAND[@]}"})
         ;;
     *)
-        PROMPT_COMMAND="__waku_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+        PROMPT_COMMAND="__goddard_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
         ;;
 esac
-PS0='\[\e]2;waku-shell:begin\e\\\]'
+PS0='\[\e]2;goddard-shell:begin\e\\\]'
 "#;
 
-const FISH_SCRIPT: &str = r#"# waku shell integration for fish.
+const FISH_SCRIPT: &str = r#"# goddard shell integration for fish.
 #
 # fish_preexec/fish_postexec fire per interactive command; $status inside
 # postexec is the command's exit code. The PWD variable watch covers cd.
-function __waku_preexec --on-event fish_preexec
-    builtin printf '\e]2;waku-shell:begin\e\\'
+function __goddard_preexec --on-event fish_preexec
+    builtin printf '\e]2;goddard-shell:begin\e\\'
 end
-function __waku_postexec --on-event fish_postexec
-    builtin printf '\e]2;waku-shell:end:%d\e\\' $status
+function __goddard_postexec --on-event fish_postexec
+    builtin printf '\e]2;goddard-shell:end:%d\e\\' $status
 end
-function __waku_pwd --on-variable PWD
-    builtin printf '\e]2;waku-shell:cwd:%s\e\\' $PWD
+function __goddard_pwd --on-variable PWD
+    builtin printf '\e]2;goddard-shell:cwd:%s\e\\' $PWD
 end
-builtin printf '\e]2;waku-shell:cwd:%s\e\\' $PWD
+builtin printf '\e]2;goddard-shell:cwd:%s\e\\' $PWD
 "#;
 
 /// The integration script for a shell, keyed by its binary name —
@@ -135,9 +136,9 @@ fn script_for(shell: &Path) -> Option<(&'static str, &'static str)> {
         .map(|name| name.to_ascii_lowercase())
         .as_deref()
     {
-        Some("zsh") => Some(("waku-integration.zsh", ZSH_SCRIPT)),
-        Some("bash") => Some(("waku-integration.bash", BASH_SCRIPT)),
-        Some("fish") => Some(("waku-integration.fish", FISH_SCRIPT)),
+        Some("zsh") => Some(("goddard-integration.zsh", ZSH_SCRIPT)),
+        Some("bash") => Some(("goddard-integration.bash", BASH_SCRIPT)),
+        Some("fish") => Some(("goddard-integration.fish", FISH_SCRIPT)),
         _ => None,
     }
 }
@@ -159,29 +160,35 @@ fn ensure_script(name: &str, script: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-const BLOCK_BEGIN: &str = "# >>> waku shell integration >>>";
-const BLOCK_END: &str = "# <<< waku shell integration <<<";
+const BLOCK_BEGIN: &str = "# >>> goddard shell integration >>>";
+const BLOCK_END: &str = "# <<< goddard shell integration <<<";
+/// Blocks written by pre-Goddard builds; installs strip them so an upgrade
+/// swaps the source line in place instead of stacking a second hook.
+const LEGACY_BLOCK_BEGIN: &str = "# >>> waku shell integration >>>";
+const LEGACY_BLOCK_END: &str = "# <<< waku shell integration <<<";
 
-/// The guarded block appended to a POSIX rc file. `$WAKU` is set only on
-/// terminals waku spawns, so every other shell — Terminal.app, SSH, cron
-/// — skips it; the `-f` test makes a stale path a no-op rather than an
-/// error banner at every prompt.
+/// The guarded block appended to a POSIX rc file. `$GODDARD` is set only
+/// on terminals Goddard spawns, so every other shell — Terminal.app, SSH,
+/// cron — skips it; the `-f` test makes a stale path a no-op rather than
+/// an error banner at every prompt.
 fn rc_block(script: &Path) -> String {
     let quoted = crate::custom_commands::shell_quote(script);
-    format!("{BLOCK_BEGIN}\n[[ -n \"$WAKU\" && -f {quoted} ]] && source {quoted}\n{BLOCK_END}\n")
+    format!("{BLOCK_BEGIN}\n[[ -n \"$GODDARD\" && -f {quoted} ]] && source {quoted}\n{BLOCK_END}\n")
 }
 
-/// `contents` minus any waku block, so installs are idempotent and a
-/// moved script path rewrites the block instead of stacking copies.
+/// `contents` minus any Goddard or legacy waku block, so installs are
+/// idempotent and a moved script path rewrites the block instead of
+/// stacking copies.
 fn strip_block(contents: &str) -> String {
     let mut kept = String::with_capacity(contents.len());
     let mut in_block = false;
     for line in contents.lines() {
-        if line.trim() == BLOCK_BEGIN {
+        let trimmed = line.trim();
+        if trimmed == BLOCK_BEGIN || trimmed == LEGACY_BLOCK_BEGIN {
             in_block = true;
             continue;
         }
-        if line.trim() == BLOCK_END {
+        if trimmed == BLOCK_END || trimmed == LEGACY_BLOCK_END {
             in_block = false;
             continue;
         }
@@ -223,7 +230,7 @@ fn zsh_rc_path() -> Option<PathBuf> {
 /// Install the integration so the next spawned shell picks it up
 /// silently — no typed `source` line, nothing echoed at the prompt.
 /// Returns `true` when the shell has an integration and the caller
-/// should export `WAKU=1` to the PTY so the rc guard passes.
+/// should export `GODDARD=1` to the PTY so the rc guard passes.
 pub fn install(shell: &Path) -> bool {
     let Some((name, script)) = script_for(shell) else {
         return false;
@@ -232,25 +239,30 @@ pub fn install(shell: &Path) -> bool {
         return false;
     };
     match name {
-        "waku-integration.zsh" => zsh_rc_path()
+        "goddard-integration.zsh" => zsh_rc_path()
             .is_some_and(|rc| install_rc_block(&rc, &rc_block(&script_path)).is_ok()),
-        "waku-integration.bash" => dirs::home_dir().is_some_and(|home| {
-            // waku spawns `bash -l`, which reads `.bash_profile` and skips
-            // `.bashrc`; nested interactive shells do the reverse. Both get
-            // the block — the script's `__waku_loaded` guard makes a second
-            // source in the same shell a no-op.
+        "goddard-integration.bash" => dirs::home_dir().is_some_and(|home| {
+            // Goddard spawns `bash -l`, which reads `.bash_profile` and
+            // skips `.bashrc`; nested interactive shells do the reverse.
+            // Both get the block — the script's `__goddard_loaded` guard
+            // makes a second source in the same shell a no-op.
             let block = rc_block(&script_path);
             install_rc_block(&home.join(".bash_profile"), &block).is_ok()
                 && install_rc_block(&home.join(".bashrc"), &block).is_ok()
         }),
         // conf.d snippets are sourced at every fish startup, so a single
-        // file under waku control needs no edit of user-owned config.
-        "waku-integration.fish" => dirs::home_dir().is_some_and(|home| {
-            let snippet = home
-                .join(".config/fish/conf.d")
-                .join("waku-integration.fish");
+        // file under Goddard's control needs no edit of user-owned config.
+        "goddard-integration.fish" => dirs::home_dir().is_some_and(|home| {
+            let conf_d = home.join(".config/fish/conf.d");
+            // Pre-Goddard installs left a waku-named snippet; drop it so the
+            // old script and the new one cannot both hook the shell.
+            let legacy = conf_d.join("waku-integration.fish");
+            if legacy.is_file() {
+                fs::remove_file(&legacy).ok();
+            }
+            let snippet = conf_d.join("goddard-integration.fish");
             let contents = format!(
-                "# waku shell integration — delete this file to disable.\nstatus is-interactive; and set -q WAKU; and source {}\n",
+                "# goddard shell integration — delete this file to disable.\nstatus is-interactive; and set -q GODDARD; and source {}\n",
                 crate::custom_commands::shell_quote(&script_path)
             );
             fs::create_dir_all(snippet.parent().unwrap_or(&home))
@@ -273,37 +285,50 @@ mod tests {
     #[test]
     fn reports_parse() {
         assert!(matches!(
-            parse_report("waku-shell:begin"),
+            parse_report("goddard-shell:begin"),
             Some(ShellReport::CommandBegin)
         ));
         assert!(matches!(
-            parse_report("waku-shell:end:0"),
+            parse_report("goddard-shell:end:0"),
             Some(ShellReport::CommandEnd(0))
         ));
         assert!(matches!(
-            parse_report("waku-shell:end: 127"),
+            parse_report("goddard-shell:end: 127"),
             Some(ShellReport::CommandEnd(127))
+        ));
+        assert!(matches!(
+            parse_report("goddard-shell:cwd:/tmp/a b"),
+            Some(ShellReport::Cwd(ref path)) if path == &PathBuf::from("/tmp/a b")
         ));
         assert!(matches!(
             parse_report("waku-shell:cwd:/tmp/a b"),
             Some(ShellReport::Cwd(ref path)) if path == &PathBuf::from("/tmp/a b")
         ));
-        assert!(parse_report("waku-shell:cwd:").is_none());
+        assert!(parse_report("goddard-shell:cwd:").is_none());
         assert!(parse_report("a normal title").is_none());
-        assert!(parse_report("waku-shell:unknown").is_none());
+        assert!(parse_report("goddard-shell:unknown").is_none());
         // A custom command's exit sentinel stays a title, not a report.
         assert!(parse_report("waku-command-exit:0").is_none());
     }
 
     #[test]
-    fn strip_block_removes_only_the_waku_block() {
-        let contents = "export EDITOR=vim\n# >>> waku shell integration >>>\n[[ -n \"$WAKU\" ]] && source '/a/b.zsh'\n# <<< waku shell integration <<<\nalias ll='ls -l'\n";
+    fn strip_block_removes_only_the_integration_block() {
+        let contents = "export EDITOR=vim\n# >>> goddard shell integration >>>\n[[ -n \"$GODDARD\" ]] && source '/a/b.zsh'\n# <<< goddard shell integration <<<\nalias ll='ls -l'\n";
         assert_eq!(
             strip_block(contents),
             "export EDITOR=vim\nalias ll='ls -l'\n"
         );
+        // A pre-Goddard block strips the same way.
+        let legacy = "export EDITOR=vim\n# >>> waku shell integration >>>\n[[ -n \"$WAKU\" ]] && source '/a/b.zsh'\n# <<< waku shell integration <<<\nalias ll='ls -l'\n";
+        assert_eq!(
+            strip_block(legacy),
+            "export EDITOR=vim\nalias ll='ls -l'\n"
+        );
         // An unterminated block eats to EOF; a file without one is untouched.
-        assert_eq!(strip_block("a\n# >>> waku shell integration >>>\nb\n"), "a\n");
+        assert_eq!(
+            strip_block("a\n# >>> goddard shell integration >>>\nb\n"),
+            "a\n"
+        );
         assert_eq!(strip_block("a\nb\n"), "a\nb\n");
     }
 

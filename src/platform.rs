@@ -74,7 +74,7 @@ pub fn init_reduce_motion(cx: &mut gpui::App) {
 
 #[cfg(target_os = "linux")]
 pub fn init_reduce_motion(cx: &mut gpui::App) {
-    if let Ok(value) = std::env::var("WAKU_REDUCE_MOTION")
+    if let Ok(value) = std::env::var("GODDARD_REDUCE_MOTION")
         && let Some(enabled) = parse_boolean_setting(&value)
     {
         cx.set_reduce_motion(enabled);

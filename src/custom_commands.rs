@@ -66,12 +66,14 @@ pub fn remove_script_if_unreferenced(script: &str, commands: &[CustomCommand]) {
 /// title is `{prefix}{code}`, and `TerminalEventProxy` swallows it before
 /// it can rename the tab. This is the only completion signal available —
 /// the shell stays interactive after the script, so nothing exits.
-const COMMAND_EXIT_TITLE_PREFIX: &str = "waku-command-exit:";
+const COMMAND_EXIT_TITLE_PREFIX: &str = "goddard-command-exit:";
 
-/// A sentinel title's reported exit code, if this title is one.
+/// A sentinel title's reported exit code, if this title is one. Command
+/// scripts materialized by pre-Goddard builds still emit `waku-command-exit:`.
 pub fn parse_command_exit(title: &str) -> Option<i32> {
     title
         .strip_prefix(COMMAND_EXIT_TITLE_PREFIX)
+        .or_else(|| title.strip_prefix("waku-command-exit:"))
         .and_then(|code| code.trim().parse().ok())
 }
 
@@ -248,7 +250,7 @@ mod tests {
     #[test]
     fn source_line_matches_the_shell_family() {
         let path = Path::new("/tmp/command-abc");
-        let sentinel = "\\033]2;waku-command-exit:%s\\033\\\\";
+        let sentinel = "\\033]2;goddard-command-exit:%s\\033\\\\";
         assert_eq!(
             source_line(Path::new("/bin/zsh"), path, false),
             format!(". '/tmp/command-abc'; printf '{sentinel}' \"$?\"")
@@ -266,7 +268,7 @@ mod tests {
         assert_eq!(
             source_line(Path::new("/usr/local/bin/nu"), path, true),
             "source '/tmp/command-abc'; let waku_status = $env.LAST_EXIT_CODE; \
-             print --no-newline $\"(char esc)]2;waku-command-exit:($waku_status)(char esc)\\\\\"; \
+             print --no-newline $\"(char esc)]2;goddard-command-exit:($waku_status)(char esc)\\\\\"; \
              if $waku_status == 0 { exit }"
         );
         assert_eq!(
@@ -275,7 +277,7 @@ mod tests {
                 path,
                 true
             ),
-            ". '/tmp/command-abc'; $waku_ok = $?; [Console]::Write(\"$([char]27)]2;waku-command-exit:$([int](-not $waku_ok))$([char]27)\\\"); if ($waku_ok) { exit }"
+            ". '/tmp/command-abc'; $waku_ok = $?; [Console]::Write(\"$([char]27)]2;goddard-command-exit:$([int](-not $waku_ok))$([char]27)\\\"); if ($waku_ok) { exit }"
         );
         assert_eq!(
             source_line(Path::new("C:/Windows/System32/cmd.exe"), path, true),
@@ -285,11 +287,11 @@ mod tests {
 
     #[test]
     fn parse_command_exit_reads_only_sentinel_titles() {
-        assert_eq!(parse_command_exit("waku-command-exit:0"), Some(0));
-        assert_eq!(parse_command_exit("waku-command-exit:127"), Some(127));
-        assert_eq!(parse_command_exit("waku-command-exit:1"), Some(1));
-        assert_eq!(parse_command_exit("waku-command-exit:"), None);
-        assert_eq!(parse_command_exit("waku-command-exit:abc"), None);
+        assert_eq!(parse_command_exit("goddard-command-exit:0"), Some(0));
+        assert_eq!(parse_command_exit("goddard-command-exit:127"), Some(127));
+        assert_eq!(parse_command_exit("goddard-command-exit:1"), Some(1));
+        assert_eq!(parse_command_exit("goddard-command-exit:"), None);
+        assert_eq!(parse_command_exit("goddard-command-exit:abc"), None);
         assert_eq!(parse_command_exit("vim — ~/project"), None);
     }
 
@@ -312,7 +314,7 @@ mod tests {
         let path = Path::new("/tmp/it's/command");
         assert_eq!(
             source_line(Path::new("/bin/sh"), path, false),
-            r#". '/tmp/it'\''s/command'; printf '\033]2;waku-command-exit:%s\033\\' "$?""#
+            r#". '/tmp/it'\''s/command'; printf '\033]2;goddard-command-exit:%s\033\\' "$?""#
         );
     }
 }

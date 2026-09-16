@@ -472,7 +472,7 @@ impl Waku {
     ///
     /// A projectless task has no worktree to retire; when its project's
     /// every session is archived and quiet, the daemon zips the workspace
-    /// into `~/.waku/archives` and removes it instead.
+    /// into `~/.goddard/archives` and removes it instead.
     pub(super) fn drain_pending_workspace_cleanups(&mut self, cx: &mut Context<Self>) {
         let mut deferred = HashSet::new();
         let mut ready = Vec::new();
@@ -577,7 +577,7 @@ impl Waku {
     /// The workspace a projectless project's archived sessions can retire:
     /// every session on the project is archived and past the same writers
     /// the worktree cleanup waits for, and the path is a real workspace —
-    /// never `~/.waku` itself, which the oldest layout used as a cwd and now
+    /// never `~/.goddard` itself, which the oldest layout used as a cwd and now
     /// holds configuration.
     fn archivable_projectless_workspace(&self, project_id: Uuid) -> Option<PathBuf> {
         let project = self

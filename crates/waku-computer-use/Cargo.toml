@@ -6,7 +6,7 @@ license = "GPL-3.0-only"
 description = "Goddard's in-process Cua Driver SDK host"
 
 [[bin]]
-name = "waku_computer_use"
+name = "goddard_computer_use"
 path = "src/main.rs"
 
 [dependencies]

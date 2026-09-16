@@ -13,12 +13,12 @@
 // Env overrides:
 //   SPARKLE_BIN                dir containing the Sparkle tools
 //   SPARKLE_PRIVATE_KEY        EdDSA private key (CI; otherwise the keychain)
-//   WAKU_DOWNLOAD_URL_PREFIX   base URL for enclosure links
+//   GODDARD_DOWNLOAD_URL_PREFIX   base URL for enclosure links
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { wakuCacheDir } from "./cache-dir";
 
-export const defaultDownloadUrlPrefix = "https://releases.waku.sh/";
+export const defaultDownloadUrlPrefix = "https://releases.goddardai.org/";
 
 /** Locate Sparkle's `generate_appcast`: SPARKLE_BIN first, then the pinned
  *  distribution scripts/bundle.sh keeps in the shared build cache, then PATH. */
@@ -109,6 +109,6 @@ if (import.meta.main) {
     process.exit(1);
   }
   const prefix =
-    process.env.WAKU_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
+    process.env.GODDARD_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
   await generateAppcast(updatesDir, prefix);
 }

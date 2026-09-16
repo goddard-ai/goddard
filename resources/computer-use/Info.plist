@@ -9,7 +9,7 @@
     <key>CFBundleExecutable</key>
     <string>Goddard Computer Use</string>
     <key>CFBundleIdentifier</key>
-    <string>sh.waku.computer-use</string>
+    <string>org.goddardai.app.computer-use</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

@@ -65,7 +65,7 @@ export function ConnectionPanel({ title }: { title?: string } = {}) {
                 autoCorrect="off"
                 className="bg-card"
                 inputMode="url"
-                placeholder="wss://waku.example.com"
+                placeholder="wss://goddard.example.com"
                 value={address}
                 onChange={(event) => setAddress(event.target.value)}
               />

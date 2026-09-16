@@ -3578,9 +3578,8 @@ mod tests {
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, SearchPaint, TextInput, UNDO_GROUP_INTERVAL,
         UNDO_HISTORY_CAP, collapsible_paste, cursor_should_be_visible, input_text_runs,
-        media_paste_entries,
-        next_word_boundary, pasted_text_for_mode, previous_word_boundary, single_line_scroll,
-        trimmed_splice, visual_row_count, word_range_at,
+        media_paste_entries, next_word_boundary, pasted_text_for_mode, previous_word_boundary,
+        single_line_scroll, trimmed_splice, visual_row_count, word_range_at,
     };
 
     struct InputHarness {

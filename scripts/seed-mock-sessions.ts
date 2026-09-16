@@ -270,7 +270,7 @@ const CODE_SAMPLES: { language: string; lines: string[] }[] = [
     language: "bash",
     lines: [
       "cargo build --profile dev 2>&1 | tail -20",
-      "hyperfine --warmup 3 'target/debug/waku --bench transcript'",
+      "hyperfine --warmup 3 'target/debug/goddard --bench transcript'",
       "rg -n 'fn render' src/app | wc -l",
       "sqlite3 temp/app.db 'EXPLAIN QUERY PLAN SELECT * FROM sessions ORDER BY updated_at'",
     ],
@@ -429,7 +429,7 @@ function buildLog(random: Random, lines: number): string {
       out.push("   |         ^^^^ help: if this is intentional, prefix it with an underscore");
     } else if (roll < 0.2) {
       out.push(
-        `   Compiling ${pick(random, ["gpui", "waku", "rusqlite", "pulldown-cmark", "smol"])} v${int(random, 0, 3)}.${int(random, 0, 40)}.${int(random, 0, 9)}`,
+        `   Compiling ${pick(random, ["gpui", "goddard", "rusqlite", "pulldown-cmark", "smol"])} v${int(random, 0, 3)}.${int(random, 0, 40)}.${int(random, 0, 9)}`,
       );
     } else {
       out.push(

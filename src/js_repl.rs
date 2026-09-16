@@ -21,10 +21,10 @@ const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 30_000;
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
 // Instructions for Goddard's persistent QuickJS runtime and its jsRepl helpers.
-const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `waku_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `jsRepl.cwd`, `jsRepl.homeDir`, `jsRepl.tmpDir`, `jsRepl.requestMeta`, `jsRepl.setResponseMeta(...)`, and `await jsRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
+const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `goddard_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `jsRepl.cwd`, `jsRepl.homeDir`, `jsRepl.tmpDir`, `jsRepl.requestMeta`, `jsRepl.setResponseMeta(...)`, and `await jsRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
 
 const KERNEL_BOOTSTRAP: &str = include_str!("js_repl_bootstrap.js");
-const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `waku_js_repl` MCP server; use it whenever instructions say to use `waku_js_repl`, the Goddard JavaScript REPL MCP, or run Goddard JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow Computer Use automation or other long-running operations. Use `jsRepl.cwd`, `jsRepl.homeDir`, and `jsRepl.tmpDir` to inspect host paths. Use `jsRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `jsRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `jsRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await jsRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, an object with a `url` property, or a Cua image content block with `data` and `mimeType`. Saved references to `jsRepl.write(...)` and `jsRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Initialize Cua Driver with `await setupComputerUseRuntime({ globals: globalThis })`, which exposes every native tool as `cua.<tool_name>(arguments)`, such as `cua.list_apps()` or `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Module imports are not supported. Prefer `jsRepl.write(...)` for text or formatted values and `jsRepl.emitImage(...)` for images.";
+const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `goddard_js_repl` MCP server; use it whenever instructions say to use `goddard_js_repl`, the Goddard JavaScript REPL MCP, or run Goddard JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow Computer Use automation or other long-running operations. Use `jsRepl.cwd`, `jsRepl.homeDir`, and `jsRepl.tmpDir` to inspect host paths. Use `jsRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `jsRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `jsRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await jsRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, an object with a `url` property, or a Cua image content block with `data` and `mimeType`. Saved references to `jsRepl.write(...)` and `jsRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Initialize Cua Driver with `await setupComputerUseRuntime({ globals: globalThis })`, which exposes every native tool as `cua.<tool_name>(arguments)`, such as `cua.list_apps()` or `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Module imports are not supported. Prefer `jsRepl.write(...)` for text or formatted values and `jsRepl.emitImage(...)` for images.";
 
 #[derive(Default)]
 struct CallOutput {
@@ -130,8 +130,9 @@ pub fn serve_stdio() -> anyhow::Result<()> {
 }
 
 fn serve<R: BufRead, W: Write>(mut input: R, mut output: W) -> anyhow::Result<()> {
-    let mut repl =
-        ReplHost::new(std::env::var_os("WAKU_COMPUTER_USE_SESSIONS_DIRECTORY").map(PathBuf::from))?;
+    let mut repl = ReplHost::new(
+        std::env::var_os("GODDARD_COMPUTER_USE_SESSIONS_DIRECTORY").map(PathBuf::from),
+    )?;
     let mut line = String::new();
     loop {
         line.clear();
@@ -279,7 +280,7 @@ fn initialize_result() -> JsonValue {
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {"tools": {"listChanged": false}},
         "serverInfo": {
-            "name": "waku_js_repl",
+            "name": "goddard_js_repl",
             "version": env!("CARGO_PKG_VERSION")
         },
         "instructions": SERVER_INSTRUCTIONS
@@ -973,23 +974,23 @@ impl HelperConnection {
     fn start(deadline: Option<Instant>, config: Option<&SessionConfig>) -> anyhow::Result<Self> {
         // The SDK host ships in every bundle, but only development builds may
         // run it. Refusing here means a release build never reaches the SDK
-        // even when WAKU_COMPUTER_USE_SERVER is set by hand.
+        // even when GODDARD_COMPUTER_USE_SERVER is set by hand.
         if !waku_protocol::computer_use::is_available() {
-            bail!("Waku Computer Use is not available in this build");
+            bail!("Goddard Computer Use is not available in this build");
         }
         let command = config
             .map(|config| config.server_path.clone())
-            .or_else(|| std::env::var_os("WAKU_COMPUTER_USE_SERVER").map(PathBuf::from))
+            .or_else(|| std::env::var_os("GODDARD_COMPUTER_USE_SERVER").map(PathBuf::from))
             .ok_or_else(|| {
                 anyhow!(
-                    "WAKU_COMPUTER_USE_SERVER is required before the first Cua Driver operation"
+                    "GODDARD_COMPUTER_USE_SERVER is required before the first Cua Driver operation"
                 )
             })?;
         let mut helper = Command::new(&command);
         if let Some(config) = config {
             helper
                 .env(
-                    "WAKU_COMPUTER_USE_PROCESS_DIRECTORY",
+                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
                     &config.process_directory,
                 )
                 .current_dir(&config.cwd);
@@ -1040,7 +1041,7 @@ impl HelperConnection {
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "waku_js_repl", "version": env!("CARGO_PKG_VERSION")}
+                "clientInfo": {"name": "goddard_js_repl", "version": env!("CARGO_PKG_VERSION")}
             }),
             deadline,
         )?;
@@ -1235,7 +1236,7 @@ mod tests {
             ["js", "js_reset"]
         );
         assert_eq!(tools[0]["description"], JS_TOOL_DESCRIPTION.trim());
-        assert!(SERVER_INSTRUCTIONS.contains("`waku_js_repl`"));
+        assert!(SERVER_INSTRUCTIONS.contains("`goddard_js_repl`"));
         assert!(!SERVER_INSTRUCTIONS.contains("`node_repl`"));
         assert!(!SERVER_INSTRUCTIONS.contains("jsRepl.write"));
         assert!(JS_TOOL_DESCRIPTION.contains("jsRepl.write"));

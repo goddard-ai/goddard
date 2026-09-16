@@ -66,7 +66,7 @@ jobs:
 
       - name: Verify in-process Cua SDK and REPL lifecycle
         run: |
-          cargo build --locked --package waku --bin waku_js_repl --package waku-computer-use --bin waku_computer_use
+          cargo build --locked --package waku --bin goddard_js_repl --package waku-computer-use --bin goddard_computer_use
           bun scripts/cua-driver.ts bundle target/debug target/debug/resources debug
           bun scripts/test-computer-use.ts
 

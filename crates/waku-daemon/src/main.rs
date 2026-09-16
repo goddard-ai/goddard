@@ -11,6 +11,14 @@ use waku_protocol::{
 };
 
 fn main() -> anyhow::Result<()> {
+    for failure in waku_protocol::migration::migrate_legacy_directories().failures {
+        eprintln!(
+            "Goddard: could not copy {} to {} ({:#}); starting with fresh state — restart to retry",
+            failure.legacy.display(),
+            failure.destination.display(),
+            failure.error
+        );
+    }
     let arguments = Arguments::parse(std::env::args().skip(1))?;
     let token = std::env::var(DAEMON_TOKEN_ENV)
         .context("Goddard daemon authentication token is missing")?;
@@ -41,7 +49,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(parent_pid) = arguments.parent_pid {
         let monitor_shutdown = shutdown.clone();
         std::thread::Builder::new()
-            .name("waku-daemon-parent".into())
+            .name("goddard-daemon-parent".into())
             .spawn(move || {
                 while !monitor_shutdown.load(Ordering::Acquire) {
                     if !process_is_alive(parent_pid) {

@@ -537,7 +537,7 @@ impl RequestDispatcher {
         let failed_request_id = request.request_id;
         let failed_outgoing = outgoing.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("waku-daemon-request".into())
+            .name("goddard-daemon-request".into())
             .spawn(move || {
                 handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
             })
@@ -597,7 +597,7 @@ impl RequestDispatcher {
             let hub = self.hub.clone();
             let mailbox_registry = Arc::downgrade(&self.runtime_mailboxes);
             let worker = std::thread::Builder::new()
-                .name(format!("waku-daemon-runtime-{session_id}"))
+                .name(format!("goddard-daemon-runtime-{session_id}"))
                 .spawn(move || {
                     run_runtime_mailbox(
                         session_id,
@@ -660,13 +660,13 @@ pub fn serve(
                 let shutdown = shutdown.clone();
                 let options = options.clone();
                 std::thread::Builder::new()
-                    .name("waku-daemon-connection".into())
+                    .name("goddard-daemon-connection".into())
                     .spawn(move || {
                         let _connection_permit = connection_permit;
                         if let Err(error) =
                             handle_connection(stream, &token, dispatcher, hub, shutdown, &options)
                         {
-                            eprintln!("waku-daemon connection ended: {error:#}");
+                            eprintln!("goddard-daemon connection ended: {error:#}");
                         }
                     })
                     .context("could not start Goddard daemon connection thread")?;
@@ -816,7 +816,7 @@ fn handle_connection(
                 }
                 Ok(ClientMessage::Hello { .. }) => {}
                 Err(error) => {
-                    eprintln!("waku-daemon ignored invalid message: {error}");
+                    eprintln!("goddard-daemon ignored invalid message: {error}");
                 }
             },
             Ok(Message::Close(_)) => break,
@@ -1303,7 +1303,7 @@ mod tests {
                     projects: Vec::new(),
                     sessions: self.sessions.lock().clone(),
                     default_cwd: PathBuf::from("/tmp"),
-                    projectless_root: Some(PathBuf::from("/tmp/.waku/projects")),
+                    projectless_root: Some(PathBuf::from("/tmp/.goddard/projects")),
                 }),
                 _ => Ok(ResponsePayload::Ack),
             }
@@ -1806,7 +1806,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_scoped_agent_token_reaches_only_agent_commands() {
-        let root = std::env::temp_dir().join(format!("waku-agent-auth-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("goddard-agent-auth-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
         settings
@@ -1952,7 +1952,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_commands_require_the_daemon_setting() {
-        let root = std::env::temp_dir().join(format!("waku-agent-gate-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("goddard-agent-gate-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let backend = WakuBackend::new(
             DaemonSettingsStore::open(root.join("settings.json")).unwrap(),

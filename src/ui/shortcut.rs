@@ -3,7 +3,9 @@
 
 use std::rc::Rc;
 
-use gpui::{Action, App, FocusHandle, KeyBinding, KeyContext, KeybindingKeystroke, SharedString, Window};
+use gpui::{
+    Action, App, FocusHandle, KeyBinding, KeyContext, KeybindingKeystroke, SharedString, Window,
+};
 
 /// A shortcut hint shown beside a menu row, tooltip, or palette entry.
 #[derive(Clone)]
@@ -52,11 +54,9 @@ impl ShortcutHint {
                     Some(focus) => {
                         window.highest_precedence_binding_for_action_in(action.as_ref(), focus)
                     }
-                    None => highest_precedence_binding(
-                        action.as_ref(),
-                        &window.context_stack(),
-                        cx,
-                    ),
+                    None => {
+                        highest_precedence_binding(action.as_ref(), &window.context_stack(), cx)
+                    }
                 }?;
                 Some(binding_label(&binding))
             }

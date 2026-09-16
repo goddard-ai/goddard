@@ -117,7 +117,7 @@ impl DaemonClient {
         });
         let thread_inner = inner.clone();
         std::thread::Builder::new()
-            .name("waku-daemon-client".into())
+            .name("goddard-daemon-client".into())
             .spawn(move || run_client(socket, outgoing_rx, thread_inner))
             .context("could not start Goddard daemon client thread")?;
         Ok(Self { inner })

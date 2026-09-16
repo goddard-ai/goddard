@@ -1,11 +1,11 @@
 ---
-name: waku-computer-use
+name: goddard-computer-use
 description: Control local macOS, Windows, and Linux apps through Goddard Computer Use. Prefer purpose-built connectors, APIs, or CLIs when available.
 ---
 
 # Goddard Computer Use
 
-Use the `js` tool from `waku_js_repl` for computer interactions. It runs a
+Use the `js` tool from `goddard_js_repl` for computer interactions. It runs a
 persistent QuickJS kernel. Use the direct `cua` methods documented here;
 all methods are available immediately after bootstrap. Goddard shows Cua's native
 virtual cursor automatically while actions run; no cursor setup is needed.

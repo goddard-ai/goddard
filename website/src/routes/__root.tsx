@@ -9,7 +9,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import appCss from '@/styles.css?url'
 
-const SITE_URL = 'https://waku.sh'
+const SITE_URL = 'https://goddardai.org'
 const TITLE = 'Goddard — one native app for all your coding agents'
 const DESCRIPTION =
   'A fast, native app for local coding agents. Amp, Claude Code, Codex, Cursor, OpenCode, Grok, and Pi — one timeline, entirely on your machine.'
@@ -50,13 +50,14 @@ export const Route = createRootRouteWithContext<{
         // Mirror the system color scheme onto <html> before first paint.
         children: `try{var m=matchMedia('(prefers-color-scheme: dark)'),d=document.documentElement,s=function(){d.classList.toggle('dark',m.matches)};s();m.addEventListener('change',s)}catch(e){}`,
       },
-      // Analytics, production builds only.
-      ...(import.meta.env.PROD
+      // Analytics, production builds only. Wired up when the Goddard Umami
+      // endpoint exists; the previous Waku instance is not reused.
+      ...(import.meta.env.PROD && import.meta.env.VITE_ANALYTICS_ENDPOINT
         ? [
             {
               defer: true,
-              src: 'https://u.egoist.dev/script.js',
-              'data-website-id': '5dc2da71-cd6e-4862-8d60-e1cfb782f54f',
+              src: `${import.meta.env.VITE_ANALYTICS_ENDPOINT}/script.js`,
+              'data-website-id': import.meta.env.VITE_ANALYTICS_WEBSITE_ID,
             },
           ]
         : []),

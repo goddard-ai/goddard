@@ -191,7 +191,7 @@ daemon.port_description: 公開中は、すべてのネットワークインタ�
 daemon.port_placeholder: "34123"
 daemon.allowed_origins: 許可するブラウザオリジン
 daemon.allowed_origins_description: WebSocket を開ける正確な http:// または https:// オリジンです。
-daemon.allowed_origins_placeholder: https://waku.example.com, http://localhost:3001
+daemon.allowed_origins_placeholder: https://goddard.example.com, http://localhost:3001
 daemon.apply: 適用
 daemon.restarting: 再起動中…
 daemon.credentials_title: 接続情報
@@ -207,7 +207,7 @@ daemon.external_description: このデスクトップは Goddard の外部で管
 daemon.web_external_description: Goddard Web はブラウザの外部で管理されているデーモンに接続します。リスナー、ブラウザオリジン、トークンは接続先ホストで設定してください。
 daemon.web_connection_description: このブラウザがデーモンを起動または停止することはありません。
 daemon.agent_tools_title: エージェントツール
-daemon.agent_tools_description: エージェントがタスクを作成し、他のタスクにメッセージを送れるようにします。有効な間に開始されたセッションにはセッション限定の waku-agent コマンドが提供され、送信されたプロンプトは対象のトランスクリプトに記録されます。
+daemon.agent_tools_description: エージェントがタスクを作成し、他のタスクにメッセージを送れるようにします。有効な間に開始されたセッションにはセッション限定の goddard-agent コマンドが提供され、送信されたプロンプトは対象のトランスクリプトに記録されます。
 daemon.agent_settings_title: エージェント設定
 daemon.agent_settings_description: エージェントがカスタムコマンドを作成・編集できるようにします。デフォルトで有効です。エージェントが追加したコマンドには印が付き、どのタスクが変更したかが記録されます。
 daemon.not_configured: 未設定
@@ -933,9 +933,9 @@ session.agent_declined_turn: エージェントはこのターンを辞退しま
 session.agent_stopped_reason: "エージェントが停止しました：%{reason}"
 
 errors.open_session: "そのタスクを開けませんでした：%{error}"
-errors.create_projectless_task: "~/.waku/projects 内にタスクを作成できませんでした：%{error}"
+errors.create_projectless_task: "~/.goddard/projects 内にタスクを作成できませんでした：%{error}"
 errors.save_projectless_migration: "プロジェクトなしタスクの移行を保存できませんでした：%{error}"
-errors.move_projectless_task: "以前のルート直下のプロジェクトなしタスクを ~/.waku/projects 内に移動できませんでした：%{error}"
+errors.move_projectless_task: "以前のルート直下のプロジェクトなしタスクを ~/.goddard/projects 内に移動できませんでした：%{error}"
 errors.remote_host_path: このパスはデーモンホスト上にあるため、デスクトップアプリでは開けません
 errors.change_branch: "ブランチを変更できませんでした：%{error}"
 errors.capture_pre_turn_checkpoint: "ターン開始前のチェックポイントを取得できませんでした：%{error}"

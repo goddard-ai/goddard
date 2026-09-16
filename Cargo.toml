@@ -5,6 +5,10 @@ edition = "2024"
 description = "A fast, native control plane for local coding agents"
 license = "GPL-3.0-only"
 
+[[bin]]
+name = "goddard"
+path = "src/main.rs"
+
 [workspace]
 members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent"]
 default-members = [

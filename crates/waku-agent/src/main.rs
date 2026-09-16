@@ -1,9 +1,9 @@
-//! `waku-agent`: the scoped control surface Waku exposes to agents running
+//! `goddard-agent`: the scoped control surface Goddard exposes to agents running
 //! inside a provider session.
 //!
 //! The daemon places this binary on the session's `PATH` together with a
-//! per-session credential (`WAKU_AGENT_TOKEN`), this session's task id
-//! (`WAKU_TASK_ID`), and the daemon address (`WAKU_DAEMON_ADDRESS`). The
+//! per-session credential (`GODDARD_AGENT_TOKEN`), this session's task id
+//! (`GODDARD_TASK_ID`), and the daemon address (`GODDARD_DAEMON_ADDRESS`). The
 //! token grants only the commands below — nothing else — and dies with the
 //! session.
 //!
@@ -32,16 +32,16 @@ use waku_protocol::{
 };
 
 const USAGE: &str = "\
-waku-agent — Goddard's scoped agent surface inside a session
+goddard-agent — Goddard's scoped agent surface inside a session
 
 USAGE
-    waku-agent create '<json>'            Create a task and start its first prompt
-    waku-agent prompt '<json>'            Send a prompt to an existing task
-    waku-agent command list               List the user's custom commands
-    waku-agent command upsert '<json>'    Add or update a custom command
-    waku-agent command remove '<json>'    Remove a custom command
-    waku-agent schema                     Print the JSON payload schemas
-    waku-agent --help                     Show this text
+    goddard-agent create '<json>'            Create a task and start its first prompt
+    goddard-agent prompt '<json>'            Send a prompt to an existing task
+    goddard-agent command list               List the user's custom commands
+    goddard-agent command upsert '<json>'    Add or update a custom command
+    goddard-agent command remove '<json>'    Remove a custom command
+    goddard-agent schema                     Print the JSON payload schemas
+    goddard-agent --help                     Show this text
 
 USAGE CONTRACT
     `command` manages the user's settings — today their custom commands —
@@ -55,11 +55,11 @@ USAGE CONTRACT
     turns are visibly attributed to it.
 
 ENVIRONMENT
-    WAKU_DAEMON_ADDRESS   Daemon WebSocket address (injected by the daemon)
-    WAKU_AGENT_TOKEN      Per-session scoped credential (injected)
-    WAKU_TASK_ID          This session's task id (injected)
+    GODDARD_DAEMON_ADDRESS   Daemon WebSocket address (injected by the daemon)
+    GODDARD_AGENT_TOKEN      Per-session scoped credential (injected)
+    GODDARD_TASK_ID          This session's task id (injected)
 
-Run `waku-agent schema` for the accepted payloads.";
+Run `goddard-agent schema` for the accepted payloads.";
 
 fn schema() -> serde_json::Value {
     let icons: Vec<String> = CustomCommandIcon::ALL
@@ -82,9 +82,9 @@ fn schema() -> serde_json::Value {
             "returns": {"task_id": "uuid of the created task"}
         },
         "prompt": {
-            "description": "Submit a prompt to an existing task, addressed by Waku task id or provider-native thread id.",
+            "description": "Submit a prompt to an existing task, addressed by Goddard task id or provider-native thread id.",
             "fields": {
-                "task_id": {"type": "string", "notes": "Waku task UUID; exactly one of task_id and thread_id is required"},
+                "task_id": {"type": "string", "notes": "Goddard task UUID; exactly one of task_id and thread_id is required"},
                 "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
                 "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
                 "prompt": {"type": "string", "required": true},
@@ -193,7 +193,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("waku-agent: {error:#}");
+            eprintln!("goddard-agent: {error:#}");
             ExitCode::FAILURE
         }
     }
@@ -215,7 +215,7 @@ fn run() -> anyhow::Result<()> {
         "create" | "prompt" => {
             let payload = arguments
                 .next()
-                .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `waku-agent schema` for its shape"))?;
+                .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
             if arguments.next().is_some() {
                 bail!("`{subcommand}` accepts exactly one JSON object argument");
             }
@@ -237,7 +237,7 @@ fn run() -> anyhow::Result<()> {
             Err(anyhow!("a subcommand is required"))
         }
         other => Err(anyhow!(
-            "unknown subcommand `{other}`; run `waku-agent --help`"
+            "unknown subcommand `{other}`; run `goddard-agent --help`"
         )),
     }
 }
@@ -255,7 +255,7 @@ fn command(action: Option<&str>, payload: Option<String>) -> anyhow::Result<()> 
                     .ok_or_else(|| anyhow!("`command remove` takes one JSON object argument"))?,
             )
             .context(
-                "`command remove` takes a JSON object; run `waku-agent schema` for its shape",
+                "`command remove` takes a JSON object; run `goddard-agent schema` for its shape",
             )?;
             Command::RemoveCustomCommand {
                 id: payload.id,
@@ -279,7 +279,7 @@ fn upsert_payload(payload: &Option<String>) -> anyhow::Result<CustomCommand> {
             .as_deref()
             .ok_or_else(|| anyhow!("`command upsert` takes one JSON object argument"))?,
     )
-    .context("`command upsert` takes a JSON object; run `waku-agent schema` for its shape")?;
+    .context("`command upsert` takes a JSON object; run `goddard-agent schema` for its shape")?;
     if payload.script.trim().is_empty() {
         bail!("`command upsert` requires a non-empty `script`");
     }
@@ -297,8 +297,9 @@ fn upsert_payload(payload: &Option<String>) -> anyhow::Result<CustomCommand> {
 fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
     match subcommand {
         "create" => {
-            let payload: CreatePayload = serde_json::from_str(payload)
-                .context("`create` takes a JSON object; run `waku-agent schema` for its shape")?;
+            let payload: CreatePayload = serde_json::from_str(payload).context(
+                "`create` takes a JSON object; run `goddard-agent schema` for its shape",
+            )?;
             Ok(Command::AgentCreateSession {
                 provider: provider_kind(&payload.provider)?,
                 model: payload.model,
@@ -312,8 +313,9 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
             })
         }
         "prompt" => {
-            let payload: PromptPayload = serde_json::from_str(payload)
-                .context("`prompt` takes a JSON object; run `waku-agent schema` for its shape")?;
+            let payload: PromptPayload = serde_json::from_str(payload).context(
+                "`prompt` takes a JSON object; run `goddard-agent schema` for its shape",
+            )?;
             let provider = payload.provider.as_deref().map(provider_kind).transpose()?;
             Ok(Command::AgentPrompt {
                 task_id: payload.task_id,
@@ -349,9 +351,9 @@ fn provider_kind(id: &str) -> anyhow::Result<ProviderKind> {
 
 fn connect() -> anyhow::Result<DaemonClient> {
     let address = std::env::var(DAEMON_ADDRESS_ENV)
-        .context("WAKU_DAEMON_ADDRESS is not set; this session has no agent surface")?;
+        .context("GODDARD_DAEMON_ADDRESS is not set; this session has no agent surface")?;
     let token = std::env::var(AGENT_TOKEN_ENV)
-        .context("WAKU_AGENT_TOKEN is not set; this session has no agent surface")?;
+        .context("GODDARD_AGENT_TOKEN is not set; this session has no agent surface")?;
     DaemonClient::connect(&address, token).context("could not reach the Goddard daemon")
 }
 

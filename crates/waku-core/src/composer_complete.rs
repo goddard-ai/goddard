@@ -128,7 +128,8 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 /// `/skill:name` there.
 ///
 /// On top of provider sources, every provider reads Goddard's user-defined layer
-/// (`.waku/commands` and `~/.config/waku/commands`).
+/// (`.goddard/commands` and `~/.config/goddard/commands`, plus their legacy
+/// `.waku`/`waku` counterparts).
 pub fn discover_slash_commands(
     provider: ProviderKind,
     project_root: &Path,
@@ -195,7 +196,7 @@ fn assemble_slash_commands(
         }
         // OpenCode 2 publishes commands and skills over its v2 API
         // (`GET /api/command`, `GET /api/skill`), so it seeds nothing from
-        // the filesystem here. The shared `.agents/skills` + `.waku/commands`
+        // the filesystem here. The shared `.agents/skills` + `.goddard/commands`
         // layer below still applies.
         ProviderKind::OpenCode2 => {}
         ProviderKind::OpenCode => {
@@ -340,19 +341,22 @@ fn assemble_slash_commands(
     if let Some(home) = home.as_deref() {
         scan_skill_files(provider, &home.join(".agents/skills"), &mut commands);
     }
-    scan_command_files(
-        &project_root.join(".waku/commands"),
-        CommandScope::Project,
-        true,
-        &mut commands,
-    );
+    // `.waku`/`waku` command directories keep working: users authored them
+    // before the rename and they live in their own repositories, outside
+    // anything startup migration can copy.
+    for directory in [
+        project_root.join(".goddard/commands"),
+        project_root.join(".waku/commands"),
+    ] {
+        scan_command_files(&directory, CommandScope::Project, true, &mut commands);
+    }
     if let Some(home) = home.as_deref() {
-        scan_command_files(
-            &home.join(".config/waku/commands"),
-            CommandScope::User,
-            true,
-            &mut commands,
-        );
+        for directory in [
+            home.join(".config/goddard/commands"),
+            home.join(".config/waku/commands"),
+        ] {
+            scan_command_files(&directory, CommandScope::User, true, &mut commands);
+        }
     }
     commands.extend(cli_commands);
     let mut commands = dedup_and_sort_commands(commands);

@@ -7,9 +7,9 @@
 //! layout; package-manager-owned builds continue to defer to their manager.
 //!
 //! Debug builds stay dormant so the dev watcher's app never offers to replace
-//! itself with a production build. `WAKU_PREVIEW_UPDATE=1` fakes only the
+//! itself with a production build. `GODDARD_PREVIEW_UPDATE=1` fakes only the
 //! automatic sidebar result while retaining the real Sparkle flow for the
-//! Check for Updates menu; `WAKU_FORCE_UPDATER=1` exercises everything for
+//! Check for Updates menu; `GODDARD_FORCE_UPDATER=1` exercises everything for
 //! real from a debug bundle.
 
 use gpui::Global;
@@ -96,7 +96,7 @@ mod macos {
 
     define_class!(
         #[unsafe(super(NSObject))]
-        #[name = "WakuSparkleUserDriver"]
+        #[name = "GoddardSparkleUserDriver"]
         #[thread_kind = MainThreadOnly]
         #[ivars = UserDriverIvars]
         struct UserDriver;
@@ -586,8 +586,9 @@ mod macos {
         /// running outside a bundle with an embedded framework.
         pub fn init() -> Option<Self> {
             let preview = cfg!(debug_assertions)
-                && std::env::var_os("WAKU_PREVIEW_UPDATE").is_some_and(|value| value == "1");
-            let forced = std::env::var_os("WAKU_FORCE_UPDATER").is_some_and(|value| value == "1");
+                && std::env::var_os("GODDARD_PREVIEW_UPDATE").is_some_and(|value| value == "1");
+            let forced =
+                std::env::var_os("GODDARD_FORCE_UPDATER").is_some_and(|value| value == "1");
             if cfg!(debug_assertions) && !forced && !preview {
                 return None;
             }
@@ -915,12 +916,12 @@ mod feed {
     <item>
       <title>0.1.4</title>
       <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
-      <enclosure url="https://releases.waku.sh/Goddard-0.1.4-x86_64-Setup.exe" length="1024" type="application/octet-stream" sparkle:edSignature="oldsig" />
+      <enclosure url="https://releases.goddardai.org/Goddard-0.1.4-x86_64-Setup.exe" length="1024" type="application/octet-stream" sparkle:edSignature="oldsig" />
     </item>
     <item>
       <title>0.2.0</title>
       <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
-      <enclosure url="https://releases.waku.sh/Goddard-0.2.0-x86_64-Setup.exe" length="2048" type="application/octet-stream" sparkle:edSignature="newsig" />
+      <enclosure url="https://releases.goddardai.org/Goddard-0.2.0-x86_64-Setup.exe" length="2048" type="application/octet-stream" sparkle:edSignature="newsig" />
     </item>
   </channel>
 </rss>"#;
@@ -994,13 +995,13 @@ mod windows {
     /// binary an item is for, and guessing from the enclosure filename would
     /// be a contract hiding in a string.
     #[cfg(target_arch = "aarch64")]
-    const FEED_URL: &str = "https://releases.waku.sh/appcast-windows-aarch64.xml";
+    const FEED_URL: &str = "https://releases.goddardai.org/appcast-windows-aarch64.xml";
     #[cfg(not(target_arch = "aarch64"))]
-    const FEED_URL: &str = "https://releases.waku.sh/appcast-windows-x86_64.xml";
+    const FEED_URL: &str = "https://releases.goddardai.org/appcast-windows-x86_64.xml";
 
     /// Read out of `resources/Info.plist` by the build script, so macOS and
     /// Windows cannot end up trusting different keys.
-    const PUBLIC_ED_KEY: &str = env!("WAKU_SPARKLE_PUBLIC_ED_KEY");
+    const PUBLIC_ED_KEY: &str = env!("GODDARD_SPARKLE_PUBLIC_ED_KEY");
 
     /// Windows 10 1803 and later ship curl in System32. The absolute path
     /// keeps a shadowed `curl` on `PATH` out of the update path; the download
@@ -1037,7 +1038,8 @@ mod windows {
         pub fn init() -> Option<Self> {
             // A debug build must never offer to replace the watcher's app
             // with a production install.
-            let forced = std::env::var_os("WAKU_FORCE_UPDATER").is_some_and(|value| value == "1");
+            let forced =
+                std::env::var_os("GODDARD_FORCE_UPDATER").is_some_and(|value| value == "1");
             if cfg!(debug_assertions) && !forced {
                 return None;
             }
@@ -1118,7 +1120,7 @@ mod windows {
             };
             let events = self.events.clone();
             let spawned = std::thread::Builder::new()
-                .name("waku-updater-check".into())
+                .name("goddard-updater-check".into())
                 .spawn(move || {
                     let outcome = fetch_and_stage();
                     // Read once the work is done, so a request that arrived
@@ -1216,7 +1218,7 @@ mod windows {
             let path = self.preference_path.clone();
             // A settings toggle must not wait on the filesystem.
             let _ = std::thread::Builder::new()
-                .name("waku-updater-preference".into())
+                .name("goddard-updater-preference".into())
                 .spawn(move || write_automatic_preference(&path, enabled));
             if enabled {
                 self.start_check(false);
@@ -1258,7 +1260,7 @@ mod windows {
             .ok_or_else(|| anyhow::anyhow!("update signature is malformed"))?;
 
         let directory = std::env::temp_dir().join(format!(
-            "waku-update-{}-{}",
+            "goddard-update-{}-{}",
             item.version,
             std::process::id()
         ));
@@ -1422,7 +1424,7 @@ mod windows {
         #[test]
         fn an_absent_preference_file_leaves_automatic_checks_on() {
             let directory = std::env::temp_dir()
-                .join(format!("waku-updater-preference-{}", std::process::id()));
+                .join(format!("goddard-updater-preference-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&directory);
             let path = directory.join("updater.json");
 

@@ -1,4 +1,4 @@
-//! Desktop proxy for the provider runtime owned by `waku-daemon`.
+//! Desktop proxy for the provider runtime owned by `goddard-daemon`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -97,7 +97,7 @@ fn connect_remote(
     let forwarding_events = events.clone();
     let thread_initial_client = initial_client.clone();
     let spawn = std::thread::Builder::new()
-        .name(format!("waku-daemon-session-{session_id}"))
+        .name(format!("goddard-daemon-session-{session_id}"))
         .spawn(move || {
             let mut client = thread_initial_client;
             let mut remote_events = client.subscribe(session_id, runtime_id);
@@ -255,7 +255,7 @@ impl RemoteDriverControl {
         let session_id = self.session_id;
         let runtime_id = self.runtime_id;
         let _ = std::thread::Builder::new()
-            .name("waku-daemon-retry".into())
+            .name("goddard-daemon-retry".into())
             .spawn(move || {
                 let deadline = Instant::now() + REPLACEMENT_WAIT;
                 loop {

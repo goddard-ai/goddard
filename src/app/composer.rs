@@ -63,7 +63,7 @@ impl gpui::Render for SidebarSessionDragView {
 }
 
 /// The provider-facing token a session chip contributes to the prompt: the
-/// task id `waku-agent prompt` addresses, with the title for legibility.
+/// task id `goddard-agent prompt` addresses, with the title for legibility.
 fn session_attachment_token(attachment: &MessageAttachment) -> Option<String> {
     attachment
         .session_id

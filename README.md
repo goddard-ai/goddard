@@ -6,12 +6,12 @@ and keeps projects, sessions, transcripts on your machine.
 
 ## Install
 
-On macOS, [download the signed `.dmg`](https://waku.sh). It updates itself.
+On macOS, [download the signed `.dmg`](https://goddardai.org). It updates itself.
 
 On Linux:
 
 ```sh
-curl -fsSL https://waku.sh/install.sh | sh
+curl -fsSL https://goddardai.org/install.sh | sh
 ```
 
 The script installs into `~/.local` without root. See
@@ -19,7 +19,7 @@ The script installs into `~/.local` without root. See
 uninstalling.
 
 On Windows, run `Goddard-<version>-<arch>-Setup.exe` from the
-[latest release](https://github.com/egoist/waku/releases/latest). It installs
+[latest release](https://github.com/goddard-ai/goddard/releases/latest). It installs
 per-user and updates itself. A portable `.zip` is published alongside it. See
 [docs/windows.md](docs/windows.md) for requirements and what is not available
 there yet.
@@ -53,7 +53,7 @@ structured protocol and session continuity.
 
 ## Architecture
 
-The native desktop is an RPC client of the standalone `waku-daemon` process.
+The native desktop is an RPC client of the standalone `goddard-daemon` process.
 Provider sessions run in [`waku-core`](crates/waku-core), behind the
 authenticated, versioned WebSocket contract in
 [`waku-protocol`](crates/waku-protocol). Goddard Desktop depends on
@@ -72,12 +72,12 @@ sequence deduplication, and replay cursors as the Rust client. Run
 `bun run protocol:check` to verify that generated files are current.
 
 Projectless task workspaces live on the daemon host under
-`~/.waku/projects/<date>/<slug>`. The daemon moves workspaces created by the
-older `~/.waku/<date>/<slug>` layout on first load.
+`~/.goddard/projects/<date>/<slug>`. The daemon moves workspaces created by the
+older `~/.goddard/<date>/<slug>` layout on first load.
 
 Configuration ownership is separate too: the Release desktop writes
-`~/.waku/app.json`, while Debug stays isolated at `temp/app.json`. Daemon
-provider and Computer Use settings live in `~/.waku/settings.json`. The
+`~/.goddard/app.json`, while Debug stays isolated at `temp/app.json`. Daemon
+provider and Computer Use settings live in `~/.goddard/settings.json`. The
 desktop's Settings → Daemon page can explicitly
 expose the child daemon on a fixed port, configure exact browser origins, and
 copy its stable authentication token. It remains loopback-only by default.
@@ -88,8 +88,8 @@ are therefore unavailable until the protocol gains daemon-host picker and
 terminal-stream endpoints; files, diffs, Git, skills, usage, task state, and
 attachments already use daemon RPC.
 
-Release apps bundle and sign `waku-daemon`. Development keeps the daemon at
-`target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
+Release apps bundle and sign `goddard-daemon`. Development keeps the daemon at
+`target/debug/goddard-debug-daemon`, allowing provider-only edits to rebuild and
 replace the daemon without relaunching Goddard Debug.
 
 ## Development

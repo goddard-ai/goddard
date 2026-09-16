@@ -39,7 +39,7 @@ fn export_sparkle_public_key() {
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| panic!("{PLIST} has no SUPublicEDKey"));
 
-    println!("cargo:rustc-env=WAKU_SPARKLE_PUBLIC_ED_KEY={value}");
+    println!("cargo:rustc-env=GODDARD_SPARKLE_PUBLIC_ED_KEY={value}");
 }
 
 #[cfg(target_os = "windows")]
@@ -87,8 +87,8 @@ BEGIN
             VALUE "CompanyName", "Goddard\0"
             VALUE "FileDescription", "{description}\0"
             VALUE "FileVersion", "{package_version}\0"
-            VALUE "InternalName", "waku\0"
-            VALUE "OriginalFilename", "waku.exe\0"
+            VALUE "InternalName", "goddard\0"
+            VALUE "OriginalFilename", "goddard.exe\0"
             VALUE "ProductName", "Goddard\0"
             VALUE "ProductVersion", "{package_version}\0"
         END

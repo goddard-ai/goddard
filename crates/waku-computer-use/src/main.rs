@@ -137,7 +137,8 @@ struct Registration {
 
 impl Registration {
     fn new() -> Result<Self> {
-        let directory = std::env::var_os("WAKU_COMPUTER_USE_PROCESS_DIRECTORY").map(PathBuf::from);
+        let directory =
+            std::env::var_os("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY").map(PathBuf::from);
         let registration = Self {
             directory,
             pid: std::process::id(),

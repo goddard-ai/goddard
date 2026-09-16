@@ -969,14 +969,15 @@ impl Waku {
                 next(),
             ));
         }
-        if let Some(worktree_name) = self.selected_session().and_then(|session| {
-            match &session.workspace {
-                SessionWorkspace::Worktree { name, .. } if session.has_started() => {
-                    Some(name.clone())
-                }
-                _ => None,
-            }
-        }) {
+        if let Some(worktree_name) =
+            self.selected_session()
+                .and_then(|session| match &session.workspace {
+                    SessionWorkspace::Worktree { name, .. } if session.has_started() => {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                })
+        {
             let mut item = CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_task_in_same_worktree"),
@@ -2111,9 +2112,7 @@ impl Waku {
         self.close_command_palette(window, cx);
         match action {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
-            PaletteAction::NewTaskInSameWorktree => {
-                self.new_task_in_same_worktree(window, cx)
-            }
+            PaletteAction::NewTaskInSameWorktree => self.new_task_in_same_worktree(window, cx),
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CopyIdentifier(identifier) => {

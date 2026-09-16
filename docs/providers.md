@@ -43,12 +43,12 @@ pub struct DriverStartOptions {
 }
 ```
 
-`subagents` carries named subagent definitions (`waku-`-prefixed) the driver
+`subagents` carries named subagent definitions (`goddard-`-prefixed) the driver
 injects at launch through the harness's own channel — `--agents` JSON plus an
 `--append-system-prompt` routing hint for Claude, `OPENCODE_CONFIG_CONTENT`
-agent entries on the pooled OpenCode server, a waku-owned `--extension`
+agent entries on the pooled OpenCode server, a goddard-owned `--extension`
 delegate tool for Pi, a `developerInstructions` hint for Codex, and a
-`waku-subagents` session instruction entry for the adopted OpenCode 2
+`goddard-subagents` session instruction entry for the adopted OpenCode 2
 service. Injection is launch-time only; no transport can re-inject
 mid-session.
 
@@ -260,7 +260,7 @@ unknown markers are dropped. Private control markers never reach the transcript
 **Models** — a throwaway app-server, `model/list` paged via `nextCursor`, up to
 32 pages ([model_catalog.rs:367](../crates/waku-core/src/model_catalog.rs#L367)).
 
-**Computer Use** — `-c mcp_servers.waku_js_repl.command=…` registers Goddard's
+**Computer Use** — `-c mcp_servers.goddard_js_repl.command=…` registers Goddard's
 QuickJS MCP server, with several `-c` flags disabling Codex's own external
 computer-use plugin/MCP/skill so only Goddard's `js` / `js_reset` surface is
 visible.
@@ -382,7 +382,7 @@ My Pi advertises the levels a model actually honors under `thinking.efforts`.
 yet it is always accepted, so it is added back
 ([model_catalog.rs](../crates/waku-core/src/model_catalog.rs)).
 
-**Computer Use** — Pi only: `--extension <waku pi extension>` and
+**Computer Use** — Pi only: `--extension <goddard pi extension>` and
 `--skill <SKILL.md>`, with the REPL and helper paths passed through the
 environment. Goddard's bridge is written against Pi's extension API, and Oh My Pi
 ships its own `/computer` instead, so the flag is never passed to it.
@@ -514,7 +514,7 @@ used as a steer.
 **Branch** — `amp threads export <id>` dumps the thread, Goddard keeps the retained
 prefix, `amp threads new` creates an empty thread, and the retained history is
 replayed as a length-delimited envelope prepended to the first prompt
-(`WAKU_AMP_BRANCH_CONTEXT_V1`). Forking a thread that was itself seeded this way
+(`GODDARD_AMP_BRANCH_CONTEXT_V1`). Forking a thread that was itself seeded this way
 re-expands the nested envelope first, so branches of branches stay flat
 ([amp_session.rs](../crates/waku-core/src/amp_session.rs)).
 

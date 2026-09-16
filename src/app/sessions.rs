@@ -702,7 +702,7 @@ impl Waku {
     /// working. A worktree-based task is then snapshotted into its archive
     /// ref and its worktree removed, so archived chats stop costing a full
     /// checkout of disk; a projectless task's workspace zips into
-    /// `~/.waku/archives` and removes the directory the same way. The
+    /// `~/.goddard/archives` and removes the directory the same way. The
     /// daemon purges archives once they outlive the retention window.
     /// Terminals that ran inside the directory are closed once the removal
     /// lands.
@@ -1026,14 +1026,15 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
-        let Some((project_id, workspace)) = self.selected_session().and_then(|session| {
-            match &session.workspace {
-                workspace @ SessionWorkspace::Worktree { .. } if session.has_started() => {
-                    Some((session.project_id, workspace.clone()))
-                }
-                _ => None,
-            }
-        }) else {
+        let Some((project_id, workspace)) =
+            self.selected_session()
+                .and_then(|session| match &session.workspace {
+                    workspace @ SessionWorkspace::Worktree { .. } if session.has_started() => {
+                        Some((session.project_id, workspace.clone()))
+                    }
+                    _ => None,
+                })
+        else {
             return;
         };
         self.bind_new_draft_to_worktree(project_id, workspace, window, cx);

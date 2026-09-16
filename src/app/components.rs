@@ -1781,7 +1781,7 @@ mod message_time_tests {
             true,
         )
         .with_tool_name(Some("js"))
-        .with_mcp_server(Some("waku_js_repl"))
+        .with_mcp_server(Some("goddard_js_repl"))
         .with_arguments(Some("{}".into()));
         assert_eq!(
             activity_display_title(&activity),
@@ -1792,7 +1792,7 @@ mod message_time_tests {
             vec![
                 ActivityDisclosureSection {
                     kind: ActivityDisclosureSectionKind::McpServer,
-                    content: "waku_js_repl".into()
+                    content: "goddard_js_repl".into()
                 },
                 ActivityDisclosureSection {
                     kind: ActivityDisclosureSectionKind::ToolName,

@@ -10,12 +10,12 @@ readme = "README.md"
 dev-binary = []
 
 [[bin]]
-name = "waku-daemon"
+name = "goddard-daemon"
 path = "src/main.rs"
 
 [[bin]]
-name = "waku-debug-daemon"
-path = "src/bin/waku-debug-daemon.rs"
+name = "goddard-debug-daemon"
+path = "src/bin/goddard-debug-daemon.rs"
 required-features = ["dev-binary"]
 
 [dependencies]

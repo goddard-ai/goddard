@@ -33,8 +33,8 @@ bun run dev
 ```
 
 On macOS the watcher builds and signs `target/debug/Goddard Debug.app`; on Linux
-and Windows it builds `target/debug/waku`. In both cases the provider daemon remains an
-external `target/debug/waku-debug-daemon`: provider-only edits rebuild and
+and Windows it builds `target/debug/goddard`. In both cases the provider daemon remains an
+external `target/debug/goddard-debug-daemon`: provider-only edits rebuild and
 hot-swap that process without relaunching the app, while desktop edits rebuild
 and relaunch the app normally. Keep that watcher running while you work. Do
 not start a second watcher or manually relaunch the debug app. Press `Ctrl-C`,
@@ -62,12 +62,12 @@ The archive is written under `target/release` with an install-prefix layout
 not bundle system graphics libraries; distribution packages should declare
 those runtime dependencies normally.
 
-`website/public/install.sh` (served at `https://waku.sh/install.sh`) is what
+`website/public/install.sh` (served at `https://goddardai.org/install.sh`) is what
 users run to install that archive. Point it at a local build to exercise it
 without publishing:
 
 ```sh
-WAKU_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
+GODDARD_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
   sh website/public/install.sh
 ```
 

@@ -38,13 +38,13 @@ AppName=Goddard
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
 AppPublisher=Goddard
-AppPublisherURL=https://waku.sh
-AppSupportURL=https://github.com/egoist/waku/issues
-AppUpdatesURL=https://github.com/egoist/waku/releases
+AppPublisherURL=https://goddardai.org
+AppSupportURL=https://github.com/goddard-ai/goddard/issues
+AppUpdatesURL=https://github.com/goddard-ai/goddard/releases
 DefaultDirName={autopf}\Goddard
 DefaultGroupName=Goddard
 UninstallDisplayName=Goddard
-UninstallDisplayIcon={app}\waku.exe
+UninstallDisplayIcon={app}\goddard.exe
 LicenseFile={#StageDir}\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=Goddard-{#AppVersion}-{#Arch}-Setup
@@ -59,7 +59,7 @@ ArchitecturesInstallIn64BitMode={#Architectures}
 MinVersion=10.0.17763
 ; Two installers must not race — the updater can be triggered again while an
 ; update is already applying.
-SetupMutex=WakuSetup
+SetupMutex=GoddardSetup
 ; No elevation, so an update never has to ask for it either.
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
@@ -68,7 +68,7 @@ DisableReadyPage=yes
 ; previous one did rather than asking again.
 UsePreviousAppDir=yes
 ; Goddard persists continuously to SQLite, so closing it is safe; a silent
-; update cannot stop to ask, and a locked waku.exe would fail the install.
+; update cannot stop to ask, and a locked goddard.exe would fail the install.
 CloseApplications=force
 RestartApplications=no
 
@@ -76,22 +76,22 @@ RestartApplications=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#StageDir}\waku.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#StageDir}\waku-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#StageDir}\waku_js_repl.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#StageDir}\waku_computer_use.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\goddard.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\goddard-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\goddard_js_repl.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\goddard_computer_use.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\cua_driver_sdk.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\cua-driver-uia.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Goddard"; Filename: "{app}\waku.exe"
-Name: "{userdesktop}\Goddard"; Filename: "{app}\waku.exe"; Tasks: desktopicon
+Name: "{group}\Goddard"; Filename: "{app}\goddard.exe"
+Name: "{userdesktop}\Goddard"; Filename: "{app}\goddard.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Run]
 ; No skipifsilent: this is also how the updater's silent run brings Goddard back.
-Filename: "{app}\waku.exe"; Description: "{cm:LaunchProgram,Goddard}"; Flags: nowait postinstall
+Filename: "{app}\goddard.exe"; Description: "{cm:LaunchProgram,Goddard}"; Flags: nowait postinstall

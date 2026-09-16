@@ -4,7 +4,7 @@ import type { SubagentTierTarget } from "./SubagentTierTarget";
 
 /**
  * One harness-neutral tier ("fast", "medium", "heavy"), mapped per provider
- * so the same `waku-fast` agent can be a cheap model on every harness at
+ * so the same `goddard-fast` agent can be a cheap model on every harness at
  * once. A provider missing from the map gets the tier's prompt with the
  * session's own model.
  */

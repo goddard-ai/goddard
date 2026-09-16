@@ -3,13 +3,13 @@
 ## Install
 
 ```sh
-curl -fsSL https://waku.sh/install.sh | sh
+curl -fsSL https://goddardai.org/install.sh | sh
 ```
 
 The script needs no root. It unpacks the release tarball into
-`~/.local/waku.app` and installs the desktop entry into
+`~/.local/goddard.app` and installs the desktop entry into
 `~/.local/share/applications`, so **Goddard appears in your applications menu** —
-you can also launch it from a terminal via `waku` command. Run the script again to
+you can also launch it from a terminal via `goddard` command. Run the script again to
 upgrade manually; the installed app also keeps itself current.
 
 Goddard expects:
@@ -24,45 +24,45 @@ Goddard expects:
 - `xdg-desktop-portal` for native file dialogs.
 - `curl` or `wget` for installation and update downloads.
 
-Set `WAKU_VERSION` to install a specific version rather than the latest.
+Set `GODDARD_VERSION` to install a specific version rather than the latest.
 
 ## Installing manually
 
 The script is a convenience, not a requirement. Download
 `Goddard-<version>-<target>.tar.gz` from
-[releases.waku.sh](https://releases.waku.sh) or the
-[GitHub release](https://github.com/egoist/waku/releases), then unpack it
+[releases.goddardai.org](https://releases.goddardai.org) or the
+[GitHub release](https://github.com/goddard-ai/goddard/releases), then unpack it
 wherever you like:
 
 ```sh
-mkdir -p ~/.local/waku.app
-tar -xzf Goddard-<version>-<target>.tar.gz --strip-components=1 -C ~/.local/waku.app
-ln -sf ~/.local/waku.app/bin/waku ~/.local/bin/waku   # optional
+mkdir -p ~/.local/goddard.app
+tar -xzf Goddard-<version>-<target>.tar.gz --strip-components=1 -C ~/.local/goddard.app
+ln -sf ~/.local/goddard.app/bin/goddard ~/.local/bin/goddard   # optional
 ```
 
 The archive uses an install-prefix layout (`bin/`, `share/`) beneath one
 versioned directory, so `--strip-components=1` into a prefix such as
 `/usr/local` works too.
 
-**Keep `bin/` and `share/waku/` intact.** Goddard launches its daemon, updater,
+**Keep `bin/` and `share/goddard/` intact.** Goddard launches its daemon, updater,
 and Computer Use helpers from `bin/`; the SDK library and supporting resources
 ship in the same installation. A symlink is fine — Goddard resolves it back to
 the real path.
 
 Installing the desktop entry is the part that matters — it is how the app is
 launched normally, and it is what associates the running window with its icon
-and name (Goddard reports the Wayland `app_id` / X11 `WM_CLASS` `sh.waku`, which
+and name (Goddard reports the Wayland `app_id` / X11 `WM_CLASS` `org.goddardai.app`, which
 matches the entry's filename). Install the packaged file and point it at the
-install (the packaged copy uses bare `Exec=waku` and `Icon=sh.waku` names so it
+install (the packaged copy uses bare `Exec=goddard` and `Icon=org.goddardai.app` names so it
 can be relocated):
 
 ```sh
-install -D ~/.local/waku.app/share/applications/sh.waku.desktop \
+install -D ~/.local/goddard.app/share/applications/org.goddardai.app.desktop \
   -t ~/.local/share/applications
-sed -i "s|^Exec=waku$|Exec=$HOME/.local/waku.app/bin/waku|" \
-  ~/.local/share/applications/sh.waku.desktop
-sed -i "s|^Icon=sh.waku$|Icon=$HOME/.local/waku.app/share/icons/hicolor/256x256/apps/sh.waku.png|" \
-  ~/.local/share/applications/sh.waku.desktop
+sed -i "s|^Exec=goddard$|Exec=$HOME/.local/goddard.app/bin/goddard|" \
+  ~/.local/share/applications/org.goddardai.app.desktop
+sed -i "s|^Icon=org.goddardai.app$|Icon=$HOME/.local/goddard.app/share/icons/hicolor/256x256/apps/org.goddardai.app.png|" \
+  ~/.local/share/applications/org.goddardai.app.desktop
 ```
 
 ## Updating
@@ -77,24 +77,24 @@ previous version.
 Every archive is verified with the same Ed25519 release key used by the macOS
 and Windows updaters. The architecture-specific feeds are:
 
-- `https://releases.waku.sh/appcast-linux-x86_64.xml`
-- `https://releases.waku.sh/appcast-linux-aarch64.xml`
+- `https://releases.goddardai.org/appcast-linux-x86_64.xml`
+- `https://releases.goddardai.org/appcast-linux-aarch64.xml`
 
 Use **Check for Updates** for an explicit check, or disable launch checks in
 **Settings → General → Automatic updates**. System-wide installs such as
 `/usr/local`, builds without the managed-install marker, root sessions, and
 package-manager-owned builds do not modify themselves; upgrade those through
 their original installation method. Re-running `install.sh` remains a safe
-manual fallback for the default `~/.local/waku.app` install.
+manual fallback for the default `~/.local/goddard.app` install.
 
 ## Uninstalling
 
 ```sh
-curl -fsSL https://waku.sh/install.sh | sh -s -- --uninstall
+curl -fsSL https://goddardai.org/install.sh | sh -s -- --uninstall
 ```
 
-This removes `~/.local/waku.app`, the symlink, and the desktop entry. Projects
-and settings stay in `~/.waku`; delete that directory to remove them too.
+This removes `~/.local/goddard.app`, the symlink, and the desktop entry. Projects
+and settings stay in `~/.goddard`; delete that directory to remove them too.
 
 ## Building from source
 
@@ -109,7 +109,7 @@ this page installs with:
 To exercise the install script against that local build:
 
 ```sh
-WAKU_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
+GODDARD_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
   sh website/public/install.sh
 ```
 

@@ -6,7 +6,7 @@ description = "Scoped agent-to-agent control surface for Goddard tasks"
 license = "GPL-3.0-only"
 
 [[bin]]
-name = "waku-agent"
+name = "goddard-agent"
 path = "src/main.rs"
 
 [dependencies]

@@ -278,6 +278,10 @@ impl WakuApplicationExt for Application {
 }
 
 pub fn run() {
+    // Copy pre-Goddard state directories before anything reads the new
+    // locations. Failures are non-fatal: the app runs on a fresh slate and
+    // the sentinel left behind retries the copy next launch.
+    let migration = waku_protocol::migration::migrate_legacy_directories();
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Goddard daemon: {error:#}"));
     gpui_platform::application()
@@ -434,6 +438,34 @@ pub fn run() {
                     cx.activate(true);
                 })
                 .ok();
+
+            if migration.failed() {
+                let paths = migration
+                    .failures
+                    .iter()
+                    .map(|failure| {
+                        format!(
+                            "• {} → {}",
+                            failure.legacy.display(),
+                            failure.destination.display()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                window
+                    .update(cx, move |_, window, cx| {
+                        let _ = window.prompt(
+                            gpui::PromptLevel::Warning,
+                            "Some of your previous Goddard data could not be copied",
+                            Some(&format!(
+                                "Goddard moved its data to a new location and the copy did not finish:\n\n{paths}\n\nYour old data was left untouched and the app is running with fresh state. Restart Goddard to retry the copy."
+                            )),
+                            &["OK"],
+                            cx,
+                        );
+                    })
+                    .ok();
+            }
 
             set_app_menus(cx, updater_available);
             // A Linux handoff retains the previous prefix until this freshly

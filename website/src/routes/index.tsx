@@ -40,7 +40,7 @@ export const Route = createFileRoute('/')({
 })
 
 const WINDOWS_DOCS_URL =
-  'https://github.com/egoist/waku/blob/main/docs/windows.md'
+  'https://github.com/goddard-ai/goddard/blob/main/docs/windows.md'
 
 const PROVIDERS = [
   { slug: 'amp', label: 'Amp' },
@@ -154,7 +154,7 @@ function DownloadMenu({
               macOS (Apple Silicon)
             </Menu.LinkItem>
             <Menu.LinkItem
-              href="https://github.com/egoist/waku/blob/main/docs/linux.md"
+              href="https://github.com/goddard-ai/goddard/blob/main/docs/linux.md"
               target="_blank"
               rel="noreferrer"
               closeOnClick
@@ -205,7 +205,7 @@ function Home() {
             </a>
             <div className="flex items-center gap-5">
               <a
-                href="https://github.com/egoist/waku"
+                href="https://github.com/goddard-ai/goddard"
                 target="_blank"
                 rel="noreferrer"
                 aria-label="GitHub"

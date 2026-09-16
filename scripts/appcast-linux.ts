@@ -9,7 +9,7 @@
 //
 // Env:
 //   SPARKLE_PRIVATE_KEY        EdDSA private key, base64 (required)
-//   WAKU_DOWNLOAD_URL_PREFIX   base URL for enclosure links
+//   GODDARD_DOWNLOAD_URL_PREFIX   base URL for enclosure links
 import { sign } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -118,7 +118,7 @@ if (import.meta.main) {
   await generateLinuxAppcasts(
     assetsDir,
     version,
-    process.env.WAKU_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix,
+    process.env.GODDARD_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix,
     new Date().toUTCString(),
   );
 }

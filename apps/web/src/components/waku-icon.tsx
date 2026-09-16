@@ -1,6 +1,6 @@
 import type { ProviderKind } from '@waku/client'
 
-export const WAKU_ICONS = {
+export const GODDARD_ICONS = {
   alert: 'i-waku-alert',
   appearance: 'i-waku-appearance',
   arrowDown: 'i-waku-arrow-down',
@@ -65,7 +65,7 @@ export const WAKU_ICONS = {
   zap: 'i-waku-zap',
 } as const
 
-export type WakuIconName = keyof typeof WAKU_ICONS
+export type WakuIconName = keyof typeof GODDARD_ICONS
 
 export function WakuIcon({
   name,
@@ -85,7 +85,7 @@ export function WakuIcon({
     >
       <span
         aria-hidden="true"
-        className={WAKU_ICONS[name]}
+        className={GODDARD_ICONS[name]}
         style={{ width: '100%', height: '100%' }}
       />
     </span>

@@ -1,4 +1,4 @@
-//! Provider backend and driver-event wire translation for `waku-daemon`.
+//! Provider backend and driver-event wire translation for `goddard-daemon`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -70,7 +70,7 @@ pub struct WakuBackend {
     /// cannot race to spawn it.
     runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
     /// The address the daemon bound, published to provider sessions as
-    /// `WAKU_DAEMON_ADDRESS` when agent tools are enabled. Set once by the
+    /// `GODDARD_DAEMON_ADDRESS` when agent tools are enabled. Set once by the
     /// daemon executable after it binds its listener.
     daemon_address: Mutex<Option<String>>,
     usage_rates_dir: std::path::PathBuf,
@@ -119,7 +119,7 @@ impl WakuBackend {
         Ok(backend)
     }
 
-    /// Record the daemon's bound address for `WAKU_DAEMON_ADDRESS`
+    /// Record the daemon's bound address for `GODDARD_DAEMON_ADDRESS`
     /// injection. Called once by the daemon executable before it starts
     /// serving; providers launched while it is unset get no agent surface.
     pub fn set_daemon_address(&self, address: String) {
@@ -336,7 +336,7 @@ fn migrate_projectless_state(
         let old_path = task_state.projects[index].path.clone();
         let workspace = crate::projectless::migrate_workspace(&old_path).with_context(|| {
             format!(
-                "could not move projectless workspace {} under ~/.waku/projects",
+                "could not move projectless workspace {} under ~/.goddard/projects",
                 old_path.display()
             )
         })?;
@@ -1926,7 +1926,7 @@ impl WakuBackend {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
                 Err(error) => eprintln!(
-                    "waku-daemon: agent surface unavailable for session {session_id}: {error:#}"
+                    "goddard-daemon: agent surface unavailable for session {session_id}: {error:#}"
                 ),
             }
         }
@@ -1953,7 +1953,7 @@ impl WakuBackend {
         let task_store = self.task_store.clone();
         let sessions = self.sessions.clone();
         std::thread::Builder::new()
-            .name(format!("waku-daemon-events-{session_id}"))
+            .name(format!("goddard-daemon-events-{session_id}"))
             .spawn(move || {
                 forward_driver_events(
                     session_id,
@@ -2694,7 +2694,7 @@ fn forward_driver_events(
                     &task_store,
                 ) {
                     eprintln!(
-                        "waku-daemon could not deliver a queued agent prompt for task {session_id}: {error:#}"
+                        "goddard-daemon could not deliver a queued agent prompt for task {session_id}: {error:#}"
                     );
                     break;
                 }
@@ -2807,7 +2807,9 @@ fn record_agent_steer(
     session.push_user_message_with_presentation(message, None, Vec::new(), Some(sent_by_task));
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
-        eprintln!("waku-daemon could not persist an agent steer for task {session_id}: {error:#}");
+        eprintln!(
+            "goddard-daemon could not persist an agent steer for task {session_id}: {error:#}"
+        );
     }
 }
 
@@ -2837,7 +2839,7 @@ fn record_provider_cursor(
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
         eprintln!(
-            "waku-daemon could not persist a provider cursor for task {session_id}: {error:#}"
+            "goddard-daemon could not persist a provider cursor for task {session_id}: {error:#}"
         );
     }
 }

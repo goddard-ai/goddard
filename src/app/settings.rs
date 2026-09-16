@@ -2335,7 +2335,7 @@ impl Waku {
 
     /// The daemon-scoped settings surface agents may write — custom commands
     /// today. On by default; turning it off makes the daemon reject the
-    /// `waku-agent command` calls outright while `create`/`prompt` stay gated
+    /// `goddard-agent command` calls outright while `create`/`prompt` stay gated
     /// by their own switch above.
     fn agent_settings_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let enabled = self.state.agent_settings_enabled;

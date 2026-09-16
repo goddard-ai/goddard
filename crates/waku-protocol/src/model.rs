@@ -2147,8 +2147,9 @@ impl ActivityKind {
 }
 
 /// The normalized leaf of a provider tool name — lowercased, server/MCP
-/// prefixes stripped, separators folded so `waku_delegate`, `waku-delegate`,
-/// and `mcp__x__waku_delegate` all compare as `wakudelegate`.
+/// prefixes stripped, separators folded so `goddard_delegate`,
+/// `goddard-delegate`, and `mcp__x__goddard_delegate` all compare as
+/// `goddarddelegate`.
 pub fn tool_name_leaf(name: &str) -> String {
     let normalized = name.trim().to_ascii_lowercase().replace(['-', ' '], "_");
     normalized
@@ -2163,12 +2164,13 @@ pub fn tool_name_leaf(name: &str) -> String {
 
 /// Whether a provider tool name dispatches a subagent rather than running
 /// inline — `task` (Claude/OpenCode), `subagent` (OpenCode 2), `spawn_agent`
-/// (Codex), `waku_delegate` (Goddard's Pi extension). Exact-leaf match only;
-/// an MCP `create_task` does not qualify.
+/// (Codex), `goddard_delegate` (Goddard's Pi extension). Exact-leaf match only;
+/// an MCP `create_task` does not qualify. `wakudelegate` stays so transcripts
+/// recorded before the rename still attribute their tool calls.
 pub fn is_delegation_tool_name(name: &str) -> bool {
     matches!(
         tool_name_leaf(name).as_str(),
-        "task" | "subagent" | "spawnagent" | "wakudelegate"
+        "task" | "subagent" | "spawnagent" | "goddarddelegate" | "wakudelegate"
     )
 }
 
@@ -4407,11 +4409,11 @@ mod tests {
     #[test]
     fn projectless_projects_use_projects_root_and_recognize_legacy_paths() {
         let home = dirs::home_dir().expect("test user has a home directory");
-        let root = home.join(".waku");
+        let root = home.join(crate::identity::HOME_DIRECTORY_NAME);
         let legacy = Project::from_path(root.clone());
         let legacy_dated = Project::from_path(root.join("2026-08-08/new-chat"));
         let project = Project::from_path(root.join("projects/2026-08-08/new-chat"));
-        let ordinary = Project::from_path(home.join("dev/waku"));
+        let ordinary = Project::from_path(home.join("dev/goddard"));
 
         assert!(legacy.is_projectless());
         assert!(legacy_dated.is_projectless());

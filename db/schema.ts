@@ -79,7 +79,7 @@ export const messages = sqliteTable(
     attachments: text("attachments").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
-    /** Waku task that submitted the message through an agent credential. */
+    /** Goddard task that submitted the message through an agent credential. */
     sentByTask: text("sent_by_task"),
     /** Provider-facing text no client renders — the internal "continue" nudge. */
     hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),

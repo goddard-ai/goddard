@@ -22,18 +22,18 @@ use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
 pub const PROTOCOL_VERSION: u32 = 9;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
-pub const DAEMON_TOKEN_ENV: &str = "WAKU_DAEMON_TOKEN";
-pub const DAEMON_ADDRESS_ENV: &str = "WAKU_DAEMON_ADDRESS";
-pub const APP_EXECUTABLE_ENV: &str = "WAKU_APP_EXECUTABLE";
+pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
+pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
+pub const APP_EXECUTABLE_ENV: &str = "GODDARD_APP_EXECUTABLE";
 /// Scoped bearer credential the daemon mints for one provider session's
 /// runtime and delivers through its launch environment. Unlike the master
 /// daemon token it is valid only for the two agent commands, only while the
 /// owning runtime is alive, and never leaves daemon memory.
-pub const AGENT_TOKEN_ENV: &str = "WAKU_AGENT_TOKEN";
+pub const AGENT_TOKEN_ENV: &str = "GODDARD_AGENT_TOKEN";
 /// The Waku task that owns the running provider session. Agent harnesses
 /// report it so the daemon can mark the prompts they submit with the sending
 /// task's provenance.
-pub const AGENT_TASK_ENV: &str = "WAKU_TASK_ID";
+pub const AGENT_TASK_ENV: &str = "GODDARD_TASK_ID";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

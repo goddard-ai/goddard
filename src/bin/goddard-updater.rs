@@ -1,6 +1,6 @@
 #[cfg(not(target_os = "linux"))]
 fn main() {
-    eprintln!("waku-updater is only supported on Linux");
+    eprintln!("goddard-updater is only supported on Linux");
     std::process::exit(1);
 }
 
@@ -22,10 +22,10 @@ mod linux {
 
     use anyhow::{Context as _, bail};
 
-    const MANAGED_MARKER: &str = "share/waku/self-update-v1";
-    const MANAGED_MARKER_CONTENTS: &str = "waku-self-update-v1\n";
-    const HELPER_EXECUTABLE: &str = "waku-updater";
-    const RELAUNCH_READY_ENV: &str = "WAKU_UPDATE_READY_FILE";
+    const MANAGED_MARKER: &str = "share/goddard/self-update-v1";
+    const MANAGED_MARKER_CONTENTS: &str = "goddard-self-update-v1\n";
+    const HELPER_EXECUTABLE: &str = "goddard-updater";
+    const RELAUNCH_READY_ENV: &str = "GODDARD_UPDATE_READY_FILE";
     const READY_TIMEOUT: Duration = Duration::from_secs(60);
     const POLL_INTERVAL: Duration = Duration::from_millis(25);
     const MAX_ERROR_LENGTH: usize = 16 * 1024;
@@ -292,7 +292,7 @@ mod linux {
     }
 
     fn launch(prefix: &Path, ready_path: Option<&Path>) -> std::io::Result<Child> {
-        let mut command = Command::new(prefix.join("bin/waku"));
+        let mut command = Command::new(prefix.join("bin/goddard"));
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -342,7 +342,7 @@ mod linux {
         {
             bail!("the install is not marked as a Goddard-managed tarball");
         }
-        for executable in ["waku", "waku-daemon", HELPER_EXECUTABLE] {
+        for executable in ["goddard", "goddard-daemon", HELPER_EXECUTABLE] {
             let path = prefix.join("bin").join(executable);
             let metadata = fs::symlink_metadata(&path)?;
             if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o111 == 0 {
@@ -396,7 +396,7 @@ mod linux {
 
         fn temporary_directory(label: &str) -> PathBuf {
             let path = std::env::temp_dir().join(format!(
-                "waku-update-helper-{label}-{}-{}",
+                "goddard-update-helper-{label}-{}-{}",
                 std::process::id(),
                 PATH_NONCE.fetch_add(1, Ordering::Relaxed)
             ));
@@ -406,9 +406,9 @@ mod linux {
 
         fn write_layout(prefix: &Path, value: &[u8]) {
             fs::create_dir_all(prefix.join("bin")).unwrap();
-            fs::create_dir_all(prefix.join("share/waku")).unwrap();
+            fs::create_dir_all(prefix.join("share/goddard")).unwrap();
             fs::write(prefix.join(MANAGED_MARKER), MANAGED_MARKER_CONTENTS).unwrap();
-            for executable in ["waku", "waku-daemon", HELPER_EXECUTABLE] {
+            for executable in ["goddard", "goddard-daemon", HELPER_EXECUTABLE] {
                 let path = prefix.join("bin").join(executable);
                 fs::write(&path, value).unwrap();
                 let mut permissions = fs::metadata(&path).unwrap().permissions();
@@ -434,10 +434,10 @@ mod linux {
         #[test]
         fn packaged_layout_requires_real_executables_and_marker() {
             let directory = temporary_directory("layout");
-            let prefix = directory.join("waku.app");
+            let prefix = directory.join("goddard.app");
             write_layout(&prefix, b"old");
             validate_packaged_layout(&prefix).unwrap();
-            fs::remove_file(prefix.join("bin/waku-daemon")).unwrap();
+            fs::remove_file(prefix.join("bin/goddard-daemon")).unwrap();
             assert!(validate_packaged_layout(&prefix).is_err());
             fs::remove_dir_all(directory).unwrap();
         }
@@ -445,19 +445,19 @@ mod linux {
         #[test]
         fn directory_swap_can_be_rolled_back_without_merging() {
             let directory = temporary_directory("swap");
-            let install = directory.join("waku.app");
-            let staged = directory.join(".waku.app.update-test");
-            let backup = directory.join(".waku.app.backup-test");
+            let install = directory.join("goddard.app");
+            let staged = directory.join(".goddard.app.update-test");
+            let backup = directory.join(".goddard.app.backup-test");
             write_layout(&install, b"old");
             write_layout(&staged, b"new");
 
             fs::rename(&install, &backup).unwrap();
             fs::rename(&staged, &install).unwrap();
-            assert_eq!(fs::read(install.join("bin/waku")).unwrap(), b"new");
-            let failed = directory.join(".waku.app.failed-test");
+            assert_eq!(fs::read(install.join("bin/goddard")).unwrap(), b"new");
+            let failed = directory.join(".goddard.app.failed-test");
             fs::rename(&install, &failed).unwrap();
             fs::rename(&backup, &install).unwrap();
-            assert_eq!(fs::read(install.join("bin/waku")).unwrap(), b"old");
+            assert_eq!(fs::read(install.join("bin/goddard")).unwrap(), b"old");
 
             fs::remove_dir_all(directory).unwrap();
         }
@@ -465,14 +465,14 @@ mod linux {
         #[test]
         fn full_handoff_waits_for_startup_and_removes_the_rollback_copy() {
             let directory = temporary_directory("handoff");
-            let install = directory.join("waku.app");
-            let staged = directory.join(".waku.app.update-test");
+            let install = directory.join("goddard.app");
+            let staged = directory.join(".goddard.app.update-test");
             write_layout(&install, b"old");
             write_layout(&staged, b"new");
-            let replacement = staged.join("bin/waku");
+            let replacement = staged.join("bin/goddard");
             fs::write(
                 &replacement,
-                b"#!/bin/sh\nprintf 'ready\\n' > \"$WAKU_UPDATE_READY_FILE\"\n",
+                b"#!/bin/sh\nprintf 'ready\\n' > \"$GODDARD_UPDATE_READY_FILE\"\n",
             )
             .unwrap();
             let mut permissions = fs::metadata(&replacement).unwrap().permissions();
@@ -482,14 +482,17 @@ mod linux {
                 install_dir: install.clone(),
                 staged_dir: staged,
                 parent: directory.clone(),
-                prefix_name: "waku.app".into(),
+                prefix_name: "goddard.app".into(),
                 parent_pid: std::process::id(),
             };
 
             apply_update(&handoff).unwrap();
 
-            assert!(install.join("bin/waku").is_file());
-            assert_eq!(fs::read(install.join("bin/waku-daemon")).unwrap(), b"new");
+            assert!(install.join("bin/goddard").is_file());
+            assert_eq!(
+                fs::read(install.join("bin/goddard-daemon")).unwrap(),
+                b"new"
+            );
             assert!(
                 fs::read_dir(&directory).unwrap().all(|entry| {
                     !entry

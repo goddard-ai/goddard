@@ -2,7 +2,7 @@
 //!
 //! Codex allocates ordinary projectless chats beneath a per-user root using
 //! `<root>/<local date>/<prompt slug>`, with numeric collision suffixes and a
-//! random fallback. Goddard mirrors that layout beneath `~/.waku/projects` so
+//! random fallback. Goddard mirrors that layout beneath `~/.goddard/projects` so
 //! generated workspaces do not sit beside configuration documents.
 
 use std::fs;
@@ -30,7 +30,10 @@ pub struct Workspace {
 fn workspace_root_slot() -> &'static RwLock<Option<PathBuf>> {
     static ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
     ROOT.get_or_init(|| {
-        RwLock::new(dirs::home_dir().map(|home| home.join(".waku").join("projects")))
+        RwLock::new(dirs::home_dir().map(|home| {
+            home.join(waku_protocol::identity::HOME_DIRECTORY_NAME)
+                .join("projects")
+        }))
     })
 }
 
@@ -52,7 +55,7 @@ pub fn home_directory() -> Option<PathBuf> {
     root.parent()?.parent().map(Path::to_path_buf)
 }
 
-/// Existing builds created dated workspaces directly under `~/.waku`; keep
+/// Existing builds created dated workspaces directly under `~/.goddard`; keep
 /// recognizing those paths while all new workspaces live under `projects/`.
 pub fn is_projectless_path(path: &Path) -> bool {
     workspace_root().is_some_and(|root| {
@@ -95,13 +98,13 @@ pub fn is_legacy_root_path(path: &Path) -> bool {
         .is_some_and(|root| root.parent().is_some_and(|legacy_root| path == legacy_root))
 }
 
-/// `~/.waku/archives`, beside the projects root. Zipped workspaces keep the
+/// `~/.goddard/archives`, beside the projects root. Zipped workspaces keep the
 /// dated layout they came from: `<archives>/<date>/<slug>.zip`.
 fn archives_root_in(root: &Path) -> Option<PathBuf> {
     root.parent().map(|parent| parent.join("archives"))
 }
 
-/// Where a workspace's archive lands. `None` for `~/.waku` itself, which
+/// Where a workspace's archive lands. `None` for `~/.goddard` itself, which
 /// the oldest layout used as a workspace and now holds configuration.
 fn archive_path_in(root: &Path, path: &Path) -> Option<PathBuf> {
     if root.parent().is_some_and(|legacy_root| path == legacy_root) {
@@ -118,7 +121,7 @@ fn archive_path_in(root: &Path, path: &Path) -> Option<PathBuf> {
 
 /// The archive operations arrive over the wire, so they re-verify the path
 /// names a workspace this app owns before touching the filesystem. That
-/// bounds a mistaken or hostile request to `~/.waku`-managed directories.
+/// bounds a mistaken or hostile request to `~/.goddard`-managed directories.
 fn validate_workspace_path_in(root: &Path, path: &Path) -> io::Result<()> {
     let legacy_root = root.parent();
     let projectless = path.starts_with(root)
@@ -133,14 +136,14 @@ fn validate_workspace_path_in(root: &Path, path: &Path) -> io::Result<()> {
     }
 }
 
-/// Zip a projectless workspace into `~/.waku/archives` and remove the live
+/// Zip a projectless workspace into `~/.goddard/archives` and remove the live
 /// directory. The directory survives a failed capture — the same
 /// verify-before-delete rule the worktree cleanup follows.
 pub fn archive_workspace(path: &Path) -> io::Result<PathBuf> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            "could not locate the home directory for ~/.goddard/projects",
         )
     })?;
     archive_workspace_in(&root, path)
@@ -180,7 +183,7 @@ pub fn restore_workspace(path: &Path) -> io::Result<bool> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            "could not locate the home directory for ~/.goddard/projects",
         )
     })?;
     restore_workspace_in(&root, path)
@@ -228,7 +231,7 @@ pub fn remove_workspace(path: &Path) -> io::Result<()> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            "could not locate the home directory for ~/.goddard/projects",
         )
     })?;
     remove_workspace_in(&root, path)
@@ -331,22 +334,22 @@ pub fn create_workspace(prompt: Option<&str>) -> io::Result<Workspace> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            "could not locate the home directory for ~/.goddard/projects",
         )
     })?;
     create_workspace_in(&root, Local::now().date_naive(), None, prompt)
 }
 
-/// Move one old dated workspace from `~/.waku/<date>/<slug>` into
-/// `~/.waku/projects/<date>/<slug>` without copying its contents through the
-/// client. The oldest layout used `~/.waku` itself; that path contains Goddard's
+/// Move one old dated workspace from `~/.goddard/<date>/<slug>` into
+/// `~/.goddard/projects/<date>/<slug>` without copying its contents through the
+/// client. The oldest layout used `~/.goddard` itself; that path contains Goddard's
 /// configuration now, so it receives a fresh private workspace instead of
 /// moving the configuration directory.
 pub fn migrate_workspace(path: &Path) -> io::Result<Workspace> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            "could not locate the home directory for ~/.goddard/projects",
         )
     })?;
     migrate_workspace_in(&root, path)
@@ -684,7 +687,7 @@ mod tests {
 
         assert!(archive_workspace_in(&root, &outside).is_err());
         assert!(archive_workspace_in(&root, &root).is_err());
-        // `~/.waku` itself was the oldest layout's workspace; it holds
+        // `~/.goddard` itself was the oldest layout's workspace; it holds
         // configuration now and must never be archived or removed.
         assert!(archive_workspace_in(&root, &home).is_err());
         assert!(restore_workspace_in(&root, &outside).is_err());

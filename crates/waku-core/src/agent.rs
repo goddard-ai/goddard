@@ -2,7 +2,7 @@
 //!
 //! When `agent_tools_enabled` is on, the daemon mints one bearer token per
 //! provider runtime and hands it to the session's harness through the launch
-//! environment (`WAKU_AGENT_TOKEN`, see [`crate::driver`]). The token never
+//! environment (`GODDARD_AGENT_TOKEN`, see [`crate::driver`]). The token never
 //! leaves daemon memory: it authenticates a WebSocket client exactly like the
 //! master token but authorizes only `agentCreateSession` and `agentPrompt`,
 //! and it dies with the runtime that carried it.
@@ -222,7 +222,7 @@ impl AgentState {
 
 /// The agent surface one provider launch receives: the scoped credential,
 /// the session it belongs to, the daemon's address, and where the
-/// `waku-agent` CLI lives. `DriverStartOptions` carries it to whichever
+/// `goddard-agent` CLI lives. `DriverStartOptions` carries it to whichever
 /// spawn path the provider uses.
 #[derive(Clone, Debug)]
 pub struct AgentLaunchEnv {
@@ -232,34 +232,34 @@ pub struct AgentLaunchEnv {
     pub task_id: Uuid,
     /// The daemon's WebSocket address, as the daemon bound it.
     pub daemon_address: String,
-    /// The `waku-agent` executable.
+    /// The `goddard-agent` executable.
     pub cli_path: PathBuf,
     /// A daemon-private directory for the session's CLI launcher. Providers
     /// whose sessions share one host process cannot receive per-session
     /// environment, so they write a credential-carrying shim here and point
     /// the session at it instead.
     pub shim_directory: PathBuf,
-    /// Whether `waku-agent create`/`prompt` — the opt-in cross-task surface —
+    /// Whether `goddard-agent create`/`prompt` — the opt-in cross-task surface —
     /// will accept calls on this credential.
     pub task_tools: bool,
-    /// Whether the `waku-agent command` settings writes will accept calls on
+    /// Whether the `goddard-agent command` settings writes will accept calls on
     /// this credential. On by default; off only when the user disabled the
     /// agent settings surface outright.
     pub settings_writes: bool,
 }
 
-/// Locate the `waku-agent` binary to place on a provider's `PATH`.
+/// Locate the `goddard-agent` binary to place on a provider's `PATH`.
 ///
 /// Development and unpackaged installs keep it beside the daemon
 /// executable; a packaged macOS app keeps it in `Contents/Resources` like
-/// `waku_js_repl`.
+/// `goddard_js_repl`.
 pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
     let executable =
         std::env::current_exe().context("Goddard daemon executable path is unavailable")?;
     let name = if cfg!(windows) {
-        "waku-agent.exe"
+        "goddard-agent.exe"
     } else {
-        "waku-agent"
+        "goddard-agent"
     };
     let bundled = executable
         .parent()
@@ -269,10 +269,10 @@ pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
         .into_iter()
         .flatten()
         .find(|path| path.is_file())
-        .ok_or_else(|| anyhow!("the waku-agent CLI is missing from this Goddard build"))
+        .ok_or_else(|| anyhow!("the goddard-agent CLI is missing from this Goddard build"))
 }
 
-/// Write the session-scoped `waku-agent` launcher shared-service providers
+/// Write the session-scoped `goddard-agent` launcher shared-service providers
 /// use. The shim bakes this session's credential into itself and execs the
 /// real CLI, so a host process that serves many sessions never carries one
 /// session's token in its own environment. Returns the shim's path — the
@@ -282,7 +282,7 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
         .with_context(|| format!("could not create {}", env.shim_directory.display()))?;
     #[cfg(unix)]
     let shim = {
-        let path = env.shim_directory.join("waku-agent");
+        let path = env.shim_directory.join("goddard-agent");
         let script = format!(
             "#!/bin/sh\nexec env {}='{}' {}='{}' {}='{}' '{}' \"$@\"\n",
             waku_protocol::DAEMON_ADDRESS_ENV,
@@ -298,7 +298,7 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
     };
     #[cfg(windows)]
     let shim = {
-        let path = env.shim_directory.join("waku-agent.cmd");
+        let path = env.shim_directory.join("goddard-agent.cmd");
         let script = format!(
             "@echo off\r\nset \"{}={}\"\r\nset \"{}={}\"\r\nset \"{}={}\"\r\n\"{}\" %*\r\n",
             waku_protocol::DAEMON_ADDRESS_ENV,
@@ -486,7 +486,7 @@ mod tests {
             token: "scoped-token".to_owned(),
             task_id: Uuid::new_v4(),
             daemon_address: "127.0.0.1:7777".to_owned(),
-            cli_path: PathBuf::from("/waku/bin/waku-agent"),
+            cli_path: PathBuf::from("/waku/bin/goddard-agent"),
             shim_directory: directory.to_path_buf(),
             task_tools: true,
             settings_writes: true,
@@ -496,7 +496,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_session_shim_execs_the_cli_with_the_scoped_credential() {
-        let directory = std::env::temp_dir().join(format!("waku-agent-test-{}", Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("goddard-agent-test-{}", Uuid::new_v4()));
         let env = launch_env(&directory);
 
         let shim = write_session_shim(&env).expect("the shim should be written");
@@ -504,10 +504,10 @@ mod tests {
         let script = std::fs::read_to_string(&shim).expect("the shim is readable");
         assert!(script.starts_with("#!/bin/sh"));
         assert!(script.contains("exec env"));
-        assert!(script.contains("WAKU_AGENT_TOKEN='scoped-token'"));
-        assert!(script.contains(&format!("WAKU_TASK_ID='{}'", env.task_id)));
-        assert!(script.contains("WAKU_DAEMON_ADDRESS='127.0.0.1:7777'"));
-        assert!(script.contains("'/waku/bin/waku-agent' \"$@\""));
+        assert!(script.contains("GODDARD_AGENT_TOKEN='scoped-token'"));
+        assert!(script.contains(&format!("GODDARD_TASK_ID='{}'", env.task_id)));
+        assert!(script.contains("GODDARD_DAEMON_ADDRESS='127.0.0.1:7777'"));
+        assert!(script.contains("'/waku/bin/goddard-agent' \"$@\""));
 
         use std::os::unix::fs::PermissionsExt as _;
         let mode = shim.metadata().unwrap().permissions().mode();
@@ -518,10 +518,10 @@ mod tests {
 
     #[test]
     fn the_shared_service_instruction_names_the_shim_and_the_contract() {
-        let directory = std::env::temp_dir().join(format!("waku-agent-test-{}", Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("goddard-agent-test-{}", Uuid::new_v4()));
         let env = launch_env(&directory);
-        let instruction = shared_service_instruction(Path::new("/x/waku-agent"), &env);
-        assert!(instruction.contains("/x/waku-agent"));
+        let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
+        assert!(instruction.contains("/x/goddard-agent"));
         assert!(instruction.contains("explicitly asks"));
         assert!(instruction.contains("`command`"));
 
@@ -530,7 +530,7 @@ mod tests {
             task_tools: false,
             ..launch_env(&directory)
         };
-        let instruction = shared_service_instruction(Path::new("/x/waku-agent"), &env);
+        let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
         assert!(instruction.contains("`command`"));
         assert!(!instruction.contains("explicitly asks"));
 
@@ -539,7 +539,7 @@ mod tests {
             settings_writes: false,
             ..launch_env(&directory)
         };
-        let instruction = shared_service_instruction(Path::new("/x/waku-agent"), &env);
+        let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
         assert!(!instruction.contains("`command`"));
         assert!(instruction.contains("explicitly asks"));
     }

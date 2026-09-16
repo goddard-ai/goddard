@@ -26,7 +26,7 @@ const LOGIN_SHELL_ENV_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(unix)]
 const INTERACTIVE_SHELL_ENV_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(unix)]
-const SHELL_ENV_COMMAND: &str = "/usr/bin/env -0 > \"$WAKU_SHELL_ENV_CAPTURE_FILE\"";
+const SHELL_ENV_COMMAND: &str = "/usr/bin/env -0 > \"$GODDARD_SHELL_ENV_CAPTURE_FILE\"";
 
 type ShellEnvironment = Vec<(OsString, OsString)>;
 
@@ -51,7 +51,7 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 }
 
 /// Inject the agent surface into a provider launch: the session's scoped
-/// token, its task id, the daemon address, and `PATH` with the `waku-agent`
+/// token, its task id, the daemon address, and `PATH` with the `goddard-agent`
 /// directory prepended. Callers build `command` through [`command`] first so
 /// the prepend lands on the PATH the provider would already run with.
 pub fn apply_agent_environment(command: &mut Command, agent: &crate::agent::AgentLaunchEnv) {
@@ -203,7 +203,7 @@ pub fn guard_command(command: Command) -> Command {
     guarded
         .arg("-c")
         .arg(DAEMON_GUARDIAN_SCRIPT)
-        .arg("waku-daemon-guardian")
+        .arg("goddard-daemon-guardian")
         .arg(command.get_program());
     guarded.args(command.get_args());
     if let Some(cwd) = command.get_current_dir() {
@@ -473,9 +473,9 @@ foreach ($name in @('PATH', 'FNM_DIR', 'FNM_MULTISHELL_PATH')) {
 }
 foreach ($target in @('User', 'Machine')) {
   $value = [Environment]::GetEnvironmentVariable('PATH', $target)
-  if ($value) { $entries.Add('WAKU_' + $target.ToUpper() + '_PATH=' + [Environment]::ExpandEnvironmentVariables($value)) }
+  if ($value) { $entries.Add('GODDARD_' + $target.ToUpper() + '_PATH=' + [Environment]::ExpandEnvironmentVariables($value)) }
 }
-[IO.File]::WriteAllText($env:WAKU_SHELL_ENV_CAPTURE_FILE, [string]::Join([string][char]0, $entries))
+[IO.File]::WriteAllText($env:GODDARD_SHELL_ENV_CAPTURE_FILE, [string]::Join([string][char]0, $entries))
 ";
 
 /// PowerShell 7 first, then the in-box Windows PowerShell. `cmd.exe` is not a
@@ -534,7 +534,7 @@ fn capture_windows_environment(
     command
         .arg("-Command")
         .arg(WINDOWS_ENV_CAPTURE_COMMAND)
-        .env("WAKU_SHELL_ENV_CAPTURE_FILE", capture.path())
+        .env("GODDARD_SHELL_ENV_CAPTURE_FILE", capture.path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -555,7 +555,7 @@ fn capture_windows_environment(
 #[cfg(windows)]
 fn merge_windows_environment(mut environment: ShellEnvironment) -> Option<ShellEnvironment> {
     let mut directories = Vec::new();
-    for name in ["PATH", "WAKU_USER_PATH", "WAKU_MACHINE_PATH"] {
+    for name in ["PATH", "GODDARD_USER_PATH", "GODDARD_MACHINE_PATH"] {
         if let Some(value) = take_environment_variable(&mut environment, name) {
             directories.extend(std::env::split_paths(&value));
         }
@@ -860,7 +860,7 @@ fn capture_shell_environment(
     command
         .args(shell_args)
         .arg(SHELL_ENV_COMMAND)
-        .env("WAKU_SHELL_ENV_CAPTURE_FILE", capture.path())
+        .env("GODDARD_SHELL_ENV_CAPTURE_FILE", capture.path())
         // Match shell-env's safeguards for common interactive zsh setups so
         // an update prompt or tmux auto-start cannot consume the probe budget.
         .env("DISABLE_AUTO_UPDATE", "true")
@@ -901,7 +901,7 @@ fn parse_shell_environment(bytes: &[u8]) -> Option<ShellEnvironment> {
 
 fn is_shell_capture_variable(name: &OsStr) -> bool {
     [
-        "WAKU_SHELL_ENV_CAPTURE_FILE",
+        "GODDARD_SHELL_ENV_CAPTURE_FILE",
         "DISABLE_AUTO_UPDATE",
         "ZSH_TMUX_AUTOSTARTED",
         "ZSH_TMUX_AUTOSTART",
@@ -1014,9 +1014,9 @@ mod tests {
             task_id: uuid::Uuid::new_v4(),
             daemon_address: "127.0.0.1:7777".to_owned(),
             cli_path: PathBuf::from(if cfg!(windows) {
-                "C:\\waku\\bin\\waku-agent.exe"
+                "C:\\waku\\bin\\goddard-agent.exe"
             } else {
-                "/waku/bin/waku-agent"
+                "/waku/bin/goddard-agent"
             }),
             shim_directory: PathBuf::from(if cfg!(windows) {
                 "C:\\waku\\agent\\session"
@@ -1053,9 +1053,9 @@ mod tests {
         assert!(directories.contains(&PathBuf::from("/usr/bin")));
 
         for (name, expected) in [
-            ("WAKU_AGENT_TOKEN", "token-1"),
-            ("WAKU_TASK_ID", agent.task_id.to_string().as_str()),
-            ("WAKU_DAEMON_ADDRESS", "127.0.0.1:7777"),
+            ("GODDARD_AGENT_TOKEN", "token-1"),
+            ("GODDARD_TASK_ID", agent.task_id.to_string().as_str()),
+            ("GODDARD_DAEMON_ADDRESS", "127.0.0.1:7777"),
         ] {
             assert!(
                 environment
@@ -1092,7 +1092,7 @@ mod tests {
         );
         let token = command
             .get_envs()
-            .find(|(key, _)| *key == OsStr::new("WAKU_AGENT_TOKEN"))
+            .find(|(key, _)| *key == OsStr::new("GODDARD_AGENT_TOKEN"))
             .and_then(|(_, value)| value)
             .expect("the scoped token is injected");
         assert_eq!(token, OsStr::new("token-3"));
@@ -1141,7 +1141,7 @@ mod tests {
 
     #[test]
     fn child_wait_distinguishes_exit_status_from_timeout_and_reaps_the_child() {
-        const CHILD_MODE: &str = "WAKU_CHILD_WAIT_TEST_MODE";
+        const CHILD_MODE: &str = "GODDARD_CHILD_WAIT_TEST_MODE";
         if let Some(mode) = std::env::var_os(CHILD_MODE) {
             match mode.to_str().expect("child mode") {
                 "success" => std::process::exit(0),
@@ -1207,7 +1207,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn spawn_unblocks_sigchld_in_the_child_and_restores_the_caller() {
-        if std::env::var_os("WAKU_SIGCHLD_CHILD_PROBE").is_some() {
+        if std::env::var_os("GODDARD_SIGCHLD_CHILD_PROBE").is_some() {
             assert!(!sigchld_is_blocked().expect("read child signal mask"));
             return;
         }
@@ -1222,7 +1222,7 @@ mod tests {
                 "command_env::tests::spawn_unblocks_sigchld_in_the_child_and_restores_the_caller",
                 "--nocapture",
             ])
-            .env("WAKU_SIGCHLD_CHILD_PROBE", "1");
+            .env("GODDARD_SIGCHLD_CHILD_PROBE", "1");
         let output = output(&mut command).expect("spawn child signal probe");
 
         assert!(
@@ -1330,7 +1330,7 @@ mod tests {
         command
             .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
             .arg(WINDOWS_ENV_CAPTURE_COMMAND)
-            .env("WAKU_SHELL_ENV_CAPTURE_FILE", capture.path())
+            .env("GODDARD_SHELL_ENV_CAPTURE_FILE", capture.path())
             .stdin(Stdio::null())
             // A file preserves diagnostics without a pipe buffer blocking the probe.
             .stdout(output.try_clone().expect("clone diagnostics handle"))
@@ -1367,11 +1367,11 @@ mod tests {
                 OsString::from("C:\\profile-first;C:\\shared"),
             ),
             (
-                OsString::from("WAKU_USER_PATH"),
+                OsString::from("GODDARD_USER_PATH"),
                 OsString::from("C:\\user;C:\\shared"),
             ),
             (
-                OsString::from("WAKU_MACHINE_PATH"),
+                OsString::from("GODDARD_MACHINE_PATH"),
                 OsString::from("C:\\machine;C:\\USER;C:\\SHARED"),
             ),
         ])
@@ -1395,12 +1395,12 @@ mod tests {
         assert!(
             !environment
                 .iter()
-                .any(|(name, _)| name == OsStr::new("WAKU_USER_PATH"))
+                .any(|(name, _)| name == OsStr::new("GODDARD_USER_PATH"))
         );
         assert!(
             !environment
                 .iter()
-                .any(|(name, _)| name == OsStr::new("WAKU_MACHINE_PATH"))
+                .any(|(name, _)| name == OsStr::new("GODDARD_MACHINE_PATH"))
         );
     }
 
@@ -1487,7 +1487,7 @@ mod tests {
     #[test]
     fn parses_null_delimited_environment_without_losing_value_contents() {
         let environment = parse_shell_environment(
-            b"PATH=/Users/example/.fnm/current/bin:/usr/bin\0TOKEN=line one\nline two=rest\0EMPTY=\0WAKU_SHELL_ENV_CAPTURE_FILE=/tmp/capture\0",
+            b"PATH=/Users/example/.fnm/current/bin:/usr/bin\0TOKEN=line one\nline two=rest\0EMPTY=\0GODDARD_SHELL_ENV_CAPTURE_FILE=/tmp/capture\0",
         )
         .expect("parse shell environment");
 
@@ -1517,7 +1517,7 @@ mod tests {
         let shell = directory.join("fake-shell");
         fs::write(
             &shell,
-            "#!/bin/sh\n/usr/bin/printf 'PATH=/Users/example/.fnm/current/bin:/usr/bin\\000WAKU_TEST_TOKEN=from-shell\\000' > \"$WAKU_SHELL_ENV_CAPTURE_FILE\"\n",
+            "#!/bin/sh\n/usr/bin/printf 'PATH=/Users/example/.fnm/current/bin:/usr/bin\\000GODDARD_TEST_TOKEN=from-shell\\000' > \"$GODDARD_SHELL_ENV_CAPTURE_FILE\"\n",
         )
         .expect("write shell fixture");
         let mut permissions = fs::metadata(&shell)
@@ -1538,7 +1538,7 @@ mod tests {
                     OsString::from("/Users/example/.fnm/current/bin:/usr/bin"),
                 ),
                 (
-                    OsString::from("WAKU_TEST_TOKEN"),
+                    OsString::from("GODDARD_TEST_TOKEN"),
                     OsString::from("from-shell"),
                 ),
             ]

@@ -2,10 +2,10 @@
 //!
 //! Sessions and projects live in SQLite (`app.db`), app-managed UI state in
 //! `state.json`, desktop preferences in `temp/app.json` for Debug or
-//! `~/.waku/app.json` for Release, daemon preferences in
-//! `~/.waku/settings.json`, and binary payloads in [`crate::blob_store`].
+//! `~/.goddard/app.json` for Release, daemon preferences in
+//! `~/.goddard/settings.json`, and binary payloads in [`crate::blob_store`].
 //! Of the configuration documents, only the desktop file is written here;
-//! daemon settings cross the RPC boundary and are persisted by `waku-daemon`.
+//! daemon settings cross the RPC boundary and are persisted by `goddard-daemon`.
 //!
 //! A save writes only the rows whose contents changed, so a streaming turn
 //! costs a few kilobytes no matter how much history exists. Fields the sidebar
@@ -187,7 +187,7 @@ impl ComposerDraftStore {
 ///
 /// This deliberately excludes navigation, panel geometry, and other values
 /// that the app changes as a side effect of ordinary use. Both builds keep it
-/// at `~/.waku/app.json` without exposing app-managed state or daemon-owned
+/// at `~/.goddard/app.json` without exposing app-managed state or daemon-owned
 /// provider policy.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
@@ -964,7 +964,7 @@ impl StateStore {
         let directory = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
         let configuration_directory = dirs::home_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join(".waku");
+            .join(crate::identity::HOME_DIRECTORY_NAME);
         let (app_settings_path, legacy_settings_paths) = if cfg!(debug_assertions) {
             (
                 directory.join("app.json"),
@@ -979,7 +979,7 @@ impl StateStore {
         Self::with_settings_paths(path, app_settings_path, legacy_settings_paths)
     }
 
-    /// Local database owner used inside `waku-daemon`. It never reads or
+    /// Local database owner used inside `goddard-daemon`. It never reads or
     /// writes desktop-only `app.json` or client navigation state.
     pub fn daemon(path: PathBuf) -> Self {
         let mut store = Self::new(path);
@@ -2673,10 +2673,10 @@ mod tests {
         }
         #[cfg(not(debug_assertions))]
         {
-            assert_eq!(directory, Some(std::ffi::OsStr::new("Waku")));
+            assert_eq!(directory, Some(std::ffi::OsStr::new("Goddard")));
             let configuration_directory = dirs::home_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join(".waku");
+                .join(crate::identity::HOME_DIRECTORY_NAME);
             assert_eq!(
                 store.app_settings_path,
                 configuration_directory.join("app.json")

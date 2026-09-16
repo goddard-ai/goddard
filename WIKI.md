@@ -12,7 +12,7 @@ each task gets a real transcript, a diff view, a terminal, a file browser, and
 Git tooling, while the agent CLI does the actual work underneath.
 
 (If you knew it as **Waku** — same app, renamed. That's why download URLs say
-`waku.sh` and internal pieces are named `waku-*`.)
+`goddardai.org` and internal pieces are named `waku-*`.)
 
 It is written in Rust on top of [GPUI](https://github.com/zed-industries/zed)
 (the framework that powers the Zed editor), which is why it stays smooth on
@@ -94,7 +94,7 @@ commits. Highlights, grouped by area:
   match-system toggle, UI and code font pickers, a completion-sound picker
   with audition and volume, and a sidebar-transparency toggle.
 - **Providers and daemon:** Devin CLI support, install/sign-in actions on the
-  Providers page, the `waku-agent` agent-tools setting, and daemon resilience
+  Providers page, the `goddard-agent` agent-tools setting, and daemon resilience
   (unresponsive-daemon detection, provider-process guarding, automatic
   remote-session reconnect).
 - **Polish:** menus and dialogs that reveal from their anchor, shortcut hints
@@ -105,9 +105,9 @@ commits. Highlights, grouped by area:
 
 ### Install
 
-- **macOS:** download the signed `.dmg` from [waku.sh](https://waku.sh). It
+- **macOS:** download the signed `.dmg` from [goddardai.org](https://goddardai.org). It
   updates itself.
-- **Linux:** `curl -fsSL https://waku.sh/install.sh | sh` — installs into
+- **Linux:** `curl -fsSL https://goddardai.org/install.sh | sh` — installs into
   `~/.local` without root, adds an applications-menu entry, and keeps itself
   updated. Requires glibc 2.35+ (Ubuntu 22.04, Debian 12, Fedora 36 or newer),
   a working Vulkan or OpenGL driver, and x86_64 or aarch64.
@@ -165,7 +165,7 @@ continuity, across every provider.
 A project is a folder on your machine (or on the daemon host, for remote
 setups). You open a project once, and every task inside it shares that folder.
 You can also start a task **without a project** — Goddard creates a scratch
-workspace under `~/.waku/projects/<date>/<slug>`.
+workspace under `~/.goddard/projects/<date>/<slug>`.
 
 ### Tasks (sessions)
 
@@ -183,7 +183,7 @@ overwritten.
 Tasks can be **pinned**, **marked unread**, **archived**, or **deleted** from
 the sidebar. Archiving a task that sits in a worktree snapshots the checkout
 first; unarchiving restores it. A projectless task's workspace is zipped into
-`~/.waku/archives/<date>/<slug>.zip` and removed the same way. Archived chats
+`~/.goddard/archives/<date>/<slug>.zip` and removed the same way. Archived chats
 are hidden from the sidebar and search, browsable in Settings → Archived, and
 permanently removed after 30 days.
 
@@ -513,7 +513,7 @@ restarts.
 
 ## Architecture: daemon, web, and mobile
 
-Goddard Desktop is an RPC client of **`waku-daemon`**, a standalone process
+Goddard Desktop is an RPC client of **`goddard-daemon`**, a standalone process
 that owns task data, transcripts, attachments, provider processes, and all
 filesystem/Git operations. The desktop keeps only presentation state. That
 split is what makes the other clients possible:
@@ -531,7 +531,7 @@ split is what makes the other clients possible:
 - **Goddard Mobile** (iOS/Android, Expo) connects to one or more remote
   daemons the same way; tokens are stored in the device keychain.
 - **Agent tools** (daemon setting): sessions can get a session-scoped
-  `waku-agent` command that lets one agent create tasks and send messages to
+  `goddard-agent` command that lets one agent create tasks and send messages to
   other tasks — agent-to-agent delegation, marked in the target transcript.
 - The desktop can also **connect to an externally managed daemon** (headless
   host, VM, container): files, diffs, Git, skills, usage, and attachments all
@@ -549,12 +549,12 @@ split is what makes the other clients possible:
 - **Local by default.** Projects, conversations, settings, and attachments
   live on your machine. There is no Goddard account and no required remote
   service.
-- On macOS/Linux, app state lives under `~/.waku/` (`app.json` for settings;
-  projectless workspaces under `~/.waku/projects/`, their zipped archives
-  under `~/.waku/archives/`); daemon provider and Computer Use settings in
-  `~/.waku/settings.json`. On Windows, task data is
+- On macOS/Linux, app state lives under `~/.goddard/` (`app.json` for settings;
+  projectless workspaces under `~/.goddard/projects/`, their zipped archives
+  under `~/.goddard/archives/`); daemon provider and Computer Use settings in
+  `~/.goddard/settings.json`. On Windows, task data is
   `%LOCALAPPDATA%\Goddard\app.db`, blobs alongside it, settings in
-  `%USERPROFILE%\.waku\app.json`.
+  `%USERPROFILE%\.goddard\app.json`.
 - Optional anonymous analytics cover feature usage and reliability only — the
   toggle is off by default and prompts, responses, project names, and file
   paths are never included.
@@ -658,7 +658,7 @@ set `VK_DRIVER_FILES=/nonexistent.json` to force the GL path.
 **Git-backed features do nothing.** Goddard shells out to `git` — make sure
 `git --version` works in a new terminal (install Git for Windows on Windows).
 
-**Updates never arrive.** The updater fetches `releases.waku.sh` (via
+**Updates never arrive.** The updater fetches `releases.goddardai.org` (via
 `curl.exe` in System32 on Windows); a proxy or filter blocking that host
 blocks updates. **Check for Updates…** in the app menu reports the reason.
 Downloading and running the installer manually is always equivalent.
@@ -669,12 +669,12 @@ isn't code-signed — choose **More info → Run anyway**.
 ## Uninstalling
 
 - **macOS:** move Goddard to the Trash. Settings, tasks, and workspaces live in
-  `~/.waku` — delete it to remove them too.
-- **Linux:** `curl -fsSL https://waku.sh/install.sh | sh -s -- --uninstall`
-  removes `~/.local/waku.app`, the symlink, and the desktop entry. `~/.waku`
+  `~/.goddard` — delete it to remove them too.
+- **Linux:** `curl -fsSL https://goddardai.org/install.sh | sh -s -- --uninstall`
+  removes `~/.local/goddard.app`, the symlink, and the desktop entry. `~/.goddard`
   stays; delete it to remove projects and settings.
 - **Windows:** uninstall from Settings → Apps, or delete the portable folder.
-  Task data is `%LOCALAPPDATA%\Goddard`, settings `%USERPROFILE%\.waku`.
+  Task data is `%LOCALAPPDATA%\Goddard`, settings `%USERPROFILE%\.goddard`.
 
 ## FAQ
 
@@ -719,7 +719,7 @@ about 30 minutes, but that's invisible — the next prompt resumes the native
 session.
 
 **Can I use it on a server/headless machine?**
-Yes: run `waku-daemon` on the host, expose it with `--allow-non-loopback`, an
+Yes: run `goddard-daemon` on the host, expose it with `--allow-non-loopback`, an
 origin allowlist, and a token, then connect with Goddard Web, the mobile app,
 or a desktop pointed at the external daemon.
 
@@ -734,7 +734,7 @@ Yes — that's the core design. Independent tasks run simultaneously, each in
 its own workspace or worktree, and keep streaming in the background.
 
 **Can one agent talk to another?**
-With the daemon's Agent Tools setting enabled, sessions get a `waku-agent`
+With the daemon's Agent Tools setting enabled, sessions get a `goddard-agent`
 command that can create tasks and send messages to other tasks.
 
 **Can I import a session I started in the terminal?**
@@ -757,7 +757,7 @@ provider round-trip is local.
 **Can I export or back up my data?**
 There's no built-in export tool — but there's also no lock-in. Everything is
 ordinary files you can browse, copy, or back up from the system file manager:
-`~/.waku` on macOS/Linux, `%LOCALAPPDATA%\Goddard` plus `%USERPROFILE%\.waku`
+`~/.goddard` on macOS/Linux, `%LOCALAPPDATA%\Goddard` plus `%USERPROFILE%\.goddard`
 on Windows. Provider transcripts also remain in each CLI's own session store
 (`~/.claude/projects`, Codex threads, etc.).
 

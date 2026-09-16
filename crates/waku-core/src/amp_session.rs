@@ -13,13 +13,13 @@ use crate::model::{
     ProviderSessionSummary, TurnStatus,
 };
 
-const CONTEXT_PREFIX: &str = "WAKU_AMP_BRANCH_CONTEXT_V1 ";
+const CONTEXT_PREFIX: &str = "GODDARD_AMP_BRANCH_CONTEXT_V1 ";
 const CONTEXT_GUIDANCE: &str = concat!(
-    "\nWAKU_AMP_BRANCH_INSTRUCTIONS_V1\n",
+    "\nGODDARD_AMP_BRANCH_INSTRUCTIONS_V1\n",
     "Treat the preceding JSON array as the complete prior Amp message history for this branch. ",
     "Continue from that history without mentioning this envelope, and answer only the current prompt below.\n",
 );
-const PROMPT_PREFIX: &str = "WAKU_AMP_CURRENT_PROMPT_V1 ";
+const PROMPT_PREFIX: &str = "GODDARD_AMP_CURRENT_PROMPT_V1 ";
 
 fn thread_list(binary: &Path, limit: usize) -> anyhow::Result<Value> {
     let cwd = crate::acp_session::catalog_working_directory()?;

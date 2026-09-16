@@ -187,23 +187,26 @@ fn configure_computer_use_command(command: &mut Command, config: Option<&CodexCo
             .arg(DISABLE_CODEX_NODE_REPL_COMMAND)
             .arg("-c")
             .arg(DISABLE_CODEX_NODE_REPL)
-            .env("WAKU_COMPUTER_USE_SERVER", &config.server_path)
+            .env("GODDARD_COMPUTER_USE_SERVER", &config.server_path)
             .env(
-                "WAKU_COMPUTER_USE_PROCESS_DIRECTORY",
+                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
                 &config.process_directory,
             )
             .arg("-c")
-            .arg(format!("mcp_servers.waku_js_repl.command={}", config.repl))
+            .arg(format!(
+                "mcp_servers.goddard_js_repl.command={}",
+                config.repl
+            ))
             .arg("-c")
-            .arg("mcp_servers.waku_js_repl.args=[]")
+            .arg("mcp_servers.goddard_js_repl.args=[]")
             .arg("-c")
             .arg(format!(
-                "mcp_servers.waku_js_repl.env.WAKU_COMPUTER_USE_SERVER={}",
+                "mcp_servers.goddard_js_repl.env.GODDARD_COMPUTER_USE_SERVER={}",
                 config.server
             ))
             .arg("-c")
             .arg(format!(
-                "mcp_servers.waku_js_repl.env.WAKU_COMPUTER_USE_PROCESS_DIRECTORY={}",
+                "mcp_servers.goddard_js_repl.env.GODDARD_COMPUTER_USE_PROCESS_DIRECTORY={}",
                 config.process_directory_config
             ));
     }
@@ -354,7 +357,7 @@ impl CodexDriver {
                         &mut stdin,
                         &json!({
                             "method": "skills/extraRoots/set",
-                            "id": "waku-computer-use-skill",
+                            "id": "goddard-computer-use-skill",
                             "params": {
                                 "extraRoots": [computer_use_skill_root.display().to_string()]
                             }
@@ -3037,16 +3040,16 @@ mod tests {
         assert!(
             disabled
                 .get_envs()
-                .all(|(name, _)| { !name.to_string_lossy().starts_with("WAKU_COMPUTER_USE_") })
+                .all(|(name, _)| { !name.to_string_lossy().starts_with("GODDARD_COMPUTER_USE_") })
         );
 
         let config = CodexComputerUseConfig {
-            server_path: PathBuf::from("/tmp/waku-computer-use-server"),
-            server: toml_string("/tmp/waku-computer-use-server"),
+            server_path: PathBuf::from("/tmp/goddard-computer-use-server"),
+            server: toml_string("/tmp/goddard-computer-use-server"),
             repl: toml_string("/tmp/waku"),
-            skill_root: PathBuf::from("/tmp/waku-computer-use-skill"),
-            process_directory: PathBuf::from("/tmp/waku-computer-use-processes"),
-            process_directory_config: toml_string("/tmp/waku-computer-use-processes"),
+            skill_root: PathBuf::from("/tmp/goddard-computer-use-skill"),
+            process_directory: PathBuf::from("/tmp/goddard-computer-use-processes"),
+            process_directory_config: toml_string("/tmp/goddard-computer-use-processes"),
         };
         let mut enabled = Command::new("/usr/bin/true");
         configure_computer_use_command(&mut enabled, Some(&config));
@@ -3059,17 +3062,17 @@ mod tests {
         assert!(
             !enabled_arguments
                 .iter()
-                .any(|argument| argument.contains("mcp_servers.waku_computer_use"))
+                .any(|argument| argument.contains("mcp_servers.goddard_computer_use"))
         );
         assert!(
             enabled_arguments
                 .iter()
-                .any(|argument| argument.contains("mcp_servers.waku_js_repl.command"))
+                .any(|argument| argument.contains("mcp_servers.goddard_js_repl.command"))
         );
         assert!(
             enabled_arguments
                 .iter()
-                .any(|argument| { argument == "mcp_servers.waku_js_repl.args=[]" })
+                .any(|argument| { argument == "mcp_servers.goddard_js_repl.args=[]" })
         );
         assert!(
             enabled_arguments
@@ -3099,14 +3102,14 @@ mod tests {
         assert!(
             enabled
                 .get_envs()
-                .any(|(name, _)| { name.to_string_lossy() == "WAKU_COMPUTER_USE_SERVER" })
+                .any(|(name, _)| { name.to_string_lossy() == "GODDARD_COMPUTER_USE_SERVER" })
         );
     }
 
     #[test]
     fn computer_use_process_registry_accepts_only_pid_files() {
         let directory = std::env::temp_dir().join(format!(
-            "waku-computer-use-process-test-{}",
+            "goddard-computer-use-process-test-{}",
             Uuid::new_v4().simple()
         ));
         fs::create_dir_all(directory.join("456")).unwrap();
@@ -3565,7 +3568,7 @@ mod tests {
                 json!({
                     "method": method, "params": {
                         "threadId": "thread-1", "turnId": "turn-9", "item": {
-                            "id": "cua-call", "type": "mcpToolCall", "server": "waku_js_repl", "tool": "js",
+                            "id": "cua-call", "type": "mcpToolCall", "server": "goddard_js_repl", "tool": "js",
                             "arguments": {"title": "List running apps via CUA", "code": "cua.list_apps()"}
                         }
                     }
@@ -3586,7 +3589,7 @@ mod tests {
             };
             assert_eq!(item.title, "List running apps via CUA");
             assert_eq!(item.tool_name.as_deref(), Some("js"));
-            assert_eq!(item.mcp_server.as_deref(), Some("waku_js_repl"));
+            assert_eq!(item.mcp_server.as_deref(), Some("goddard_js_repl"));
             assert_eq!(item.complete, method == "item/completed");
         }
     }
@@ -3595,7 +3598,7 @@ mod tests {
     fn mcp_tool_title_prefers_the_human_facing_argument() {
         let titled = json!({
             "type": "mcpToolCall",
-            "server": "waku_js_repl",
+            "server": "goddard_js_repl",
             "tool": "js",
             "arguments": {
                 "title": "Inspect Helium browser",
@@ -3604,7 +3607,7 @@ mod tests {
         });
         let untitled = json!({
             "type": "mcpToolCall",
-            "server": "waku_js_repl",
+            "server": "goddard_js_repl",
             "tool": "js",
             "arguments": { "code": "cua.list_apps()" }
         });

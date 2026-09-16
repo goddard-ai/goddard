@@ -404,8 +404,11 @@ impl TerminalSession {
         options.env.insert("TERM".into(), "xterm-256color".into());
         options.env.insert("COLORTERM".into(), "truecolor".into());
         if shell_integration {
-            // The rc block the integration installs keys on $WAKU so only
-            // waku-spawned shells source the script.
+            // The rc block the integration installs keys on $GODDARD so
+            // only Goddard-spawned shells source the script. $WAKU keeps
+            // blocks a pre-Goddard install left behind working until the
+            // installer rewrites them.
+            options.env.insert("GODDARD".into(), "1".into());
             options.env.insert("WAKU".into(), "1".into());
         }
         if let Some(path) = crate::command_env::executable_search_path() {

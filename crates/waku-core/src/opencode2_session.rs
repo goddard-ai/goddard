@@ -845,12 +845,12 @@ mod tests {
     /// while `sanitize=true` replaces even the user's own prompt with a
     /// `[redacted:…]` placeholder.
     #[test]
-    #[ignore = "requires a running opencode2 background service and WAKU_OPENCODE2_TEST_SESSION_ID"]
+    #[ignore = "requires a running opencode2 background service and GODDARD_OPENCODE2_TEST_SESSION_ID"]
     fn imports_a_real_transcript_without_redaction_placeholders() {
         let binary =
             crate::command_env::find_executable("opencode2").expect("opencode2 is not installed");
-        let session_id = std::env::var("WAKU_OPENCODE2_TEST_SESSION_ID")
-            .expect("set WAKU_OPENCODE2_TEST_SESSION_ID to a completed session");
+        let session_id = std::env::var("GODDARD_OPENCODE2_TEST_SESSION_ID")
+            .expect("set GODDARD_OPENCODE2_TEST_SESSION_ID to a completed session");
         let history =
             provider_session_history(&binary, &session_id, 100).expect("the import should work");
         assert!(!history.messages.is_empty());

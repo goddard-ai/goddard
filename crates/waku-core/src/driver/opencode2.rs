@@ -568,7 +568,7 @@ impl OpenCode2Driver {
                     }),
                     Err(error) => {
                         eprintln!(
-                            "waku-daemon: could not attach OpenCode 2 subagent instructions: {error}"
+                            "goddard-daemon: could not attach OpenCode 2 subagent instructions: {error}"
                         );
                         None
                     }
@@ -709,10 +709,10 @@ struct OpenCode2AgentSurface {
     shim_directory: std::path::PathBuf,
 }
 
-const AGENT_INSTRUCTION_KEY: &str = "waku-agent";
-const SUBAGENT_INSTRUCTION_KEY: &str = "waku-subagents";
+const AGENT_INSTRUCTION_KEY: &str = "goddard-agent";
+const SUBAGENT_INSTRUCTION_KEY: &str = "goddard-subagents";
 
-/// A `waku-subagents` instruction entry: attached at start, removed on drop
+/// A `goddard-subagents` instruction entry: attached at start, removed on drop
 /// so a later session reconciles to whatever its own launch injected.
 struct SubagentInstruction {
     endpoint: Endpoint,
@@ -2701,7 +2701,7 @@ mod tests {
     #[test]
     fn computer_use_tools_keep_mcp_identity_and_image_results() {
         let mut harness = Harness::new(RuntimeMode::FullAccess);
-        let server = "waku_js_repl_0123456789abcdef0123456789abcdef";
+        let server = "goddard_js_repl_0123456789abcdef0123456789abcdef";
         harness.feed(step_started("msg_cua"));
         harness.feed(json!({"type":"session.tool.input.started","data":{
             "assistantMessageID":"msg_cua","id":"call_cua","name":format!("{server}_js")
@@ -3272,7 +3272,7 @@ mod tests {
     }
 
     /// Nonvisual integration check: only reads Cua configuration and emits a
-    /// synthetic image. Requires the signed app through WAKU_APP_EXECUTABLE.
+    /// synthetic image. Requires the signed app through GODDARD_APP_EXECUTABLE.
     #[test]
     #[ignore = "requires a configured OpenCode 2 model and a packaged Goddard app"]
     fn opencode2_computer_use_against_the_adopted_service() {
@@ -3335,7 +3335,7 @@ mod tests {
             .filter(|server| {
                 server["name"]
                     .as_str()
-                    .is_some_and(|name| name.starts_with("waku_js_repl_"))
+                    .is_some_and(|name| name.starts_with("goddard_js_repl_"))
             })
             .collect();
         assert_eq!(

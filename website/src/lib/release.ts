@@ -7,12 +7,12 @@ export interface LatestRelease {
   pubDate: string | null
 }
 
-const RELEASES_BASE = 'https://releases.waku.sh'
+const RELEASES_BASE = 'https://releases.goddardai.org'
 
 // Versioned artifact names are a stable contract and old archives stay in R2
 // (see RELEASING.md), so a known-published version is a safe fallback while
 // the appcast query is pending or unreachable.
-export const FALLBACK_DOWNLOAD_URL = `${RELEASES_BASE}/Waku-0.0.1.dmg`
+export const FALLBACK_DOWNLOAD_URL = `${RELEASES_BASE}/Goddard-0.0.1.dmg`
 
 export const WINDOWS_ARCHITECTURES = [
   { arch: 'x86_64', label: 'Windows (x86_64)' },

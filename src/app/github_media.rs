@@ -29,7 +29,7 @@ const MAX_MEDIA_CACHE_BYTES: u64 = 256 * 1024 * 1024;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// The media cache root: `~/Library/Caches/Waku/pull-request-media` in
+/// The media cache root: `~/Library/Caches/Goddard/pull-request-media` in
 /// release, the checkout's gitignored `temp/` in debug — the same split the
 /// daemon's model cache follows, so development never touches the installed
 /// app's cache.

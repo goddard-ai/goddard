@@ -9,7 +9,7 @@ import { wakuCacheDir } from "./cache-dir";
 const projectRoot = resolve(import.meta.dir, "..");
 const userHome = homedir();
 const library = join(userHome, "Library");
-const debugBundleIdentifiers = ["sh.waku.dev", "codes.waku.dev"];
+const debugBundleIdentifiers = ["org.goddardai.app.debug", "codes.waku.dev"];
 
 type Target = {
   path: string;
@@ -68,7 +68,7 @@ addCandidate(join(projectRoot, "temp"));
 // Debug helper cache in the shared build cache, plus its old checkout-local
 // location. Keep the release cache intact.
 addCandidate(join(wakuCacheDir(), "computer-use", "debug"));
-addCandidate(join(projectRoot, ".waku-cache", "computer-use", "debug"));
+addCandidate(join(projectRoot, ".goddard-cache", "computer-use", "debug"));
 addCandidate(join(projectRoot, "target", "debug", "Goddard Debug.app"));
 // Pre-rename builds used the Waku name.
 addCandidate(join(projectRoot, "target", "debug", "Waku Debug.app"));
@@ -87,20 +87,24 @@ for (const app of ["Goddard Debug.app", "Waku Debug.app"]) {
   addCandidate(join("/Applications", app));
 }
 
-// Debug-only app data. The release app uses Goddard/sh.waku and is not included.
-addCandidate(join(library, "Application Support", "Waku Debug"));
+// Debug-only app data. The release app uses Goddard/org.goddardai.app and is not included.
+for (const root of ["Goddard Debug", "Waku Debug"]) {
+  addCandidate(join(library, "Application Support", root));
+  addCandidate(join(library, "Caches", root));
+  addCandidate(join(library, "Logs", root));
+}
 for (const helper of [
   "Goddard Debug Computer Use.app",
   "Waku Debug Computer Use.app",
 ]) {
-  addCandidate(
-    join(library, "Application Support", "Waku", "Computer Use", helper),
-  );
+  for (const root of ["Goddard", "Waku"]) {
+    addCandidate(
+      join(library, "Application Support", root, "Computer Use", helper),
+    );
+  }
 }
-addCandidate(join(library, "Caches", "Waku Debug"));
-addCandidate(join(library, "Logs", "Waku Debug"));
 
-// codes.waku.dev was the debug app's bundle ID before sh.waku.dev.
+// codes.waku.dev was the debug app's bundle ID before org.goddardai.app.debug.
 for (const bundleIdentifier of debugBundleIdentifiers) {
   for (const path of [
     join(library, "Application Support", bundleIdentifier),

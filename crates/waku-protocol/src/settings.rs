@@ -20,7 +20,7 @@ pub struct SubagentTierTarget {
 }
 
 /// One harness-neutral tier ("fast", "medium", "heavy"), mapped per provider
-/// so the same `waku-fast` agent can be a cheap model on every harness at
+/// so the same `goddard-fast` agent can be a cheap model on every harness at
 /// once. A provider missing from the map gets the tier's prompt with the
 /// session's own model.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
@@ -53,7 +53,7 @@ pub struct DaemonSettings {
     pub disabled_providers: Vec<ProviderKind>,
     /// Named subagent tiers injected into every session's harness, keyed by
     /// tier name ("explore", "fast", "medium", "heavy"). Empty → only the
-    /// built-in read-only `waku-explore` agent is injected.
+    /// built-in read-only `goddard-explore` agent is injected.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub subagent_tiers: BTreeMap<String, SubagentTier>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -82,7 +82,7 @@ impl DaemonSettings {
     pub fn default_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join(".waku")
+            .join(crate::identity::HOME_DIRECTORY_NAME)
             .join("settings.json")
     }
 

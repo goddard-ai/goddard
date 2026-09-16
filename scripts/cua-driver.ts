@@ -111,7 +111,7 @@ export async function bundleComputerUse(
   const suffix = process.platform === "win32" ? ".exe" : "";
   await mkdir(binDirectory, { recursive: true });
   await mkdir(resourcesDirectory, { recursive: true });
-  for (const file of [`waku_js_repl${suffix}`, `waku_computer_use${suffix}`]) {
+  for (const file of [`goddard_js_repl${suffix}`, `goddard_computer_use${suffix}`]) {
     const destination = join(binDirectory, file);
     if (resolve(target, file) !== resolve(destination))
       await cp(join(target, file), destination);
@@ -141,8 +141,8 @@ export async function bundleComputerUse(
     await cp(join(root, source!), destination);
   }
   await writeCuaSkill(
-    join(binDirectory, `waku_computer_use${suffix}`),
-    join(resourcesDirectory, "skills/waku-computer-use/SKILL.md"),
+    join(binDirectory, `goddard_computer_use${suffix}`),
+    join(resourcesDirectory, "skills/goddard-computer-use/SKILL.md"),
   );
 }
 

@@ -1,6 +1,6 @@
 # waku-client
 
-`waku-client` is the Rust client for `waku-daemon`. It owns the authenticated
+`waku-client` is the Rust client for `goddard-daemon`. It owns the authenticated
 WebSocket handshake, request correlation, subscriptions, event sequence
 deduplication, replay cursors, local-daemon supervision, and disposable client
 preview caches. It depends on `waku-protocol`, never on `waku-core`.

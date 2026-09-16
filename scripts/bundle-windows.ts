@@ -127,9 +127,9 @@ const installer = join(
   `Goddard-${version}-${architecture}-Setup.exe`,
 );
 
-await $`cargo build --locked --release --package waku --bin waku --bin waku_js_repl --package waku-daemon --bin waku-daemon --package waku-computer-use --bin waku_computer_use`;
+await $`cargo build --locked --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-computer-use --bin goddard_computer_use`;
 
-const staging = await mkdtemp(join(tmpdir(), "waku-bundle-"));
+const staging = await mkdtemp(join(tmpdir(), "goddard-bundle-"));
 try {
   // Both executables stay side by side: the app resolves the daemon next to
   // itself, so the layout is what makes an extracted zip runnable in place.
@@ -140,7 +140,7 @@ try {
     join(packageDirectory, "resources"),
     "release",
   );
-  for (const file of ["waku.exe", "waku-daemon.exe"]) {
+  for (const file of ["goddard.exe", "goddard-daemon.exe"]) {
     await copyFile(join(releaseDirectory, file), join(packageDirectory, file));
   }
   await copyFile(
@@ -160,10 +160,10 @@ try {
     await writeFile(certificate, Buffer.from(certificateData, "base64"));
     signtool = findSigntool();
     await sign(signtool, certificate, certificatePassword, [
-      join(packageDirectory, "waku.exe"),
-      join(packageDirectory, "waku-daemon.exe"),
-      join(packageDirectory, "waku_js_repl.exe"),
-      join(packageDirectory, "waku_computer_use.exe"),
+      join(packageDirectory, "goddard.exe"),
+      join(packageDirectory, "goddard-daemon.exe"),
+      join(packageDirectory, "goddard_js_repl.exe"),
+      join(packageDirectory, "goddard_computer_use.exe"),
       join(packageDirectory, "cua_driver_sdk.dll"),
       join(packageDirectory, "cua-driver-uia.exe"),
     ]);

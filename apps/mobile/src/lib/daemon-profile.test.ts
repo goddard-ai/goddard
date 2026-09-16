@@ -12,8 +12,8 @@ import {
 describe('daemon profiles', () => {
   test('normalizes host, HTTP aliases, and protocol paths', () => {
     expect(normalizeDaemonAddress('waku.local:34123')).toBe('ws://waku.local:34123');
-    expect(normalizeDaemonAddress('https://waku.example.com/v1?old=1')).toBe(
-      'wss://waku.example.com',
+    expect(normalizeDaemonAddress('https://goddard.example.com/v1?old=1')).toBe(
+      'wss://goddard.example.com',
     );
   });
 
@@ -46,7 +46,7 @@ describe('daemon profiles', () => {
     expect(isPrivateDaemonAddress('ws://workstation:34123')).toBe(true);
     expect(isPrivateDaemonAddress('ws://[::1]:34123')).toBe(true);
     expect(isPrivateDaemonAddress('ws://[2001:db8::8]:34123')).toBe(false);
-    expect(isPrivateDaemonAddress('wss://waku.example.com')).toBe(false);
+    expect(isPrivateDaemonAddress('wss://goddard.example.com')).toBe(false);
   });
 
   test('creates compact initials', () => {

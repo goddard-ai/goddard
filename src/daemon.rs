@@ -64,10 +64,10 @@ pub fn local_hostname() -> Option<String> {
 }
 
 fn daemon_executable_path() -> anyhow::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("WAKU_DAEMON_PATH").filter(|path| !path.is_empty()) {
+    if let Some(path) = std::env::var_os("GODDARD_DAEMON_PATH").filter(|path| !path.is_empty()) {
         return Ok(path.into());
     }
-    let executable = format!("waku-daemon{}", std::env::consts::EXE_SUFFIX);
+    let executable = format!("goddard-daemon{}", std::env::consts::EXE_SUFFIX);
     let current = std::env::current_exe().context("could not locate the Goddard executable")?;
 
     // Development keeps the daemon beside Cargo's debug artifacts rather than

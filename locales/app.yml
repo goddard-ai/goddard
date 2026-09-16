@@ -374,7 +374,7 @@ daemon.allowed_origins:
 daemon.allowed_origins_description:
   en: Exact http:// or https:// origins allowed to open the WebSocket.
 daemon.allowed_origins_placeholder:
-  en: https://waku.example.com, http://localhost:3001
+  en: https://goddard.example.com, http://localhost:3001
 daemon.apply:
   en: Apply
 daemon.restarting:
@@ -406,7 +406,7 @@ daemon.web_connection_description:
 daemon.agent_tools_title:
   en: Agent tools
 daemon.agent_tools_description:
-  en: Let an agent create tasks and send messages to other tasks. Sessions started while this is on get a session-scoped waku-agent command; prompts it sends are marked in the target transcript.
+  en: Let an agent create tasks and send messages to other tasks. Sessions started while this is on get a session-scoped goddard-agent command; prompts it sends are marked in the target transcript.
 daemon.agent_settings_title:
   en: Agent settings
 daemon.agent_settings_description:
@@ -1876,11 +1876,11 @@ session.agent_stopped_reason:
 errors.open_session:
   en: "Could not open that session: %{error}"
 errors.create_projectless_task:
-  en: "Could not create a task beneath ~/.waku/projects: %{error}"
+  en: "Could not create a task beneath ~/.goddard/projects: %{error}"
 errors.save_projectless_migration:
   en: "Could not save the projectless task migration: %{error}"
 errors.move_projectless_task:
-  en: "Could not move the old projectless task beneath ~/.waku/projects: %{error}"
+  en: "Could not move the old projectless task beneath ~/.goddard/projects: %{error}"
 errors.remote_host_path:
   en: This path belongs to the daemon host and cannot be opened by the desktop
 errors.change_branch:

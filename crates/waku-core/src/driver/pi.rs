@@ -118,7 +118,7 @@ impl PiFlavor {
 
     /// Goddard's computer-use bridge is a Pi extension written against Pi's
     /// extension API. Oh My Pi ships its own `/computer` instead.
-    fn supports_waku_computer_use(self) -> bool {
+    fn supports_goddard_computer_use(self) -> bool {
         matches!(self, Self::Pi)
     }
 
@@ -194,10 +194,10 @@ fn configure_pi_computer_use_command(
             .arg(extension)
             .arg("--skill")
             .arg(&config.skill_path)
-            .env("WAKU_JS_REPL_SERVER", &config.repl_path)
-            .env("WAKU_COMPUTER_USE_SERVER", &config.server_path)
+            .env("GODDARD_JS_REPL_SERVER", &config.repl_path)
+            .env("GODDARD_COMPUTER_USE_SERVER", &config.server_path)
             .env(
-                "WAKU_COMPUTER_USE_PROCESS_DIRECTORY",
+                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
                 &config.process_directory,
             );
     }
@@ -252,7 +252,7 @@ impl PiDriver {
             parse_model_slug(model)?;
         }
 
-        let computer_use = (computer_use_enabled && flavor.supports_waku_computer_use())
+        let computer_use = (computer_use_enabled && flavor.supports_goddard_computer_use())
             .then(|| computer_use_runtime::ComputerUseRuntime::start(events.clone()))
             .transpose()?;
         let pi_extension = computer_use
@@ -260,10 +260,10 @@ impl PiDriver {
             .map(|_| crate::computer_use::pi_extension_path())
             .transpose()?;
         // Pi has no built-in subagent tool, so delegation arrives as a
-        // waku-owned extension: a `waku_delegate` tool that runs `pi -p`
+        // goddard-owned extension: a `goddard_delegate` tool that runs `pi -p`
         // subprocesses on the spec's models. The file lives in Goddard's
         // data directory — identical content for every session — and reads
-        // the spec from `WAKU_SUBAGENTS`. Oh My Pi is a fork with its own
+        // the spec from `GODDARD_SUBAGENTS`. Oh My Pi is a fork with its own
         // extension model, so only stock Pi gets it.
         let subagent_extension = subagents
             .as_ref()
@@ -271,7 +271,7 @@ impl PiDriver {
             .map(|spec| -> anyhow::Result<(PathBuf, String)> {
                 let directory = dirs::data_dir()
                     .ok_or_else(|| anyhow!("Application Support directory is unavailable"))?
-                    .join("Waku")
+                    .join("Goddard")
                     .join("subagents");
                 Ok((
                     crate::subagents::write_pi_extension(&directory)?,
@@ -298,8 +298,8 @@ impl PiDriver {
             command
                 .arg("--extension")
                 .arg(extension)
-                .env("WAKU_SUBAGENTS", spec_json)
-                .env("WAKU_PI_BINARY", &binary);
+                .env("GODDARD_SUBAGENTS", spec_json)
+                .env("GODDARD_PI_BINARY", &binary);
         }
         let mut command = crate::command_env::guard_command(command);
         let command = command
@@ -1302,7 +1302,7 @@ struct PiStreamState {
     message_saw_reasoning: bool,
     failed: bool,
     tools: HashMap<String, (ActivityKind, String)>,
-    /// `waku_delegate` call id → agent name, kept for the duration of the
+    /// `goddard_delegate` call id → agent name, kept for the duration of the
     /// call so completion upserts still carry the role.
     subagent_roles: HashMap<String, String>,
 }
@@ -1536,7 +1536,7 @@ fn handle_pi_message(
             )
             .with_tool_name(tool_name);
             let _ = events.send(DriverEvent::RichActivity(item));
-            // A delegated call (waku's `waku_delegate` extension, or a native
+            // A delegated call (goddard's `goddard_delegate` extension, or a native
             // equivalent) runs a helper that emits no events of its own —
             // synthesize the tasks-surface item here the way other drivers do
             // for their native subagent tools.
@@ -1919,9 +1919,9 @@ mod tests {
     fn pi_computer_use_uses_only_session_scoped_extension_and_skill_arguments() {
         let config = computer_use_runtime::ComputerUseConfig {
             server_path: PathBuf::from("/tmp/Goddard Computer Use"),
-            repl_path: PathBuf::from("/Applications/Goddard.app/Resources/waku_js_repl"),
+            repl_path: PathBuf::from("/Applications/Goddard.app/Resources/goddard_js_repl"),
             skill_path: PathBuf::from("/Applications/Goddard.app/Resources/skills/SKILL.md"),
-            process_directory: PathBuf::from("/tmp/waku-computer-use/session"),
+            process_directory: PathBuf::from("/tmp/goddard-computer-use/session"),
         };
         let mut command = std::process::Command::new("pi");
 
@@ -1956,35 +1956,35 @@ mod tests {
             })
             .collect::<HashMap<_, _>>();
         assert_eq!(
-            environment.get("WAKU_JS_REPL_SERVER"),
+            environment.get("GODDARD_JS_REPL_SERVER"),
             Some(&Some(
-                "/Applications/Goddard.app/Resources/waku_js_repl".into()
+                "/Applications/Goddard.app/Resources/goddard_js_repl".into()
             ))
         );
         assert_eq!(
-            environment.get("WAKU_COMPUTER_USE_PROCESS_DIRECTORY"),
-            Some(&Some("/tmp/waku-computer-use/session".into()))
+            environment.get("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY"),
+            Some(&Some("/tmp/goddard-computer-use/session".into()))
         );
     }
 
-    /// `waku_delegate` runs a helper `pi -p` that emits no events of its own,
+    /// `goddard_delegate` runs a helper `pi -p` that emits no events of its own,
     /// so the driver synthesizes the tasks-surface item from the tool call:
     /// running while it executes, settled at the end, role carried across.
     #[test]
-    fn waku_delegate_calls_emit_subagent_background_work() {
+    fn goddard_delegate_calls_emit_subagent_background_work() {
         let (pending, commands, _command_rx, mut state) = harness();
         let (events, event_rx) = unbounded();
         for value in [
             json!({
                 "type": "tool_execution_start",
                 "toolCallId": "tool-9",
-                "toolName": "waku_delegate",
-                "args": {"agent": "waku-explore", "prompt": "Find the auth flow"}
+                "toolName": "goddard_delegate",
+                "args": {"agent": "goddard-explore", "prompt": "Find the auth flow"}
             }),
             json!({
                 "type": "tool_execution_end",
                 "toolCallId": "tool-9",
-                "toolName": "waku_delegate",
+                "toolName": "goddard_delegate",
                 "result": {"content": "auth lives in auth.rs"},
                 "isError": false
             }),
@@ -2009,10 +2009,10 @@ mod tests {
         assert_eq!(works.len(), 2);
         assert_eq!(works[0].key.kind, BackgroundWorkKind::Subagent);
         assert_eq!(works[0].status, BackgroundWorkStatus::Running);
-        assert_eq!(works[0].role.as_deref(), Some("waku-explore"));
+        assert_eq!(works[0].role.as_deref(), Some("goddard-explore"));
         assert_eq!(works[1].status, BackgroundWorkStatus::Completed);
         // Role survives the end event, which carries no args.
-        assert_eq!(works[1].role.as_deref(), Some("waku-explore"));
+        assert_eq!(works[1].role.as_deref(), Some("goddard-explore"));
         assert!(state.subagent_roles.is_empty());
     }
 

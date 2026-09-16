@@ -19,14 +19,14 @@ use crate::driver::DriverEventSender;
 use crate::opencode2_api;
 use crate::opencode2_service::Opencode2Service;
 
-pub(super) const INSTRUCTION_KEY: &str = "waku-computer-use";
+pub(super) const INSTRUCTION_KEY: &str = "goddard-computer-use";
 
 pub(super) fn tool_identity(name: &str) -> Option<(&str, &str)> {
     let (server, tool) = name
         .strip_suffix("_js_reset")
         .map(|server| (server, "js_reset"))
         .or_else(|| name.strip_suffix("_js").map(|server| (server, "js")))?;
-    let id = server.strip_prefix("waku_js_repl_")?;
+    let id = server.strip_prefix("goddard_js_repl_")?;
     (id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit())).then_some((server, tool))
 }
 
@@ -59,7 +59,7 @@ impl McpBridge {
         let bridge = Arc::new(Self {
             service: service.clone(),
             directory: directory.to_owned(),
-            server: format!("waku_js_repl_{}", Uuid::new_v4().simple()),
+            server: format!("goddard_js_repl_{}", Uuid::new_v4().simple()),
             config: json!({
                 "type": "local",
                 "command": [config.repl_path],
@@ -68,7 +68,7 @@ impl McpBridge {
                 // execute/codemode wrapper out of the agent-facing API.
                 "codemode": false,
                 "environment": {
-                    "WAKU_COMPUTER_USE_SESSIONS_DIRECTORY": sessions_directory,
+                    "GODDARD_COMPUTER_USE_SESSIONS_DIRECTORY": sessions_directory,
                 },
                 "timeout": {"startup": 10000, "catalog": 10000, "execution": 300000},
             }),

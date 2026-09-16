@@ -3,7 +3,7 @@
 Delegating work *inside* a session through each harness's own subagent
 mechanism — Claude Code's `Agent` tool, Codex's `spawn_agent`, OpenCode's
 `task`/`subagent` tool — on a model the harness can reach natively. This is
-deliberately **not** `waku-agent create`: that spawns a new top-level Goddard
+deliberately **not** `goddard-agent create`: that spawns a new top-level Goddard
 task with its own transcript, while an inline subagent reports back into the
 same turn and renders through the background-work surface we already have.
 
@@ -55,7 +55,7 @@ A tier is a named bundle in app settings (home: `PersistedState`/`AppSettings`,
 
 ```rust
 struct SubagentTier {
-    id: String,            // "fast" | "medium" | "heavy" — becomes agent name `waku-<id>`
+    id: String,            // "fast" | "medium" | "heavy" — becomes agent name `goddard-<id>`
     model: String,         // harness-native model id (NOT a catalog id — see below)
     effort: Option<String>,
     read_only: bool,       // explorer tiers: deny write tools where the harness allows
@@ -74,7 +74,7 @@ Two non-obvious constraints:
   the catalog (`ProviderModel.reasoning_efforts`, `model.rs:511`) is where the
   settings UI validates them, not where dispatch reads them.
 - **Tier *names* are the attribution key.** Naming every injected agent
-  `waku-<tier>` means `BackgroundWorkItem.role` — already parsed from
+  `goddard-<tier>` means `BackgroundWorkItem.role` — already parsed from
   `subagent_type`/`agentType` (`claude.rs:987`, `codex.rs:1588`) — carries the
   tier with zero new wire plumbing.
 
@@ -91,7 +91,7 @@ per session (`claude.rs:139-167`), so **argv is ours**.
   user's repo or `~/.claude`. Model per agent: alias or full id; the
   `Agent` tool also accepts a per-call `model` override.
 - **Routing hint:** `--append-system-prompt '<text>'` (works in `-p` mode)
-  teaches the parent when to prefer `waku-fast` over the built-in `Explore`.
+  teaches the parent when to prefer `goddard-fast` over the built-in `Explore`.
   Optionally `--append-subagent-system-prompt` for a policy every subagent
   inherits.
 - **Tier prompts:** the `prompt` field of the `--agents` JSON.
@@ -101,8 +101,8 @@ per session (`claude.rs:139-167`), so **argv is ours**.
   (deny/`updatedInput`) and `PostToolUse` (`additionalContext`) hooks for this
   session only — file-less, no user-settings edits. A `PostToolUse` hook on
   the `Agent` tool is where `[cap: N/MAX]` annotations live; `PreToolUse`
-  deny is the hard cap. Handler can be a waku-owned script/binary (the
-  `waku-agent` shim pattern, `agent.rs:280`); per-session counting can live
+  deny is the hard cap. Handler can be a goddard-owned script/binary (the
+  `goddard-agent` shim pattern, `agent.rs:280`); per-session counting can live
   in the daemon since the token already scopes the session.
 - **Observation:** `task_started` events already carry `subagent_type` →
   `role` and `model` (`claude.rs:929-998`); `can_stop`+`control_id` are wired
@@ -135,7 +135,7 @@ launch flags on a process we own.
      Caveat: upstream bugs where the role layer drops `model`/effort
      overrides, and `fork_context`-style spawns reject overrides — pin and
      test the exact Codex build.
-  2. *Agent files*: write `~/.codex/agents/waku-{fast,medium,heavy}.toml`
+  2. *Agent files*: write `~/.codex/agents/goddard-{fast,medium,heavy}.toml`
      (additive, namespaced; do **not** redirect `CODEX_HOME` — auth lives
      there). Needed if we want per-tier `developer_instructions` rather than
      relying on the parent to paste prompts into `message`.
@@ -160,8 +160,8 @@ injection entirely.
   definition, and agent definitions live in the service's config (the user's).
   Goddard can only *name* agents that already exist.
 - **Routing hint:** session instruction entries — the exact channel the
-  `waku-agent` shim already uses (`opencode2.rs:661-688`, API at
-  `opencode2_api.rs:945`). A `waku-subagents` entry can describe a routing
+  `goddard-agent` shim already uses (`opencode2.rs:661-688`, API at
+  `opencode2_api.rs:945`). A `goddard-subagents` entry can describe a routing
   policy and name whatever `subagent`-mode agents `list_agents` reports
   (`opencode2.rs:444`, `opencode2_api.rs:1248`).
 - **Tier models:** only achievable if the user's config defines agents with
@@ -220,9 +220,9 @@ cannot select a subagent model at all** (inherits session model).
 No built-in subagent tool — upstream ships subagents as an *extension* that
 spawns `pi -p` subprocesses, and agent defs (`.pi/agents/*.md`) support
 `model:`/`thinking:`. Goddard already passes `--extension <file>` and
-`--skill <file>` for Computer Use (`pi.rs:183-200`) — so a waku-owned
+`--skill <file>` for Computer Use (`pi.rs:183-200`) — so a goddard-owned
 extension implementing a `task` tool with per-tier model selection is fully
-in-pattern, file lives in waku-owned storage, zero repo pollution. Steer
+in-pattern, file lives in goddard-owned storage, zero repo pollution. Steer
 supported (`pi.rs:757`).
 
 ### Amp (`driver/amp.rs`)
@@ -249,7 +249,7 @@ question; keep as "already observable, dispatch TBD".
 | OpenCode 2 | none reachable on adopted service | none | steer (`opencode2.rs:644`) |
 | ACP / Amp / Pi / DeepSeek | none v1 (Pi could do it inside our extension) | none v1 | steer (all but Fx) |
 
-A steer nudge ("you have exhausted `waku-fast`; continue inline or escalate")
+A steer nudge ("you have exhausted `goddard-fast`; continue inline or escalate")
 is a uniform degrade because every transport except Fx advertises
 `supports_steer`.
 
@@ -264,7 +264,7 @@ is a uniform degrade because every transport except Fx advertises
 2. One new `DriverStartOptions` field — `subagents: Option<SubagentSpec>` —
    not a `SessionOptions` field: injected agents/hints are launch-time
    artifacts, and none of the harnesses can re-inject mid-session anyway.
-3. A shared routing-hint text template + the `waku-<tier>` naming convention.
+3. A shared routing-hint text template + the `goddard-<tier>` naming convention.
 4. Tier attribution = `role` prefix match at render; no new event types.
 
 **Per-driver owns** a `prepare_subagents(spec, …)` step inside `start()`:
@@ -272,10 +272,10 @@ is a uniform degrade because every transport except Fx advertises
 | Driver | Mechanism | Writes where |
 |---|---|---|
 | claude | `--agents` JSON + `--append-system-prompt` (+ `--settings` hooks for caps) | nowhere — flags only |
-| codex | `developerInstructions` on `thread/start`; tier TOMLs only if needed | `~/.codex/agents/waku-*.toml` (opt-in) |
+| codex | `developerInstructions` on `thread/start`; tier TOMLs only if needed | `~/.codex/agents/goddard-*.toml` (opt-in) |
 | opencode2 | `put_instruction_entry` routing hint | session instruction entry |
 | opencode | `OPENCODE_CONFIG_CONTENT` env on pool acquire | server env |
-| pi | `--extension` waku-owned task-tool extension | waku data dir |
+| pi | `--extension` goddard-owned task-tool extension | goddard data dir |
 | acp/amp/deepseek | no-op v1 | — |
 
 **Stays harness-specific:** agent definition format, per-call model params,
@@ -284,15 +284,15 @@ common "subagent config file" — they don't share a shape.
 
 **Explicitly out of scope for the slice:** grader/definition-of-done layer,
 escalation ladders, routing modes (budget/quality/deep), cost ceilings,
-cross-task `waku-agent create` delegation, mid-session tier changes.
+cross-task `goddard-agent create` delegation, mid-session tier changes.
 
 ## Risks / open questions
 
 - **Adopted OpenCode 2 cannot install agents.** If tier dispatch requires
-  waku-defined agents, opencode2 sessions can only route to agents the user
+  goddard-defined agents, opencode2 sessions can only route to agents the user
   already configured. Options: accept hint-only routing (model tiering lost),
   or ask the service to define agents — no such route exists today.
-- **Config writes into user-owned space.** `~/.codex/agents/waku-*.toml` are
+- **Config writes into user-owned space.** `~/.codex/agents/goddard-*.toml` are
   global and persist after the session — visible in the user's own Codex
   runs. Namespacing + a cleanup pass mitigate, but prefer flag/env injection
   wherever it exists. Never write `.claude/agents/` or `.codex/agents/` into
@@ -300,15 +300,15 @@ cross-task `waku-agent create` delegation, mid-session tier changes.
 - **Sessions outliving injection.** Claude `--agents` is per-process and
   re-applied on resume — clean. OpenCode 2 instruction entries persist
   server-side past a daemon crash (the resume path already tolerates stale
-  `waku-agent` instructions, `opencode2.rs:508`); use the same reconcile
-  pattern for a `waku-subagents` key.
+  `goddard-agent` instructions, `opencode2.rs:508`); use the same reconcile
+  pattern for a `goddard-subagents` key.
 - **Attribution without cooperation.** If the model spawns a built-in agent
-  (`Explore`, `general`) instead of `waku-*`, the run still renders — it just
+  (`Explore`, `general`) instead of `goddard-*`, the run still renders — it just
   isn't tier-attributed. That's acceptable; the hint is advisory, not
   enforceable, on every harness except where we gate the tool itself.
 - **Hook latency.** Claude `PreToolUse`/`PostToolUse` spawn a process per
   tool call — off the UI thread, but on the agent's critical path. Keep the
-  handler a fast static binary (the `waku-agent` shim precedent), and make
+  handler a fast static binary (the `goddard-agent` shim precedent), and make
   caps opt-in.
 - **Codex override bugs.** Role-layer dropping `model`/`reasoning_effort` and
   context-fork spawns rejecting overrides are live upstream issues; the

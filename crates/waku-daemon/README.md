@@ -1,19 +1,19 @@
-# waku-daemon
+# goddard-daemon
 
-`waku-daemon` is the standalone process that hosts Goddard's provider sessions.
+`goddard-daemon` is the standalone process that hosts Goddard's provider sessions.
 It defaults to a loopback-only listener, authenticates clients with
-`WAKU_DAEMON_TOKEN`, and
+`GODDARD_DAEMON_TOKEN`, and
 prints one JSON readiness record to stdout containing its address, protocol
 version, and process ID.
 
 ```text
-WAKU_DAEMON_TOKEN=<secret> waku-daemon --bind 127.0.0.1:0 [--parent-pid PID] [--allow-origin ORIGIN]...
+GODDARD_DAEMON_TOKEN=<secret> goddard-daemon --bind 127.0.0.1:0 [--parent-pid PID] [--allow-origin ORIGIN]...
 ```
 
 Goddard Desktop supervises this process. Debug builds use the feature-gated
-`waku-debug-daemon` target at `target/debug/waku-debug-daemon`, so rebuilding
+`goddard-debug-daemon` target at `target/debug/goddard-debug-daemon`, so rebuilding
 provider code replaces only the daemon. Release distributions place the signed
-`waku-daemon` binary beside the desktop executable.
+`goddard-daemon` binary beside the desktop executable.
 
 The token is a full-control capability for a trusted Goddard client, not a user or
 workspace-scoped credential. Browser handshakes are rejected unless their exact

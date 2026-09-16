@@ -2010,7 +2010,7 @@ server.serve_forever()
     fn task_calls_emit_subagent_background_work() {
         let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
         let wire = [
-            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"running","input":{"description":"Find auth flow","subagent_type":"waku-explore"}}}}}),
+            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"running","input":{"description":"Find auth flow","subagent_type":"goddard-explore"}}}}}),
             json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"completed","output":"auth lives in auth.rs"}}}}),
         ];
         for event in wire {
@@ -2028,7 +2028,7 @@ server.serve_forever()
         assert_eq!(works.len(), 2);
         assert_eq!(works[0].key.provider_id, "call_t1");
         assert_eq!(works[0].key.kind, BackgroundWorkKind::Subagent);
-        assert_eq!(works[0].role.as_deref(), Some("waku-explore"));
+        assert_eq!(works[0].role.as_deref(), Some("goddard-explore"));
         assert_eq!(works[0].status, BackgroundWorkStatus::Running);
         assert_eq!(works[1].status, BackgroundWorkStatus::Completed);
         assert_eq!(works[0].origin_activity_id.as_deref(), Some("call_t1"));

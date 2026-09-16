@@ -520,12 +520,12 @@ mod tests {
     /// the caller so this never creates provider traffic; it only forks the
     /// already-completed native transcript and removes the test fork again.
     #[test]
-    #[ignore = "requires an installed opencode and WAKU_OPENCODE_TEST_SESSION_ID"]
+    #[ignore = "requires an installed opencode and GODDARD_OPENCODE_TEST_SESSION_ID"]
     fn forks_away_a_real_single_turn_session() {
         let binary =
             crate::command_env::find_executable("opencode").expect("opencode is not installed");
-        let session_id = std::env::var("WAKU_OPENCODE_TEST_SESSION_ID")
-            .expect("set WAKU_OPENCODE_TEST_SESSION_ID to a completed one-turn session");
+        let session_id = std::env::var("GODDARD_OPENCODE_TEST_SESSION_ID")
+            .expect("set GODDARD_OPENCODE_TEST_SESSION_ID to a completed one-turn session");
         let cwd = std::env::current_dir().expect("the test working directory should exist");
         let server = OpenCodeServer::start(&binary, &cwd).expect("the server should start");
         let ProviderResumeCursor::OpenCode {

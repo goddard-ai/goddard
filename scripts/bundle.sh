@@ -6,11 +6,11 @@ cargo_target_dir="${CARGO_TARGET_DIR:-target}"
 # Shared build cache (see scripts/cache-dir.ts): worktrees share the codesign
 # identity, downloaded SDKs, and compiled helpers instead of resolving them
 # per checkout.
-waku_cache="${WAKU_CACHE_DIR:-$HOME/Library/Caches/waku-build}"
+waku_cache="${GODDARD_CACHE_DIR:-$HOME/Library/Caches/goddard-build}"
 debug_identity_cache="$waku_cache/codesign/debug-identity"
 codesign_identity_from_environment=0
-if [ -n "${WAKU_CODESIGN_IDENTITY:-}" ]; then
-  codesign_identity="$WAKU_CODESIGN_IDENTITY"
+if [ -n "${GODDARD_CODESIGN_IDENTITY:-}" ]; then
+  codesign_identity="$GODDARD_CODESIGN_IDENTITY"
   codesign_identity_from_environment=1
 else
   if [ "$profile" = "debug" ]; then
@@ -44,13 +44,13 @@ case "$profile" in
   debug)
     app_name="Goddard Debug"
     helper_name="Goddard Debug Computer Use"
-    bundle_identifier="sh.waku.dev"
+    bundle_identifier="org.goddardai.app.debug"
     icon_file="AppIconDev.icns"
     ;;
   release)
     app_name="Goddard"
     helper_name="Goddard Computer Use"
-    bundle_identifier="sh.waku"
+    bundle_identifier="org.goddardai.app"
     icon_file="AppIcon.icns"
     ;;
   *)
@@ -63,20 +63,20 @@ if [ "$profile" = "debug" ] && [ "$codesign_identity_from_environment" = "0" ] &
   printf '%s\n' "$codesign_identity" > "$debug_identity_cache"
 fi
 debug_adhoc_requirement="=designated => identifier \"$bundle_identifier\""
-if [ "${WAKU_SKIP_CARGO_BUILD:-0}" != "1" ]; then
+if [ "${GODDARD_SKIP_CARGO_BUILD:-0}" != "1" ]; then
   if [ "$profile" = "release" ]; then
-    cargo build --release --package waku --bin waku --bin waku_js_repl --package waku-daemon --bin waku-daemon --package waku-agent --bin waku-agent
+    cargo build --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
   else
-    cargo build --package waku --bin waku --bin waku_js_repl --package waku-agent --bin waku-agent
+    cargo build --package waku --bin goddard --bin goddard_js_repl --package waku-agent --bin goddard-agent
   fi
 fi
 
 bundle="$cargo_target_dir/$profile/$app_name.app"
 contents="$bundle/Contents"
 helper_bundle="$contents/Helpers/$helper_name.app"
-repl_executable="$contents/Resources/waku_js_repl"
-agent_executable="$contents/Resources/waku-agent"
-daemon_executable="$contents/MacOS/waku-daemon"
+repl_executable="$contents/Resources/goddard_js_repl"
+agent_executable="$contents/Resources/goddard-agent"
+daemon_executable="$contents/MacOS/goddard-daemon"
 swift_module_cache="$cargo_target_dir/$profile/swift-module-cache"
 helper_source="resources/computer-use/WakuComputerUse.swift"
 helper_sdk_source="resources/computer-use/CuaDriver.swift"
@@ -114,7 +114,7 @@ if [ ! -d "$cached_helper_bundle" ]; then
   cp resources/computer-use/Info.plist "$cached_helper_contents/Info.plist"
   cp resources/computer-use/CUA-LICENSE "$cached_helper_contents/Resources/"
   cp "$cua_sdk_library" "$cached_helper_contents/Frameworks/"
-  printf '%s\n' "$helper_fingerprint" > "$cached_helper_contents/Resources/.waku-helper-fingerprint"
+  printf '%s\n' "$helper_fingerprint" > "$cached_helper_contents/Resources/.goddard-helper-fingerprint"
   plutil -replace CFBundleDisplayName -string "$helper_name" "$cached_helper_contents/Info.plist"
   plutil -replace CFBundleExecutable -string "$helper_name" "$cached_helper_contents/Info.plist"
   plutil -replace CFBundleIdentifier -string "$bundle_identifier.computer-use" "$cached_helper_contents/Info.plist"
@@ -167,20 +167,20 @@ if [ ! -d "$sparkle_framework_source" ]; then
 fi
 
 rm -rf "$bundle"
-mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/waku-computer-use" "$contents/Helpers"
-cp "$cargo_target_dir/$profile/waku" "$contents/MacOS/$app_name"
-cp "$cargo_target_dir/$profile/waku_js_repl" "$repl_executable"
+mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/goddard-computer-use" "$contents/Helpers"
+cp "$cargo_target_dir//goddard" "$contents/MacOS/$app_name"
+cp "$cargo_target_dir/$profile/goddard_js_repl" "$repl_executable"
 chmod 755 "$repl_executable"
-cp "$cargo_target_dir/$profile/waku-agent" "$agent_executable"
+cp "$cargo_target_dir/$profile/goddard-agent" "$agent_executable"
 chmod 755 "$agent_executable"
 if [ "$profile" = "release" ]; then
-  cp "$cargo_target_dir/$profile/waku-daemon" "$daemon_executable"
+  cp "$cargo_target_dir/$profile/goddard-daemon" "$daemon_executable"
   chmod 755 "$daemon_executable"
 fi
 cp resources/Info.plist "$contents/Info.plist"
 cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
 cp resources/computer-use/pi-extension.ts "$contents/Resources/computer-use/pi-extension.ts"
-bun scripts/cua-api.ts "$cached_helper_bundle/Contents/MacOS/$helper_name" "$contents/Resources/skills/waku-computer-use/SKILL.md"
+bun scripts/cua-api.ts "$cached_helper_bundle/Contents/MacOS/$helper_name" "$contents/Resources/skills/goddard-computer-use/SKILL.md"
 frameworks_directory="$contents/Frameworks"
 sparkle_framework="$frameworks_directory/Sparkle.framework"
 mkdir -p "$frameworks_directory"

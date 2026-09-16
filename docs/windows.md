@@ -3,23 +3,23 @@
 ## Install
 
 Download `Goddard-<version>-x86_64-Setup.exe` (or the `aarch64` installer on an
-Arm device) from [releases.waku.sh](https://releases.waku.sh) or the
-[GitHub release](https://github.com/egoist/waku/releases) and run it. It
+Arm device) from [releases.goddardai.org](https://releases.goddardai.org) or the
+[GitHub release](https://github.com/goddard-ai/goddard/releases) and run it. It
 installs per-user into `%LOCALAPPDATA%\Programs\Goddard`, so it never asks for
 administrator rights — which is also what lets Goddard update itself later
 without a UAC prompt.
 
-`https://releases.waku.sh/latest-windows.txt` names the current version if you
+`https://releases.goddardai.org/latest-windows.txt` names the current version if you
 want to script the download.
 
 ### Portable
 
 `Goddard-<version>-<target>.zip` is the same build without an installer. Unpack it
-anywhere and run `waku.exe`.
+anywhere and run `goddard.exe`.
 
 **Keep the installation folder intact.** Goddard launches its daemon and
 Computer Use helpers from this directory and loads the bundled SDK DLL and
-`resources/` files. Moving `waku.exe` out on its own leaves those unavailable.
+`resources/` files. Moving `goddard.exe` out on its own leaves those unavailable.
 A shortcut is fine.
 
 A portable copy still updates itself: the updater passes the running
@@ -52,8 +52,8 @@ Updates…** in the app menu still works either way.
 Updates are the same signed feed macOS uses, with one appcast per
 architecture:
 
-- `https://releases.waku.sh/appcast-windows-x86_64.xml`
-- `https://releases.waku.sh/appcast-windows-aarch64.xml`
+- `https://releases.goddardai.org/appcast-windows-x86_64.xml`
+- `https://releases.goddardai.org/appcast-windows-aarch64.xml`
 
 Every installer carries an EdDSA signature, and Goddard refuses one that does not
 verify against the public key built into it — so a compromised mirror or a
@@ -66,7 +66,7 @@ tampered download cannot install anything. The preference itself lives in
 | --- | --- |
 | Tasks, sessions, transcripts | `%LOCALAPPDATA%\Goddard\app.db` |
 | Attachments and blobs | `%LOCALAPPDATA%\Goddard\blobs` |
-| Settings | `%USERPROFILE%\.waku\app.json` |
+| Settings | `%USERPROFILE%\.goddard\app.json` |
 
 Unpacking a new release over the old directory leaves all of it untouched.
 
@@ -141,7 +141,7 @@ shim on `PATH`. If the shell finds it but Goddard does not, set the binary path 
 Windows and make sure `git --version` works in a new terminal.
 
 **The update never arrives.** Goddard reaches the feed with the `curl.exe` in
-System32; a proxy or filter that blocks `releases.waku.sh` blocks updates too.
+System32; a proxy or filter that blocks `releases.goddardai.org` blocks updates too.
 **Check for Updates…** reports the reason, where the once-per-launch check
 stays quiet. Downloading the installer by hand and running it is always
 equivalent.

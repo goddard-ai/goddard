@@ -99,7 +99,7 @@ struct WakuComputerUse {
             "--socket", listener.path, "--bridge-pid", String(getpid()),
         ]
         if prompt { arguments.append("request-permissions") }
-        if let directory = ProcessInfo.processInfo.environment["WAKU_COMPUTER_USE_PROCESS_DIRECTORY"], !directory.isEmpty {
+        if let directory = ProcessInfo.processInfo.environment["GODDARD_COMPUTER_USE_PROCESS_DIRECTORY"], !directory.isEmpty {
             arguments.append(contentsOf: ["--process-directory", directory])
         }
         let launcher = try launchSelfThroughLaunchServices(arguments: arguments, background: !prompt)
@@ -297,7 +297,7 @@ private final class UnixListener {
 
     init() throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("waku-computer-use", isDirectory: true)
+            .appendingPathComponent("goddard-computer-use", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         path = directory.appendingPathComponent(UUID().uuidString).path
         descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)

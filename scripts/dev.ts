@@ -14,17 +14,17 @@ const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
   ? join(targetDir, "debug/Goddard Debug.app")
-  : join(targetDir, `debug/waku${executableSuffix}`);
+  : join(targetDir, `debug/goddard${executableSuffix}`);
 const daemonPath = join(
   targetDir,
-  `debug/waku-debug-daemon${executableSuffix}`,
+  `debug/goddard-debug-daemon${executableSuffix}`,
 );
 const appExecutablePath = isMacOS
   ? join(appPath, "Contents/MacOS", appName)
   : appPath;
 const daemonToken =
-  process.env.WAKU_DAEMON_TOKEN ?? crypto.randomUUID().replaceAll("-", "");
-const externalDaemonAddress = process.env.WAKU_DAEMON_ADDRESS;
+  process.env.GODDARD_DAEMON_TOKEN ?? crypto.randomUUID().replaceAll("-", "");
+const externalDaemonAddress = process.env.GODDARD_DAEMON_ADDRESS;
 const interactive = process.stdin.isTTY === true;
 const stdoutIsTTY = process.stdout.isTTY === true;
 
@@ -99,12 +99,12 @@ let daemonChangeRevision = 0;
 let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
 const watchers: FSWatcher[] = [];
 const hyprlandRuleKeys = [
-  "waku_dev_workspace_rule",
-  "waku_dev_background_rule",
+  "goddard_dev_workspace_rule",
+  "goddard_dev_background_rule",
 ] as const;
-const hyprlandSubscriptionKey = "waku_dev_window_open_subscription";
-const hyprlandLaunchArmedKey = "waku_dev_launch_armed";
-const hyprlandOwnerKey = "waku_dev_owner";
+const hyprlandSubscriptionKey = "goddard_dev_window_open_subscription";
+const hyprlandLaunchArmedKey = "goddard_dev_launch_armed";
+const hyprlandOwnerKey = "goddard_dev_owner";
 let hyprlandRulesInstalled = false;
 let hyprlandWarningShown = false;
 
@@ -219,15 +219,15 @@ async function prepareHyprlandLaunch(): Promise<void> {
 
     if _G[workspace_key] == nil then
       _G[workspace_key] = hl.window_rule({
-        name = "waku-dev-workspace",
-        match = { initial_class = "sh[.]waku[.]dev" },
+        name = "goddard-dev-workspace",
+        match = { initial_class = "org[.]goddardai[.]app[.]debug" },
         workspace = ${luaString(`${hyprlandWorkspace.selector} silent`)},
       })
     end
     if _G[background_key] == nil then
       _G[background_key] = hl.window_rule({
-        name = "waku-dev-background",
-        match = { initial_class = "sh[.]waku[.]dev" },
+        name = "goddard-dev-background",
+        match = { initial_class = "org[.]goddardai[.]app[.]debug" },
         no_initial_focus = true,
         suppress_event = "activate activatefocus",
       })
@@ -239,7 +239,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
     if _G[subscription_key] == nil then
       local anchor_selector = ${luaString(anchorSelector)}
       _G[subscription_key] = hl.on("window.open", function(window)
-        if not _G[armed_key] or window.initial_class ~= "sh.waku.dev" then
+        if not _G[armed_key] or window.initial_class ~= "org.goddardai.app.debug" then
           return
         end
         _G[armed_key] = false
@@ -314,7 +314,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
       const detail =
         result.stderr.toString().trim() || result.stdout.toString().trim();
       console.warn(
-        `[waku-dev] Could not pin Goddard to its Hyprland workspace${detail ? `: ${detail}` : "."}`,
+        `[goddard-dev] Could not pin Goddard to its Hyprland workspace${detail ? `: ${detail}` : "."}`,
       );
       hyprlandWarningShown = true;
     }
@@ -323,7 +323,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
 
   if (!hyprlandRulesInstalled) {
     console.log(
-      `[waku-dev] Keeping Goddard beside the watcher on Hyprland workspace ${hyprlandWorkspace.name}.`,
+      `[goddard-dev] Keeping Goddard beside the watcher on Hyprland workspace ${hyprlandWorkspace.name}.`,
     );
   }
   hyprlandRulesInstalled = true;
@@ -358,18 +358,18 @@ async function build(target: BuildTarget): Promise<boolean> {
     return buildDaemon();
   }
 
-  console.log(`[waku-dev] Building ${isMacOS ? "app bundle" : "app"}...`);
+  console.log(`[goddard-dev] Building ${isMacOS ? "app bundle" : "app"}...`);
   if (!(await buildDaemon())) {
     console.error(
-      "[waku-dev] Daemon build failed; keeping the current app open.",
+      "[goddard-dev] Daemon build failed; keeping the current app open.",
     );
     return false;
   }
   const result = isMacOS
     ? await $`${join(root, "scripts/bundle.sh")} debug`.nothrow()
-    : await $`cargo build --package waku --bin waku --bin waku_js_repl --package waku-computer-use --bin waku_computer_use --package waku-agent --bin waku-agent`.nothrow();
+    : await $`cargo build --package waku --bin goddard --bin goddard_js_repl --package waku-computer-use --bin goddard_computer_use --package waku-agent --bin goddard-agent`.nothrow();
   if (result.exitCode !== 0) {
-    console.error("[waku-dev] Build failed; keeping the current app open.");
+    console.error("[goddard-dev] Build failed; keeping the current app open.");
     return false;
   }
   if (!isMacOS) {
@@ -380,7 +380,7 @@ async function build(target: BuildTarget): Promise<boolean> {
         "debug",
       );
     } catch (error) {
-      console.error("[waku-dev] Computer Use SDK packaging failed:", error);
+      console.error("[goddard-dev] Computer Use SDK packaging failed:", error);
       return false;
     }
   }
@@ -388,12 +388,12 @@ async function build(target: BuildTarget): Promise<boolean> {
 }
 
 async function buildDaemon(): Promise<boolean> {
-  console.log("[waku-dev] Building daemon...");
+  console.log("[goddard-dev] Building daemon...");
   const result =
-    await $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon --package waku-agent --bin waku-agent`.nothrow();
+    await $`cargo build --package waku-daemon --features dev-binary --bin goddard-debug-daemon --package waku-agent --bin goddard-agent`.nothrow();
   if (result.exitCode !== 0) {
     console.error(
-      "[waku-dev] Daemon build failed; keeping the current daemon running.",
+      "[goddard-dev] Daemon build failed; keeping the current daemon running.",
     );
     return false;
   }
@@ -414,8 +414,8 @@ async function spawnDaemon(bind: string): Promise<void> {
       cwd: root,
       env: {
         ...process.env,
-        WAKU_DAEMON_TOKEN: daemonToken,
-        WAKU_APP_EXECUTABLE: appExecutablePath,
+        GODDARD_DAEMON_TOKEN: daemonToken,
+        GODDARD_APP_EXECUTABLE: appExecutablePath,
       },
       stdout: "pipe",
       stderr: "inherit",
@@ -446,12 +446,12 @@ function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
   void child.exited.then(async (code) => {
     if (daemon !== child || stopping) return;
     daemon = undefined;
-    console.error(`[waku-dev] Daemon exited unexpectedly (${code}).`);
+    console.error(`[goddard-dev] Daemon exited unexpectedly (${code}).`);
     if (Date.now() - lastDaemonSpawnAt > 30_000) {
       await restartDaemon("unexpected exit");
     } else {
       daemonRestartPending = true;
-      console.log("[waku-dev] Press d + enter to restart the daemon.");
+      console.log("[goddard-dev] Press d + enter to restart the daemon.");
     }
   });
 }
@@ -509,18 +509,18 @@ function readDaemonReady(
   });
 }
 
-// A pre-set WAKU_DAEMON_ADDRESS keeps working: the watcher adopts that daemon
+// A pre-set GODDARD_DAEMON_ADDRESS keeps working: the watcher adopts that daemon
 // instead of spawning its own, and never restarts it.
 async function ensureDaemon(): Promise<void> {
   if (externalDaemonAddress) {
-    if (process.env.WAKU_DAEMON_TOKEN === undefined) {
+    if (process.env.GODDARD_DAEMON_TOKEN === undefined) {
       console.warn(
-        "[waku-dev] WAKU_DAEMON_TOKEN is unset; the external daemon will likely reject the app.",
+        "[goddard-dev] GODDARD_DAEMON_TOKEN is unset; the external daemon will likely reject the app.",
       );
     }
     daemonAddress = externalDaemonAddress;
     console.log(
-      `[waku-dev] Using external daemon at ${externalDaemonAddress}; the watcher will not restart it.`,
+      `[goddard-dev] Using external daemon at ${externalDaemonAddress}; the watcher will not restart it.`,
     );
     return;
   }
@@ -529,7 +529,7 @@ async function ensureDaemon(): Promise<void> {
     try {
       await spawnDaemon(`127.0.0.1:${daemonPortBase + offset}`);
       console.log(
-        `[waku-dev] Daemon listening on ${daemonAddress}; it stays up across app relaunches.`,
+        `[goddard-dev] Daemon listening on ${daemonAddress}; it stays up across app relaunches.`,
       );
       return;
     } catch (error) {
@@ -604,7 +604,7 @@ async function restartDaemon(reason: string): Promise<void> {
   if (daemonRestarting || stopping) return;
   if (daemonBind === undefined) {
     console.log(
-      "[waku-dev] The daemon is externally managed; restart it yourself.",
+      "[goddard-dev] The daemon is externally managed; restart it yourself.",
     );
     daemonRestartPending = false;
     return;
@@ -612,7 +612,7 @@ async function restartDaemon(reason: string): Promise<void> {
   daemonRestarting = true;
   try {
     console.log(
-      `[waku-dev] Restarting the daemon (${reason}); the app will reconnect on its own.`,
+      `[goddard-dev] Restarting the daemon (${reason}); the app will reconnect on its own.`,
     );
     await stopDaemon();
     if (stopping) return;
@@ -620,9 +620,9 @@ async function restartDaemon(reason: string): Promise<void> {
       await spawnDaemon(daemonBind);
       daemonRestartPending = false;
       daemonRestartWhenIdle = false;
-      console.log(`[waku-dev] Daemon restarted on ${daemonAddress}.`);
+      console.log(`[goddard-dev] Daemon restarted on ${daemonAddress}.`);
     } catch (error) {
-      console.error("[waku-dev] Daemon restart failed:", error);
+      console.error("[goddard-dev] Daemon restart failed:", error);
       daemonRestartPending = true;
     }
   } finally {
@@ -632,14 +632,14 @@ async function restartDaemon(reason: string): Promise<void> {
 
 function armDaemonRestartWhenIdle(): void {
   if (!daemonRestartPending) {
-    console.log("[waku-dev] No pending daemon restart.");
+    console.log("[goddard-dev] No pending daemon restart.");
     return;
   }
   if (daemonRestartWhenIdle) return;
   daemonRestartWhenIdle = true;
   lastDeferredLiveCount = undefined;
   console.log(
-    "[waku-dev] Daemon restart armed; it fires once no live sessions remain.",
+    "[goddard-dev] Daemon restart armed; it fires once no live sessions remain.",
   );
   void pollForDaemonIdle();
 }
@@ -654,7 +654,7 @@ async function pollForDaemonIdle(): Promise<void> {
       }
       if (live !== undefined && live !== lastDeferredLiveCount) {
         console.log(
-          `[waku-dev] ${live} live session${live === 1 ? "" : "s"} still running.`,
+          `[goddard-dev] ${live} live session${live === 1 ? "" : "s"} still running.`,
         );
         lastDeferredLiveCount = live;
       }
@@ -690,7 +690,7 @@ function printBanner(): void {
       ? "survives app relaunches and quits"
       : "external — not restarted by the watcher";
   console.log(
-    `\n  ${bold("waku dev")} ${dim("— watching for changes")}\n\n` +
+    `\n  ${bold("goddard dev")} ${dim("— watching for changes")}\n\n` +
       `  ${green("➜")}  ${dim("app")}     ${appName}${isMacOS ? ".app" : ""}\n` +
       `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress} ${dim(`(${daemonDetail})`)}`,
   );
@@ -703,7 +703,7 @@ async function handleCommand(command: string): Promise<void> {
     case "d":
       if (building) {
         console.log(
-          "[waku-dev] A build is in progress; try again when it finishes.",
+          "[goddard-dev] A build is in progress; try again when it finishes.",
         );
         return;
       }
@@ -715,7 +715,7 @@ async function handleCommand(command: string): Promise<void> {
     case "a":
       if (protocolDirty) {
         console.log(
-          "[waku-dev] The protocol changed; press b + enter to restart the daemon before relaunching.",
+          "[goddard-dev] The protocol changed; press b + enter to restart the daemon before relaunching.",
         );
         return;
       }
@@ -726,7 +726,7 @@ async function handleCommand(command: string): Promise<void> {
       ) {
         relaunchAfterBuild = true;
         console.log(
-          "[waku-dev] Will relaunch the app once the current build finishes.",
+          "[goddard-dev] Will relaunch the app once the current build finishes.",
         );
         return;
       }
@@ -741,7 +741,7 @@ async function handleCommand(command: string): Promise<void> {
         forceDaemonRestart = true;
         relaunchAfterBuild = true;
         console.log(
-          "[waku-dev] Will restart the daemon and relaunch the app once the current build finishes.",
+          "[goddard-dev] Will restart the daemon and relaunch the app once the current build finishes.",
         );
         return;
       }
@@ -756,7 +756,7 @@ async function handleCommand(command: string): Promise<void> {
       return;
     default:
       console.log(
-        "[waku-dev] Unknown command — press h + enter to show shortcuts.",
+        "[goddard-dev] Unknown command — press h + enter to show shortcuts.",
       );
   }
 }
@@ -787,18 +787,18 @@ async function stopApp(): Promise<void> {
 
 function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
   if (daemonAddress === undefined) {
-    console.error("[waku-dev] The daemon is not running; cannot launch the app.");
+    console.error("[goddard-dev] The daemon is not running; cannot launch the app.");
     return undefined;
   }
-  console.log(`[waku-dev] Launching ${appPath}`);
+  console.log(`[goddard-dev] Launching ${appPath}`);
   const command = isMacOS ? ["open", "-n", "-W", appPath] : [appPath];
   const launchedApp = Bun.spawn(command, {
     cwd: root,
     env: {
       ...process.env,
-      WAKU_DAEMON_PATH: daemonPath,
-      WAKU_DAEMON_ADDRESS: daemonAddress,
-      WAKU_DAEMON_TOKEN: daemonToken,
+      GODDARD_DAEMON_PATH: daemonPath,
+      GODDARD_DAEMON_ADDRESS: daemonAddress,
+      GODDARD_DAEMON_TOKEN: daemonToken,
     },
     stdout: "inherit",
     stderr: "inherit",
@@ -809,7 +809,7 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     // The daemon owns session state, so it and the watcher stay up when the
     // app exits; 'a' relaunches, 'q' shuts everything down.
     console.log(
-      `[waku-dev] App exited (${exitCode}); the daemon is still running — press a + enter to relaunch.`,
+      `[goddard-dev] App exited (${exitCode}); the daemon is still running — press a + enter to relaunch.`,
     );
   });
   return launchedApp;
@@ -834,7 +834,7 @@ function closeWatchers(): void {
 }
 
 function reportWatcherError(error: Error): void {
-  console.error("[waku-dev] File watcher failed:", error);
+  console.error("[goddard-dev] File watcher failed:", error);
   process.exitCode = 1;
   void cleanup();
 }
@@ -925,7 +925,7 @@ async function drainBuildQueue(): Promise<void> {
                 ? "; no live sessions"
                 : `; ${live} live session${live === 1 ? "" : "s"} would be interrupted`;
           console.log(
-            `[waku-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter once sessions go idle.`,
+            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter once sessions go idle.`,
           );
           // Non-interactive runs cannot press 'd'; keep the previous
           // rebuild-and-swap behavior so the daemon never goes stale.
@@ -947,7 +947,7 @@ async function drainBuildQueue(): Promise<void> {
       // sessions keep running while the window reloads.
       if (appChangeRevision !== buildAppRevision) {
         console.log(
-          "[waku-dev] More changes arrived during the build; waiting to rebuild.",
+          "[goddard-dev] More changes arrived during the build; waiting to rebuild.",
         );
         continue;
       }
@@ -971,13 +971,13 @@ async function drainBuildQueue(): Promise<void> {
       if (protocolDirty) {
         daemonRestartPending = true;
         console.log(
-          "[waku-dev] App rebuilt, but the protocol changed — press b + enter to restart the daemon and relaunch.",
+          "[goddard-dev] App rebuilt, but the protocol changed — press b + enter to restart the daemon and relaunch.",
         );
       } else {
         console.log(
           daemonRebuilt
-            ? "[waku-dev] App and daemon rebuilt — press b + enter to restart both, a + enter to relaunch the app only."
-            : "[waku-dev] App rebuilt — press a + enter to relaunch.",
+            ? "[goddard-dev] App and daemon rebuilt — press b + enter to restart both, a + enter to relaunch the app only."
+            : "[goddard-dev] App rebuilt — press a + enter to relaunch.",
         );
       }
 
@@ -1001,7 +1001,7 @@ async function drainBuildQueue(): Promise<void> {
 async function cleanup(): Promise<void> {
   if (stopping) return;
   stopping = true;
-  console.log("[waku-dev] Stopping watcher, app, and daemon...");
+  console.log("[goddard-dev] Stopping watcher, app, and daemon...");
   closeWatchers();
   clearRebuildTimer();
   closeCommandLoop();
@@ -1027,7 +1027,7 @@ if (!initialBuildSucceeded) {
 try {
   await ensureDaemon();
 } catch (error) {
-  console.error("[waku-dev]", error);
+  console.error("[goddard-dev]", error);
   closeWatchers();
   process.exit(1);
 }
@@ -1036,7 +1036,7 @@ if (appChangeRevision === initialAppRevision) {
   await relaunchApp();
 } else {
   console.log(
-    "[waku-dev] Changes arrived during the initial build; waiting to rebuild.",
+    "[goddard-dev] Changes arrived during the initial build; waiting to rebuild.",
   );
   if (queuedBuild !== undefined) void drainBuildQueue();
 }
