@@ -2423,14 +2423,6 @@ impl Waku {
             .focus_visible(|style| style.bg(theme.overlay))
             .child(
                 div()
-                    .flex_none()
-                    .font_family(crate::fonts::current(cx).code)
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_tertiary)
-                    .child(entry.short_sha.clone()),
-            )
-            .child(
-                div()
                     .min_w_0()
                     .flex_1()
                     .truncate()
@@ -2448,6 +2440,15 @@ impl Waku {
                         .child(icon("icons/arrow-up.svg", 10.0, theme.accent)),
                 )
             })
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(format_time_ago(
+                        unix_time().saturating_sub(entry.authored_at),
+                    )),
+            )
             .on_hover(cx.listener(move |this, hovered, _, cx| {
                 this.git_panel_commit_row_hovered(sha.clone(), *hovered, cx);
             }))
