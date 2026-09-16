@@ -33,6 +33,8 @@ const WALK_MAX_DEPTH: usize = 8;
 pub enum TriggerKind {
     Command,
     File,
+    /// `#` — a GitHub issue or pull request on the workspace's origin remote.
+    WorkItem,
 }
 
 /// An autocompletion site under the caret: the token being typed, and the byte
@@ -74,9 +76,13 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
             index + text[index..].chars().next().unwrap().len_utf8()
         });
     let token = &text[token_start..cursor];
-    let query = token.strip_prefix('@')?;
+    let (kind, query) = if let Some(query) = token.strip_prefix('@') {
+        (TriggerKind::File, query)
+    } else {
+        (TriggerKind::WorkItem, token.strip_prefix('#')?)
+    };
     Some(Trigger {
-        kind: TriggerKind::File,
+        kind,
         query: query.to_owned(),
         range: token_start..cursor,
     })
@@ -1017,6 +1023,22 @@ mod tests {
         assert!(detect_trigger("see @src done", 13).is_none());
         // Cursor before the sigil is not inside the token.
         assert!(detect_trigger("@src", 0).is_none());
+    }
+
+    #[test]
+    fn hash_triggers_on_token_start_only() {
+        let trigger = detect_trigger("fix #12", 7).expect("token-start # triggers");
+        assert_eq!(trigger.kind, TriggerKind::WorkItem);
+        assert_eq!(trigger.query, "12");
+        assert_eq!(trigger.range, 4..7);
+
+        let trigger = detect_trigger("#", 1).expect("bare # triggers");
+        assert_eq!(trigger.kind, TriggerKind::WorkItem);
+        assert_eq!(trigger.query, "");
+        // A `#` inside a token is prose, not a mention site.
+        assert!(detect_trigger("c#note", 6).is_none());
+        // Once the token moves past the sigil the trigger is gone.
+        assert!(detect_trigger("# title", 7).is_none());
     }
 
     #[test]

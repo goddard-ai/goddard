@@ -1359,6 +1359,14 @@ impl Waku {
                         animate_streaming,
                         cx,
                     );
+                    let work_item_refs = (message.role == MessageRole::User)
+                        .then(|| {
+                            self.work_item_refs_for_content(
+                                self.workspace_path_for_session(session),
+                                message.visible_content(),
+                            )
+                        })
+                        .unwrap_or_default();
                     let mut markdown = self.big_picture.card_markdown.borrow_mut();
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
@@ -1389,6 +1397,7 @@ impl Waku {
                             attachment_images,
                             attachments_can_reveal: !self.is_remote_session(session_id),
                             markdown: view,
+                            work_item_refs,
                             ctx: &ctx,
                             menu,
                             waku: cx.entity().downgrade(),

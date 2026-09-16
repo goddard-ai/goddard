@@ -1480,6 +1480,15 @@ impl Waku {
                     // Human and assistant messages share the Markdown path.
                     // Parse only visible rows rather than doing work for every
                     // driver delta or every off-screen prompt.
+                    let work_item_refs = (message.role == MessageRole::User)
+                        .then(|| {
+                            self.work_item_refs_for_content(
+                                self.selected_session()
+                                    .and_then(|session| self.workspace_path_for_session(session)),
+                                message.visible_content(),
+                            )
+                        })
+                        .unwrap_or_default();
                     let mut markdown = self.message_markdown.borrow_mut();
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
@@ -1505,6 +1514,7 @@ impl Waku {
                             attachment_images,
                             attachments_can_reveal,
                             markdown: view,
+                            work_item_refs,
                             ctx: &ctx,
                             menu,
                             waku,

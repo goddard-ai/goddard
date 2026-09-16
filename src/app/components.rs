@@ -366,6 +366,9 @@ pub(super) struct MessageRender<'a> {
     pub(super) attachments_can_reveal: bool,
     /// The parsed human or assistant body. System messages remain verbatim.
     pub(super) markdown: Option<&'a MarkdownView>,
+    /// `#N` mentions in a user message resolved against the workspace's
+    /// work-item store — the chips under the bubble. Empty when none.
+    pub(super) work_item_refs: Vec<ComposerWorkItem>,
     pub(super) ctx: &'a MarkdownCtx<'a>,
     pub(super) menu: ContextMenuHandle,
     pub(super) waku: gpui::WeakEntity<Waku>,
@@ -571,6 +574,80 @@ fn render_sent_message_attachments(
     Some(row.into_any_element())
 }
 
+/// The GitHub references under a sent user message: one chip per `#N` the
+/// composer resolved — mark, number, and title — each opening the item's URL.
+fn render_work_item_ref_chips(
+    message_id: Uuid,
+    refs: &[ComposerWorkItem],
+    theme: &Theme,
+) -> AnyElement {
+    let mut row = div()
+        .max_w(px(540.0))
+        .flex()
+        .flex_wrap()
+        .justify_end()
+        .gap(px(6.0));
+    for item in refs {
+        let url = item.url.clone();
+        let key_url = item.url.clone();
+        let kind_icon = match item.kind {
+            waku_client::WorkItemKind::Issue => "icons/info.svg",
+            waku_client::WorkItemKind::PullRequest => "icons/git-pull-request-arrow.svg",
+        };
+        let chip = div()
+            .id(SharedString::from(format!(
+                "message-{message_id}-ref-{}",
+                item.number
+            )))
+            .h(px(22.0))
+            .max_w(px(280.0))
+            .pl(px(5.0))
+            .pr(px(8.0))
+            .rounded(px(7.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .tooltip(Tooltip::text(format!("#{} — {}", item.number, item.title)))
+            .child(icon("icons/github.svg", 11.0, theme.text_tertiary))
+            .child(icon(kind_icon, 10.0, theme.text_ghost))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(format!("#{}", item.number)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(item.title.clone()),
+            )
+            .on_click(move |_, _, cx| {
+                cx.open_url(&url);
+                cx.stop_propagation();
+            })
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.open_url(&key_url);
+                    cx.stop_propagation();
+                }
+            });
+        row = row.child(chip);
+    }
+    row.into_any_element()
+}
+
 fn render_markdown_message_body<'a>(
     content: &str,
     markdown: Option<&'a MarkdownView>,
@@ -609,6 +686,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         attachment_images,
         attachments_can_reveal,
         markdown,
+        work_item_refs,
         ctx,
         menu,
         waku,
@@ -930,6 +1008,13 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     None,
                     user_message_action,
                     waku.clone(),
+                ));
+            }
+            if !work_item_refs.is_empty() {
+                column = column.child(render_work_item_ref_chips(
+                    message_id,
+                    &work_item_refs,
+                    theme,
                 ));
             }
             column

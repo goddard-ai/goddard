@@ -21,7 +21,7 @@ use gpui::{
 use uuid::Uuid;
 
 use crate::checkpoint;
-use crate::composer_complete::{FileEntry, SlashCommand};
+use crate::composer_complete::{ComposerWorkItem, FileEntry, SlashCommand};
 use crate::computer_use::{
     ComputerPermissions, ComputerTarget, ComputerUsePhase, ComputerUseState,
     PendingComputerApproval,
@@ -1873,6 +1873,9 @@ pub struct Waku {
     mention_file_index: Rc<Vec<FileEntry>>,
     mention_file_index_path: Option<PathBuf>,
     mention_file_index_loading: bool,
+    /// `#` work-item mention state per workspace root: resolved repo, latest
+    /// landed search, and the number→item map for expansion and chips.
+    work_item_mentions: HashMap<PathBuf, autocomplete::WorkItemMentions>,
     /// Set when a driver reports its command registry mid-drain; the drain
     /// has no `Context` to rebuild the drawn index itself.
     composer_sources_stale: bool,
@@ -4431,6 +4434,7 @@ impl Waku {
                 mention_file_index: Rc::new(Vec::new()),
                 mention_file_index_path: None,
                 mention_file_index_loading: false,
+                work_item_mentions: HashMap::new(),
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,

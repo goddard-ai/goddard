@@ -4317,7 +4317,13 @@ impl Waku {
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
         }
-        let provider_prompt = self.resolve_skill_submission(session.provider, &submission.prompt);
+        let workspace_path = self
+            .workspace_path_for_session(&session)
+            .map(Path::to_path_buf);
+        let provider_prompt = self.expand_work_item_references(
+            workspace_path.as_deref(),
+            &self.resolve_skill_submission(session.provider, &submission.prompt),
+        );
         if let Some(runtime) = self.runtimes.get_mut(&session.id) {
             runtime.driver.steer(provider_prompt);
             runtime.pending_steers.push_back(submission);
@@ -4350,6 +4356,21 @@ impl Waku {
             &self.slash_command_index,
         )
         .unwrap_or_else(|| prompt.to_owned())
+    }
+
+    /// Rewrite the prompt's `#N` mentions as self-contained GitHub references
+    /// for the provider. The composer and transcript keep the plain token;
+    /// items the workspace's mention store never saw stay verbatim.
+    fn expand_work_item_references(&self, workspace: Option<&Path>, prompt: &str) -> String {
+        if !self.state.github_enabled || !prompt.contains('#') {
+            return prompt.to_owned();
+        }
+        let Some(state) = workspace.and_then(|path| self.work_item_mentions.get(path)) else {
+            return prompt.to_owned();
+        };
+        crate::composer_complete::expand_work_item_references(prompt, |number| {
+            state.known.get(&number).cloned()
+        })
     }
 
     pub(super) fn enqueue_follow_up_submission(
@@ -4887,19 +4908,27 @@ impl Waku {
         if selected && let Some(warning) = checkpoint_warning {
             self.show_toast(warning);
         }
-        let provider = self
+        let session = self
             .state
             .sessions
             .iter()
-            .find(|session| session.id == session_id)
+            .find(|session| session.id == session_id);
+        let provider = session
             .map(|session| session.provider)
             .unwrap_or(self.state.last_provider);
+        let workspace_path = session
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(Path::to_path_buf);
         // Provider syntax resolves here, at the seam between the transcript
         // and the transport. The user message keeps the typed slash form,
         // while templates expand and skills adopt provider-native syntax.
         // Claude's commands pass through untouched; its CLI owns expansion.
+        // `#` mentions resolve here too, into titled GitHub links.
         let prompt = submission.prompt;
-        let driver_prompt = self.resolve_provider_submission(provider, &prompt);
+        let driver_prompt = self.expand_work_item_references(
+            workspace_path.as_deref(),
+            &self.resolve_provider_submission(provider, &prompt),
+        );
         // The turn and its user message landed at accept time. Their ids go
         // with the prompt so every other client attached to the runtime
         // mirrors the same rows instead of minting its own.
