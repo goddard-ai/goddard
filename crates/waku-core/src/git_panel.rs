@@ -364,18 +364,46 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
     if !ref_exists(cwd, "HEAD")? {
         return Ok(Vec::new());
     }
+    log_commits(cwd, &[], skip, limit)
+}
+
+/// `git log <upstream> --not HEAD`: the commits the tracking branch has that
+/// the checkout lacks — what a pull would bring in. Empty when the branch
+/// has no upstream.
+pub fn upstream_commits(
+    cwd: &Path,
+    skip: usize,
+    limit: usize,
+) -> anyhow::Result<Vec<CommitEntry>> {
+    ensure_repository(cwd)?;
+    let Some(upstream) = upstream(cwd)? else {
+        return Ok(Vec::new());
+    };
+    let revs = if ref_exists(cwd, "HEAD")? {
+        vec![upstream, "--not".to_owned(), "HEAD".to_owned()]
+    } else {
+        vec![upstream]
+    };
+    log_commits(cwd, &revs, skip, limit)
+}
+
+fn log_commits(
+    cwd: &Path,
+    revs: &[String],
+    skip: usize,
+    limit: usize,
+) -> anyhow::Result<Vec<CommitEntry>> {
     // \x1f separates fields, \x1e records; both are illegal in commit
     // subjects and all but impossible in bodies.
-    let output = git_stdout(
-        cwd,
-        &[
-            "log",
-            &format!("--skip={skip}"),
-            &format!("-n{limit}"),
-            "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e",
-        ],
-    )?;
-    let stats = commit_numstats(cwd, skip, limit)?;
+    let mut args = vec![
+        "log".to_owned(),
+        format!("--skip={skip}"),
+        format!("-n{limit}"),
+        "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e".to_owned(),
+    ];
+    args.extend(revs.iter().cloned());
+    let output = git_stdout(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    let stats = commit_numstats(cwd, revs, skip, limit)?;
     Ok(output
         .split('\x1e')
         .filter_map(|record| {
@@ -415,19 +443,19 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
 /// (merges, binary-only changes), which `--numstat` simply omits lines for.
 fn commit_numstats(
     cwd: &Path,
+    revs: &[String],
     skip: usize,
     limit: usize,
 ) -> anyhow::Result<HashMap<String, (u64, u64)>> {
-    let output = git_stdout(
-        cwd,
-        &[
-            "log",
-            &format!("--skip={skip}"),
-            &format!("-n{limit}"),
-            "--format=%x1e%H",
-            "--numstat",
-        ],
-    )?;
+    let mut args = vec![
+        "log".to_owned(),
+        format!("--skip={skip}"),
+        format!("-n{limit}"),
+        "--format=%x1e%H".to_owned(),
+        "--numstat".to_owned(),
+    ];
+    args.extend(revs.iter().cloned());
+    let output = git_stdout(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     let mut stats = HashMap::new();
     for record in output.split('\x1e') {
         let mut lines = record.lines();

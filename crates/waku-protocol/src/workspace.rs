@@ -621,6 +621,14 @@ pub enum WorkspaceOperation {
         skip: usize,
         limit: usize,
     },
+    /// `git log` for `@{upstream} --not HEAD`, paged like `ListCommits`:
+    /// the commits the tracking branch has that the checkout lacks.
+    ListUpstreamCommits {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        skip: usize,
+        limit: usize,
+    },
     /// One file's working-tree diff for the Git panel's hover preview.
     /// `staged` selects `--cached`; an unstaged path with no index entry is
     /// diffed as a new file.

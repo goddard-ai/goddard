@@ -14,7 +14,7 @@ use gpui::{
 
 use waku_client::git::{
     CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
-    PullStrategy, SyncInProgress,
+    PullStrategy, SyncInProgress, UpstreamStatus,
 };
 use waku_client::workspace::{WorkspaceOperation, WorkspaceResult};
 
@@ -148,6 +148,13 @@ pub(super) struct GitPanelState {
     pub commits_loading: bool,
     /// `git log` returned a short page — the history is exhausted.
     pub commits_exhausted: bool,
+    /// The collapsed upstream section above the log: commits the tracking
+    /// branch has that this checkout lacks. Fetched on first expand and
+    /// refetched alongside the log; a single page is plenty for a section
+    /// whose whole point is how far the checkout trails.
+    pub upstream_expanded: bool,
+    pub upstream_commits: Vec<CommitEntry>,
+    pub upstream_commits_loading: bool,
     pub changes_scroll: ScrollHandle,
     pub changes_scrollbar: Rc<ScrollbarState>,
     pub commits_scroll: ScrollHandle,
@@ -325,6 +332,9 @@ impl Waku {
             commits: Vec::new(),
             commits_loading: false,
             commits_exhausted: false,
+            upstream_expanded: false,
+            upstream_commits: Vec::new(),
+            upstream_commits_loading: false,
             changes_scroll: ScrollHandle::new(),
             changes_scrollbar: ScrollbarState::new(),
             commits_scroll: ScrollHandle::new(),
@@ -469,7 +479,75 @@ impl Waku {
             return;
         };
         let limit = panel.commits.len().max(GIT_PANEL_COMMIT_PAGE);
+        let upstream_expanded = panel.upstream_expanded;
         self.fetch_git_panel_commits(0, limit, false, cx);
+        if upstream_expanded {
+            self.fetch_git_panel_upstream_commits(cx);
+        }
+    }
+
+    /// The upstream section header toggles its list; the first expand fetches
+    /// the page, later expands reuse it until the next refresh.
+    fn toggle_git_panel_upstream(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_mut() else {
+            return;
+        };
+        panel.upstream_expanded = !panel.upstream_expanded;
+        let fetch = panel.upstream_expanded
+            && panel.upstream_commits.is_empty()
+            && !panel.upstream_commits_loading;
+        cx.notify();
+        if fetch {
+            self.fetch_git_panel_upstream_commits(cx);
+        }
+    }
+
+    fn fetch_git_panel_upstream_commits(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_mut() else {
+            return;
+        };
+        if panel.upstream_commits_loading {
+            return;
+        }
+        panel.upstream_commits_loading = true;
+        let panel_id = panel.id;
+        let workspace = panel.workspace.clone();
+        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::ListUpstreamCommits {
+                        cwd: workspace,
+                        skip: 0,
+                        limit: GIT_PANEL_COMMIT_PAGE,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                let Some(panel) = waku.git_panel.as_mut() else {
+                    return;
+                };
+                if panel.id != panel_id {
+                    return;
+                }
+                panel.upstream_commits_loading = false;
+                match result {
+                    Ok(WorkspaceResult::Commits { entries }) => {
+                        panel.upstream_commits = entries;
+                    }
+                    Ok(_) => {
+                        panel.error = Some(tr!("git_panel.unexpected_result"));
+                    }
+                    Err(error) => {
+                        panel.error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     /// The commits list scrolled to its end: pull the next page.
@@ -2309,6 +2387,111 @@ impl Waku {
         row.into_any_element()
     }
 
+    /// The collapsible upstream section heading the log: the tracking ref's
+    /// name with its ahead/behind counts, and on expand the commits a pull
+    /// would bring in.
+    fn render_git_panel_upstream_section(
+        &self,
+        upstream: &UpstreamStatus,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(panel) = self.git_panel.as_ref() else {
+            return div().into_any_element();
+        };
+        let expanded = panel.upstream_expanded;
+        let header = div()
+            .id("git-panel-upstream-header")
+            .h(px(24.0))
+            .flex_none()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_default()
+            .hover(|style| style.bg(theme.overlay))
+            .child(icon(
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                10.0,
+                theme.text_ghost,
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(upstream.name.clone()),
+            )
+            .child(div().flex_1())
+            .children(
+                [
+                    (upstream.behind, "icons/arrow-down.svg"),
+                    (upstream.ahead, "icons/arrow-up.svg"),
+                ]
+                .into_iter()
+                .filter(|(count, _)| *count > 0)
+                .map(|(count, icon_path)| {
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(icon(icon_path, 10.0, theme.text_tertiary))
+                        .child(count.to_string())
+                        .into_any_element()
+                }),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_git_panel_upstream(cx);
+            }));
+        let mut section = div().flex().flex_col().child(header);
+        if expanded {
+            for (index, entry) in panel.upstream_commits.iter().enumerate() {
+                section = section.child(self.render_git_panel_commit_row(
+                    entry,
+                    index,
+                    false,
+                    width,
+                    "git-panel-upstream-commit",
+                    cx,
+                ));
+            }
+            if panel.upstream_commits_loading {
+                section = section.child(
+                    div()
+                        .h(px(30.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(motion::spin(icon(
+                            "icons/loader-circle.svg",
+                            12.0,
+                            theme.text_tertiary,
+                        ))),
+                );
+            } else if panel.upstream_commits.is_empty() {
+                section = section.child(
+                    div()
+                        .px(px(10.0))
+                        .py(px(6.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("git_panel.up_to_date")),
+                );
+            }
+        }
+        section.into_any_element()
+    }
+
     /// The paged commit list. Rows mark commits the upstream lacks and dwell
     /// for their full message; a click opens the commit-diff modal.
     fn render_git_panel_commits(&self, width: f32, cx: &mut Context<Self>) -> AnyElement {
@@ -2323,11 +2506,25 @@ impl Waku {
             .map(|upstream| upstream.ahead)
             .unwrap_or(0);
         let mut rows = div().w_full().flex().flex_col().py(px(4.0));
+        if let Some(upstream) = panel
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.upstream.as_ref())
+        {
+            rows = rows.child(self.render_git_panel_upstream_section(upstream, width, cx));
+        }
         for (index, entry) in panel.commits.iter().enumerate() {
             // `git log` starts at HEAD and the first `ahead` entries are the
             // ones the upstream has not seen.
             let unpushed = index < ahead as usize;
-            rows = rows.child(self.render_git_panel_commit_row(entry, index, unpushed, width, cx));
+            rows = rows.child(self.render_git_panel_commit_row(
+                entry,
+                index,
+                unpushed,
+                width,
+                "git-panel-commit",
+                cx,
+            ));
         }
         if panel.commits_loading {
             rows = rows.child(
@@ -2393,6 +2590,7 @@ impl Waku {
         index: usize,
         unpushed: bool,
         width: f32,
+        id_prefix: &str,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
@@ -2407,7 +2605,7 @@ impl Waku {
         let entry_for_click = entry.clone();
         let entry_for_key = entry.clone();
         div()
-            .id(SharedString::from(format!("git-panel-commit-{index}")))
+            .id(SharedString::from(format!("{id_prefix}-{index}")))
             .relative()
             .track_focus(&focus)
             .tab_index(0)
@@ -2432,9 +2630,7 @@ impl Waku {
             .when(unpushed, |row| {
                 row.child(
                     div()
-                        .id(SharedString::from(format!(
-                            "git-panel-commit-unpushed-{index}"
-                        )))
+                        .id(SharedString::from(format!("{id_prefix}-unpushed-{index}")))
                         .flex_none()
                         .tooltip(Tooltip::text(tr!("git_panel.unpushed")))
                         .child(icon("icons/arrow-up.svg", 10.0, theme.accent)),
@@ -2480,7 +2676,13 @@ impl Waku {
         let entry = self
             .git_panel
             .as_ref()
-            .and_then(|panel| panel.commits.iter().find(|entry| entry.sha == hover.sha))
+            .and_then(|panel| {
+                panel
+                    .commits
+                    .iter()
+                    .chain(panel.upstream_commits.iter())
+                    .find(|entry| entry.sha == hover.sha)
+            })
             .cloned()?;
         let body = commit_body_text(&entry.body);
         let ago = format_time_ago(unix_time().saturating_sub(entry.authored_at));
