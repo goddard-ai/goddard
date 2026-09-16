@@ -2636,9 +2636,8 @@ impl Waku {
                     .label(selected_label)
                     .outlined()
                     .selected(menu_handle.is_open())
-                    .w(px(180.0))
-                    .flex_none()
-                    .justify_between(),
+                    .max_w(px(220.0))
+                    .flex_none(),
                 "archived-project-selector-menu",
                 &menu_handle,
                 MenuAlign::BelowRight,
@@ -2685,6 +2684,7 @@ impl Waku {
             let entity = cx.entity().downgrade();
             page = page.child(
                 div()
+                    .mt(px(10.0))
                     .flex_1()
                     .min_h_0()
                     .relative()
