@@ -1519,6 +1519,93 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn an_unstarted_draft_is_never_catalogued() {
+        let root = std::env::temp_dir().join(format!("waku-draft-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let project = Project::from_path(root.join("repo"));
+        // A detail-loaded draft: real to the client, but it owns no row.
+        let draft = AgentSession::new(project.id, ProviderKind::Codex);
+        let ResponsePayload::TaskStateSaved { sessions } = client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![project.clone()],
+                    live_session_ids: vec![draft.id],
+                    sessions: vec![draft.clone()],
+                },
+            )
+            .unwrap()
+        else {
+            panic!("expected task-state save response");
+        };
+        assert!(sessions.is_empty());
+        let ResponsePayload::TaskState { sessions, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected task state");
+        };
+        assert!(sessions.is_empty());
+
+        // Once the draft starts it is catalogued like any other session.
+        let mut started = draft;
+        started.begin_turn("run it");
+        let ResponsePayload::TaskStateSaved { sessions } = client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![project],
+                    live_session_ids: vec![started.id],
+                    sessions: vec![started.clone()],
+                },
+            )
+            .unwrap()
+        else {
+            panic!("expected task-state save response");
+        };
+        assert_eq!(sessions.len(), 1);
+        let ResponsePayload::TaskState { sessions, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected task state");
+        };
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, started.id);
+
+        client.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
     fn serve_task_state(
         root: &std::path::Path,
         state: crate::persistence::PersistedState,

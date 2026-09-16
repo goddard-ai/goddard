@@ -1415,12 +1415,19 @@ impl StateStore {
             ));
         }
         let dirty_ids = state.dirty_sessions.clone();
-        let sessions = state
+        // Drafts stay local until their first prompt: a session that has not
+        // started owns no daemon row, and shipping one would catalogue it as
+        // a phantom "New task" skeleton in every client's next load.
+        let sessions: Vec<AgentSession> = state
             .sessions
             .iter()
-            .filter(|session| dirty_ids.contains(&session.id))
+            .filter(|session| dirty_ids.contains(&session.id) && session.has_started())
             .cloned()
             .collect();
+        let sent_ids = sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<HashSet<_>>();
         let live_session_ids = state.sessions.iter().map(|session| session.id).collect();
         self.daemon
             .client()
@@ -1434,7 +1441,16 @@ impl StateStore {
                 },
             )
             .map_err(to_io_error)?;
-        state.dirty_sessions.clear();
+        // Skipped drafts remain dirty so the save after their first prompt
+        // still publishes them even if that path forgets to re-mark them.
+        let remaining_ids = state
+            .sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<HashSet<_>>();
+        state
+            .dirty_sessions
+            .retain(|id| remaining_ids.contains(id) && !sent_ids.contains(id));
         Ok(())
     }
 

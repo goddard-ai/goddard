@@ -486,6 +486,7 @@ impl Backend for WakuBackend {
                     sessions: state
                         .sessions
                         .iter()
+                        .filter(|session| session.has_started())
                         .map(AgentSession::list_projection)
                         .collect(),
                     default_cwd: self.default_cwd.clone(),
@@ -553,12 +554,14 @@ impl Backend for WakuBackend {
                             *existing = session;
                             true
                         }
-                    } else if session.detail_loaded {
+                    } else if session.detail_loaded && session.has_started() {
                         state.sessions.push(session);
                         true
                     } else {
                         // A skeleton can update a known row but never create
-                        // one — none of its detail is real.
+                        // one — none of its detail is real. An unstarted draft
+                        // owns no row either: cataloguing it would project it
+                        // back to every client as a phantom "New task" skeleton.
                         false
                     };
                     if applied {
