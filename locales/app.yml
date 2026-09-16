@@ -3014,6 +3014,8 @@ shortcuts.next_turn:
   en: Next Turn
 shortcuts.latest_unseen:
   en: Jump to Latest Unseen Completion
+shortcuts.mark_unread:
+  en: Mark Current Task Unread
 shortcuts.mark_unread_next:
   en: Mark Unread & Jump to Next
 shortcuts.task_switcher:

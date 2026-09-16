@@ -89,6 +89,7 @@ actions!(
         NavigateBack,
         NavigateForward,
         GoToLatestUnseenCompletion,
+        MarkSessionUnread,
         MarkUnreadAndGoToNextUnseen,
         GoToPreviousTurn,
         GoToNextTurn,
@@ -559,6 +560,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
             MarkUnreadAndGoToNextUnseen,
             Some("Waku"),
         ),
+        // ⌘⌥U is the sidebar's "Mark as Unread" on the viewed task,
+        // without ⌘⇧D's jump to the next one waiting.
+        KeyBinding::new("secondary-alt-u", MarkSessionUnread, Some("Waku")),
         KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
         KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
         KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),

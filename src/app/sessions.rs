@@ -1473,6 +1473,19 @@ impl Waku {
         }
     }
 
+    /// ⌘⌥U: the sidebar's "Mark as Unread" on the viewed task — the same
+    /// rejoin-the-unseen-set stamp as ⌘⇧D, without leaving the session.
+    pub(super) fn mark_session_unread_action(
+        &mut self,
+        _: &MarkSessionUnread,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(session_id) = self.composer_session_id() {
+            self.mark_session_unread(session_id, cx);
+        }
+    }
+
     pub(super) fn navigation_mouse_down(
         &mut self,
         event: &MouseDownEvent,

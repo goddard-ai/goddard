@@ -187,6 +187,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("Waku"),
                 ),
                 bound(
+                    tr!("shortcuts.mark_unread"),
+                    MarkSessionUnread,
+                    Some("Waku"),
+                ),
+                bound(
                     tr!("shortcuts.mark_unread_next"),
                     MarkUnreadAndGoToNextUnseen,
                     Some("Waku"),
