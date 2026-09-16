@@ -818,7 +818,19 @@ impl Waku {
         }
         if !leaving {
             card = card
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        // Double-click commits: leave the overlay on the card's
+                        // session. The first click's target toggle is harmless —
+                        // the target resets on close anyway.
+                        if event.click_count == 2 && this.big_picture.open {
+                            this.close_big_picture(window, cx);
+                            this.select_session(session_id, cx);
+                        }
+                    }),
+                )
                 .on_mouse_move(cx.listener(move |this, _, _, cx| {
                     if this.big_picture.highlighted != Some(session_id) {
                         this.big_picture.highlighted = Some(session_id);
