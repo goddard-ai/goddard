@@ -3390,7 +3390,7 @@ impl Waku {
                 .w_full()
                 .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
                 .mx_auto()
-                .rounded(px(16.0))
+                .rounded(px(18.0))
                 .border(hairline())
                 .border_color(theme.border)
                 .bg(theme.composer)
