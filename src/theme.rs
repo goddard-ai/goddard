@@ -327,7 +327,7 @@ impl Theme {
             text_tertiary: 0x858585,
             text_ghost: 0xA4A4A4,
 
-            accent: 0xC85F44,
+            accent: 0x369BDC,
             selection: hsla(211.0 / 360.0, 1.0, 0.50, 0.35),
             code_text: 0x9A5528,
 
