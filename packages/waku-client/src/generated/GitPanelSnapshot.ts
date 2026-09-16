@@ -26,6 +26,11 @@ upstream: UpstreamStatus | null,
  */
 can_push: boolean,
 /**
+ * The commit where HEAD diverges from the resolved base branch, for the
+ * log's two-lane graph; `None` when no base resolves.
+ */
+merge_base: string | null,
+/**
  * Where `Land` would send this checkout's commits — `None` when no base
  * branch resolves or HEAD has no commits the base lacks.
  */

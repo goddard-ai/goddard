@@ -106,12 +106,26 @@ pub fn inspect(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<GitPanel
             });
         }
     }
-    let land_target = land_target(cwd, base)?;
+    let base_branch = land_base(cwd, base)?;
+    // Where the log's base lane starts: the commit HEAD shares with the
+    // branch Land targets. `None` when no base resolves — the panel then
+    // draws every commit on the worktree lane.
+    let merge_base = base_branch.as_deref().and_then(|branch| {
+        git_optional_stdout(cwd, &["merge-base", "HEAD", branch])
+            .ok()
+            .flatten()
+            .filter(|sha| !sha.is_empty())
+    });
+    let land_target = match base_branch {
+        Some(branch) => land_target_on_base(cwd, branch)?,
+        None => None,
+    };
     Ok(Some(GitPanelSnapshot {
         branch,
         origin_url: remote_url(cwd, "origin")?,
         upstream: upstream_status,
         can_push,
+        merge_base,
         land_target,
         staged,
         unstaged,
@@ -280,6 +294,10 @@ fn land_target(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<Land
     let Some(base) = land_base(cwd, recorded)? else {
         return Ok(None);
     };
+    land_target_on_base(cwd, base)
+}
+
+fn land_target_on_base(cwd: &Path, base: String) -> anyhow::Result<Option<LandTarget>> {
     let ahead = git_optional_stdout(cwd, &["rev-list", "--count", &format!("{base}..HEAD")])?
         .and_then(|count| count.parse::<u64>().ok())
         .unwrap_or(0);

@@ -211,6 +211,78 @@ pub(super) enum GitPanelCommitDiffState {
     Failed(String),
 }
 
+/// Which lane a log row's graph cell draws: worktree commits sit on the
+/// accent lane; the merge-base row steps out to the indented base lane that
+/// the rest of the history follows.
+#[derive(Clone, Copy, PartialEq)]
+enum CommitLane {
+    Worktree,
+    FirstBase,
+    Base,
+}
+
+/// Graph-cell geometry: the lane centers inside the 16px gutter and the row
+/// midline the connector and circles hang on.
+const COMMIT_LANE_WORKTREE: f32 = 5.0;
+const COMMIT_LANE_BASE: f32 = 13.0;
+const COMMIT_GRAPH_WIDTH: f32 = 18.0;
+
+fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
+    let line = theme.border_strong;
+    let (circle_x, circle_color) = match lane {
+        CommitLane::Worktree => (COMMIT_LANE_WORKTREE, theme.accent),
+        CommitLane::FirstBase | CommitLane::Base => (COMMIT_LANE_BASE, theme.text_ghost),
+    };
+    let mut cell = div()
+        .flex_none()
+        .w(px(COMMIT_GRAPH_WIDTH))
+        .h_full()
+        .relative();
+    let vertical = |x: f32, top: f32, bottom: f32| {
+        div()
+            .absolute()
+            .left(px(x))
+            .top(px(top))
+            .bottom(px(bottom))
+            .w(px(1.0))
+            .bg(line)
+    };
+    match lane {
+        CommitLane::Worktree => {
+            cell = cell.child(vertical(COMMIT_LANE_WORKTREE, 0.0, 0.0));
+        }
+        CommitLane::FirstBase => {
+            // The worktree lane descends to mid-row, jogs right, and hands
+            // off to the base lane that continues downward.
+            cell = cell
+                .child(vertical(COMMIT_LANE_WORKTREE, 0.0, GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(COMMIT_LANE_WORKTREE))
+                        .top(px(GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0))
+                        .h(px(1.0))
+                        .w(px(COMMIT_LANE_BASE - COMMIT_LANE_WORKTREE))
+                        .bg(line),
+                )
+                .child(vertical(COMMIT_LANE_BASE, 0.0, 0.0));
+        }
+        CommitLane::Base => {
+            cell = cell.child(vertical(COMMIT_LANE_BASE, 0.0, 0.0));
+        }
+    }
+    cell.child(
+        div()
+            .absolute()
+            .left(px(circle_x - 3.0))
+            .top(px(GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0 - 3.0))
+            .w(px(6.0))
+            .h(px(6.0))
+            .rounded_full()
+            .bg(circle_color),
+    )
+}
+
 impl Waku {
     /// The Git icon button. It sits left of the right-panel toggle wherever
     /// that toggle renders: the main top bar, the right panel's header, and
@@ -2460,6 +2532,7 @@ impl Waku {
                     entry,
                     index,
                     false,
+                    None,
                     width,
                     "git-panel-upstream-commit",
                     cx,
@@ -2513,14 +2586,30 @@ impl Waku {
         {
             rows = rows.child(self.render_git_panel_upstream_section(upstream, width, cx));
         }
+        let merge_base_index = panel
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.merge_base.as_deref())
+            .and_then(|merge_base| {
+                panel
+                    .commits
+                    .iter()
+                    .position(|entry| entry.sha == merge_base)
+            });
         for (index, entry) in panel.commits.iter().enumerate() {
             // `git log` starts at HEAD and the first `ahead` entries are the
             // ones the upstream has not seen.
             let unpushed = index < ahead as usize;
+            let lane = match merge_base_index {
+                Some(base_index) if index > base_index => CommitLane::Base,
+                Some(base_index) if index == base_index && index > 0 => CommitLane::FirstBase,
+                _ => CommitLane::Worktree,
+            };
             rows = rows.child(self.render_git_panel_commit_row(
                 entry,
                 index,
                 unpushed,
+                Some(lane),
                 width,
                 "git-panel-commit",
                 cx,
@@ -2589,6 +2678,7 @@ impl Waku {
         entry: &CommitEntry,
         index: usize,
         unpushed: bool,
+        lane: Option<CommitLane>,
         width: f32,
         id_prefix: &str,
         cx: &mut Context<Self>,
@@ -2619,6 +2709,7 @@ impl Waku {
             .text_size(sp(12.5))
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.overlay))
+            .when_some(lane, |row, lane| row.child(commit_graph_cell(lane, &theme)))
             .child(
                 div()
                     .min_w_0()

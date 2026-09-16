@@ -105,6 +105,9 @@ pub struct GitPanelSnapshot {
     /// A remote the branch could publish to exists — the same condition the
     /// commit dialog's push affordance uses.
     pub can_push: bool,
+    /// The commit where HEAD diverges from the resolved base branch, for the
+    /// log's two-lane graph; `None` when no base resolves.
+    pub merge_base: Option<String>,
     /// Where `Land` would send this checkout's commits — `None` when no base
     /// branch resolves or HEAD has no commits the base lacks.
     pub land_target: Option<LandTarget>,
