@@ -500,9 +500,10 @@ impl Waku {
         }
     }
 
-    /// Escape on the page peels one layer at a time: an open detail, then the
-    /// selection, then the page itself. An emptied filter's second Escape
-    /// reaches here through `clear_on_escape`.
+    /// Escape on the page peels one layer at a time: the selection, then the
+    /// page itself. An emptied filter's second Escape reaches here through
+    /// `clear_on_escape`; an open work-item detail is right-panel chrome and
+    /// handles its own Escape.
     pub(super) fn dismiss_projects_layer_action(
         &mut self,
         _: &DismissProjectsLayer,
@@ -512,14 +513,6 @@ impl Waku {
         let Some(project_id) = self.projects_page else {
             return;
         };
-        if self
-            .github_browsers
-            .get(&project_id)
-            .is_some_and(|browser| browser.detail.is_some())
-        {
-            self.github_close_detail(project_id, cx);
-            return;
-        }
         let cleared = self
             .projects_page_states
             .get_mut(&project_id)
@@ -1258,16 +1251,10 @@ impl Waku {
         } else {
             state.tab
         };
-        let detail_open = self
-            .github_browsers
-            .get(&project_id)
-            .is_some_and(|browser| browser.detail.is_some());
-
         let content = match tab {
             ProjectsTab::Worktrees | ProjectsTab::Branches => {
                 self.render_projects_table(project_id, window, cx)
             }
-            _ if detail_open => self.render_github_detail(project_id, window, cx),
             tab => {
                 let github_tab = tab.github_tab().unwrap_or(github::GitHubTab::PullRequests);
                 let filter = self
@@ -1300,7 +1287,7 @@ impl Waku {
                     .px(px(PROJECTS_CONTENT_MARGIN))
                     .flex()
                     .flex_col()
-                    .child(self.render_projects_toolbar(project_id, tab, detail_open, cx))
+                    .child(self.render_projects_toolbar(project_id, tab, cx))
                     .child(content)
                     .children(self.render_projects_bulk_bar(project_id, cx))
                     .child(self.render_projects_composer(project_id, cx)),
@@ -1457,13 +1444,12 @@ impl Waku {
     }
 
     /// The line under the header: the tab's filter field (initial focus)
-    /// plus per-tab controls — back and the work-item state picker on the
-    /// GitHub tabs, a refresh everywhere.
+    /// plus per-tab controls — the work-item state picker on the GitHub
+    /// tabs, a refresh everywhere.
     fn render_projects_toolbar(
         &mut self,
         project_id: Uuid,
         tab: ProjectsTab,
-        detail_open: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -1471,27 +1457,6 @@ impl Waku {
             return div().into_any_element();
         };
         let filter = state.filter_input(tab).clone();
-
-        let back = detail_open.then(|| {
-            div()
-                .id("projects-detail-back")
-                .w(px(24.0))
-                .h(px(24.0))
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .hover(|style| style.bg(theme.overlay))
-                .active(|style| style.bg(theme.overlay_strong))
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-                .tooltip(Tooltip::text(tr!("github.back_to_list")))
-                .child(icon("icons/arrow-left.svg", 13.0, theme.text_secondary))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.github_close_detail(project_id, cx);
-                }))
-                .into_any_element()
-        });
 
         // Open/closed/all for the GitHub tabs, applied server-side.
         let state_picker = tab.github_tab().map(|_| {
@@ -1567,7 +1532,6 @@ impl Waku {
             .gap(px(8.0))
             .border_b(hairline())
             .border_color(theme.border)
-            .children(back)
             .child(
                 TextField::new("projects-filter", filter)
                     .icon("icons/search.svg", 12.0)

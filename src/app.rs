@@ -675,6 +675,9 @@ enum RightPanelSurface {
     Files,
     Diff,
     File(String),
+    /// A project's issue/pull-request detail. Which item it shows lives in
+    /// `GitHubBrowser::detail`, so one tab serves every item in the repo.
+    GitHub(Uuid),
 }
 
 /// The closed sidebar's left-edge hover peek: the real sidebar pane mounted

@@ -1002,6 +1002,7 @@ right_panel.terminal: 终端
 right_panel.new_terminal: 新建终端
 right_panel.files: 文件
 right_panel.diff: 审阅
+right_panel.github: GitHub
 right_panel.toggle: 显示或隐藏右侧面板
 right_panel.open_surface: 打开一个面板
 right_panel.choose_surface: 选择要在右侧面板中显示的内容

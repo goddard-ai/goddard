@@ -1029,6 +1029,7 @@ right_panel.terminal: ターミナル
 right_panel.new_terminal: 新しいターミナル
 right_panel.files: ファイル
 right_panel.diff: レビュー
+right_panel.github: GitHub
 right_panel.toggle: 右パネルの表示を切り替える
 right_panel.open_surface: パネルを開く
 right_panel.choose_surface: 右パネルに表示する内容を選択します

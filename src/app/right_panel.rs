@@ -914,6 +914,7 @@ impl RightPanelSurface {
             Self::Files => tr!("right_panel.files"),
             Self::Diff => tr!("right_panel.diff"),
             Self::File(path) => path.rsplit('/').next().unwrap_or(path).to_owned(),
+            Self::GitHub(_) => tr!("right_panel.github"),
         }
     }
 
@@ -925,6 +926,7 @@ impl RightPanelSurface {
             Self::Files => "icons/folder.svg",
             Self::Diff => "icons/file-diff.svg",
             Self::File(path) => file_icon_for_path(path),
+            Self::GitHub(_) => "icons/github.svg",
         }
     }
 }
@@ -962,6 +964,9 @@ fn reusable_surface_index(
         RightPanelSurface::Browser(_) | RightPanelSurface::Terminal(_) => None,
         RightPanelSurface::BackgroundWork { key, .. } => surfaces.iter().position(|surface| {
             matches!(surface, RightPanelSurface::BackgroundWork { key: candidate, .. } if candidate == key)
+        }),
+        RightPanelSurface::GitHub(project_id) => surfaces.iter().position(|surface| {
+            matches!(surface, RightPanelSurface::GitHub(candidate) if candidate == project_id)
         }),
         RightPanelSurface::Files | RightPanelSurface::Diff | RightPanelSurface::File(_) => {
             surfaces.iter().position(|surface| surface == requested)
@@ -1650,12 +1655,14 @@ mod tests {
             key: BackgroundWorkKey::new(BackgroundWorkKind::Process, "process-1"),
             title: "Process one".into(),
         };
+        let project_id = Uuid::new_v4();
         let surfaces = vec![
             browser,
             terminal,
             background,
             RightPanelSurface::Files,
             RightPanelSurface::Diff,
+            RightPanelSurface::GitHub(project_id),
         ];
 
         assert_eq!(
@@ -1683,6 +1690,19 @@ mod tests {
         assert_eq!(
             reusable_surface_index(&surfaces, &RightPanelSurface::Diff),
             Some(4)
+        );
+        // The work-item tab is per project — a second item from the same
+        // repo reuses it, another repo gets its own.
+        assert_eq!(
+            reusable_surface_index(&surfaces, &RightPanelSurface::GitHub(project_id)),
+            Some(5)
+        );
+        assert_eq!(
+            reusable_surface_index(
+                &surfaces,
+                &RightPanelSurface::GitHub(Uuid::new_v4()),
+            ),
+            None
         );
     }
 
@@ -1867,6 +1887,11 @@ impl Waku {
                 if let Some(browser_id) = surface.browser_id() {
                     self.right_panel_browsers.remove(&browser_id);
                 }
+                if let RightPanelSurface::GitHub(project_id) = surface
+                    && let Some(browser) = self.github_browsers.get_mut(project_id)
+                {
+                    browser.detail = None;
+                }
             }
         }
     }
@@ -1936,6 +1961,31 @@ impl Waku {
             .as_ref()
             .map_or(0, |snapshot| snapshot.lines.len());
         self.right_panel_diff_list_state.reset(line_count);
+    }
+
+    /// Drop a project's work-item tab from every parked session's surface
+    /// list. The detail it renders is keyed by project, so a second copy in
+    /// another session's strip would show the same item. The active strip's
+    /// copy — if any — is the caller's to handle.
+    pub(super) fn remove_parked_github_surfaces(&mut self, project_id: Uuid) {
+        for state in self.right_panel_session_states.values_mut() {
+            let Some(index) = state.surfaces.iter().position(|surface| {
+                matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id)
+            }) else {
+                continue;
+            };
+            state.surfaces.remove(index);
+            state.active_surface = if state.surfaces.is_empty() {
+                None
+            } else {
+                Some(match state.active_surface {
+                    Some(active) if active > index => active - 1,
+                    Some(active) if active == index => index.saturating_sub(1),
+                    Some(active) => active.min(state.surfaces.len() - 1),
+                    None => 0,
+                })
+            };
+        }
     }
 
     fn reveal_right_panel_tab(&mut self, index: usize) {
@@ -2213,6 +2263,11 @@ impl Waku {
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
             self.right_panel_browsers.remove(&browser_id);
         }
+        if let RightPanelSurface::GitHub(project_id) = self.right_panel_surfaces[index]
+            && let Some(browser) = self.github_browsers.get_mut(&project_id)
+        {
+            browser.detail = None;
+        }
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
             None
@@ -2345,6 +2400,9 @@ impl Waku {
                 }),
             Some(RightPanelSurface::File(path)) => self
                 .render_right_panel_file(path, width, window, cx)
+                .into_any_element(),
+            Some(RightPanelSurface::GitHub(project_id)) => self
+                .render_github_detail(project_id, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
@@ -2782,6 +2840,10 @@ impl Waku {
                     .get(browser_id)
                     .and_then(|browser| browser.read(cx).tab_label())
                     .unwrap_or_else(|| surface.label()),
+                // Work-item tabs name the open item: "#123".
+                RightPanelSurface::GitHub(project_id) => {
+                    self.github_surface_label(*project_id)
+                }
                 _ => {
                     right_panel_tab_label(&surface, self.right_panel_files_selected_path.as_deref())
                 }
@@ -2799,6 +2861,10 @@ impl Waku {
                             self.right_panel_files_selected_path.as_deref(),
                         )
                     }),
+                // Work-item tabs wear the open item's state glyph.
+                RightPanelSurface::GitHub(project_id) => {
+                    self.github_surface_icon(*project_id)
+                }
                 _ => {
                     right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref())
                 }

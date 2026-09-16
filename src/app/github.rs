@@ -580,15 +580,65 @@ impl Waku {
         browser.markdown.borrow_mut().clear();
         browser.detail_scroll.set_offset(point(px(0.0), px(0.0)));
         let focus = browser.detail_focus.clone();
+        // Details open in the right panel — one tab per project, its content
+        // keyed to `browser.detail` so moving between items reuses the tab.
+        self.remove_parked_github_surfaces(project_id);
+        self.open_right_panel_surface(RightPanelSurface::GitHub(project_id), cx);
         window.focus(&focus, cx);
         cx.notify();
+    }
+
+    /// The work-item surface's tab label: the open item's `#number`, or a
+    /// generic label until one is open.
+    pub(super) fn github_surface_label(&self, project_id: Uuid) -> String {
+        self.github_browsers
+            .get(&project_id)
+            .and_then(|browser| browser.detail)
+            .map(|detail| format!("#{}", detail.number))
+            .unwrap_or_else(|| tr!("right_panel.github"))
+    }
+
+    /// The work-item surface's tab icon: the loaded item's state glyph, or
+    /// the kind's glyph while it loads.
+    pub(super) fn github_surface_icon(&self, project_id: Uuid) -> &'static str {
+        let Some(browser) = self.github_browsers.get(&project_id) else {
+            return "icons/github.svg";
+        };
+        let Some(detail) = browser.detail else {
+            return "icons/github.svg";
+        };
+        if let Some(GitHubFetch::Loaded(Some(content))) = browser.details.get(&detail) {
+            return match content.as_ref() {
+                GitHubItemDetail::PullRequest(pr) => sidebar::sidebar_pull_request_icon(
+                    sidebar::pull_request_class(&pr.summary),
+                ),
+                GitHubItemDetail::Issue(issue) => match issue.summary.state {
+                    IssueState::Open => "icons/info.svg",
+                    IssueState::Closed => "icons/check.svg",
+                },
+            };
+        }
+        match detail.kind {
+            GitHubItemKind::PullRequest => "icons/git-pull-request-arrow.svg",
+            GitHubItemKind::Issue => "icons/info.svg",
+        }
     }
 
     pub(super) fn github_close_detail(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         if let Some(browser) = self.github_browsers.get_mut(&project_id) {
             browser.detail = None;
-            cx.notify();
         }
+        if let Some(index) = self
+            .right_panel_surfaces
+            .iter()
+            .position(|surface| {
+                matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id)
+            })
+        {
+            self.close_right_panel_surface(index, cx);
+        }
+        self.remove_parked_github_surfaces(project_id);
+        cx.notify();
     }
 
     /// "Start a task" / "Fix failing checks": hand the item to a draft
