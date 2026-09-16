@@ -28,7 +28,7 @@ export const Colors = {
     borderStrong: 'hsla(220, 10%, 12%, 0.15)',
     accent: '#369bdc',
     accentSoft: 'rgba(54, 155, 220, 0.12)',
-    codeText: '#9a5528',
+    codeText: '#1e6fb4',
     codeWash: 'hsla(220, 10%, 12%, 0.07)',
     inverse: '#202227',
     onInverse: '#f8f8f9',

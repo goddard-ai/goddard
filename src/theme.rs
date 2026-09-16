@@ -329,7 +329,7 @@ impl Theme {
 
             accent: 0x369BDC,
             selection: hsla(211.0 / 360.0, 1.0, 0.50, 0.35),
-            code_text: 0x9A5528,
+            code_text: 0x1E6FB4,
 
             inverse: 0x202227,
             on_inverse: 0xF8F8F9,
