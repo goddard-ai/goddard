@@ -1316,6 +1316,10 @@ impl Waku {
                     self.refresh_git_panel(cx);
                     self.refresh_git_panel_commits(cx);
                 }
+                LandOutcome::AlreadyLanded { base } => {
+                    self.show_notice_toast(tr!("git_panel.already_landed", base = base));
+                    self.invalidate_workspace_queries(cx);
+                }
             },
             Ok(_) => {
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {

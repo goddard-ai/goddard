@@ -226,9 +226,12 @@ fn git_path_exists(cwd: &Path, name: &str) -> anyhow::Result<bool> {
 /// Land the checkout's commits on its base branch: rebase onto it — or merge
 /// it in with `PullStrategy::Merge` — then fast-forward the base to the
 /// result. `base` is the session's recorded base; [`land_base`] resolves the
-/// fallback when it is absent or stale. A stopped integration reports
-/// `Conflict` and leaves the rebase or merge in progress; re-running while
-/// stopped reports the same conflict again rather than erroring.
+/// fallback when it is absent or stale. A base that already contains every
+/// commit reports `AlreadyLanded` — a land's Resolve-in-chat agent finishing
+/// the fast-forward itself lands here on the next run. A stopped
+/// integration reports `Conflict` and leaves the rebase or merge in
+/// progress; re-running while stopped reports the same conflict again
+/// rather than erroring.
 pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::Result<LandOutcome> {
     ensure_repository(cwd)?;
     let Some(base) = land_base(cwd, base)? else {
@@ -242,7 +245,7 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
         });
     }
     if is_ancestor(cwd, "HEAD", &base)? {
-        bail!("'{base}' already contains every commit on this checkout");
+        return Ok(LandOutcome::AlreadyLanded { base });
     }
     if !is_ancestor(cwd, &base, "HEAD")? {
         // Diverged history integrates first. Rebase and merge both require a
@@ -993,9 +996,14 @@ mod tests {
     }
 
     #[test]
-    fn land_errors_when_there_is_nothing_to_land() {
+    fn land_reports_already_landed_when_there_is_nothing_to_land() {
         let (root, _repository, worktree) = land_repository();
-        assert!(land(&worktree, Some("main"), PullStrategy::Rebase).is_err());
+        assert_eq!(
+            land(&worktree, Some("main"), PullStrategy::Rebase).unwrap(),
+            LandOutcome::AlreadyLanded {
+                base: "main".to_owned()
+            }
+        );
         std::fs::remove_dir_all(root).ok();
     }
 

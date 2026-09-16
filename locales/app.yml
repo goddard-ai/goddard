@@ -2580,6 +2580,8 @@ git_panel.landing:
   en: Landing…
 git_panel.landed:
   en: Landed on %{base}
+git_panel.already_landed:
+  en: "%{base} already contains every commit here"
 git_panel.land_conflict_description:
   en: Landing onto %{base} stopped midway — the conflicts are still in the working tree.
 git_panel.resolve_land_rebase_prompt:

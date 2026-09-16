@@ -266,6 +266,10 @@ export function MobileComposer({
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         return;
       }
+      // Nothing to send: the requested end state already holds.
+      if ('alreadyLanded' in outcome) {
+        return;
+      }
       // Mobile has no conflict modal; the banner carries the way out.
       const kind = outcome.conflict.in_progress === 'rebase' ? 'rebase' : 'merge';
       throw new Error(

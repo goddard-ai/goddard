@@ -183,6 +183,10 @@ pub enum LandOutcome {
     /// The checkout's commits are on the base, which was fast-forwarded to
     /// this HEAD.
     Landed { base: String },
+    /// The base already contains every commit on the checkout — the land
+    /// either already ran or there was never anything to send. A neutral
+    /// result, not an error.
+    AlreadyLanded { base: String },
     /// The rebase or merge stopped on conflicts; the integration is still in
     /// progress and the checkout owns the conflict markers.
     Conflict {

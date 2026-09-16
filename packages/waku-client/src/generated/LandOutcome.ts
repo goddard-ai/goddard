@@ -5,7 +5,7 @@ import type { SyncInProgress } from "./SyncInProgress";
  * How a `Land` operation ended. `base` names the branch it resolved, which
  * the conflict modal and prompts quote back to the user.
  */
-export type LandOutcome = { "landed": { base: string, } } | { "conflict": { base: string, in_progress: SyncInProgress,
+export type LandOutcome = { "landed": { base: string, } } | { "alreadyLanded": { base: string, } } | { "conflict": { base: string, in_progress: SyncInProgress,
 /**
  * Working-tree paths still carrying conflict markers.
  */

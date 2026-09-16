@@ -728,6 +728,10 @@ export function WakuApp() {
         toast.success(t('git_panel.landed', { base: outcome.landed.base }))
         return
       }
+      if ('alreadyLanded' in outcome) {
+        toast(t('git_panel.already_landed', { base: outcome.alreadyLanded.base }))
+        return
+      }
       const conflict = outcome.conflict
       toast.error(t('git_panel.land_conflict_description', { base: conflict.base }))
       const prompt = t(

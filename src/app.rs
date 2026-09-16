@@ -2387,6 +2387,12 @@ impl Waku {
         self.show_toast_with_tone(message, ToastTone::Success, None);
     }
 
+    /// A neutral toast for a command that found nothing to do — the accent
+    /// Notice tone rather than Success or an alert.
+    pub(super) fn show_notice_toast(&mut self, message: impl Into<String>) {
+        self.show_toast_with_tone(message, ToastTone::Notice, None);
+    }
+
     /// Confirms an unarchive with a "View now" jump to the restored task.
     pub(super) fn show_unarchived_toast(&mut self, session_id: Uuid) {
         self.show_toast_with_tone(
