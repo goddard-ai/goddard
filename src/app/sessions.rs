@@ -174,6 +174,16 @@ impl Waku {
         self.finish_session_activation(session_id, transition, cx);
     }
 
+    /// The surface the back/forward history records as "current": the
+    /// selected task's transcript, or the full-width terminal that parked it.
+    pub(super) fn navigation_target(&self) -> Option<NavigationTarget> {
+        if let Some(session_id) = self.state.selected_session {
+            Some(NavigationTarget::Session(session_id))
+        } else {
+            self.selected_terminal.map(NavigationTarget::Terminal)
+        }
+    }
+
     fn finish_session_activation(
         &mut self,
         session_id: Uuid,
@@ -183,18 +193,20 @@ impl Waku {
         match transition {
             SessionActivationTransition::Visit => self
                 .session_navigation
-                .visit(self.state.selected_session, session_id),
+                .visit(self.navigation_target(), NavigationTarget::Session(session_id)),
             SessionActivationTransition::Back { from } => {
-                if self.state.selected_session != Some(from)
-                    || self.session_navigation.back_target() != Some(session_id)
+                if self.navigation_target() != Some(from)
+                    || self.session_navigation.back_target()
+                        != Some(NavigationTarget::Session(session_id))
                 {
                     return;
                 }
                 let _ = self.session_navigation.go_back(from);
             }
             SessionActivationTransition::Forward { from } => {
-                if self.state.selected_session != Some(from)
-                    || self.session_navigation.forward_target() != Some(session_id)
+                if self.navigation_target() != Some(from)
+                    || self.session_navigation.forward_target()
+                        != Some(NavigationTarget::Session(session_id))
                 {
                     return;
                 }
@@ -1317,23 +1329,31 @@ impl Waku {
             return;
         }
 
-        let Some(current) = self.state.selected_session else {
+        let Some(current) = self.navigation_target() else {
             return;
         };
-        if let Some(target) = self.session_navigation.back_target() {
-            self.settings_page = None;
-            self.request_session_activation(
-                target,
-                SessionActivationTransition::Back { from: current },
-                cx,
-            );
+        match self.session_navigation.back_target() {
+            Some(NavigationTarget::Session(target)) => {
+                self.settings_page = None;
+                self.request_session_activation(
+                    target,
+                    SessionActivationTransition::Back { from: current },
+                    cx,
+                );
+            }
+            Some(NavigationTarget::Terminal(target)) => {
+                self.settings_page = None;
+                let _ = self.session_navigation.go_back(current);
+                self.activate_terminal(target, false, window, cx);
+            }
+            None => {}
         }
     }
 
     pub(super) fn navigate_forward_action(
         &mut self,
         _: &NavigateForward,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.big_picture.is_open() {
@@ -1343,16 +1363,24 @@ impl Waku {
             return;
         }
 
-        let Some(current) = self.state.selected_session else {
+        let Some(current) = self.navigation_target() else {
             return;
         };
-        if let Some(target) = self.session_navigation.forward_target() {
-            self.settings_page = None;
-            self.request_session_activation(
-                target,
-                SessionActivationTransition::Forward { from: current },
-                cx,
-            );
+        match self.session_navigation.forward_target() {
+            Some(NavigationTarget::Session(target)) => {
+                self.settings_page = None;
+                self.request_session_activation(
+                    target,
+                    SessionActivationTransition::Forward { from: current },
+                    cx,
+                );
+            }
+            Some(NavigationTarget::Terminal(target)) => {
+                self.settings_page = None;
+                let _ = self.session_navigation.go_forward(current);
+                self.activate_terminal(target, false, window, cx);
+            }
+            None => {}
         }
     }
 
@@ -2680,7 +2708,10 @@ mod tests {
         let mut navigation = SessionNavigation::default();
 
         navigation.remember_new_task(draft.id);
-        navigation.visit(Some(draft.id), started.id);
+        navigation.visit(
+            Some(NavigationTarget::Session(draft.id)),
+            NavigationTarget::Session(started.id),
+        );
 
         assert_eq!(
             navigation.remembered_new_task(&[draft.clone(), started], project_id),

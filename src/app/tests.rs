@@ -10,7 +10,8 @@ use super::sidebar::SidebarRow;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
-    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
+    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationTarget, PendingUserInput,
+    SessionNavigation,
     StreamDeltaKind, TranscriptRowKind::*, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
     active_navigation_turn_index, activity_group_is_live,
     activity_header_title, append_text_delta_to_session, assistant_response_footer,
@@ -499,10 +500,10 @@ fn driver_errors_are_bounded_before_rendering() {
 
 #[test]
 fn session_navigation_tracks_back_forward_and_new_branches() {
-    let first = Uuid::new_v4();
-    let second = Uuid::new_v4();
-    let third = Uuid::new_v4();
-    let branch = Uuid::new_v4();
+    let first = NavigationTarget::Session(Uuid::new_v4());
+    let second = NavigationTarget::Session(Uuid::new_v4());
+    let third = NavigationTarget::Session(Uuid::new_v4());
+    let branch = NavigationTarget::Terminal(Uuid::new_v4());
     let mut navigation = SessionNavigation::default();
 
     navigation.visit(Some(first), second);
@@ -521,16 +522,31 @@ fn session_navigation_prunes_deleted_tasks() {
     let first = Uuid::new_v4();
     let second = Uuid::new_v4();
     let third = Uuid::new_v4();
+    let terminal = Uuid::new_v4();
     let mut navigation = SessionNavigation::default();
 
-    navigation.visit(Some(first), second);
-    navigation.visit(Some(second), third);
-    assert_eq!(navigation.go_back(third), Some(second));
+    navigation.visit(
+        Some(NavigationTarget::Session(first)),
+        NavigationTarget::Terminal(terminal),
+    );
+    navigation.visit(
+        Some(NavigationTarget::Terminal(terminal)),
+        NavigationTarget::Session(second),
+    );
+    navigation.visit(
+        Some(NavigationTarget::Session(second)),
+        NavigationTarget::Session(third),
+    );
+    assert_eq!(
+        navigation.go_back(NavigationTarget::Session(third)),
+        Some(NavigationTarget::Session(second))
+    );
 
     navigation.remove(first);
     navigation.remove(third);
-    assert_eq!(navigation.go_back(second), None);
-    assert_eq!(navigation.go_forward(second), None);
+    navigation.remove_terminal(terminal);
+    assert_eq!(navigation.go_back(NavigationTarget::Session(second)), None);
+    assert_eq!(navigation.go_forward(NavigationTarget::Session(second)), None);
 }
 
 #[test]

@@ -202,6 +202,7 @@ impl Waku {
         self.custom_command_runs.remove(&terminal_id);
         self.terminal_records.remove(&terminal_id);
         self.terminal_order.retain(|id| *id != terminal_id);
+        self.session_navigation.remove_terminal(terminal_id);
         if self.selected_terminal == Some(terminal_id) {
             self.selected_terminal = None;
         }
@@ -418,6 +419,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.activate_terminal(terminal_id, true, window, cx);
+    }
+
+    /// `record_visit` is false only for back/forward history, which already
+    /// moved the stacks before landing here.
+    pub(super) fn activate_terminal(
+        &mut self,
+        terminal_id: Uuid,
+        record_visit: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(record) = self.terminal_records.get(&terminal_id) else {
             return;
         };
@@ -441,6 +454,10 @@ impl Waku {
                 return;
             };
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
+        }
+        if record_visit {
+            self.session_navigation
+                .visit(self.navigation_target(), NavigationTarget::Terminal(terminal_id));
         }
         if self.state.selected_session.is_some() {
             self.capture_and_save_current_composer_draft(cx);

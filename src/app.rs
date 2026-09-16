@@ -1130,49 +1130,66 @@ struct ComputerUsePreview {
     decode_task: Option<gpui::Task<()>>,
 }
 
+/// A main-area surface the back/forward history can land on: a task's
+/// transcript or a full-width terminal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NavigationTarget {
+    Session(Uuid),
+    Terminal(Uuid),
+}
+
 #[derive(Debug, Default)]
 struct SessionNavigation {
-    back: Vec<Uuid>,
-    forward: Vec<Uuid>,
+    back: Vec<NavigationTarget>,
+    forward: Vec<NavigationTarget>,
     /// The most recently selected unstarted task. The global New Task entry
     /// may reuse it only when it belongs to the currently selected project.
     new_task: Option<Uuid>,
 }
 
 impl SessionNavigation {
-    fn visit(&mut self, current: Option<Uuid>, next: Uuid) {
+    fn visit(&mut self, current: Option<NavigationTarget>, next: NavigationTarget) {
         if let Some(current) = current.filter(|current| *current != next) {
             self.back.push(current);
             self.forward.clear();
         }
     }
 
-    fn go_back(&mut self, current: Uuid) -> Option<Uuid> {
+    fn go_back(&mut self, current: NavigationTarget) -> Option<NavigationTarget> {
         let target = self.back.pop()?;
         self.forward.push(current);
         Some(target)
     }
 
-    fn back_target(&self) -> Option<Uuid> {
+    fn back_target(&self) -> Option<NavigationTarget> {
         self.back.last().copied()
     }
 
-    fn go_forward(&mut self, current: Uuid) -> Option<Uuid> {
+    fn go_forward(&mut self, current: NavigationTarget) -> Option<NavigationTarget> {
         let target = self.forward.pop()?;
         self.back.push(current);
         Some(target)
     }
 
-    fn forward_target(&self) -> Option<Uuid> {
+    fn forward_target(&self) -> Option<NavigationTarget> {
         self.forward.last().copied()
     }
 
     fn remove(&mut self, session_id: Uuid) {
-        self.back.retain(|entry| *entry != session_id);
-        self.forward.retain(|entry| *entry != session_id);
+        self.back
+            .retain(|entry| *entry != NavigationTarget::Session(session_id));
+        self.forward
+            .retain(|entry| *entry != NavigationTarget::Session(session_id));
         if self.new_task == Some(session_id) {
             self.new_task = None;
         }
+    }
+
+    fn remove_terminal(&mut self, terminal_id: Uuid) {
+        self.back
+            .retain(|entry| *entry != NavigationTarget::Terminal(terminal_id));
+        self.forward
+            .retain(|entry| *entry != NavigationTarget::Terminal(terminal_id));
     }
 
     fn remember_new_task(&mut self, session_id: Uuid) {
@@ -1197,8 +1214,8 @@ impl SessionNavigation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionActivationTransition {
     Visit,
-    Back { from: Uuid },
-    Forward { from: Uuid },
+    Back { from: NavigationTarget },
+    Forward { from: NavigationTarget },
 }
 
 /// Where a session activation parks the transcript.
