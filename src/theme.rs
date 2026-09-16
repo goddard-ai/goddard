@@ -1093,6 +1093,114 @@ impl Theme {
             ],
         })
     }
+
+    /// Warm Burnout Dark — felipefdl/warm-burnout (nvim `palette.lua`, Zed
+    /// port). Ember-toned on a `#1a1510` canvas: keywords orange, functions
+    /// amber, strings olive, types steel blue, constants dusty rose; the
+    /// accent is the signature burnt orange. ANSI is the ghostty port's
+    /// table.
+    pub fn warm_burnout_dark() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: true,
+            canvas: 0x1A1510,
+            sidebar_solid: 0x14120F,
+            surface: 0x1A1510,
+            raised: 0x222018,
+            composer: 0x1F1D17,
+            inset: 0x14120F,
+            terminal: 0x1A1510,
+            sidebar_border: rgb(0x222018).into(),
+
+            neutral: rgb(0xADA69C).into(),
+
+            text: 0xBFBDB6,
+            text_secondary: 0xADA69C,
+            text_tertiary: 0xA59F96,
+            // fg_gutter (`#a59f96a6`) blended over the canvas — the ramp has
+            // no dimmer solid stop.
+            text_ghost: 0x746E67,
+
+            accent: 0xB8522E,
+            selection: wash(0x8AA8B8, 0.25),
+            code_text: 0xF29668,
+
+            inverse: 0xBFBDB6,
+            on_inverse: 0x1A1510,
+
+            info: 0x90AEC0,
+            warning: 0xFFB454,
+            success: 0x70BF56,
+            favorite: 0xF5C56E,
+            danger: 0xF49090,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0xFF8F40).into(),  // orange
+                literal: rgb(0xD4A8B8).into(),  // dusty rose — constant/boolean
+                string: rgb(0xB4BC78).into(),   // olive
+                comment: rgb(0xB4A89C).into(),  // warm gray
+                number: rgb(0xD4A8B8).into(),   // dusty rose
+                ty: rgb(0x90AEC0).into(),       // steel blue
+                function: rgb(0xFFB454).into(), // amber
+                meta: rgb(0xE6C08A).into(),     // decorator sand
+            },
+            ansi: [
+                0x23211b, 0xf06b73, 0x70bf56, 0xfdb04c, 0x4fbfff, 0xd0a1ff, 0x93e2c8, 0xc7c7c7,
+                0x686868, 0xf07178, 0xaad94c, 0xffb454, 0x59c2ff, 0xd2a6ff, 0x95e6cb, 0xffffff,
+            ],
+        })
+    }
+
+    /// Warm Burnout Light — the `#f5ede0` paper side of the same palette.
+    /// Same hue roles deepened for contrast; the burnt-orange accent is
+    /// unchanged. ANSI is the ghostty port's light table.
+    pub fn warm_burnout_light() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: false,
+            canvas: 0xF5EDE0,
+            sidebar_solid: 0xEDE6DA,
+            surface: 0xF5EDE0,
+            raised: 0xF0E8DC,
+            composer: 0xFAF6F0,
+            inset: 0xEDE6DA,
+            terminal: 0xF5EDE0,
+            sidebar_border: rgb(0xDDD6CA).into(),
+
+            neutral: rgb(0x8A8070).into(),
+
+            text: 0x3A3630,
+            text_secondary: 0x5C5750,
+            text_tertiary: 0x8A8070,
+            text_ghost: 0xA09888,
+
+            accent: 0xB8522E,
+            selection: wash(0x8AA8B8, 0.25),
+            code_text: 0x8F4418,
+
+            inverse: 0x3A3630,
+            on_inverse: 0xF5EDE0,
+
+            info: 0x285464,
+            warning: 0x855700,
+            success: 0x226414,
+            favorite: 0x8A6000,
+            danger: 0xB03434,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0x924800).into(),
+                literal: rgb(0x7E4060).into(),
+                string: rgb(0x4D5C1A).into(),
+                comment: rgb(0x544C40).into(),
+                number: rgb(0x7E4060).into(),
+                ty: rgb(0x285464).into(),
+                function: rgb(0x855700).into(),
+                meta: rgb(0x7A5A1C).into(),
+            },
+            ansi: [
+                0x3a3630, 0xb82820, 0x2d6a14, 0x8a6000, 0x2060a0, 0x8a3090, 0x146858, 0xc0b8aa,
+                0x686868, 0xc83028, 0x3a7a20, 0x9a7008, 0x2870b0, 0x9a38a0, 0x208870, 0xfaf6f0,
+            ],
+        })
+    }
 }
 
 /// Resolve settings to a palette. `System` picks the slot matching the OS
@@ -1124,6 +1232,8 @@ fn theme_named(name: ThemeName) -> Theme {
         ThemeName::RosePineMoon => Theme::rose_pine_moon(),
         ThemeName::KansoZen => Theme::kanso_zen(),
         ThemeName::KansoPearl => Theme::kanso_pearl(),
+        ThemeName::WarmBurnoutLight => Theme::warm_burnout_light(),
+        ThemeName::WarmBurnoutDark => Theme::warm_burnout_dark(),
     }
 }
 

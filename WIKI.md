@@ -87,9 +87,10 @@ commits. Highlights, grouped by area:
 - **Transcript:** clipped long prompts with Show more, shift-click selection
   extension, changed-file cards that open files and preview diffs on hover,
   and "Annotation N" citation resolution.
-- **Customization:** fourteen new theme palettes (Gruvbox, Everforest,
+- **Customization:** sixteen new theme palettes (Gruvbox, Everforest,
   Kanagawa, Zenburn, Poimandres, GitHub light/dark, Dracula, Rosé Pine
-  Dawn/Moon, Kansō Zen/Pearl), split light/dark theme slots with a
+  Dawn/Moon, Kansō Zen/Pearl, Warm Burnout light/dark), split light/dark
+  theme slots with a
   match-system toggle, UI and code font pickers, a completion-sound picker
   with audition and volume, and a sidebar-transparency toggle.
 - **Providers and daemon:** Devin CLI support, install/sign-in actions on the
@@ -450,8 +451,8 @@ Goddard is designed to be driven without a mouse:
 
 - Match system appearance, or pick light/dark independently.
 - Separate light and dark theme palettes: Default, Gruvbox, Everforest,
-  Kanagawa, Zenburn, Poimandres, GitHub, Dracula, Rosé Pine (Dawn/Moon), and
-  Kanso (Zen/Pearl).
+  Kanagawa, Zenburn, Poimandres, GitHub, Dracula, Rosé Pine (Dawn/Moon),
+  Kanso (Zen/Pearl), and Warm Burnout.
 - UI font and code font (any installed family), with independent sizes for UI
   text, code/diff/editor text, and the terminal.
 - Sidebar transparency (vibrancy) on or off.

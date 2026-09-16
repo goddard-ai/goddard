@@ -44,11 +44,13 @@ pub enum ThemeName {
     RosePineMoon,
     KansoZen,
     KansoPearl,
+    WarmBurnoutLight,
+    WarmBurnoutDark,
 }
 
 impl ThemeName {
     /// Light-slot choices, in picker order.
-    pub const LIGHT: [Self; 7] = [
+    pub const LIGHT: [Self; 8] = [
         Self::DefaultLight,
         Self::GruvboxLightHard,
         Self::EverforestLight,
@@ -56,9 +58,10 @@ impl ThemeName {
         Self::GithubLight,
         Self::RosePineDawn,
         Self::KansoPearl,
+        Self::WarmBurnoutLight,
     ];
     /// Dark-slot choices, in picker order.
-    pub const DARK: [Self; 9] = [
+    pub const DARK: [Self; 10] = [
         Self::DefaultDark,
         Self::GruvboxDark,
         Self::EverforestDark,
@@ -68,6 +71,7 @@ impl ThemeName {
         Self::DraculaDark,
         Self::RosePineMoon,
         Self::KansoZen,
+        Self::WarmBurnoutDark,
     ];
 
     pub fn is_dark(self) -> bool {
@@ -93,6 +97,8 @@ impl ThemeName {
             Self::RosePineMoon => "Rosé Pine Moon".to_owned(),
             Self::KansoZen => "Kansō Zen".to_owned(),
             Self::KansoPearl => "Kansō Pearl".to_owned(),
+            Self::WarmBurnoutLight => "Warm Burnout Light".to_owned(),
+            Self::WarmBurnoutDark => "Warm Burnout Dark".to_owned(),
         }
     }
 }
