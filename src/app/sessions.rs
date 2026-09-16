@@ -679,9 +679,11 @@ impl Waku {
 
     /// Hides a task from the sidebar and search without deleting it.
     ///
-    /// A checkout still holding uncommitted or unpushed work gets a
+    /// A worktree still holding uncommitted or unpushed work gets a
     /// confirmation first — inspected on the background executor — so the
-    /// user sees what the archive snapshot is about to carry. Inspection
+    /// user sees what the archive snapshot is about to carry. A local
+    /// checkout skips it: its git state is the user's own and archive
+    /// leaves it untouched. Inspection
     /// failures archive anyway: the snapshot ref keeps the state regardless.
     ///
     /// An active turn is stopped first — a hidden session must not keep
@@ -712,11 +714,14 @@ impl Waku {
         else {
             return;
         };
-        // No workspace means nothing for a preview to inspect — archive now.
-        let Some(workspace) = self
-            .workspace_path_for_session(session)
-            .map(std::path::Path::to_path_buf)
-        else {
+        // Only a worktree gets a preview: archiving snapshots its checkout
+        // into the archive ref and removes the directory. A local checkout
+        // is the user's own git state — archive never touches it, so dirty
+        // files and unpushed commits are nothing to warn about.
+        let Some(workspace) = (match &session.workspace {
+            SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
+            _ => None,
+        }) else {
             self.finish_archive_session(session_id, sidebar_position, window, cx);
             return;
         };
