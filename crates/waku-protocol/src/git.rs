@@ -162,13 +162,17 @@ pub enum SyncInProgress {
     Merge,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum PullOutcome {
     /// The pull applied cleanly; the checkout is caught up.
     Clean,
     /// The pull stopped on conflicts and an integration is still in progress.
-    Conflict { in_progress: SyncInProgress },
+    Conflict {
+        in_progress: SyncInProgress,
+        /// Working-tree paths still carrying conflict markers.
+        files: Vec<String>,
+    },
 }
 
 /// How a `Land` operation ended. `base` names the branch it resolved, which
@@ -184,6 +188,8 @@ pub enum LandOutcome {
     Conflict {
         base: String,
         in_progress: SyncInProgress,
+        /// Working-tree paths still carrying conflict markers.
+        files: Vec<String>,
     },
 }
 

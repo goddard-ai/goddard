@@ -1664,6 +1664,9 @@ pub struct Waku {
     transcript_commit_press: Option<git_panel::TranscriptCommitPress>,
     /// The conflicted-sync modal: which integration is stopped mid-flight.
     git_panel_sync_conflict: Option<git_panel::SyncConflict>,
+    /// Scroll state for the conflict modal's file list.
+    git_panel_conflict_files_scroll: ScrollHandle,
+    git_panel_conflict_files_scrollbar: Rc<ScrollbarState>,
     /// The "nothing staged" prompt's open flag.
     git_panel_unstaged_prompt: bool,
     /// The commit-diff modal, when a commit row is open.
@@ -3919,6 +3922,8 @@ impl Waku {
                 transcript_commit_details: HashMap::new(),
                 transcript_commit_press: None,
                 git_panel_sync_conflict: None,
+                git_panel_conflict_files_scroll: ScrollHandle::new(),
+                git_panel_conflict_files_scrollbar: ScrollbarState::new(),
                 git_panel_unstaged_prompt: false,
                 git_panel_commit_diff: None,
                 git_panel_modal_focus: cx.focus_handle(),

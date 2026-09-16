@@ -165,9 +165,24 @@ pub fn pull(cwd: &Path, strategy: PullStrategy) -> anyhow::Result<PullOutcome> {
         return Ok(PullOutcome::Clean);
     }
     if let Some(in_progress) = sync_in_progress(cwd)? {
-        return Ok(PullOutcome::Conflict { in_progress });
+        return Ok(PullOutcome::Conflict {
+            in_progress,
+            files: conflicted_paths(cwd)?,
+        });
     }
     bail!("{}", command_error(&output))
+}
+
+/// The working-tree paths still unmerged — what `git status` shows as
+/// "both modified" (or added/deleted). `--diff-filter=U` covers every
+/// unmerged status pair.
+fn conflicted_paths(cwd: &Path) -> anyhow::Result<Vec<String>> {
+    let stdout = git_stdout(cwd, &["diff", "--name-only", "--diff-filter=U", "-z"])?;
+    Ok(stdout
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect())
 }
 
 /// Abort a conflicted sync: `rebase --abort` while a rebase is stopped,
@@ -209,7 +224,11 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
         bail!("could not find a base branch to land on");
     };
     if let Some(in_progress) = sync_in_progress(cwd)? {
-        return Ok(LandOutcome::Conflict { base, in_progress });
+        return Ok(LandOutcome::Conflict {
+            base,
+            in_progress,
+            files: conflicted_paths(cwd)?,
+        });
     }
     if is_ancestor(cwd, "HEAD", &base)? {
         bail!("'{base}' already contains every commit on this checkout");
@@ -227,7 +246,11 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
         };
         if !output.status.success() {
             if let Some(in_progress) = sync_in_progress(cwd)? {
-                return Ok(LandOutcome::Conflict { base, in_progress });
+                return Ok(LandOutcome::Conflict {
+                    base,
+                    in_progress,
+                    files: conflicted_paths(cwd)?,
+                });
             }
             bail!("{}", command_error(&output));
         }
@@ -853,6 +876,7 @@ mod tests {
             LandOutcome::Conflict {
                 base: "main".to_owned(),
                 in_progress: SyncInProgress::Rebase,
+                files: vec!["file.txt".to_owned()],
             }
         );
         // Re-running while stopped reports the conflict again.

@@ -98,11 +98,15 @@ pub(super) enum SyncConflict {
     Pull {
         in_progress: SyncInProgress,
         workspace: PathBuf,
+        /// Working-tree paths still carrying conflict markers.
+        files: Vec<String>,
     },
     Land {
         in_progress: SyncInProgress,
         base: String,
         workspace: PathBuf,
+        /// Working-tree paths still carrying conflict markers.
+        files: Vec<String>,
     },
 }
 
@@ -120,6 +124,12 @@ impl SyncConflict {
             SyncConflict::Pull { workspace, .. } | SyncConflict::Land { workspace, .. } => {
                 workspace.clone()
             }
+        }
+    }
+
+    fn files(&self) -> &[String] {
+        match self {
+            SyncConflict::Pull { files, .. } | SyncConflict::Land { files, .. } => files,
         }
     }
 }
@@ -1263,21 +1273,35 @@ impl Waku {
                 cx.notify();
             }
             Ok(WorkspaceResult::Pull {
-                outcome: PullOutcome::Conflict { in_progress },
+                outcome:
+                    PullOutcome::Conflict {
+                        in_progress,
+                        files,
+                    },
             }) => {
+                self.git_panel_conflict_files_scroll
+                    .set_offset(gpui::Point::default());
                 self.git_panel_sync_conflict = Some(SyncConflict::Pull {
                     in_progress,
                     workspace: op.workspace.clone(),
+                    files,
                 });
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
             }
             Ok(WorkspaceResult::Land { outcome }) => match outcome {
-                LandOutcome::Conflict { base, in_progress } => {
+                LandOutcome::Conflict {
+                    base,
+                    in_progress,
+                    files,
+                } => {
+                    self.git_panel_conflict_files_scroll
+                        .set_offset(gpui::Point::default());
                     self.git_panel_sync_conflict = Some(SyncConflict::Land {
                         in_progress,
                         base,
                         workspace: op.workspace.clone(),
+                        files,
                     });
                     self.invalidate_workspace_queries(cx);
                     cx.notify();
@@ -3631,29 +3655,70 @@ impl Waku {
             buttons = buttons.child(div().flex_1());
         }
         buttons = buttons.child(resolve);
-        let card = self.git_panel_modal_card(cx).child(
-            div()
-                .px(px(16.0))
-                .py(px(14.0))
-                .flex()
-                .flex_col()
-                .gap(px(10.0))
-                .child(
+        let mut content = div()
+            .px(px(16.0))
+            .py(px(14.0))
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .line_height(sp(17.0))
+                    .text_color(theme.text_secondary)
+                    .child(description),
+            );
+        if !conflict.files().is_empty() {
+            let code = crate::fonts::current(cx).code;
+            let mut files = div().flex().flex_col().py(px(2.0));
+            for path in conflict.files() {
+                files = files.child(
                     div()
-                        .text_size(sp(13.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .line_height(sp(17.0))
+                        .px(px(8.0))
+                        .py(px(2.0))
+                        .w_full()
+                        .truncate()
+                        .text_size(sp(12.0))
+                        .font_family(code.clone())
                         .text_color(theme.text_secondary)
-                        .child(description),
-                )
-                .child(buttons),
-        );
+                        .child(path.clone()),
+                );
+            }
+            let scroll = self.git_panel_conflict_files_scroll.clone();
+            let wheel = scroll.clone();
+            content = content.child(
+                div()
+                    .flex_none()
+                    .max_h(px(160.0))
+                    .flex()
+                    .flex_col()
+                    .relative()
+                    .rounded(px(8.0))
+                    .border(hairline())
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .id("git-panel-conflict-files")
+                            .max_h(px(160.0))
+                            .overflow_y_scroll()
+                            .track_scroll(&scroll)
+                            .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
+                            .child(files),
+                    )
+                    .child(scrollbar::vertical(
+                        &scroll,
+                        &self.git_panel_conflict_files_scrollbar,
+                    )),
+            );
+        }
+        let card = self.git_panel_modal_card(cx).child(content.child(buttons));
         Some(self.git_panel_modal_layer("git-panel-conflict-modal", card, cx))
     }
 
