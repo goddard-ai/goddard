@@ -1062,6 +1062,22 @@ projects.composer_placeholder:
   en: Describe a task…
 projects.send:
   en: Send
+projects.col_name:
+  en: Name
+projects.col_branch:
+  en: Branch
+projects.col_changes:
+  en: Changes
+projects.col_tasks:
+  en: Tasks
+projects.col_pull_request:
+  en: PR
+projects.col_divergence:
+  en: Ahead/Behind
+projects.col_last_commit:
+  en: Last commit
+projects.col_updated:
+  en: Updated
 
 onboarding.open_project_to_begin:
   en: Open a project to begin

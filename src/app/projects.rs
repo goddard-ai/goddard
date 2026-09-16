@@ -230,10 +230,18 @@ fn apply_row_select(
 }
 
 const PROJECTS_ROW_HEIGHT: f32 = 30.0;
+const PROJECTS_COLUMN_HEADER_HEIGHT: f32 = 26.0;
 const PROJECTS_HEADER_HEIGHT: f32 = 48.0;
 const PROJECTS_TOOLBAR_HEIGHT: f32 = 40.0;
 const PROJECTS_CONTENT_MAX_WIDTH: f32 = 900.0;
 const PROJECTS_CONTENT_MARGIN: f32 = 60.0;
+/// Fixed trailing column widths shared by the column header and the rows
+/// beneath it, so the table's cells line up.
+const PROJECTS_BRANCH_COL: f32 = 160.0;
+const PROJECTS_PR_COL: f32 = 56.0;
+const PROJECTS_DIVERGENCE_COL: f32 = 96.0;
+const PROJECTS_COUNT_COL: f32 = 64.0;
+const PROJECTS_UPDATED_COL: f32 = 76.0;
 
 /// Per-project page state: tab, per-tab filters, fetched tables, selection,
 /// and the docked composer. Kept in `Waku::projects_page_states` by project
@@ -288,13 +296,17 @@ impl ProjectsPageState {
             })
         }
         let composer = cx.new(|cx| {
-            TextInput::new(window, cx)
+            let mut input = TextInput::new(window, cx)
                 .accessibility_label(tr!("a11y.task_description"))
                 .placeholder(tr!("projects.composer_placeholder"))
                 .multi_line()
                 .auto_height()
                 .submit_on_enter()
-                .max_lines(6)
+                .max_lines(6);
+            // Matches the task composer's card inset — the padding lives in
+            // the field's scroll viewport so rows stay edge-to-edge.
+            input.set_padding_x(px(14.0));
+            input
         });
         cx.subscribe(&composer, |this: &mut Waku, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Submit(_)) {
@@ -1336,7 +1348,7 @@ impl Waku {
                 .hover(|style| style.bg(theme.overlay))
                 .child(
                     div()
-                        .text_size(sp(13.0))
+                        .text_size(sp(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.text)
                         .max_w(px(240.0))
@@ -1419,7 +1431,7 @@ impl Waku {
             .rounded(px(5.0))
             .flex()
             .items_center()
-            .text_size(sp(12.0))
+            .text_size(sp(15.0))
             .when(!enabled, |element| element.text_color(theme.text_ghost))
             .when(enabled, |element| {
                 let element = element
@@ -1515,7 +1527,7 @@ impl Waku {
                     .hover(|style| style.bg(theme.overlay))
                     .child(
                         div()
-                            .text_size(sp(12.0))
+                            .text_size(sp(15.0))
                             .text_color(theme.text_secondary)
                             .child(state_label),
                     )
@@ -1693,41 +1705,49 @@ impl Waku {
         div()
             .flex_1()
             .min_h_0()
-            .relative()
+            .flex()
+            .flex_col()
+            .child(projects_column_header(tab, &theme))
             .child(
-                list(list_state.clone(), move |index, _window, cx| {
-                    let Some(row) = rows.get(index) else {
-                        return div().into_any_element();
-                    };
-                    let row = match row {
-                        ProjectsListRow::Worktree { index } => {
-                            ProjectsListRow::Worktree { index: *index }
-                        }
-                        ProjectsListRow::RemoteHeader {
-                            remote,
-                            count,
-                            expanded,
-                        } => ProjectsListRow::RemoteHeader {
-                            remote: remote.clone(),
-                            count: *count,
-                            expanded: *expanded,
-                        },
-                        ProjectsListRow::Branch { index } => {
-                            ProjectsListRow::Branch { index: *index }
-                        }
-                    };
-                    entity
-                        .upgrade()
-                        .map(|entity| {
-                            entity.update(cx, |this, cx| {
-                                this.render_projects_row(project_id, row, cx)
-                            })
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(
+                        list(list_state.clone(), move |index, _window, cx| {
+                            let Some(row) = rows.get(index) else {
+                                return div().into_any_element();
+                            };
+                            let row = match row {
+                                ProjectsListRow::Worktree { index } => {
+                                    ProjectsListRow::Worktree { index: *index }
+                                }
+                                ProjectsListRow::RemoteHeader {
+                                    remote,
+                                    count,
+                                    expanded,
+                                } => ProjectsListRow::RemoteHeader {
+                                    remote: remote.clone(),
+                                    count: *count,
+                                    expanded: *expanded,
+                                },
+                                ProjectsListRow::Branch { index } => {
+                                    ProjectsListRow::Branch { index: *index }
+                                }
+                            };
+                            entity
+                                .upgrade()
+                                .map(|entity| {
+                                    entity.update(cx, |this, cx| {
+                                        this.render_projects_row(project_id, row, cx)
+                                    })
+                                })
+                                .unwrap_or_else(|| div().into_any_element())
                         })
-                        .unwrap_or_else(|| div().into_any_element())
-                })
-                .size_full(),
+                        .size_full(),
+                    )
+                    .child(scrollbar::vertical(&list_state, &scrollbar)),
             )
-            .child(scrollbar::vertical(&list_state, &scrollbar))
             .into_any_element()
     }
 
@@ -1792,14 +1812,14 @@ impl Waku {
             .child(icon("icons/globe.svg", 12.0, theme.text_tertiary))
             .child(
                 div()
-                    .text_size(sp(11.5))
+                    .text_size(sp(14.5))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.text_secondary)
                     .child(remote.clone()),
             )
             .child(
                 div()
-                    .text_size(sp(11.0))
+                    .text_size(sp(14.0))
                     .text_color(theme.text_tertiary)
                     .child(format!("{count}")),
             )
@@ -1940,74 +1960,103 @@ impl Waku {
             .copied()
             .unwrap_or(0);
 
-        let mut row = div()
+        // Column cells share widths with `projects_column_header` — every
+        // cell renders even when empty so the columns stay put.
+        let mut name_cell = div()
+            .flex_1()
             .min_w_0()
-            .child(icon("icons/folder.svg", 13.0, theme.text_secondary))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
             .child(
                 div()
                     .min_w_0()
-                    .flex_1()
                     .truncate()
-                    .text_size(sp(12.5))
+                    .text_size(sp(15.5))
                     .text_color(theme.text)
                     .child(name),
             );
         if entry.is_main {
-            row = row.child(projects_badge(tr!("projects.main_checkout"), &theme));
+            name_cell = name_cell.child(projects_badge(tr!("projects.main_checkout"), &theme));
         }
-        if let Some(branch) = &entry.branch {
-            row = row.child(projects_badge(branch.clone(), &theme));
-        } else {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .text_size(sp(11.0))
+
+        let branch_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_BRANCH_COL))
+            .min_w_0()
+            .flex()
+            .items_center()
+            .child(match &entry.branch {
+                Some(branch) => projects_badge(branch.clone(), &theme)
+                    .min_w_0()
+                    .truncate()
+                    .into_any_element(),
+                None => div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(14.0))
                     .text_color(theme.text_tertiary)
-                    .child(format!("@{}", &entry.head[..entry.head.len().min(8)])),
-            );
-        }
+                    .child(format!("@{}", &entry.head[..entry.head.len().min(8)]))
+                    .into_any_element(),
+            });
+
         let dirty = entry.dirty_files.unwrap_or(0);
+        let mut changes_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_COUNT_COL))
+            .flex()
+            .items_center()
+            .gap(px(4.0));
         if dirty > 0 {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .child(icon("icons/circle-dot.svg", 10.0, theme.warning))
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.warning)
-                            .child(format!("{dirty}")),
-                    ),
-            );
+            changes_cell = changes_cell
+                .child(icon("icons/circle-dot.svg", 10.0, theme.warning))
+                .child(
+                    div()
+                        .text_size(sp(14.0))
+                        .text_color(theme.warning)
+                        .child(format!("{dirty}")),
+                );
         }
+
+        let mut sessions_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_COUNT_COL))
+            .flex()
+            .items_center()
+            .gap(px(4.0));
         if sessions > 0 {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .child(icon("icons/message-square.svg", 10.0, theme.text_tertiary))
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(format!("{sessions}")),
-                    ),
-            );
+            sessions_cell = sessions_cell
+                .child(icon("icons/message-square.svg", 10.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .text_size(sp(14.0))
+                        .text_color(theme.text_tertiary)
+                        .child(format!("{sessions}")),
+                );
         }
-        if let Some(at) = entry.last_commit_at {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_tertiary)
-                    .child(sidebar::format_time_ago(unix_time().saturating_sub(at))),
+
+        let updated_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_UPDATED_COL))
+            .min_w_0()
+            .truncate()
+            .text_size(sp(14.0))
+            .text_color(theme.text_tertiary)
+            .child(
+                entry
+                    .last_commit_at
+                    .map(|at| sidebar::format_time_ago(unix_time().saturating_sub(at)))
+                    .unwrap_or_default(),
             );
-        }
+
+        let row = div()
+            .min_w_0()
+            .child(icon("icons/folder.svg", 13.0, theme.text_secondary))
+            .child(name_cell)
+            .child(branch_cell)
+            .child(changes_cell)
+            .child(sessions_cell)
+            .child(updated_cell);
 
         self.projects_row_frame(
             project_id,
@@ -2044,14 +2093,20 @@ impl Waku {
         let behind = entry.behind;
         let pr = state.prs_by_head.borrow().get(&name).cloned();
 
-        // Branch names keep their width — the subject is the truncating cell.
-        let mut row = div()
+        // Column cells share widths with `projects_column_header` — every
+        // cell renders even when empty so the columns stay put. The name and
+        // subject cells split the remaining width evenly.
+        let mut name_cell = div()
+            .flex_1()
             .min_w_0()
-            .child(icon("icons/git-branch.svg", 13.0, theme.text_secondary))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
             .child(
                 div()
-                    .flex_none()
-                    .text_size(sp(12.5))
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(15.5))
                     .text_color(theme.text)
                     .child(match &remote {
                         Some(remote) => format!("{remote}/{name}"),
@@ -2059,7 +2114,7 @@ impl Waku {
                     }),
             );
         if let Some(path) = &checked_out_in {
-            row = row.child(
+            name_cell = name_cell.child(
                 div()
                     .id(SharedString::from(format!("projects-checked-out-{key:?}")))
                     .flex_none()
@@ -2072,16 +2127,23 @@ impl Waku {
                     .child(icon("icons/folder-open.svg", 11.0, theme.accent)),
             );
         }
+
+        let mut pr_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_PR_COL))
+            .min_w_0()
+            .flex()
+            .items_center();
         if let Some(pr) = pr {
             let (color, url) = (
                 sidebar::sidebar_pull_request_color(&theme, sidebar::pull_request_class(&pr)),
                 pr.url.clone(),
             );
-            row = row.child(
+            pr_cell = pr_cell.child(
                 div()
                     .id(SharedString::from(format!("projects-pr-{}", pr.number)))
                     .flex_none()
-                    .text_size(sp(11.0))
+                    .text_size(sp(14.0))
                     .text_color(color)
                     .cursor_default()
                     .tooltip(Tooltip::text(tr!("projects.open_pull_request")))
@@ -2092,36 +2154,50 @@ impl Waku {
                     })),
             );
         }
-        match (ahead, behind) {
-            (ahead, behind) if ahead.unwrap_or(0) > 0 || behind.unwrap_or(0) > 0 => {
-                row = row.child(
-                    div()
-                        .flex_none()
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(format!("↑{} ↓{}", ahead.unwrap_or(0), behind.unwrap_or(0))),
-                );
-            }
-            _ => {}
-        }
-        row = row.child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(sp(11.5))
-                .text_color(theme.text_tertiary)
-                .child(subject.unwrap_or_default()),
-        );
-        if let Some(at) = at {
-            row = row.child(
+
+        let mut divergence_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_DIVERGENCE_COL))
+            .min_w_0()
+            .flex()
+            .items_center();
+        if ahead.unwrap_or(0) > 0 || behind.unwrap_or(0) > 0 {
+            divergence_cell = divergence_cell.child(
                 div()
-                    .flex_none()
-                    .text_size(sp(11.0))
+                    .text_size(sp(14.0))
                     .text_color(theme.text_tertiary)
-                    .child(sidebar::format_time_ago(unix_time().saturating_sub(at))),
+                    .child(format!("↑{} ↓{}", ahead.unwrap_or(0), behind.unwrap_or(0))),
             );
         }
+
+        let subject_cell = div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .text_size(sp(14.5))
+            .text_color(theme.text_tertiary)
+            .child(subject.unwrap_or_default());
+
+        let updated_cell = div()
+            .flex_none()
+            .w(px(PROJECTS_UPDATED_COL))
+            .min_w_0()
+            .truncate()
+            .text_size(sp(14.0))
+            .text_color(theme.text_tertiary)
+            .child(
+                at.map(|at| sidebar::format_time_ago(unix_time().saturating_sub(at)))
+                    .unwrap_or_default(),
+            );
+
+        let row = div()
+            .min_w_0()
+            .child(icon("icons/git-branch.svg", 13.0, theme.text_secondary))
+            .child(name_cell)
+            .child(pr_cell)
+            .child(divergence_cell)
+            .child(subject_cell)
+            .child(updated_cell);
 
         self.projects_row_frame(
             project_id,
@@ -2467,7 +2543,7 @@ impl Waku {
                 .bg(theme.raised)
                 .child(
                     div()
-                        .text_size(sp(12.0))
+                        .text_size(sp(15.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.text)
                         .child(tr!("projects.selected_count", count = count)),
@@ -2482,7 +2558,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .cursor_default()
-                        .text_size(sp(11.5))
+                        .text_size(sp(14.5))
                         .text_color(theme.text_secondary)
                         .hover(|style| style.bg(theme.overlay).text_color(theme.text))
                         .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
@@ -2504,7 +2580,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(5.0))
-                        .text_size(sp(11.5))
+                        .text_size(sp(14.5))
                         .when(disabled, |element| element.text_color(theme.text_ghost))
                         .when(!disabled, |element| {
                             element
@@ -2602,14 +2678,14 @@ impl Waku {
          -> AnyElement {
             div()
                 .id(id)
-                .h(px(20.0))
+                .h(px(22.0))
                 .px(px(7.0))
                 .rounded(px(6.0))
                 .bg(theme.inset)
                 .flex()
                 .items_center()
                 .gap(px(5.0))
-                .text_size(sp(11.0))
+                .text_size(sp(14.0))
                 .text_color(theme.text_secondary)
                 .child(label)
                 .when(removable, |element| {
@@ -2639,10 +2715,13 @@ impl Waku {
                 .into_any_element()
         };
 
+        let no_providers = self.model_picker_has_no_providers();
+        let can_send = has_content && !no_providers;
+
         let mut chips = div()
             .flex_none()
             .w_full()
-            .px(px(12.0))
+            .px(px(10.0))
             .pb(px(6.0))
             .flex()
             .items_center()
@@ -2667,63 +2746,152 @@ impl Waku {
             ));
         }
 
+        // The same card the new-task composer docks — chips carry the
+        // page's context where attachments would sit, the field fills the
+        // card, and the footer row pins the send action right.
         div()
             .flex_none()
             .w_full()
-            .border_t(hairline())
-            .border_color(theme.border)
-            .bg(theme.composer)
-            .pt(px(8.0))
-            .flex()
-            .flex_col()
-            .child(chips)
+            .px(px(20.0 - COMPOSER_OVERHANG))
+            .py(px(8.0))
             .child(
                 div()
                     .w_full()
-                    .px(px(12.0))
-                    .pb(px(10.0))
+                    .rounded(px(16.0))
+                    .border(hairline())
+                    .border_color(theme.border)
+                    .bg(theme.composer)
+                    .py(px(10.0))
                     .flex()
-                    .items_end()
-                    .gap(px(8.0))
-                    .child(div().flex_1().min_w_0().child(composer))
+                    .flex_col()
+                    .child(chips)
+                    .child(div().pt(px(2.0)).child(composer))
                     .child(
                         div()
-                            .id("projects-send")
-                            .w(px(26.0))
-                            .h(px(26.0))
-                            .rounded(px(7.0))
+                            .mt(px(8.0))
+                            .px(px(10.0))
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .when(has_content, |element| element.bg(theme.accent))
-                            .when(!has_content, |element| element.bg(theme.inset))
-                            .hover(|style| {
-                                style.bg(if has_content {
-                                    theme.accent
-                                } else {
-                                    theme.overlay
-                                })
-                            })
-                            .focus_visible(|style| {
-                                style.border(hairline()).border_color(theme.accent)
-                            })
-                            .tooltip(Tooltip::text(tr!("projects.send")))
-                            .child(icon(
-                                "icons/arrow-up.svg",
-                                13.0,
-                                if has_content {
-                                    theme.on_inverse
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.projects_submit(cx);
-                            })),
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .id("projects-send")
+                                    .w(px(26.0))
+                                    .h(px(26.0))
+                                    .flex_none()
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(if can_send {
+                                        theme.inverse
+                                    } else {
+                                        theme.overlay_strong
+                                    })
+                                    .when(can_send, |element| {
+                                        element
+                                            .cursor_default()
+                                            .hover(|style| style.opacity(0.9))
+                                            .active(|style| style.opacity(0.8))
+                                    })
+                                    .focus_visible(|style| {
+                                        style.border(hairline()).border_color(theme.accent)
+                                    })
+                                    .child(icon(
+                                        "icons/arrow-up.svg",
+                                        16.0,
+                                        if can_send {
+                                            theme.on_inverse
+                                        } else {
+                                            theme.text_ghost
+                                        },
+                                    ))
+                                    .tooltip(Tooltip::text(if no_providers {
+                                        tr!("composer.no_providers")
+                                    } else {
+                                        tr!("projects.send")
+                                    }))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.projects_submit(cx);
+                                    })),
+                            ),
                     ),
             )
             .into_any_element()
+    }
+}
+
+/// The pinned column header above a Worktrees/Branches table. Its cells use
+/// the same padding, gaps, and widths as the rows so each label sits over
+/// its column.
+fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
+    let label = |text: String| {
+        div()
+            .min_w_0()
+            .truncate()
+            .text_size(sp(13.0))
+            .text_color(theme.text_tertiary)
+            .child(text)
+    };
+    let cell = |width: f32, text: String| {
+        div()
+            .flex_none()
+            .w(px(width))
+            .min_w_0()
+            .flex()
+            .items_center()
+            .child(label(text))
+    };
+    let row = div()
+        .flex_none()
+        .w_full()
+        .h(px(PROJECTS_COLUMN_HEADER_HEIGHT))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .border_b(hairline())
+        .border_color(theme.border)
+        // Covers the rows' leading icon so labels align with cell text.
+        .child(div().flex_none().w(px(13.0)));
+    match tab {
+        ProjectsTab::Worktrees => row
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .child(label(tr!("projects.col_name"))),
+            )
+            .child(cell(PROJECTS_BRANCH_COL, tr!("projects.col_branch")))
+            .child(cell(PROJECTS_COUNT_COL, tr!("projects.col_changes")))
+            .child(cell(PROJECTS_COUNT_COL, tr!("projects.col_tasks")))
+            .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
+        ProjectsTab::Branches => row
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .child(label(tr!("projects.col_branch"))),
+            )
+            .child(cell(PROJECTS_PR_COL, tr!("projects.col_pull_request")))
+            .child(cell(
+                PROJECTS_DIVERGENCE_COL,
+                tr!("projects.col_divergence"),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .child(label(tr!("projects.col_last_commit"))),
+            )
+            .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
+        _ => row,
     }
 }
 
@@ -2731,13 +2899,13 @@ impl Waku {
 fn projects_badge(label: String, theme: &Theme) -> Div {
     div()
         .flex_none()
-        .h(px(18.0))
+        .h(px(20.0))
         .px(px(6.0))
         .rounded(px(4.0))
         .bg(theme.overlay)
         .flex()
         .items_center()
-        .text_size(sp(10.5))
+        .text_size(sp(13.5))
         .text_color(theme.text_secondary)
         .child(label)
 }
