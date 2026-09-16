@@ -1,10 +1,12 @@
 //! Big Picture mode: a ⌘0 overlay of the sessions most worth a glance.
 //!
-//! Up to four cards sit side by side — tasks waiting on input first, then
-//! unread completions, then running work, then whatever the sidebar saw most
-//! recently — each carrying a live tail of its transcript. The card set is
-//! reconciled every frame the overlay is open, so a session that newly blocks
-//! slides in while a settled one fades out rather than the row jumping.
+//! Cards fill as much of a grid as the window affords — up to eight across
+//! on a wide screen, further rows when it's tall — tasks waiting on input
+//! first, then unread completions, then running work, then whatever the
+//! sidebar saw most recently — each carrying a live tail of its transcript.
+//! The card set is reconciled every frame the overlay is open, so a session
+//! that newly blocks slides in while a settled one fades out rather than the
+//! grid jumping.
 //!
 //! Clicking a card never navigates: it targets the docked composer at that
 //! session, and clicking again — or sending — returns it to new-task mode.
@@ -16,19 +18,30 @@ use gpui::{KeyBinding, actions};
 
 use super::*;
 
-pub const MAX_CARDS: usize = 4;
+pub const MAX_CARDS: usize = 8;
 const CARD_GAP: f32 = 16.0;
 const CARD_RADIUS: f32 = 14.0;
-/// Distance from the window's side edges to the card row and composer.
+/// Distance from the window's side edges to the card grid and composer.
 const EDGE_MARGIN: f32 = 32.0;
 /// Clears the 48px titlebar — and the traffic lights inside it — plus a
 /// comfortable gap before the first card.
 const TOP_MARGIN: f32 = 64.0;
-/// Air between the card row's bottom edge and the docked composer.
+/// Air between the card grid's bottom edge and the docked composer.
 const CARD_COMPOSER_GAP: f32 = 20.0;
 /// Narrowest a card can get before the layout would rather clip than crush
 /// the header row — only reached on very small windows.
 const CARD_MIN_WIDTH: f32 = 140.0;
+/// The width a card wants. Columns are how many of these the window affords:
+/// four across a normal screen, up to eight on a wide one.
+const CARD_TARGET_WIDTH: f32 = 300.0;
+/// The shortest row worth adding. Taller windows stack a second (or further)
+/// row of cards instead of stretching one row past readability.
+const CARD_MIN_ROW_HEIGHT: f32 = 240.0;
+/// The composer lane's height before it has ever been measured — a prompt's
+/// single-line footprint, used for the first open's grid math.
+const COMPOSER_HEIGHT_FALLBACK: f32 = 96.0;
+/// The hint line's footprint below the composer.
+const HINT_HEIGHT: f32 = 16.0;
 const COMPOSER_BOTTOM_MARGIN: f32 = 28.0;
 const HINT_BOTTOM_MARGIN: f32 = 10.0;
 const CARD_TRANSITION: Duration = Duration::from_millis(220);
@@ -63,20 +76,24 @@ pub fn init(cx: &mut App) {
 }
 
 /// A mounted card. Slots outlive their session's rank so an evicted card can
-/// fade where it stood instead of vanishing mid-row.
+/// fade where it stood instead of vanishing mid-grid.
 #[derive(Clone)]
 struct BigPictureSlot {
     session_id: Uuid,
-    /// Column the card rests at; only an index or count change re-runs the
-    /// slide, so a window resize moves cards without replaying a transition
-    /// per frame.
+    /// Flat row-major position in the grid; only an index or count change
+    /// re-runs the slide, so a window resize moves cards without replaying a
+    /// transition per frame.
     index: usize,
     left: f32,
     /// Where the in-flight transition started, for FLIP slides on re-sort.
     from_left: f32,
-    /// Fill width this frame; resized live, so a viewport drag never replays.
+    top: f32,
+    from_top: f32,
+    /// Fill size this frame; resized live, so a viewport drag never replays.
     width: f32,
     from_width: f32,
+    height: f32,
+    from_height: f32,
     leaving: bool,
     /// Fresh mounts fade up; reordered or surviving cards only slide.
     entering: bool,
@@ -107,7 +124,7 @@ pub(super) struct BigPictureUi {
     /// persistently failing load cannot re-spawn (and re-toast) every frame.
     hydrate_requested: HashSet<Uuid>,
     /// Card count from the last reconcile; a change means a card entered or
-    /// left — which animates width — while an unchanged count means any
+    /// left — which animates geometry — while an unchanged count means any
     /// geometry delta is a viewport resize and stays instant.
     last_row_count: usize,
     /// Blurred snapshot of the frame underneath, captured as the overlay
@@ -180,8 +197,13 @@ fn big_picture_arrow_target(
 /// The card order for this frame: tier first, then most recently touched.
 /// Waiting sessions rank by `updated_at` — the moment they parked — matching
 /// `next_unread_session`; everything else ranks by sidebar recency, with the
-/// unseen-completion stamp counting as activity.
-fn big_picture_order(sessions: &[AgentSession], unseen: &HashMap<Uuid, u64>) -> Vec<Uuid> {
+/// unseen-completion stamp counting as activity. `limit` is how many cards
+/// this frame's grid can afford.
+fn big_picture_order(
+    sessions: &[AgentSession],
+    unseen: &HashMap<Uuid, u64>,
+    limit: usize,
+) -> Vec<Uuid> {
     let mut eligible = sessions
         .iter()
         .filter(|session| session.has_started() && session.archived_at.is_none())
@@ -201,9 +223,53 @@ fn big_picture_order(sessions: &[AgentSession], unseen: &HashMap<Uuid, u64>) -> 
     });
     eligible
         .into_iter()
-        .take(MAX_CARDS)
+        .take(limit)
         .map(|session| session.id)
         .collect()
+}
+
+/// One card's resting geometry inside the grid, in grid-local coordinates —
+/// row 0 sits under `TOP_MARGIN`.
+#[derive(Clone, Copy)]
+struct CardGeometry {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+/// Lay out `count` cards row-major over `rows` rows, each row balanced to
+/// within one card of the next. Every card takes the grid's uniform size; a
+/// short row centers itself rather than hugging the left edge.
+fn big_picture_card_geometry(
+    count: usize,
+    rows: usize,
+    row_width: f32,
+    card_width: f32,
+    card_height: f32,
+) -> Vec<CardGeometry> {
+    let base = count / rows;
+    let extra = count % rows;
+    let mut cards = Vec::with_capacity(count);
+    for row in 0..rows {
+        // Even the rows out: the first `extra` rows carry one card more.
+        let row_count = base + usize::from(row < extra);
+        let row_span =
+            row_count as f32 * card_width + row_count.saturating_sub(1) as f32 * CARD_GAP;
+        let row_left = ((row_width - row_span) / 2.0).max(0.0);
+        for column in 0..row_count {
+            if cards.len() == count {
+                break;
+            }
+            cards.push(CardGeometry {
+                left: row_left + column as f32 * (card_width + CARD_GAP),
+                top: row as f32 * (card_height + CARD_GAP),
+                width: card_width,
+                height: card_height,
+            });
+        }
+    }
+    cards
 }
 
 /// A card's transcript tail: the last few visible messages, newest last,
@@ -280,7 +346,7 @@ impl Waku {
         self.big_picture.open_seq = self.big_picture.open_seq.wrapping_add(1);
         self.big_picture.last_row_count = 0;
         self.big_picture.highlighted =
-            big_picture_order(&self.state.sessions, &self.state.unseen_completions)
+            big_picture_order(&self.state.sessions, &self.state.unseen_completions, MAX_CARDS)
                 .first()
                 .copied();
         self.sync_big_picture_placeholder(cx);
@@ -381,7 +447,8 @@ impl Waku {
         self.set_big_picture_target(target, cx);
     }
 
-    /// The ids arrow keys and Enter walk — the live cards, in display order.
+    /// The ids arrow keys and Enter walk — the live cards, in row-major
+    /// display order.
     fn big_picture_navigable(&self) -> Vec<Uuid> {
         let mut slots = self
             .big_picture
@@ -389,7 +456,7 @@ impl Waku {
             .iter()
             .filter(|slot| !slot.leaving)
             .collect::<Vec<_>>();
-        slots.sort_by_key(|slot| slot.left as i64);
+        slots.sort_by_key(|slot| slot.index);
         slots.iter().map(|slot| slot.session_id).collect()
     }
 
@@ -456,7 +523,7 @@ impl Waku {
     fn reconcile_big_picture_slots(
         &mut self,
         desired: &[Uuid],
-        card_width: f32,
+        geometry: &[CardGeometry],
         cx: &mut Context<Self>,
     ) {
         for session_id in desired {
@@ -465,7 +532,6 @@ impl Waku {
             }
         }
         let mut seq = self.big_picture.anim_seq;
-        let step = card_width + CARD_GAP;
         // A slot whose session ranked back in before its exit finished just
         // rejoins the row — the animation restart reads as a fade back up.
         for slot in &mut self.big_picture.slots {
@@ -511,12 +577,17 @@ impl Waku {
             })
             .detach();
         }
-        // A card arriving or leaving changes every card's width, so those
-        // slides animate. A viewport resize does not — same count, new width,
+        // A card arriving or leaving changes every card's geometry, so those
+        // slides animate. A viewport resize does not — same count, new size,
         // no replayed transition chasing the drag.
         let count_changed = self.big_picture.last_row_count != desired.len();
         for (index, session_id) in desired.iter().enumerate() {
-            let left = index as f32 * step;
+            let CardGeometry {
+                left,
+                top,
+                width,
+                height,
+            } = geometry[index];
             match self
                 .big_picture
                 .slots
@@ -524,16 +595,26 @@ impl Waku {
                 .find(|slot| slot.session_id == *session_id)
             {
                 Some(slot) if !slot.leaving => {
-                    if slot.index != index || (count_changed && slot.width != card_width) {
+                    if slot.index != index
+                        || (count_changed
+                            && (slot.left != left
+                                || slot.top != top
+                                || slot.width != width
+                                || slot.height != height))
+                    {
                         slot.from_left = slot.left;
+                        slot.from_top = slot.top;
                         slot.from_width = slot.width;
+                        slot.from_height = slot.height;
                         slot.index = index;
                         slot.entering = false;
                         seq += 1;
                         slot.anim_seq = seq;
                     }
                     slot.left = left;
-                    slot.width = card_width;
+                    slot.top = top;
+                    slot.width = width;
+                    slot.height = height;
                 }
                 Some(_) => {}
                 None => {
@@ -543,8 +624,12 @@ impl Waku {
                         index,
                         left,
                         from_left: left,
-                        width: card_width,
-                        from_width: card_width,
+                        top,
+                        from_top: top,
+                        width,
+                        from_width: width,
+                        height,
+                        from_height: height,
                         leaving: false,
                         entering: true,
                         enter_delay: CARD_STAGGER * index as u32,
@@ -677,8 +762,12 @@ impl Waku {
         let entering = slot.entering;
         let left = slot.left;
         let from_left = slot.from_left;
+        let top = slot.top;
+        let from_top = slot.from_top;
         let width = slot.width;
         let from_width = slot.from_width;
+        let height = slot.height;
+        let from_height = slot.from_height;
         let enter_delay = slot.enter_delay;
         let anim_id =
             SharedString::from(format!("big-picture-card-{session_id}-{}", slot.anim_seq));
@@ -846,10 +935,10 @@ impl Waku {
         }
         div()
             .absolute()
-            .top_0()
-            .h_full()
             .left(px(left))
+            .top(px(top))
             .w(px(width))
+            .h(px(height))
             .child(card)
             .with_animation(
                 anim_id,
@@ -869,23 +958,24 @@ impl Waku {
                     } else {
                         delta
                     };
-                    let element = element
+                    let mut top = from_top + (top - from_top) * delta;
+                    if leaving {
+                        top += 10.0 * delta;
+                    } else if entering {
+                        top += 14.0 * (1.0 - delta);
+                    }
+                    element
                         .left(px(from_left + (left - from_left) * delta))
+                        .top(px(top))
                         .w(px(from_width + (width - from_width) * delta))
+                        .h(px(from_height + (height - from_height) * delta))
                         .opacity(if leaving {
                             1.0 - delta
                         } else if entering {
                             delta
                         } else {
                             1.0
-                        });
-                    if leaving {
-                        element.top(px(10.0 * delta))
-                    } else if entering {
-                        element.top(px(14.0 * (1.0 - delta)))
-                    } else {
-                        element
-                    }
+                        })
                 },
             )
             .into_any_element()
@@ -984,13 +1074,41 @@ impl Waku {
         }
         let theme = Theme::current(cx);
         let viewport = window.viewport_size();
-        let desired = big_picture_order(&self.state.sessions, &self.state.unseen_completions);
-        // Cards stretch to fill the row: N sessions split the width between
-        // the screen-edge margins and the inter-card gaps.
-        let count = desired.len().max(1) as f32;
+        // The grid fills what the window affords: columns come from width at
+        // the card's target size, extra rows from leftover height. The composer
+        // lane's last measured height stands in for the overlay's docked one —
+        // the same card renders in both places.
         let row_width = (f32::from(viewport.width) - EDGE_MARGIN * 2.0).max(0.0);
-        let card_width = ((row_width - CARD_GAP * (count - 1.0)) / count).max(CARD_MIN_WIDTH);
-        self.reconcile_big_picture_slots(&desired, card_width, cx);
+        let composer_height = self.composer_lane_height.get().max(COMPOSER_HEIGHT_FALLBACK);
+        let grid_height = (f32::from(viewport.height)
+            - TOP_MARGIN
+            - CARD_COMPOSER_GAP
+            - composer_height
+            - COMPOSER_BOTTOM_MARGIN
+            - HINT_HEIGHT
+            - HINT_BOTTOM_MARGIN)
+            .max(0.0);
+        let columns = (((row_width + CARD_GAP) / (CARD_TARGET_WIDTH + CARD_GAP)) as usize)
+            .clamp(1, MAX_CARDS);
+        let max_rows = (((grid_height + CARD_GAP) / (CARD_MIN_ROW_HEIGHT + CARD_GAP)) as usize)
+            .clamp(1, MAX_CARDS);
+        let desired = big_picture_order(
+            &self.state.sessions,
+            &self.state.unseen_completions,
+            (columns * max_rows).min(MAX_CARDS),
+        );
+        let rows = desired.len().div_ceil(columns).max(1);
+        let card_width =
+            ((row_width - CARD_GAP * (columns - 1) as f32) / columns as f32).max(CARD_MIN_WIDTH);
+        let card_height = (grid_height - CARD_GAP * (rows - 1) as f32) / rows as f32;
+        let geometry = big_picture_card_geometry(
+            desired.len(),
+            rows,
+            row_width,
+            card_width,
+            card_height,
+        );
+        self.reconcile_big_picture_slots(&desired, &geometry, cx);
         let slots = self.big_picture.slots.clone();
         let cards = slots
             .iter()
@@ -1120,7 +1238,7 @@ mod tests {
         ];
 
         assert_eq!(
-            big_picture_order(&sessions, &unseen),
+            big_picture_order(&sessions, &unseen, MAX_CARDS),
             vec![waiting.id, unread_idle.id, running.id, settled.id]
         );
     }
@@ -1132,25 +1250,29 @@ mod tests {
         let sessions = vec![older_wait.clone(), newer_wait.clone()];
 
         assert_eq!(
-            big_picture_order(&sessions, &HashMap::new()),
+            big_picture_order(&sessions, &HashMap::new(), MAX_CARDS),
             vec![newer_wait.id, older_wait.id]
         );
     }
 
     #[test]
-    fn the_grid_caps_at_four_and_skips_unstarted_drafts() {
+    fn the_grid_caps_at_the_frame_limit_and_skips_unstarted_drafts() {
         let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         let mut sessions = vec![draft];
-        for index in 0..6 {
+        for index in 0..10 {
             sessions.push(session(SessionStatus::Idle, index as u64 + 1, 0));
         }
-        let ordered = big_picture_order(&sessions, &HashMap::new());
+        let ordered = big_picture_order(&sessions, &HashMap::new(), 4);
 
-        assert_eq!(ordered.len(), MAX_CARDS);
+        assert_eq!(ordered.len(), 4);
         assert!(
             !sessions[0..1]
                 .iter()
                 .any(|draft| ordered.contains(&draft.id))
+        );
+        assert_eq!(
+            big_picture_order(&sessions, &HashMap::new(), MAX_CARDS).len(),
+            MAX_CARDS
         );
     }
 
@@ -1164,9 +1286,23 @@ mod tests {
 
         // The unread task still leads on tier, not recency.
         assert_eq!(
-            big_picture_order(&sessions, &unseen),
+            big_picture_order(&sessions, &unseen, MAX_CARDS),
             vec![stale_unread.id, recent_read.id]
         );
+    }
+
+    #[test]
+    fn geometry_balances_rows_and_centers_the_short_one() {
+        // Seven cards over two rows: 4 + 3, both rows centered on the grid.
+        let cards = big_picture_card_geometry(7, 2, 1000.0, 235.0, 400.0);
+        assert_eq!(cards.len(), 7);
+        let full_row_span = 4.0 * 235.0 + 3.0 * CARD_GAP;
+        assert_eq!(cards[0].left, (1000.0 - full_row_span) / 2.0);
+        assert_eq!(cards[0].top, 0.0);
+        assert_eq!(cards[4].top, 416.0);
+        // The three-card row is centered: equal margins on both edges.
+        let short_row_span = 3.0 * 235.0 + 2.0 * CARD_GAP;
+        assert_eq!(cards[4].left, (1000.0 - short_row_span) / 2.0);
     }
 
     #[test]
