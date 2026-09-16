@@ -21,13 +21,11 @@ const MAX_TASKS: usize = 10;
 const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
-const MODAL_REVEAL_DELAY: Duration = Duration::from_millis(150);
 
 /// Runtime-only switcher state. Restoration deliberately seeds only the
 /// selected task: opening old windows must not masquerade as user recency.
 pub(super) struct TaskSwitcherUi {
     open: bool,
-    visible: bool,
     ordered_session_ids: Vec<Uuid>,
     highlighted_session_id: Option<Uuid>,
     original_session_id: Option<Uuid>,
@@ -42,7 +40,6 @@ impl TaskSwitcherUi {
     pub(super) fn new(focus: FocusHandle) -> Self {
         Self {
             open: false,
-            visible: false,
             ordered_session_ids: Vec::new(),
             highlighted_session_id: None,
             original_session_id: None,
@@ -108,7 +105,6 @@ impl TaskSwitcherUi {
 
     fn dismiss(&mut self) -> Option<FocusHandle> {
         self.open = false;
-        self.visible = false;
         self.ordered_session_ids.clear();
         self.highlighted_session_id = None;
         self.original_session_id = None;
@@ -318,7 +314,6 @@ impl Waku {
         };
 
         self.task_switcher.open = true;
-        self.task_switcher.visible = false;
         self.task_switcher.ordered_session_ids = ordered;
         self.task_switcher.highlighted_session_id = self
             .task_switcher
@@ -331,7 +326,6 @@ impl Waku {
         let generation = self.task_switcher.generation;
         let focus = self.task_switcher.focus.clone();
         let weak = cx.entity().downgrade();
-        let window_handle = window.window_handle();
 
         if !open_menus.is_empty() {
             window.defer(cx, move |window, cx| {
@@ -341,47 +335,23 @@ impl Waku {
             });
         }
 
-        // The card only paints once Control has been held for a beat: a
-        // quicker chord still commits on release without flashing the
-        // overlay, and the generation bump in dismiss() retires the timer.
-        cx.spawn(async move |_, cx| {
-            cx.background_executor().timer(MODAL_REVEAL_DELAY).await;
-            let _ = window_handle.update(cx, |_, window, cx| {
-                let reveal = weak
-                    .update(cx, |this, cx| {
-                        let reveal = this.task_switcher.open
-                            && !this.task_switcher.visible
-                            && this.task_switcher.generation == generation;
-                        if reveal {
-                            this.task_switcher.visible = true;
-                            cx.notify();
-                        }
-                        reveal
+        // Deferred overlays join the dispatch tree after their deferred
+        // paint. Two frames guarantees the switcher focus can resolve, while
+        // the root modifier listener still catches a very quick Control
+        // release.
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| {
+                let should_focus = weak
+                    .update(cx, |this, _| {
+                        this.task_switcher.open
+                            && this.task_switcher.generation == generation
                     })
                     .unwrap_or(false);
-                if !reveal {
-                    return;
+                if should_focus {
+                    window.focus(&focus, cx);
                 }
-                // Deferred overlays join the dispatch tree after their
-                // deferred paint. Two frames guarantees the switcher focus
-                // can resolve, while the root modifier listener still
-                // catches a very quick Control release.
-                window.on_next_frame(move |window, _| {
-                    window.on_next_frame(move |window, cx| {
-                        let should_focus = weak
-                            .update(cx, |this, _| {
-                                this.task_switcher.open
-                                    && this.task_switcher.generation == generation
-                            })
-                            .unwrap_or(false);
-                        if should_focus {
-                            window.focus(&focus, cx);
-                        }
-                    });
-                });
             });
-        })
-        .detach();
+        });
         cx.notify();
     }
 
@@ -567,10 +537,7 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.task_switcher.open
-            || !self.task_switcher.visible
-            || self.task_switcher.ordered_session_ids.is_empty()
-        {
+        if !self.task_switcher.open || self.task_switcher.ordered_session_ids.is_empty() {
             return None;
         }
         let theme = Theme::current(cx);
@@ -650,7 +617,7 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.cancel_task_switcher(window, cx)),
             )
-            .child(motion::modal_enter("task-switcher-card-enter", card));
+            .child(card);
         Some(gpui::deferred(layer).with_priority(6).into_any_element())
     }
 }
