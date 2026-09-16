@@ -44,6 +44,8 @@ mod platform;
 mod query;
 mod review_diff;
 mod shell_integration;
+#[cfg(unix)]
+mod ssh;
 mod terminal;
 mod theme;
 mod ui;

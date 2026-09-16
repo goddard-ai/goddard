@@ -493,10 +493,22 @@ daemon.remote_host_token_description:
   en: The bearer token from that daemon's connection details.
 daemon.remote_host_token_placeholder:
   en: Paste the daemon token
+daemon.remote_host_ssh:
+  en: SSH destination
+daemon.remote_host_ssh_description:
+  en: Connect over SSH instead — a user@host destination or a Host alias from ~/.ssh/config. Goddard provisions and forwards the daemon itself; address and token are not needed.
+daemon.remote_host_ssh_placeholder:
+  en: user@host or an ssh config alias
 daemon.remote_host_required:
-  en: Address and token are required.
+  en: Enter an SSH destination, or both an address and a token.
 daemon.remote_host_save:
   en: Save host
+daemon.ssh_password_title:
+  en: SSH authentication
+daemon.ssh_password_label:
+  en: Password or passphrase
+daemon.ssh_password_submit:
+  en: Connect
 sidebar.offline:
   en: Offline
 daemon.restart_failed:

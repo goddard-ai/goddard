@@ -166,8 +166,17 @@ fn default_right_panel_width() -> f32 {
 pub struct RemoteHost {
     pub id: Uuid,
     pub name: String,
+    /// A WebSocket URL or `host:port` for a daemon reachable directly. Sits
+    /// empty on SSH hosts — their forwarded endpoint is ephemeral.
     pub address: String,
+    /// The daemon's bearer token. Empty on SSH hosts: the token lives on the
+    /// remote in `~/.waku/daemon-token` and is read during provisioning.
     pub token: String,
+    /// A `user@host` destination (or `~/.ssh/config` Host alias). When set,
+    /// the connection runs over the platform `ssh` binary instead of a
+    /// direct WebSocket and `address`/`token` are unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_destination: Option<String>,
 }
 
 /// One daemon's catalog contribution: its project list plus the list-only

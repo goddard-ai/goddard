@@ -37,6 +37,64 @@ fn start_driver(mut request: DriverStartRequest, cwd: PathBuf) -> anyhow::Result
     Ok(PreparedDriver { handle, events })
 }
 
+/// What a remote connect attempt produced: the supervisor plus, for ssh
+/// hosts, the transport whose tunnel and forward keep the socket alive.
+pub(super) struct RemoteDaemonLink {
+    supervisor: waku_client::DaemonSupervisor,
+    #[cfg(unix)]
+    ssh: Option<SshLink>,
+}
+
+/// A live ssh channel: the ControlMaster-managed transport and the local
+/// port its `-L` forward owns. The port must stay fixed so the supervisor's
+/// reconnects keep working after the master restarts.
+#[cfg(unix)]
+#[derive(Clone)]
+pub(super) struct SshLink {
+    transport: crate::ssh::SshTransport,
+    local_port: u16,
+}
+
+/// One connect attempt against a remote host: over ssh when the record has
+/// a destination, direct websocket otherwise. Blocking — run on the
+/// background executor.
+fn connect_remote_supervisor(
+    host: &waku_client::persistence::RemoteHost,
+) -> anyhow::Result<RemoteDaemonLink> {
+    #[cfg(unix)]
+    if let Some(destination) = host.ssh_destination.as_deref() {
+        let transport = crate::ssh::SshTransport::new(host.id, destination);
+        let (local_port, supervisor) = transport.connect()?;
+        return Ok(RemoteDaemonLink {
+            supervisor,
+            ssh: Some(SshLink {
+                transport,
+                local_port,
+            }),
+        });
+    }
+    #[cfg(not(unix))]
+    if host.ssh_destination.is_some() {
+        anyhow::bail!("ssh remotes are not supported on this platform");
+    }
+    let supervisor = waku_client::DaemonSupervisor::connect(&host.address, host.token.clone())?;
+    Ok(RemoteDaemonLink {
+        supervisor,
+        #[cfg(unix)]
+        ssh: None,
+    })
+}
+
+/// A password/passphrase request ssh is waiting on, presented as a modal.
+#[cfg(unix)]
+pub(super) struct SshPrompt {
+    /// The prompt text ssh sent the askpass helper, e.g. `host's password:`.
+    pub prompt: String,
+    request: crate::ssh::SshAskpassRequest,
+    /// Created by the dialog's render path, which owns a `Window`.
+    pub input: Option<Entity<crate::input::TextInput>>,
+}
+
 fn attach_driver(
     daemon: waku_client::DaemonSupervisor,
     session_id: Uuid,
@@ -1540,9 +1598,12 @@ impl Waku {
     /// The saved record still points at what this loop tried — an edited or
     /// removed record makes an in-flight loop stale, and its attempts must
     /// not install a supervisor for coordinates the user replaced.
-    fn remote_host_record_matches(&self, host_id: Uuid, address: &str, token: &str) -> bool {
+    fn remote_host_record_matches(&self, host: &waku_client::persistence::RemoteHost) -> bool {
         self.state.remote_hosts.iter().any(|record| {
-            record.id == host_id && record.address == address && record.token == token
+            record.id == host.id
+                && record.address == host.address
+                && record.token == host.token
+                && record.ssh_destination == host.ssh_destination
         })
     }
 
@@ -1552,26 +1613,24 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let host_id = host.id;
+        #[cfg(unix)]
+        if host.ssh_destination.is_some() {
+            self.ensure_askpass_responder(cx);
+        }
         cx.spawn(async move |waku, cx| {
             loop {
                 let attempt = cx
                     .background_executor()
                     .spawn({
                         let host = host.clone();
-                        async move {
-                            waku_client::DaemonSupervisor::connect(
-                                &host.address,
-                                host.token.clone(),
-                            )
-                        }
+                        async move { connect_remote_supervisor(&host) }
                     })
                     .await;
                 match attempt {
-                    Ok(supervisor) => {
+                    Ok(outcome) => {
                         let _ = waku.update(cx, |waku, cx| {
-                            if waku.remote_host_record_matches(host_id, &host.address, &host.token)
-                            {
-                                waku.install_remote_daemon(host_id, supervisor, cx);
+                            if waku.remote_host_record_matches(&host) {
+                                waku.install_remote_daemon(host_id, outcome, cx);
                             }
                         });
                         return;
@@ -1579,11 +1638,7 @@ impl Waku {
                     Err(error) => {
                         let keep_trying = waku
                             .update(cx, |waku, cx| {
-                                let current = waku.remote_host_record_matches(
-                                    host_id,
-                                    &host.address,
-                                    &host.token,
-                                );
+                                let current = waku.remote_host_record_matches(&host);
                                 if current {
                                     waku.remote_errors.insert(host_id, error.to_string());
                                     cx.notify();
@@ -1610,9 +1665,15 @@ impl Waku {
     fn install_remote_daemon(
         &mut self,
         host: Uuid,
-        supervisor: waku_client::DaemonSupervisor,
+        link: RemoteDaemonLink,
         cx: &mut Context<Self>,
     ) {
+        #[cfg(unix)]
+        if let Some(ssh) = link.ssh {
+            self.ssh_transports.insert(host, ssh);
+            self.watch_ssh_transport(host, cx);
+        }
+        let supervisor = link.supervisor;
         self.daemons.add_remote(host, supervisor.clone());
         self.remote_errors.remove(&host);
         self.start_task_state_sync(waku_client::DaemonKey::Remote(host), supervisor);
@@ -1655,6 +1716,7 @@ impl Waku {
         name: String,
         address: String,
         token: String,
+        ssh_destination: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let host = waku_client::persistence::RemoteHost {
@@ -1662,6 +1724,7 @@ impl Waku {
             name,
             address,
             token,
+            ssh_destination,
         };
         self.state.remote_hosts.push(host.clone());
         self.save();
@@ -1679,6 +1742,7 @@ impl Waku {
         name: String,
         address: String,
         token: String,
+        ssh_destination: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let Some(record) = self
@@ -1692,8 +1756,13 @@ impl Waku {
         record.name = name;
         record.address = address;
         record.token = token;
+        record.ssh_destination = ssh_destination;
         let record = record.clone();
         self.save();
+        #[cfg(unix)]
+        if let Some(link) = self.ssh_transports.remove(&host_id) {
+            link.transport.shutdown();
+        }
         self.daemons.remove_remote(host_id);
         self.remote_errors.remove(&host_id);
         self.connect_remote_host(record, cx);
@@ -1788,6 +1857,117 @@ impl Waku {
         self.daemons
             .supervisor(waku_client::DaemonKey::Remote(host))
             .is_some_and(|supervisor| supervisor.status() == waku_client::DaemonStatus::Connected)
+    }
+
+    /// Keep the ssh channel under a connected host alive: while the record
+    /// and transport exist, verify the ControlMaster and re-run provisioning
+    /// plus the forward when it died. The supervisor reconnects its client
+    /// on its own once the forward is back.
+    #[cfg(unix)]
+    fn watch_ssh_transport(&mut self, host_id: Uuid, cx: &mut Context<Self>) {
+        cx.spawn(async move |waku, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(5))
+                    .await;
+                let link = waku
+                    .update(cx, |waku, _| waku.ssh_transports.get(&host_id).cloned())
+                    .ok()
+                    .flatten();
+                let Some(link) = link else { return };
+                let repaired = cx
+                    .background_executor()
+                    .spawn(async move {
+                        if link.transport.master_alive() {
+                            return Ok(());
+                        }
+                        link.transport.restore_forward(link.local_port)
+                    })
+                    .await;
+                if let Err(error) = repaired {
+                    let keep = waku
+                        .update(cx, |waku, cx| {
+                            let current = waku.ssh_transports.contains_key(&host_id);
+                            if current {
+                                waku.remote_errors.insert(host_id, format!("{error:#}"));
+                                cx.notify();
+                            }
+                            current
+                        })
+                        .unwrap_or(false);
+                    if !keep {
+                        return;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Start the askpass responder thread and its UI pump once. ssh invokes
+    /// the helper script for passwords and key passphrases; each request
+    /// becomes a modal prompt on the entity.
+    #[cfg(unix)]
+    fn ensure_askpass_responder(&mut self, cx: &mut Context<Self>) {
+        if self.ssh_askpass_started {
+            return;
+        }
+        self.ssh_askpass_started = true;
+        if let Err(error) = crate::ssh::prepare_askpass() {
+            eprintln!("could not prepare ssh askpass helper: {error:#}");
+            return;
+        }
+        let (tx, rx) = smol::channel::unbounded::<crate::ssh::SshAskpassRequest>();
+        std::thread::Builder::new()
+            .name("waku-ssh-askpass".into())
+            .spawn(move || crate::ssh::askpass_responder_loop(tx))
+            .ok();
+        cx.spawn(async move |waku, cx| {
+            while let Ok(request) = rx.recv().await {
+                let _ = waku.update(cx, |waku, cx| waku.present_ssh_prompt(request, cx));
+            }
+        })
+        .detach();
+    }
+
+    /// Show ssh's prompt text. The input entity is created lazily by the
+    /// dialog's render path, which owns a `Window`.
+    #[cfg(unix)]
+    fn present_ssh_prompt(
+        &mut self,
+        request: crate::ssh::SshAskpassRequest,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_ssh_prompt = Some(SshPrompt {
+            prompt: request.prompt.clone(),
+            request,
+            input: None,
+        });
+        cx.notify();
+    }
+
+    /// Deliver the answer — or an empty line when cancelled — to the waiting
+    /// askpass helper and close the prompt.
+    #[cfg(unix)]
+    pub(super) fn answer_ssh_prompt(&mut self, cancel: bool, cx: &mut Context<Self>) {
+        let Some(prompt) = self.pending_ssh_prompt.take() else {
+            return;
+        };
+        let answer = if cancel {
+            String::new()
+        } else {
+            prompt
+                .input
+                .as_ref()
+                .map(|input| input.read(cx).content().to_owned())
+                .unwrap_or_default()
+        };
+        cx.background_executor()
+            .spawn(async move {
+                let _ = prompt.request.answer(&answer);
+            })
+            .detach();
+        cx.notify();
     }
 
     /// Which remote host owns a session, for badge/label lookups.

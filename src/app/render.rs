@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::ui::ActivationExt;
+
 fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
     // Turns count as content even before any message exists: a
     // provider-initiated turn (Codex goal continuation) reasons for a while
@@ -453,6 +455,7 @@ impl Render for Waku {
             let archive_dialog = self.render_archive_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
+            let ssh_prompt = self.render_ssh_prompt(window, cx);
             let toast = self.render_active_toast(window, cx);
             let content = div()
                 .relative()
@@ -494,6 +497,7 @@ impl Render for Waku {
                 .children(archive_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
+                .children(ssh_prompt)
                 .children(image_preview)
                 .children(task_switcher)
                 .children(project_switcher)
@@ -516,6 +520,7 @@ impl Render for Waku {
         let archive_dialog = self.render_archive_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
+        let ssh_prompt = self.render_ssh_prompt(window, cx);
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
@@ -849,6 +854,7 @@ impl Render for Waku {
             .children(archive_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
+            .children(ssh_prompt)
             .children(git_panel_overlays)
             .children(image_preview)
             .children(task_switcher)
@@ -1129,5 +1135,167 @@ impl Waku {
                         .opacity(0.4 + 0.6 * delta)
                 },
             )
+    }
+
+    /// The modal an ssh askpass request becomes. The prompt text is whatever
+    /// ssh asked for — `host's password:` or `Enter passphrase for key: …` —
+    /// and Enter submits the field straight back to the waiting helper.
+    #[cfg(not(unix))]
+    pub(super) fn render_ssh_prompt(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        None
+    }
+
+    /// The modal an ssh askpass request becomes. The prompt text is whatever
+    /// ssh asked for — `host's password:` or `Enter passphrase for key: …` —
+    /// and Enter submits the field straight back to the waiting helper.
+    #[cfg(unix)]
+    pub(super) fn render_ssh_prompt(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.pending_ssh_prompt.is_none() {
+            return None;
+        }
+        if self
+            .pending_ssh_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.input.is_none())
+        {
+            let input = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .tab_index(0)
+                    .accessibility_label(tr!("daemon.ssh_password_label"))
+                    .placeholder(tr!("daemon.ssh_password_label"))
+            });
+            cx.subscribe(&input, |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Submit(_)) {
+                    this.answer_ssh_prompt(false, cx);
+                }
+            })
+            .detach();
+            self.pending_ssh_prompt.as_mut().unwrap().input = Some(input);
+        }
+        let prompt = self.pending_ssh_prompt.as_ref().unwrap();
+        let input = prompt.input.clone().unwrap();
+        if !input.read(cx).focus().is_focused(window) {
+            let focus = input.read(cx).focus();
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        }
+        let theme = Theme::current(cx);
+        let button = |id: &'static str, label: String| {
+            div()
+                .id(id)
+                .tab_index(0)
+                .h(px(28.0))
+                .px(px(12.0))
+                .rounded(px(9.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(13.0))
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay))
+                .focus_visible(|style| style.border_color(theme.accent))
+                .child(label)
+        };
+        let card = div()
+            .id("ssh-prompt-card")
+            .key_context("SshPrompt")
+            .tab_group()
+            .tab_stop(false)
+            .w_full()
+            .max_w(px(400.0))
+            .overflow_hidden()
+            .rounded(px(21.0))
+            .bg(theme.composer)
+            .shadow_xl()
+            .flex()
+            .flex_col()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.answer_ssh_prompt(true, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .px(px(16.0))
+                    .pt(px(14.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(9.0))
+                    .text_size(sp(14.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(icon("icons/server.svg", 15.0, theme.text))
+                    .child(tr!("daemon.ssh_password_title")),
+            )
+            .child(
+                div()
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .min_w_0()
+                    .whitespace_normal()
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(prompt.prompt.clone())),
+            )
+            .child(
+                div()
+                    .px(px(16.0))
+                    .pt(px(10.0))
+                    .child(TextField::new("ssh-prompt-input", input).w_full()),
+            )
+            .child(
+                div()
+                    .p(px(12.0))
+                    .flex()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .child(
+                        button("ssh-prompt-cancel", tr!("common.cancel")).on_activation(
+                            cx,
+                            |this, _, cx| {
+                                this.answer_ssh_prompt(true, cx);
+                            },
+                        ),
+                    )
+                    .child(
+                        button("ssh-prompt-submit", tr!("daemon.ssh_password_submit"))
+                            .on_activation(cx, |this, _, cx| {
+                                this.answer_ssh_prompt(false, cx);
+                            }),
+                    ),
+            );
+        let scrim = if theme.is_dark {
+            gpui::hsla(0.0, 0.0, 0.0, 0.34)
+        } else {
+            gpui::hsla(0.0, 0.0, 0.0, 0.16)
+        };
+        let layer = div()
+            .id("ssh-prompt-layer")
+            .absolute()
+            .inset_0()
+            .occlude()
+            .bg(scrim)
+            .p(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(motion::modal_enter("ssh-prompt-card-enter", card));
+        Some(
+            gpui::deferred(motion::fade_in("ssh-prompt-layer-enter", layer))
+                .with_priority(4)
+                .into_any_element(),
+        )
     }
 }

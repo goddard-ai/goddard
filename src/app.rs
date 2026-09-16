@@ -1363,6 +1363,17 @@ pub struct Waku {
     /// host still renders its rows at launch.
     remote_catalogs: HashMap<Uuid, RemoteTaskStateSnapshot>,
     remote_catalogs_path: std::path::PathBuf,
+    /// Live ssh channels under connected remote hosts, host id → transport
+    /// plus the local forward port the supervisor dials.
+    #[cfg(unix)]
+    ssh_transports: HashMap<Uuid, runtime::SshLink>,
+    /// The askpass responder thread is a singleton; prompts from every ssh
+    /// child funnel through the one queue fifo it serves.
+    #[cfg(unix)]
+    ssh_askpass_started: bool,
+    /// A password/passphrase prompt ssh is waiting on, rendered as a modal.
+    #[cfg(unix)]
+    pending_ssh_prompt: Option<runtime::SshPrompt>,
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
@@ -3871,6 +3882,12 @@ impl Waku {
                 daemons,
                 remote_errors: HashMap::new(),
                 remote_daemon_settings: HashMap::new(),
+                #[cfg(unix)]
+                ssh_transports: HashMap::new(),
+                #[cfg(unix)]
+                ssh_askpass_started: false,
+                #[cfg(unix)]
+                pending_ssh_prompt: None,
                 remote_catalogs,
                 remote_catalogs_path,
                 daemon_hostname,
