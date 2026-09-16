@@ -993,11 +993,7 @@ impl Waku {
             .collect::<Vec<_>>();
         let focus = self.big_picture.focus.clone();
         let backdrop = self.big_picture.backdrop.clone();
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.45)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.2)
-        };
+        let scrim = theme.backdrop().opacity(0.72);
         let layer = div()
             .id("big-picture-layer")
             .key_context("BigPicture")

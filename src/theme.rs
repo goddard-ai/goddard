@@ -183,6 +183,14 @@ struct ThemeSpec {
 }
 
 impl Theme {
+    /// The Big Picture backdrop: one step off the window surface — lifted
+    /// toward `raised` in dark themes, sunken toward `inset` in light ones —
+    /// painted translucent over the blurred frame snapshot so the workspace
+    /// still ghosts through.
+    pub fn backdrop(&self) -> Hsla {
+        if self.is_dark { self.raised } else { self.inset }
+    }
+
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActiveWakuTheme>() {
             cx.global::<ActiveWakuTheme>().0
