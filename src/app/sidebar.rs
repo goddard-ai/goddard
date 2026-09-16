@@ -375,14 +375,13 @@ pub(super) enum SidebarPullRequestState {
     Closed,
 }
 
-struct SidebarPullRequestBadge {
-    state: SidebarPullRequestState,
-    number: u64,
-    others: usize,
-    title: String,
-    url: String,
-    check_status: Option<waku_client::PullRequestCheckStatus>,
-    review_decision: Option<waku_client::PullRequestReviewDecision>,
+pub(super) struct SidebarPullRequestBadge {
+    pub state: SidebarPullRequestState,
+    pub number: u64,
+    pub others: usize,
+    pub title: String,
+    pub check_status: Option<waku_client::PullRequestCheckStatus>,
+    pub review_decision: Option<waku_client::PullRequestReviewDecision>,
 }
 
 pub(super) fn pull_request_class(
@@ -402,7 +401,7 @@ pub(super) fn pull_request_class(
 /// — so a pull request created right now is still attributable. A session can
 /// only produce pull requests while it is working; anything created before
 /// its first turn or after its last one ended belongs to somebody else.
-fn session_pull_request_window(session: &AgentSession) -> (u64, Option<u64>) {
+pub(super) fn session_pull_request_window(session: &AgentSession) -> (u64, Option<u64>) {
     let since = session
         .turns
         .first()
@@ -412,6 +411,23 @@ fn session_pull_request_window(session: &AgentSession) -> (u64, Option<u64>) {
     (since, until)
 }
 
+/// The pull requests attributable to a session's activity window — the set
+/// the sidebar badge collapses and the header chip menus from.
+pub(super) fn session_pull_requests_in_window<'a>(
+    entries: &'a [waku_client::PullRequestSummary],
+    window: (u64, Option<u64>),
+) -> Vec<&'a waku_client::PullRequestSummary> {
+    let (since, until) = window;
+    entries
+        .iter()
+        .filter(|entry| {
+            entry.created_at.map_or(true, |created| {
+                created >= since && until.map_or(true, |until| created <= until)
+            })
+        })
+        .collect()
+}
+
 /// Collapses a session's pull requests into the one badge its row shows: a
 /// state glyph for the aggregate — draft only when every one is a draft, open
 /// when any is, merged when all are, closed otherwise — plus the lowest
@@ -419,19 +435,11 @@ fn session_pull_request_window(session: &AgentSession) -> (u64, Option<u64>) {
 /// first. `others` counts the remainder, so `#123 +2` reads as "two more".
 /// `window` bounds attribution by when the pull request was created; a host
 /// that reports no creation time keeps its row rather than losing it.
-fn sidebar_pull_request_badge(
+pub(super) fn sidebar_pull_request_badge(
     entries: &[waku_client::PullRequestSummary],
     window: (u64, Option<u64>),
 ) -> Option<SidebarPullRequestBadge> {
-    let (since, until) = window;
-    let entries: Vec<&waku_client::PullRequestSummary> = entries
-        .iter()
-        .filter(|entry| {
-            entry.created_at.map_or(true, |created| {
-                created >= since && until.map_or(true, |until| created <= until)
-            })
-        })
-        .collect();
+    let entries = session_pull_requests_in_window(entries, window);
     if entries.is_empty() {
         return None;
     }
@@ -467,7 +475,6 @@ fn sidebar_pull_request_badge(
         number: primary.number,
         others: entries.len() - 1,
         title: primary.title.clone(),
-        url: primary.url.clone(),
         check_status: primary.check_status,
         review_decision: primary.review_decision,
     })
@@ -573,7 +580,7 @@ fn sidebar_review_decision_label(decision: waku_client::PullRequestReviewDecisio
     }
 }
 
-fn sidebar_pull_request_tooltip(badge: &SidebarPullRequestBadge) -> String {
+pub(super) fn sidebar_pull_request_tooltip(badge: &SidebarPullRequestBadge) -> String {
     let state = sidebar_pull_request_state_label(badge.state);
     let mut tooltip = if badge.others == 0 {
         tr!(
@@ -3429,7 +3436,6 @@ impl Waku {
                         pull_request_badge.filter(|_| !shortcut_hint),
                         |element, badge| {
                             let color = sidebar_pull_request_color(&theme, badge.state);
-                            let url = badge.url.clone();
                             element.child(
                                 div()
                                     .id(SharedString::from(format!("session-pr-{session_id}")))
@@ -3437,7 +3443,6 @@ impl Waku {
                                     .flex()
                                     .items_center()
                                     .gap(px(3.0))
-                                    .cursor_pointer()
                                     .child(icon(
                                         sidebar_pull_request_icon(badge.state),
                                         12.0,
@@ -3464,11 +3469,7 @@ impl Waku {
                                             sidebar_review_decision_color(&theme, decision),
                                         ))
                                     })
-                                    .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
-                                    .on_click(move |_, _, cx| {
-                                        cx.open_url(&url);
-                                        cx.stop_propagation();
-                                    }),
+                                    .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge))),
                             )
                         },
                     )
@@ -3497,6 +3498,9 @@ impl Waku {
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
         let session = self.selected_session();
+        // The header's pull-request chip reads the same scan the sidebar
+        // badge does; the sidebar's own ensure never runs while it is hidden.
+        self.ensure_sidebar_pull_requests(cx);
         let title = if let Some(terminal_id) = self.selected_terminal {
             self.right_panel_terminals
                 .get(&terminal_id)

@@ -137,6 +137,19 @@ pub(super) struct GitHubBrowser {
 
 const GITHUB_LIST_ROW_HEIGHT: f32 = 30.0;
 
+/// The view-local pieces a mounted detail needs — focus, scroll position,
+/// and the comment composer entity. The Projects page reuses the browser's
+/// single set; each right-panel pull-request tab keeps its own in
+/// `Waku::right_panel_pr_states` so a panel thread never shares, moves, or
+/// closes the page's open detail.
+#[derive(Clone)]
+pub(super) struct GitHubDetailChrome {
+    pub focus: FocusHandle,
+    pub scroll: ScrollHandle,
+    pub scrollbar: Rc<ScrollbarState>,
+    pub comment_input: Entity<TextInput>,
+}
+
 impl GitHubBrowser {
     pub(super) fn new(project_id: Uuid, window: &mut Window, cx: &mut Context<Waku>) -> Self {
         let comment_input = cx.new(|cx| {
@@ -395,9 +408,9 @@ impl Waku {
         .detach();
     }
 
-    /// Post the composer's comment to the open detail, then refetch it so
-    /// the thread shows the new comment. A failure lands beside the composer
-    /// rather than losing the typed text.
+    /// The Projects page composer's submit: the open detail and the shared
+    /// input. Right-panel tabs call [`Self::github_post_comment`] directly
+    /// with their own composer entity.
     fn github_submit_comment(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return;
@@ -405,7 +418,24 @@ impl Waku {
         let Some(detail) = browser.detail else {
             return;
         };
-        let body = browser.comment_input.read(cx).content().trim().to_owned();
+        let input = browser.comment_input.clone();
+        self.github_post_comment(project_id, detail, input, cx);
+    }
+
+    /// Post `input`'s comment to `detail`, then refetch it so the thread
+    /// shows the new comment. A failure lands beside the composer and the
+    /// typed text stays in the field.
+    fn github_post_comment(
+        &mut self,
+        project_id: Uuid,
+        detail: GitHubDetailRef,
+        input: Entity<TextInput>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(browser) = self.github_browsers.get(&project_id) else {
+            return;
+        };
+        let body = input.read(cx).content().trim().to_owned();
         if body.is_empty() || browser.comment_posting.contains(&detail) {
             return;
         }
@@ -452,14 +482,15 @@ impl Waku {
                             // Clear only the text actually posted — a user
                             // who kept typing while the request flew keeps
                             // the newer draft. The stashed draft clears too:
-                            // it is the same text.
+                            // it is the same text. The page's shared input
+                            // fronts whichever detail is open, so only clear
+                            // it while it still belongs to this thread; a
+                            // panel tab's own input is always this thread's.
                             browser.comment_drafts.remove(&detail);
-                            if browser.detail == Some(detail)
-                                && browser.comment_input.read(cx).content().trim() == submitted
-                            {
-                                browser
-                                    .comment_input
-                                    .update(cx, |input, cx| input.clear(cx));
+                            let input_fronts_detail =
+                                input != browser.comment_input || browser.detail == Some(detail);
+                            if input_fronts_detail && input.read(cx).content().trim() == submitted {
+                                input.update(cx, |input, cx| input.clear(cx));
                             }
                         }
                         Err(error) => {
@@ -1220,23 +1251,139 @@ impl Waku {
         )
     }
 
+    /// The Projects page's detail mount: whichever item `browser.detail`
+    /// names, with the browser's own chrome and the list's navigation keys.
     pub(super) fn render_github_detail(
         &mut self,
         project_id: Uuid,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = Theme::current(cx);
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return div().into_any_element();
         };
         let Some(detail) = browser.detail else {
             return div().into_any_element();
         };
-        let focus = browser.detail_focus.clone();
-        let scroll = browser.detail_scroll.clone();
-        let scrollbar = browser.detail_scrollbar.clone();
-        let comment_input = browser.comment_input.clone();
+        let chrome = GitHubDetailChrome {
+            focus: browser.detail_focus.clone(),
+            scroll: browser.detail_scroll.clone(),
+            scrollbar: browser.detail_scrollbar.clone(),
+            comment_input: browser.comment_input.clone(),
+        };
+        self.render_github_detail_view(project_id, detail, "page", chrome, true, cx)
+    }
+
+    /// A session-linked pull request as a right-panel tab: the same detail
+    /// document the Projects page renders, backed by the project's shared
+    /// fetch cache but carrying its own chrome so the tab never moves or
+    /// closes the page's open detail.
+    pub(super) fn render_pull_request_panel(
+        &mut self,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(session) = self.selected_session() else {
+            return div().into_any_element();
+        };
+        let session_id = session.id;
+        let project_id = session.project_id;
+        let detail = GitHubDetailRef {
+            kind: GitHubItemKind::PullRequest,
+            number,
+        };
+        // No project means no `gh` host to read from; say so rather than
+        // spin forever on a fetch that can never start.
+        if !self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id)
+        {
+            return github_centered(
+                icon("icons/alert.svg", 16.0, theme.text_tertiary).into_any_element(),
+                tr!("github.unavailable"),
+                &theme,
+            );
+        }
+        self.github_browsers
+            .entry(project_id)
+            .or_insert_with(|| GitHubBrowser::new(project_id, window, cx));
+        self.github_ensure_detail(project_id, detail, cx);
+        let chrome = self.ensure_pull_request_chrome(session_id, project_id, detail, window, cx);
+        self.render_github_detail_view(project_id, detail, "panel", chrome, false, cx)
+    }
+
+    /// The tab's chrome, created on first mount: scroll and focus handles
+    /// plus a comment composer wired to post to this detail. A panel draft
+    /// lives on its own input entity rather than the browser's per-thread
+    /// stash, so closing the page's detail never touches it.
+    fn ensure_pull_request_chrome(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        detail: GitHubDetailRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> GitHubDetailChrome {
+        let key = (session_id, detail.number);
+        if !self.right_panel_pr_states.contains_key(&key) {
+            let comment_input = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .placeholder(tr!("github.comment_placeholder"))
+                    .multi_line()
+                    .auto_height()
+                    .submit_on_enter()
+                    .max_lines(6)
+                    .clear_on_escape()
+            });
+            let submit_input = comment_input.clone();
+            cx.subscribe(
+                &comment_input,
+                move |this: &mut Waku, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Submit(_)) {
+                        this.github_post_comment(project_id, detail, submit_input.clone(), cx);
+                    }
+                },
+            )
+            .detach();
+            self.right_panel_pr_states.insert(
+                key,
+                GitHubDetailChrome {
+                    focus: cx.focus_handle(),
+                    scroll: ScrollHandle::new(),
+                    scrollbar: ScrollbarState::new(),
+                    comment_input,
+                },
+            );
+        }
+        self.right_panel_pr_states
+            .get(&key)
+            .expect("pull-request chrome inserted above")
+            .clone()
+    }
+
+    /// One mounted detail: the scrollable document, its selection canvas,
+    /// and the scrollbar. `scope` namespaces the element ids and markdown
+    /// cache keys the document stamps out — the Projects page and a
+    /// right-panel tab can mount a detail, even the same one, at once.
+    /// `navigable` adds the page's list keys (escape closes, brackets walk
+    /// the filtered list); a panel tab has no list to walk.
+    fn render_github_detail_view(
+        &mut self,
+        project_id: Uuid,
+        detail: GitHubDetailRef,
+        scope: &str,
+        chrome: GitHubDetailChrome,
+        navigable: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(browser) = self.github_browsers.get(&project_id) else {
+            return div().into_any_element();
+        };
         let markdown_selection = browser.markdown_selection.clone();
         let selection_for_input = markdown_selection.clone();
 
@@ -1265,7 +1412,15 @@ impl Waku {
             GitHubFetch::Loaded(Some(value)) => value,
         };
 
-        let document = self.render_github_detail_document(project_id, detail, &content, cx);
+        let comment_input = chrome.comment_input.clone();
+        let document = self.render_github_detail_document(
+            project_id,
+            detail,
+            scope,
+            &content,
+            &chrome.comment_input,
+            cx,
+        );
 
         div()
             .flex_1()
@@ -1273,34 +1428,38 @@ impl Waku {
             .relative()
             .child(
                 div()
-                    .id("github-detail-scroll")
+                    .id(SharedString::from(format!("{scope}-github-detail-scroll")))
                     .size_full()
                     .overflow_y_scroll()
-                    .track_scroll(&scroll)
-                    .track_focus(&focus)
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        // Caret motion and escape belong to the comment field
-                        // while it is focused — only then do they double as
-                        // detail navigation.
-                        if comment_input.read(cx).focus().is_focused(window) {
-                            return;
-                        }
-                        match event.keystroke.key.as_str() {
-                            "escape" => {
-                                this.github_close_detail(project_id, cx);
-                                cx.stop_propagation();
-                            }
-                            "left" | "[" => {
-                                this.github_detail_navigate(project_id, -1, window, cx);
-                                cx.stop_propagation();
-                            }
-                            "right" | "]" => {
-                                this.github_detail_navigate(project_id, 1, window, cx);
-                                cx.stop_propagation();
-                            }
-                            _ => {}
-                        }
-                    }))
+                    .track_scroll(&chrome.scroll)
+                    .track_focus(&chrome.focus)
+                    .when(navigable, |element| {
+                        element.on_key_down(cx.listener(
+                            move |this, event: &KeyDownEvent, window, cx| {
+                                // Caret motion and escape belong to the
+                                // comment field while it is focused — only
+                                // then do they double as detail navigation.
+                                if comment_input.read(cx).focus().is_focused(window) {
+                                    return;
+                                }
+                                match event.keystroke.key.as_str() {
+                                    "escape" => {
+                                        this.github_close_detail(project_id, cx);
+                                        cx.stop_propagation();
+                                    }
+                                    "left" | "[" => {
+                                        this.github_detail_navigate(project_id, -1, window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                    "right" | "]" => {
+                                        this.github_detail_navigate(project_id, 1, window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                    _ => {}
+                                }
+                            },
+                        ))
+                    })
                     .child(md::render::frame_reset(markdown_selection.clone()))
                     .child(document),
             )
@@ -1323,7 +1482,7 @@ impl Waku {
                 .left_0()
                 .size_full(),
             )
-            .child(scrollbar::vertical(&scroll, &scrollbar))
+            .child(scrollbar::vertical(&chrome.scroll, &chrome.scrollbar))
             .into_any_element()
     }
 
@@ -1332,11 +1491,14 @@ impl Waku {
         &mut self,
         project_id: Uuid,
         detail: GitHubDetailRef,
+        scope: &str,
         content: &GitHubItemDetail,
+        comment_input: &Entity<TextInput>,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
+        let doc_key = format!("{scope}-{}", github_detail_key(detail));
 
         let (
             title,
@@ -1432,7 +1594,7 @@ impl Waku {
                 .child({
                     let prompt = github_task_prompt(detail, &title, &url, false);
                     github_detail_action(
-                        "github-start-task",
+                        SharedString::from(format!("{scope}-github-start-task")),
                         "icons/plus.svg",
                         tr!("github.start_task"),
                         &theme,
@@ -1447,6 +1609,7 @@ impl Waku {
                         .get(&project_id)
                         .is_some_and(|browser| browser.fix_preparing.contains(&detail));
                     element.child(github_fix_action(
+                        SharedString::from(format!("{scope}-github-fix-findings")),
                         preparing,
                         &theme,
                         cx.listener(move |this, _, window, cx| {
@@ -1463,7 +1626,7 @@ impl Waku {
                 .when(checks_failing, |element| {
                     let prompt = github_task_prompt(detail, &title, &url, true);
                     element.child(github_detail_action(
-                        "github-fix-checks",
+                        SharedString::from(format!("{scope}-github-fix-checks")),
                         "icons/hammer.svg",
                         tr!("github.fix_checks"),
                         &theme,
@@ -1474,7 +1637,7 @@ impl Waku {
                 })
                 .child(
                     div()
-                        .id("github-open-external")
+                        .id(SharedString::from(format!("{scope}-github-open-external")))
                         .h(px(24.0))
                         .px(px(8.0))
                         .rounded(px(6.0))
@@ -1521,7 +1684,7 @@ impl Waku {
         if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
             section = section.child(self.github_markdown_section(
                 project_id,
-                Rc::from("body"),
+                Rc::from(format!("{doc_key}-body")),
                 &body,
                 &palette,
                 cx,
@@ -1536,7 +1699,7 @@ impl Waku {
         }
 
         if let Some(checks) = checks {
-            section = section.child(github_checks_section(checks, &theme));
+            section = section.child(github_checks_section(scope, checks, &theme));
         }
         if let Some(commits) = commits {
             let repo_url = self
@@ -1546,6 +1709,7 @@ impl Waku {
                 .and_then(|(repo, _)| repo.as_ref())
                 .map(|repo| repo.web_url.clone());
             section = section.child(github_commits_section(
+                scope,
                 commits,
                 repo_url,
                 crate::fonts::current(cx).code,
@@ -1561,10 +1725,17 @@ impl Waku {
             ));
         }
         for (index, comment) in comments.iter().enumerate() {
-            section =
-                section.child(self.github_comment_card(project_id, index, comment, &palette, cx));
+            section = section.child(
+                self.github_comment_card(project_id, &doc_key, index, comment, &palette, cx),
+            );
         }
-        section = section.child(self.github_comment_composer(project_id, detail, cx));
+        section = section.child(self.github_comment_composer(
+            project_id,
+            scope,
+            detail,
+            comment_input.clone(),
+            cx,
+        ));
 
         section
     }
@@ -1612,6 +1783,7 @@ impl Waku {
     fn github_comment_card(
         &self,
         project_id: Uuid,
+        doc_key: &str,
         index: usize,
         comment: &WorkItemComment,
         palette: &MarkdownPalette,
@@ -1664,7 +1836,7 @@ impl Waku {
                     .py(px(10.0))
                     .child(self.github_markdown_section(
                         project_id,
-                        Rc::from(format!("comment-{index}")),
+                        Rc::from(format!("{doc_key}-comment-{index}")),
                         &comment.body,
                         palette,
                         cx,
@@ -1675,20 +1847,25 @@ impl Waku {
     /// The comment box at the foot of the thread — posts through `gh`, spins
     /// while in flight, and shows the daemon's error beneath itself. Enter
     /// submits inside the field; the button is a tab stop for the mouse path.
+    /// `input` is the mount's composer: the page's shared field, or a panel
+    /// tab's own.
     fn github_comment_composer(
         &mut self,
         project_id: Uuid,
+        scope: &str,
         detail: GitHubDetailRef,
+        input: Entity<TextInput>,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return div();
         };
-        let input = browser.comment_input.clone();
         let posting = browser.comment_posting.contains(&detail);
         let error = browser.comment_post_errors.get(&detail).cloned();
         let has_content = !input.read(cx).content().trim().is_empty();
+        let click_input = input.clone();
+        let key_input = input.clone();
 
         div()
             .w_full()
@@ -1710,7 +1887,7 @@ impl Waku {
                     .child(div().flex_1().min_w_0().child(input))
                     .child(
                         div()
-                            .id("github-comment-send")
+                            .id(SharedString::from(format!("{scope}-github-comment-send")))
                             .w(px(26.0))
                             .h(px(26.0))
                             .rounded(px(7.0))
@@ -1750,11 +1927,21 @@ impl Waku {
                                 .into_any_element()
                             })
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.github_submit_comment(project_id, cx);
+                                this.github_post_comment(
+                                    project_id,
+                                    detail,
+                                    click_input.clone(),
+                                    cx,
+                                );
                             }))
                             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.github_submit_comment(project_id, cx);
+                                    this.github_post_comment(
+                                        project_id,
+                                        detail,
+                                        key_input.clone(),
+                                        cx,
+                                    );
                                     cx.stop_propagation();
                                 }
                             })),
@@ -1965,7 +2152,7 @@ fn github_issue_meta(issue: &IssueSummary) -> Vec<String> {
 /// A detail-header action chip: icon + label, hover and focus treatments
 /// matching the list rows.
 fn github_detail_action(
-    id: &'static str,
+    id: impl Into<gpui::ElementId>,
     icon_path: &'static str,
     label: String,
     theme: &Theme,
@@ -1993,6 +2180,16 @@ fn github_detail_action(
         .on_click(on_click)
 }
 
+/// Stable per-item segment for markdown cache keys — `pr-42`, `issue-7` —
+/// so two details (or two mounts of one) never share a parsed document.
+fn github_detail_key(detail: GitHubDetailRef) -> String {
+    let kind = match detail.kind {
+        GitHubItemKind::PullRequest => "pr",
+        GitHubItemKind::Issue => "issue",
+    };
+    format!("{kind}-{}", detail.number)
+}
+
 /// The agent-facing prompt a "Start a task" action seeds. Not localized —
 /// it is input for the agent, not UI copy.
 fn github_task_prompt(detail: GitHubDetailRef, title: &str, url: &str, fix_checks: bool) -> String {
@@ -2014,13 +2211,14 @@ fn github_task_prompt(detail: GitHubDetailRef, title: &str, url: &str, fix_check
 /// detail still loading or the PR head branch being fetched — it renders a
 /// spinner and drops its click handler so a repeat press cannot double up.
 fn github_fix_action(
+    id: impl Into<gpui::ElementId>,
     preparing: bool,
     theme: &Theme,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
     on_key: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     div()
-        .id("github-fix-findings")
+        .id(id)
         .tab_index(0)
         .h(px(24.0))
         .px(px(8.0))
@@ -2294,7 +2492,7 @@ fn github_section_header(label: String, count: Option<usize>, theme: &Theme) -> 
 /// One check run or commit status per row: status glyph, name, state label
 /// and duration, opening the check's details URL on click. An empty list is
 /// the host's answer, not a missing section — it still says so.
-fn github_checks_section(checks: &[PullRequestCheck], theme: &Theme) -> Div {
+fn github_checks_section(scope: &str, checks: &[PullRequestCheck], theme: &Theme) -> Div {
     let section = div()
         .flex()
         .flex_col()
@@ -2317,7 +2515,7 @@ fn github_checks_section(checks: &[PullRequestCheck], theme: &Theme) -> Div {
         .enumerate()
         .fold(section, |section, (index, check)| {
             let mut row = div()
-                .id(SharedString::from(format!("github-check-{index}")))
+                .id(SharedString::from(format!("{scope}-github-check-{index}")))
                 .min_w_0()
                 .flex()
                 .items_center()
@@ -2378,6 +2576,7 @@ fn github_check_duration(seconds: u64) -> String {
 /// opening the commit on the host when the repo URL is known. Long lists are
 /// capped — a 500-commit PR is not a 500-row document.
 fn github_commits_section(
+    scope: &str,
     commits: &[PullRequestCommit],
     repo_url: Option<String>,
     code: SharedString,
@@ -2413,7 +2612,7 @@ fn github_commits_section(
             ));
         }
         let mut row = div()
-            .id(SharedString::from(format!("github-commit-{index}")))
+            .id(SharedString::from(format!("{scope}-github-commit-{index}")))
             .min_w_0()
             .flex()
             .items_center()

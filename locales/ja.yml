@@ -447,6 +447,7 @@ github.fix_checks: 失敗したチェックを修正
 github.fix: 修正
 github.fix_tooltip: 新しいタスクでレビューの指摘を修正
 github.fix_preparing: 準備中…
+github.more_pull_requests: その他のプルリクエスト
 github.resolving_repo: リポジトリを解決中…
 github.install_gh: このリポジトリを見るには GitHub CLI をインストールしてください
 github.auth_gh: "`gh auth login` を実行するとこのリポジトリを見られます"

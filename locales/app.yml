@@ -908,6 +908,8 @@ github.fix_tooltip:
   en: Fix review findings in a new task
 github.fix_preparing:
   en: Preparing…
+github.more_pull_requests:
+  en: More pull requests
 github.resolving_repo:
   en: Resolving repository…
 github.install_gh:

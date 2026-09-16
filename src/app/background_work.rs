@@ -733,6 +733,12 @@ impl Waku {
         self.open_right_panel_surface(RightPanelSurface::BackgroundWork { key, title }, cx);
     }
 
+    /// Open a session-linked pull request as a right-panel tab — the in-app
+    /// detail view, not the external URL.
+    pub(super) fn open_session_pull_request(&mut self, number: u64, cx: &mut Context<Self>) {
+        self.open_right_panel_surface(RightPanelSurface::PullRequest { number }, cx);
+    }
+
     pub(super) fn render_background_work_summary(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.selected_session();
         let session_id = session.map(|session| session.id);
@@ -890,6 +896,23 @@ impl Waku {
                 }))
                 .into_any_element()
         });
+        let pull_request = session.and_then(|session| {
+            let entries = self
+                .sidebar_pull_requests
+                .borrow()
+                .get(&session.id)?
+                .clone();
+            let window = sidebar::session_pull_request_window(session);
+            let badge = sidebar::sidebar_pull_request_badge(&entries, window)?;
+            let mut others: Vec<waku_client::PullRequestSummary> =
+                sidebar::session_pull_requests_in_window(&entries, window)
+                    .into_iter()
+                    .filter(|entry| entry.number != badge.number)
+                    .cloned()
+                    .collect();
+            others.sort_by_key(|entry| entry.number);
+            Some(self.render_pull_request_control(&badge, Rc::new(others), cx))
+        });
         let open_in = self.render_open_in_control(workspace_path, cx);
         let entries = Rc::new(entries);
         let weak = cx.entity().downgrade();
@@ -918,6 +941,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .children(git_status)
+            .children(pull_request)
             .children(open_in)
             .child(info)
             .into_any_element()
@@ -1101,6 +1125,166 @@ impl Waku {
                 .child(menu)
                 .into_any_element(),
         )
+    }
+
+    /// The session's linked pull requests as a header chip, styled like the
+    /// "Open in" split control beside it: the primary segment opens the
+    /// badge's pick as a right-panel tab; when more of the session's PRs
+    /// exist, a "+N" segment menus them.
+    fn render_pull_request_control(
+        &self,
+        badge: &sidebar::SidebarPullRequestBadge,
+        others: Rc<Vec<waku_client::PullRequestSummary>>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let color = sidebar::sidebar_pull_request_color(&theme, badge.state);
+        let number = badge.number;
+        let focus = self.transcript_control_focus("header-pull-request", cx);
+        let single = others.is_empty();
+        let primary = div()
+            .id("header-pull-request")
+            .track_focus(&focus)
+            .tab_index(0)
+            .h_full()
+            .px(px(6.0))
+            .rounded_tl(px(8.0))
+            .rounded_bl(px(8.0))
+            .when(single, |element| {
+                element.rounded_tr(px(8.0)).rounded_br(px(8.0))
+            })
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .cursor_default()
+            .focus_visible(|style| {
+                style
+                    .bg(theme.overlay)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(sidebar::sidebar_pull_request_tooltip(badge)))
+            .child(icon(
+                sidebar::sidebar_pull_request_icon(badge.state),
+                12.5,
+                color,
+            ))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(color)
+                    .child(format!("#{number}")),
+            )
+            .when_some(badge.check_status, |element, status| {
+                element.child(icon(
+                    sidebar::sidebar_check_status_icon(status),
+                    11.5,
+                    sidebar::sidebar_check_status_color(&theme, status),
+                ))
+            })
+            .when_some(badge.review_decision, |element, decision| {
+                element.child(icon(
+                    sidebar::sidebar_review_decision_icon(decision),
+                    11.5,
+                    sidebar::sidebar_review_decision_color(&theme, decision),
+                ))
+            })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.open_session_pull_request(number, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.open_session_pull_request(number, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        if single {
+            return div()
+                .h(px(28.0))
+                .rounded(px(9.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .flex_none()
+                .flex()
+                .items_center()
+                .child(primary)
+                .into_any_element();
+        }
+
+        let handle = self.menu_handle("header-pull-request-menu", cx);
+        let weak = cx.entity().downgrade();
+        let count = others.len();
+        let caret = div()
+            .id("header-pull-request-caret")
+            .h_full()
+            .px(px(5.0))
+            .rounded_tr(px(8.0))
+            .rounded_br(px(8.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(3.0))
+            .cursor_default()
+            .focus_visible(|style| {
+                style
+                    .bg(theme.overlay)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(tr!("github.more_pull_requests")))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(format!("+{count}")),
+            )
+            .child(icon("icons/chevron-down.svg", 10.0, theme.text_tertiary));
+        let menu = dropdown_menu(
+            caret,
+            "header-pull-request-menu-list",
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                others
+                    .iter()
+                    .map(|pr| {
+                        let weak = weak.clone();
+                        let number = pr.number;
+                        MenuItem::new(format!("#{} — {}", pr.number, pr.title), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.open_session_pull_request(number, cx);
+                            });
+                        })
+                        .icon(sidebar::sidebar_pull_request_icon(
+                            sidebar::pull_request_class(pr),
+                        ))
+                    })
+                    .collect()
+            },
+        );
+        div()
+            .h(px(28.0))
+            .rounded(px(9.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex_none()
+            .flex()
+            .items_center()
+            .child(primary)
+            .child(div().w(hairline()).h_full().flex_none().bg(theme.border))
+            .child(menu)
+            .into_any_element()
     }
 
     pub(super) fn render_background_work_surface(

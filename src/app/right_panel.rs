@@ -913,6 +913,7 @@ impl RightPanelSurface {
             }
             Self::Files => tr!("right_panel.files"),
             Self::Diff => tr!("right_panel.diff"),
+            Self::PullRequest { number } => format!("#{number}"),
             Self::File(path) => path.rsplit('/').next().unwrap_or(path).to_owned(),
             Self::GitHub(_) => tr!("right_panel.github"),
         }
@@ -923,6 +924,7 @@ impl RightPanelSurface {
             Self::Browser(_) => "icons/globe.svg",
             Self::Terminal(_) => "icons/terminal.svg",
             Self::BackgroundWork { key, .. } => work_kind_icon(key.kind),
+            Self::PullRequest { .. } => "icons/git-pull-request-arrow.svg",
             Self::Files => "icons/folder.svg",
             Self::Diff => "icons/file-diff.svg",
             Self::File(path) => file_icon_for_path(path),
@@ -968,7 +970,10 @@ fn reusable_surface_index(
         RightPanelSurface::GitHub(project_id) => surfaces.iter().position(|surface| {
             matches!(surface, RightPanelSurface::GitHub(candidate) if candidate == project_id)
         }),
-        RightPanelSurface::Files | RightPanelSurface::Diff | RightPanelSurface::File(_) => {
+        RightPanelSurface::Files
+        | RightPanelSurface::Diff
+        | RightPanelSurface::File(_)
+        | RightPanelSurface::PullRequest { .. } => {
             surfaces.iter().position(|surface| surface == requested)
         }
     }
@@ -1894,6 +1899,8 @@ impl Waku {
                 }
             }
         }
+        self.right_panel_pr_states
+            .retain(|(owner, _), _| *owner != session_id);
     }
 
     fn take_active_right_panel_state(&mut self) -> RightPanelSessionState {
@@ -2268,6 +2275,12 @@ impl Waku {
         {
             browser.detail = None;
         }
+        if let (Some(session_id), RightPanelSurface::PullRequest { number }) = (
+            self.state.selected_session,
+            &self.right_panel_surfaces[index],
+        ) {
+            self.right_panel_pr_states.remove(&(session_id, *number));
+        }
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
             None
@@ -2403,6 +2416,9 @@ impl Waku {
                 .into_any_element(),
             Some(RightPanelSurface::GitHub(project_id)) => self
                 .render_github_detail(project_id, window, cx)
+                .into_any_element(),
+            Some(RightPanelSurface::PullRequest { number }) => self
+                .render_pull_request_panel(number, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
