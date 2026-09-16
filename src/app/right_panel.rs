@@ -228,7 +228,7 @@ fn review_diff_directory_paths(files: &[crate::review_diff::File]) -> HashSet<St
     paths
 }
 
-fn review_diff_tree_rows(
+pub(super) fn review_diff_tree_rows(
     files: &[crate::review_diff::File],
     expanded_paths: &HashSet<String>,
     filter: &str,

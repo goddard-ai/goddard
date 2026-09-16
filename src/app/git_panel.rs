@@ -60,7 +60,6 @@ const GIT_PANEL_DIFF_WIDTH: f32 = 560.0;
 const GIT_PANEL_DIFF_MAX_HEIGHT: f32 = 360.0;
 const GIT_PANEL_HOVER_OPEN_DELAY: Duration = Duration::from_millis(350);
 const GIT_PANEL_HOVER_CLOSE_DELAY: Duration = Duration::from_millis(150);
-const GIT_PANEL_MODAL_WIDTH: f32 = 720.0;
 const GIT_PANEL_MODAL_HEIGHT: f32 = 520.0;
 
 /// What the panel's background task is doing. The action button renders the
@@ -193,7 +192,9 @@ pub(super) struct GitPanelCommitHover {
     pub open: bool,
 }
 
-/// The commit-diff modal's state.
+/// The open commit view's state. While set, the panel slot expands to fill
+/// the workspace: the diff column on the left, the panel — its commit box
+/// and changes swapped for the commit's file tree — on the right.
 pub(super) struct GitPanelCommitDiff {
     pub sha: String,
     pub subject: String,
@@ -203,12 +204,27 @@ pub(super) struct GitPanelCommitDiff {
     pub scrollbar: Rc<ScrollbarState>,
     pub body_scroll: ScrollHandle,
     pub body_scrollbar: Rc<ScrollbarState>,
+    /// File-tree state for the panel's upper section: which directories are
+    /// expanded and which file the diff is anchored to.
+    pub expanded_paths: HashSet<String>,
+    pub selected_file: Option<usize>,
+    pub tree_scroll: ScrollHandle,
+    pub tree_scrollbar: Rc<ScrollbarState>,
 }
 
 pub(super) enum GitPanelCommitDiffState {
     Loading,
     Ready(Arc<ReviewDiffSnapshot>),
     Failed(String),
+}
+
+impl GitPanelCommitDiffState {
+    fn snapshot(&self) -> Option<&Arc<ReviewDiffSnapshot>> {
+        match self {
+            Self::Ready(snapshot) => Some(snapshot),
+            _ => None,
+        }
+    }
 }
 
 /// Which lane a log row's graph cell draws: worktree commits sit on the
@@ -1469,6 +1485,16 @@ impl Waku {
     /// A commit row's click: fetch its diff and open the modal.
     fn open_git_panel_commit_diff(&mut self, entry: &CommitEntry, cx: &mut Context<Self>) {
         self.git_panel_commit_hover = None;
+        // Re-clicking the open commit collapses the expanded view.
+        if self
+            .git_panel_commit_diff
+            .as_ref()
+            .is_some_and(|modal| modal.sha == entry.sha)
+        {
+            self.git_panel_commit_diff = None;
+            cx.notify();
+            return;
+        }
         let Some(panel) = self.git_panel.as_ref() else {
             return;
         };
@@ -1484,6 +1510,10 @@ impl Waku {
             scrollbar: ScrollbarState::new(),
             body_scroll: ScrollHandle::new(),
             body_scrollbar: ScrollbarState::new(),
+            expanded_paths: HashSet::new(),
+            selected_file: None,
+            tree_scroll: ScrollHandle::new(),
+            tree_scrollbar: ScrollbarState::new(),
         });
         cx.notify();
         let client = waku_client::WorkspaceClient::new(self.daemon.client());
@@ -1526,6 +1556,17 @@ impl Waku {
                 match result {
                     Ok(snapshot) => {
                         let count = snapshot.lines.len();
+                        modal.expanded_paths = snapshot
+                            .files
+                            .iter()
+                            .flat_map(|file| {
+                                file.path
+                                    .match_indices('/')
+                                    .map(|(index, _)| file.path[..index].to_owned())
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect();
+                        modal.selected_file = (!snapshot.files.is_empty()).then_some(0);
                         modal.state = GitPanelCommitDiffState::Ready(Arc::new(snapshot));
                         modal.list_state.reset(count);
                     }
@@ -1596,7 +1637,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let width = self.effective_panel_widths(window).1;
+        let (sidebar, panel) = self.effective_panel_widths(window);
+        // With a commit open the slot stretches to the sidebar (see
+        // `settle_panel_slides`); the pane lays out at that same target so
+        // the slide only clips it.
+        let width = if self.git_panel_commit_diff.is_some() {
+            (f32::from(window.viewport_size().width) - sidebar).max(panel)
+        } else {
+            panel
+        };
         self.render_git_panel(width, window, cx).into_any_element()
     }
 
@@ -1607,6 +1656,36 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        // An open commit splits the expanded slot in two: the diff column
+        // takes the slack on the left while the panel keeps its fitted width
+        // on the right, its commit box and changes swapped for the commit's
+        // file tree.
+        let commit_open = self.git_panel_commit_diff.is_some();
+        let column_width = if commit_open {
+            self.effective_panel_widths(window).1.min(width)
+        } else {
+            width
+        };
+        let mut column = div()
+            .w(px(column_width))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .relative()
+            .child(self.render_git_panel_header(window, cx));
+        if !commit_open {
+            column = column.child(self.render_git_panel_commit_area(cx));
+        }
+        column = column.child(self.render_git_panel_body(column_width, window, cx));
+        if !commit_open {
+            column = column.child(self.render_panel_resize_handle(
+                "git-panel-resize-handle",
+                PanelResizeTarget::RightPanel,
+                cx,
+            ));
+        }
         div()
             .id("git-panel")
             .key_context(PANEL_CONTEXT)
@@ -1620,20 +1699,19 @@ impl Waku {
             .h_full()
             .flex_none()
             .flex()
-            .flex_col()
             .min_w_0()
             .border_l(hairline())
             .border_color(theme.border_strong)
             .bg(theme.surface)
             .relative()
-            .child(self.render_git_panel_header(window, cx))
-            .child(self.render_git_panel_commit_area(cx))
-            .child(self.render_git_panel_body(width, window, cx))
-            .child(self.render_panel_resize_handle(
-                "git-panel-resize-handle",
-                PanelResizeTarget::RightPanel,
-                cx,
-            ))
+            .when(commit_open, |element| {
+                element.child(self.render_git_panel_commit_view(cx))
+            })
+            .child(
+                column.when(commit_open, |column| {
+                    column.border_l(hairline()).border_color(theme.border)
+                }),
+            )
     }
 
     fn render_git_panel_header(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1999,7 +2077,11 @@ impl Waku {
                 );
             }
             Some(snapshot) => {
-                if !snapshot.staged.is_empty() || !snapshot.unstaged.is_empty() {
+                if self.git_panel_commit_diff.is_some() {
+                    // An open commit replaces the working-tree sections with
+                    // its file tree; the log below stays live.
+                    body = body.child(self.render_git_panel_commit_tree(cx));
+                } else if !snapshot.staged.is_empty() || !snapshot.unstaged.is_empty() {
                     body = body.child(self.render_git_panel_changes(snapshot, width, window, cx));
                 }
             }
@@ -2095,6 +2177,241 @@ impl Waku {
             ))
             .child(scrollbar::vertical(&scroll_track, &scrollbar_state))
             .into_any_element()
+    }
+
+    /// The open commit's file tree, standing in for the commit box and
+    /// changes sections while the expanded view is up. Picking a file
+    /// top-anchors its header in the diff column.
+    fn render_git_panel_commit_tree(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(modal) = self.git_panel_commit_diff.as_ref() else {
+            return div().into_any_element();
+        };
+        let list = match &modal.state {
+            GitPanelCommitDiffState::Loading => div()
+                .h(px(40.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_tertiary,
+                )))
+                .into_any_element(),
+            GitPanelCommitDiffState::Failed(_) => div().into_any_element(),
+            GitPanelCommitDiffState::Ready(snapshot) => {
+                if snapshot.files.is_empty() {
+                    div()
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("diff.no_changes"))
+                        .into_any_element()
+                } else {
+                    let rows = right_panel::review_diff_tree_rows(
+                        &snapshot.files,
+                        &modal.expanded_paths,
+                        "",
+                    );
+                    let mut list = div().w_full().flex().flex_col().py(px(2.0));
+                    for row in &rows {
+                        list = list.child(self.render_git_panel_tree_row(row, cx));
+                    }
+                    list.into_any_element()
+                }
+            }
+        };
+        let scroll = modal.tree_scroll.clone();
+        let wheel = scroll.clone();
+        div()
+            .flex_none()
+            .max_h(gpui::relative(0.5))
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .border_b(hairline())
+            .border_color(theme.border)
+            .relative()
+            .child(Self::git_panel_section_label(
+                tr!("git_panel.files"),
+                &theme,
+            ))
+            .child(
+                div()
+                    .id("git-panel-commit-tree")
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
+                    .child(list),
+            )
+            .child(scrollbar::vertical(&scroll, &modal.tree_scrollbar))
+            .into_any_element()
+    }
+
+    fn render_git_panel_tree_row(
+        &self,
+        row: &right_panel::ReviewDiffTreeRow,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        match row {
+            right_panel::ReviewDiffTreeRow::Directory {
+                path,
+                name,
+                depth,
+                expanded,
+            } => {
+                let path = path.clone();
+                let path_for_key = path.clone();
+                let focus =
+                    self.transcript_control_focus(format!("git-panel-tree-dir-{path}"), cx);
+                div()
+                    .id(SharedString::from(format!("git-panel-tree-dir-{path}")))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(GIT_PANEL_FILE_ROW_HEIGHT))
+                    .pl(px(10.0 + *depth as f32 * 14.0))
+                    .pr(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .cursor_default()
+                    .hover(|style| style.bg(theme.overlay))
+                    .focus_visible(|style| style.bg(theme.overlay))
+                    .child(icon(
+                        if *expanded {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
+                        10.0,
+                        theme.text_ghost,
+                    ))
+                    .child(icon("icons/folder.svg", 12.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(name.clone()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_git_panel_tree_directory(path.clone(), cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.toggle_git_panel_tree_directory(path_for_key.clone(), cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .into_any_element()
+            }
+            right_panel::ReviewDiffTreeRow::File { file_index, depth } => {
+                let Some(modal) = self.git_panel_commit_diff.as_ref() else {
+                    return div().into_any_element();
+                };
+                let Some(file) = modal
+                    .state
+                    .snapshot()
+                    .and_then(|snapshot| snapshot.files.get(*file_index))
+                else {
+                    return div().into_any_element();
+                };
+                let selected = modal.selected_file == Some(*file_index);
+                let path = file.path.clone();
+                let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                let (status, status_color) = match file.status {
+                    crate::review_diff::FileStatus::Added => ("A", theme.success),
+                    crate::review_diff::FileStatus::Modified => ("M", theme.warning),
+                    crate::review_diff::FileStatus::Deleted => ("D", theme.danger),
+                    crate::review_diff::FileStatus::Binary => ("B", theme.text_tertiary),
+                };
+                let file_index = *file_index;
+                let focus = self.transcript_control_focus(
+                    format!("git-panel-tree-file-{path}"),
+                    cx,
+                );
+                div()
+                    .id(SharedString::from(format!("git-panel-tree-file-{path}")))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(GIT_PANEL_FILE_ROW_HEIGHT))
+                    .pl(px(10.0 + *depth as f32 * 14.0 + 16.0))
+                    .pr(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .cursor_default()
+                    .when(selected, |row| row.bg(theme.overlay_strong))
+                    .when(!selected, |row| {
+                        row.hover(|style| style.bg(theme.overlay))
+                            .focus_visible(|style| style.bg(theme.overlay))
+                    })
+                    .child(file_icon(right_panel::file_icon_for_path(&path), 12.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(name),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(status_color)
+                            .child(status),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_git_panel_commit_file(file_index, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.select_git_panel_commit_file(file_index, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn toggle_git_panel_tree_directory(&mut self, path: String, cx: &mut Context<Self>) {
+        let Some(modal) = self.git_panel_commit_diff.as_mut() else {
+            return;
+        };
+        if !modal.expanded_paths.remove(&path) {
+            modal.expanded_paths.insert(path);
+        }
+        cx.notify();
+    }
+
+    fn select_git_panel_commit_file(&mut self, file_index: usize, cx: &mut Context<Self>) {
+        let Some(modal) = self.git_panel_commit_diff.as_mut() else {
+            return;
+        };
+        modal.selected_file = Some(file_index);
+        if let Some(line) = modal
+            .state
+            .snapshot()
+            .and_then(|snapshot| snapshot.files.get(file_index))
+            .and_then(|file| file.diff_line)
+        {
+            // Top-anchor the file's header so its diff body is immediately
+            // visible, the same jump the Review panel's tree makes.
+            modal.list_state.scroll_to(gpui::ListOffset {
+                item_ix: line,
+                offset_in_item: px(0.0),
+            });
+        }
+        cx.notify();
     }
 
     /// A changed-file row: status letter, icon, path, counts, the stage or
@@ -2709,6 +3026,12 @@ impl Waku {
             .text_size(sp(12.5))
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.overlay))
+            .when(
+                self.git_panel_commit_diff
+                    .as_ref()
+                    .is_some_and(|modal| modal.sha == entry.sha),
+                |row| row.bg(theme.overlay_strong),
+            )
             .when_some(lane, |row, lane| row.child(commit_graph_cell(lane, &theme)))
             .child(
                 div()
@@ -2882,16 +3205,12 @@ impl Waku {
         // An open modal holds focus so Escape reaches its context no matter
         // where the pointer was last; the scrim keeps the panel unclickable
         // in the meantime.
-        if self.git_panel_commit_diff.is_some()
-            || self.git_panel_sync_conflict.is_some()
-            || self.git_panel_unstaged_prompt
-        {
+        if self.git_panel_sync_conflict.is_some() || self.git_panel_unstaged_prompt {
             window.focus(&self.git_panel_modal_focus, cx);
         }
         let mut overlays = Vec::new();
         overlays.extend(self.render_git_panel_unstaged_modal(window, cx));
         overlays.extend(self.render_git_panel_conflict_modal(window, cx));
-        overlays.extend(self.render_git_panel_commit_modal(window, cx));
         overlays
     }
 
@@ -3118,13 +3437,12 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     }
 
-    /// One commit's diff, opened from its row.
-    fn render_git_panel_commit_modal(
-        &self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let modal = self.git_panel_commit_diff.as_ref()?;
+    /// The diff column of the expanded commit view: the modal's header and
+    /// scrollable diff, minus the card chrome — the panel sits to its right.
+    fn render_git_panel_commit_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(modal) = self.git_panel_commit_diff.as_ref() else {
+            return div().into_any_element();
+        };
         let theme = Theme::current(cx);
         // `…/commit/<sha>` and `#<n>` issue links only make sense when the
         // workspace's origin remote is a github.com repository.
@@ -3197,25 +3515,14 @@ impl Waku {
                 }
             }
         };
-        let card = div()
-            .id("git-panel-commit-modal-card")
-            .track_focus(&self.git_panel_modal_focus)
-            .tab_index(0)
-            .key_context(MODAL_CONTEXT)
-            .on_action(cx.listener(|this, _: &DismissGitPanelModal, _, cx| {
-                this.dismiss_git_panel_modal(cx);
-            }))
-            .w(px(GIT_PANEL_MODAL_WIDTH))
-            .h(px(GIT_PANEL_MODAL_HEIGHT))
-            .overflow_hidden()
-            .rounded(px(16.0))
-            .border(hairline())
-            .border_color(theme.border)
-            .bg(theme.surface)
-            .shadow_xl()
+        div()
+            .id("git-panel-commit-view")
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .flex()
             .flex_col()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .bg(theme.canvas)
             .child(
                 div()
                     .h(px(40.0))
@@ -3312,8 +3619,8 @@ impl Waku {
                         .child(scrollbar::vertical(&scroll, &modal.body_scrollbar)),
                 )
             })
-            .child(body);
-        Some(self.git_panel_modal_layer("git-panel-commit-modal", card, cx))
+            .child(body)
+            .into_any_element()
     }
 
     /// A row in the commit-diff modal — the Review panel's own row shapes,

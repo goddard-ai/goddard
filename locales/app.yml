@@ -2481,6 +2481,8 @@ git_panel.no_commits:
   en: No commits yet
 git_panel.up_to_date:
   en: Up to date
+git_panel.files:
+  en: Files
 git_panel.unpushed:
   en: Not pushed to upstream
 git_panel.no_commit_body:
