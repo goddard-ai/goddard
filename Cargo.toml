@@ -39,6 +39,8 @@ gpui_platform = { git = "https://github.com/goddard-ai/zed", branch = "main", fe
   # metallib, so builds work without Xcode's metal/metallib toolchain.
   "runtime_shaders",
 ] }
+# Backs `App::http_client`; GPUI's `img()` loads remote sources through it.
+reqwest_client = { git = "https://github.com/goddard-ai/zed", branch = "main" }
 parking_lot = "0.12"
 rquickjs = "0.12.2"
 serde = { version = "1.0", features = ["derive"] }

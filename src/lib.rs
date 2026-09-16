@@ -281,6 +281,16 @@ pub fn run() {
         .unwrap_or_else(|error| panic!("failed to start Goddard daemon: {error:#}"));
     gpui_platform::application()
         .with_assets(crate::assets::Assets)
+        // Remote `img()` sources (commit-author avatars) go through this
+        // client; without one GPUI's null client fails every load silently.
+        .with_http_client(std::sync::Arc::new(
+            reqwest_client::ReqwestClient::user_agent(&format!(
+                "{}/{}",
+                APP_NAME,
+                env!("CARGO_PKG_VERSION")
+            ))
+            .expect("failed to build the app's HTTP user agent"),
+        ))
         .with_main_window_reopen()
         .run(move |cx: &mut App| {
             // Linux uses this for Wayland app_id/X11 WM_CLASS and notification
