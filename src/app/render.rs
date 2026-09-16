@@ -239,6 +239,15 @@ impl Waku {
         cx.notify();
     }
 
+    /// Whether a menu card is up over the workspace. While one is, the
+    /// pointer leaving the peek overlay is it moving *into the menu* — the
+    /// card is a deferred layer outside the overlay's element tree — not a
+    /// real exit, so the overlay must not dismiss underneath it.
+    fn any_menu_open(&self, cx: &App) -> bool {
+        self.menus.borrow().values().any(ContextMenuHandle::is_open)
+            || self.composer.read(cx).context_menu_open(cx)
+    }
+
     /// The overlay is the hover surface once it is up — it covers the strip —
     /// so leaving it (or the window) starts the nudge-out, and returning to
     /// it mid-exit settles it back.
@@ -257,6 +266,18 @@ impl Waku {
             }
             return;
         }
+        if self.any_menu_open(cx) {
+            // An open menu claimed the pointer. Defer the exit to
+            // `settle_sidebar_peek`, which re-checks it once the menu closes.
+            self.sidebar_peek_menu_hold = true;
+            return;
+        }
+        self.begin_sidebar_peek_exit(cx);
+        cx.notify();
+    }
+
+    /// Start the overlay's nudge-out when it is on screen.
+    fn begin_sidebar_peek_exit(&mut self, cx: &App) {
         if matches!(self.sidebar_peek, SidebarPeek::Shown { .. }) {
             self.sidebar_peek = if cx.reduce_motion() {
                 SidebarPeek::Hidden
@@ -265,7 +286,6 @@ impl Waku {
                     started: Instant::now(),
                 }
             };
-            cx.notify();
         }
     }
 
@@ -278,7 +298,18 @@ impl Waku {
         // retires without its nudge-out.
         if self.settings_page.is_some() || !self.sidebar_peek_allowed() {
             self.sidebar_peek = SidebarPeek::Hidden;
+            self.sidebar_peek_menu_hold = false;
             return None;
+        }
+        // Settle a hover exit a menu card claimed: once no menu is open, a
+        // pointer that ended up outside the panel dismisses it here rather
+        // than waiting for the next mouse move to resend the hover.
+        if self.sidebar_peek_menu_hold && !self.any_menu_open(cx) {
+            self.sidebar_peek_menu_hold = false;
+            let right_edge = px(self.sidebar_peek_width(window));
+            if window.mouse_position().x > right_edge {
+                self.begin_sidebar_peek_exit(cx);
+            }
         }
         if cx.reduce_motion() {
             return (!matches!(self.sidebar_peek, SidebarPeek::Hidden)).then_some((0.0, 1.0));

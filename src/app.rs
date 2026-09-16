@@ -1678,6 +1678,9 @@ pub struct Waku {
     right_panel_rendered_width: f32,
     /// The closed sidebar's hover-peek overlay — see [`SidebarPeek`].
     sidebar_peek: SidebarPeek,
+    /// A hover exit the peek overlay deferred because a menu card was open
+    /// above it. Settled once no menu is open by re-checking the pointer.
+    sidebar_peek_menu_hold: bool,
     /// The right-panel surface currently maximized over the window, if any —
     /// runtime-only; the docked layout it covers comes back exactly as it
     /// was. The path of the file shown at entry rides alongside so a
@@ -3877,6 +3880,7 @@ impl Waku {
                     0.0
                 },
                 sidebar_peek: SidebarPeek::Hidden,
+                sidebar_peek_menu_hold: false,
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {
