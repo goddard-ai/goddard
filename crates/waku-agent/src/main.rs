@@ -71,7 +71,7 @@ fn schema() -> serde_json::Value {
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
             "fields": {
-                "provider": {"type": "string", "required": true, "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "grok", "kimi", "ohmypi", "pi"]},
+                "provider": {"type": "string", "required": true, "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "grok", "kimi", "muse", "ohmypi", "pi"]},
                 "model": {"type": "string", "required": true, "notes": "explicit provider model id, or \"default\" for the provider's own default"},
                 "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
                 "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},

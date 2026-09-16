@@ -30,7 +30,7 @@ toml = "0.8"
 trash = "5.2.6"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
-uuid = { version = "1.18", features = ["v4", "serde"] }
+uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-protocol = { path = "../waku-protocol" }
 waku-share = { path = "../waku-share" }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

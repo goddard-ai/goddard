@@ -75,6 +75,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         | ProviderKind::Fx
         | ProviderKind::Grok
         | ProviderKind::Kimi
+        | ProviderKind::Muse
         | ProviderKind::OpenCode
         | ProviderKind::OpenCode2
         | ProviderKind::OhMyPi

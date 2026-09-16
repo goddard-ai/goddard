@@ -8,6 +8,7 @@ mod codex;
 mod computer_use;
 mod copilot;
 mod deepseek;
+mod muse;
 mod opencode;
 mod opencode2;
 mod opencode2_computer_use;
@@ -278,6 +279,9 @@ pub(crate) fn start_local(
         // service carries every workspace, and every Goddard task rides its one
         // event stream.
         ProviderKind::OpenCode2 => Arc::new(opencode2::OpenCode2Driver::start(options, events)?),
+        // Muse is the same shape but Goddard owns the host: one `muse serve`
+        // multiplexes every session's MSP view over a single stdio connection.
+        ProviderKind::Muse => Arc::new(muse::MuseDriver::start(options, events)?),
         // Claude serves a realtime stream of user messages on stdin — the same
         // transport the Agent SDK drives — which is what lets its Supervised
         // mode ask rather than decide alone.

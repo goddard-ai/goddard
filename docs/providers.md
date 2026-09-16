@@ -22,6 +22,7 @@ session that spans the whole conversation**:
 | Claude streaming-input session (NDJSON over stdio) | [driver/claude.rs](../crates/waku-core/src/driver/claude.rs) | Claude Code |
 | Amp streaming-JSON session (NDJSON over stdio) | [driver/amp.rs](../crates/waku-core/src/driver/amp.rs) | Amp |
 | Harness client API (typed HTTP + downlink streams) | [driver/deepseek.rs](../crates/waku-core/src/driver/deepseek.rs) | DeepSeek Harness |
+| Muse Session Protocol (JSON-RPC over a shared `muse serve`) | [driver/muse.rs](../crates/waku-core/src/driver/muse.rs), [muse_service.rs](../crates/waku-core/src/muse_service.rs), [muse_session.rs](../crates/waku-core/src/muse_session.rs) | Muse Code |
 
 DeepSeek Harness has no dedicated section below yet; its driver's module
 comment is the current reference.
@@ -583,6 +584,58 @@ the same local resources; a cold task may use a short-lived server
 **Computer Use** — `OPENCODE_CONFIG_CONTENT` and the helper paths are handed to
 the resident server through its environment, exactly as the one-shot invocation
 received them.
+
+---
+
+## Muse Code
+
+**Launch** — `muse serve`
+([driver/muse.rs](../crates/waku-core/src/driver/muse.rs)). One long-lived host
+process serves every Muse task in the app: Goddard owns it, multiplexes all
+sessions over its single stdio connection, and each task subscribes to its own
+session's event view before `session/start` or `session/resume` is sent.
+
+**Protocol** — Muse Session Protocol (MSP), newline-delimited JSON-RPC over
+stdio, defined by `meta-models/muse-code-sdk`. The `initialize` handshake
+validates the schema version and fingerprint; commands carry a client-minted
+UUIDv7 `commandId`. Server-initiated `approval/request` and
+`userInput/request` get an immediate `{}` acknowledgement, and the real
+decision goes back later through `approval/decide` or `userInput/answer` —
+the same split ACP clients use.
+
+**Events** — a session's view is a revisioned, durable event log.
+`item/started`/`delta`/`completed` map agent messages to streamed text,
+`reasoning` items to streamed thinking, and `toolCall`/`userShell`/subagent
+items to activity cards. `session/contextUsage` feeds the context meter,
+`session/todoListChanged` renders a plan card, and `view/gap` triggers a
+`view/page` refill so a dropped delivery cannot silently lose items.
+
+**Permissions and questions** — `approval/requested`/`approval/request`
+become permission cards whose `availableChoices` carry their own
+allow/deny semantics; `userInput/requested` becomes the question card, with
+answers re-encoded by each question's selection mode.
+
+**Rewind and branch** — `session/fork` at a `lastTurnId` cut point, same
+model as OpenCode 2: a live driver forks through the shared host and the
+driver resubscribes to the forked session, while a cold task forks through
+[muse_session.rs](../crates/waku-core/src/muse_session.rs).
+
+**Models** — `model/list` on the live host is authoritative; with no host
+running the picker falls back to the last-good cache. Models accept a
+per-turn `reasoningEffort` and `session/setModel` applies a picker change
+in place.
+
+**Access modes** — Ask and Auto-accept-edits map to `promptUnmatched`,
+Auto to `onRequest`, Full-access to `allowAll`
+(`session/setApprovalMode` for live changes).
+
+**History** — `session/list` enumerates native sessions for the Resume
+picker and `session/read` serves the folded transcript, with `view/page`
+as the fallback when the host returns a snapshot instead of items.
+
+**Authentication** — errors that look like missing or expired credentials
+are reported with a `muse login` hint, and the binary path can be pinned in
+the provider's binary-override setting.
 
 ---
 

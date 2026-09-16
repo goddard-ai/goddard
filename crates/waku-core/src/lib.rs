@@ -50,6 +50,8 @@ pub mod kimi_session;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;
+pub mod muse_service;
+pub mod muse_session;
 pub mod notifications;
 pub mod opencode2_api;
 pub mod opencode2_service;

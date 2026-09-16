@@ -664,6 +664,38 @@ fn perform_provider_rewind(
             };
             Ok((Some(cursor), None, None))
         }
+        ProviderKind::Muse => {
+            let cursor = if let Some(driver) = request.driver.as_ref() {
+                driver.rollback(request.rollback_turns)?.ok_or_else(|| {
+                    anyhow::anyhow!("Muse Code returned no cursor for the rewound session")
+                })?
+            } else {
+                let Some(ProviderResumeCursor::Muse {
+                    session_id: native_session_id,
+                    ..
+                }) = request.provider_cursor.as_ref()
+                else {
+                    anyhow::bail!(tr!(
+                        "errors.provider_native_cursor_unavailable",
+                        provider = "Muse Code"
+                    ));
+                };
+                let binary = request.binary.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!(tr!("errors.provider_not_found", provider = "Muse Code"))
+                })?;
+                request
+                    .workspace_client
+                    .fork_provider_session(
+                        waku_client::provider_session::ProviderSessionForkRequest::Muse {
+                            binary: binary.to_owned(),
+                            session_id: native_session_id.clone(),
+                            turn_count: request.provider_turn_count,
+                        },
+                    )?
+                    .cursor
+            };
+            Ok((Some(cursor), None, None))
+        }
         ProviderKind::Amp => {
             let Some(ProviderResumeCursor::Amp {
                 thread_id: native_thread_id,
@@ -1074,6 +1106,35 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                             waku_client::provider_session::ProviderSessionForkRequest::Grok {
                                 binary: binary.to_owned(),
                                 cwd: request.source_workspace_path.clone(),
+                                session_id: native_session_id.clone(),
+                                turn_count: request.provider_turn_count,
+                            },
+                        )?
+                        .cursor,
+                    None,
+                    None,
+                ))
+            }
+            ProviderKind::Muse => {
+                let Some(ProviderResumeCursor::Muse {
+                    session_id: native_session_id,
+                    ..
+                }) = request.source.provider_cursor.as_ref()
+                else {
+                    anyhow::bail!(tr!(
+                        "errors.provider_native_session_unavailable",
+                        provider = "Muse Code"
+                    ));
+                };
+                let binary = request.binary.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!(tr!("errors.provider_not_installed", provider = "Muse Code"))
+                })?;
+                Ok((
+                    request
+                        .workspace_client
+                        .fork_provider_session(
+                            waku_client::provider_session::ProviderSessionForkRequest::Muse {
+                                binary: binary.to_owned(),
                                 session_id: native_session_id.clone(),
                                 turn_count: request.provider_turn_count,
                             },
@@ -3017,6 +3078,7 @@ impl Waku {
         let binary_provider = match provider {
             ProviderKind::Amp => Some("Amp"),
             ProviderKind::Copilot => Some("GitHub Copilot"),
+            ProviderKind::Muse => Some("Muse Code"),
             ProviderKind::OpenCode => Some("OpenCode"),
             ProviderKind::OpenCode2 => Some("OpenCode 2"),
             ProviderKind::Grok => Some("Grok Build"),
@@ -3397,6 +3459,7 @@ impl Waku {
                 || (source.provider == ProviderKind::Copilot && retained_turn_count > 0)
                 || (source.provider == ProviderKind::OpenCode && driver.is_none())
                 || (source.provider == ProviderKind::OpenCode2 && driver.is_none())
+                || (source.provider == ProviderKind::Muse && driver.is_none())
                 || (source.provider == ProviderKind::Grok && retained_turn_count > 0));
         let binary = needs_binary
             .then(|| self.provider_binary_for_session(session_id, source.provider))

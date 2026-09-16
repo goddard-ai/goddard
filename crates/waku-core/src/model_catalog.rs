@@ -115,6 +115,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
         ProviderKind::Kimi | ProviderKind::OhMyPi | ProviderKind::Pi => Vec::new(),
+        // Muse's catalog comes from `model/list` on its own serve host — the
+        // account's providers and profiles decide what is selectable, so an
+        // invented fallback would offer models the host rejects.
+        ProviderKind::Muse => Vec::new(),
     }
 }
 
@@ -158,6 +162,9 @@ pub fn discover_catalog(
         ProviderKind::OpenCode2 => crate::opencode2_session::discover_catalog(binary),
         ProviderKind::Grok => (discover_grok_models(binary), None),
         ProviderKind::Kimi => (discover_kimi_models(binary), None),
+        // `model/list` is served by the shared `muse serve` host; with no
+        // session running there is nothing to ask, and the cache stands in.
+        ProviderKind::Muse => crate::muse_session::discover_catalog(binary),
         ProviderKind::Pi => (discover_pi_models(binary, PiDialect::Pi), None),
         ProviderKind::OhMyPi => (discover_pi_models(binary, PiDialect::OhMyPi), None),
     };

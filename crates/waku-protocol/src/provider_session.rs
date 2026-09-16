@@ -57,6 +57,13 @@ pub enum ProviderSessionForkRequest {
         turn_count: usize,
         title: String,
     },
+    /// One `muse serve` hosts every workspace, so a cold fork needs only the
+    /// binary to reach it and the source session id to cut.
+    Muse {
+        binary: PathBuf,
+        session_id: String,
+        turn_count: usize,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

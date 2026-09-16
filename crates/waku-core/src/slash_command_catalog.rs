@@ -49,7 +49,10 @@ pub(crate) fn discover(
         | ProviderKind::Droid
         | ProviderKind::Fx
         | ProviderKind::Grok
-        | ProviderKind::Kimi => None,
+        | ProviderKind::Kimi
+        // Muse owns its skills and commands inside the serve host; MSP has
+        // no catalog method, so autocomplete stays empty until one exists.
+        | ProviderKind::Muse => None,
     }
 }
 

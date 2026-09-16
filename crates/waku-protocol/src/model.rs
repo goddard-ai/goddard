@@ -24,6 +24,7 @@ pub enum ProviderKind {
     OpenCode2,
     Grok,
     Kimi,
+    Muse,
     OhMyPi,
     Pi,
 }
@@ -43,6 +44,7 @@ impl ProviderKind {
         Self::OpenCode2,
         Self::Grok,
         Self::Kimi,
+        Self::Muse,
         Self::OhMyPi,
         Self::Pi,
     ];
@@ -62,6 +64,7 @@ impl ProviderKind {
             Self::OpenCode2 => "opencode2",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
+            Self::Muse => "muse",
             Self::OhMyPi => "ohmypi",
             Self::Pi => "pi",
         }
@@ -82,6 +85,7 @@ impl ProviderKind {
             Self::OpenCode2 => "OpenCode 2",
             Self::Grok => "Grok Build",
             Self::Kimi => "Kimi Code",
+            Self::Muse => "Muse Code",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
         }
@@ -102,6 +106,7 @@ impl ProviderKind {
             Self::OpenCode2 => "OpenCode 2",
             Self::Grok => "Grok",
             Self::Kimi => "Kimi",
+            Self::Muse => "Muse",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
         }
@@ -124,6 +129,7 @@ impl ProviderKind {
             Self::OpenCode2 => "opencode2",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
+            Self::Muse => "muse",
             Self::OhMyPi => "omp",
             Self::Pi => "pi",
         }
@@ -221,6 +227,14 @@ impl ProviderKind {
                 api_key_env: None,
                 docs_url: "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html",
             },
+            // Muse credentials live in the Muse CLI itself; MSP exposes no
+            // login surface, so sign-in is always the CLI's own flow.
+            Self::Muse => ProviderSetup {
+                install: "curl -fsSL https://dev.meta.ai/install.sh | sh",
+                sign_in: Some("muse login"),
+                api_key_env: None,
+                docs_url: "https://meta-models.github.io/muse-code-sdk",
+            },
             Self::OhMyPi => ProviderSetup {
                 install: "curl -fsSL https://omp.sh/install | sh",
                 sign_in: Some("omp auth-broker login"),
@@ -257,6 +271,7 @@ impl ProviderKind {
                 | Self::OpenCode
                 | Self::OpenCode2
                 | Self::Grok
+                | Self::Muse
                 | Self::OhMyPi
                 | Self::Pi
         )
@@ -274,6 +289,7 @@ impl ProviderKind {
                 | Self::OpenCode
                 | Self::OpenCode2
                 | Self::Grok
+                | Self::Muse
                 | Self::OhMyPi
                 | Self::Pi
         )
@@ -294,6 +310,7 @@ impl ProviderKind {
                 | Self::OpenCode2
                 | Self::Grok
                 | Self::Kimi
+                | Self::Muse
                 | Self::OhMyPi
                 | Self::Pi
         )
@@ -370,6 +387,13 @@ pub enum ProviderResumeCursor {
     Kimi {
         session_id: String,
     },
+    Muse {
+        session_id: String,
+        /// The last view cursor this runtime observed; a reattach can ask
+        /// `session/resume` for the suffix only instead of a full fold.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view_cursor: Option<String>,
+    },
     OhMyPi {
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -410,6 +434,10 @@ impl ProviderResumeCursor {
             },
             ProviderKind::Grok => Self::Grok { session_id: id },
             ProviderKind::Kimi => Self::Kimi { session_id: id },
+            ProviderKind::Muse => Self::Muse {
+                session_id: id,
+                view_cursor: None,
+            },
             ProviderKind::OhMyPi => Self::OhMyPi {
                 session_id: id,
                 session_file: None,
@@ -436,6 +464,7 @@ impl ProviderResumeCursor {
             Self::OpenCode2 { .. } => ProviderKind::OpenCode2,
             Self::Grok { .. } => ProviderKind::Grok,
             Self::Kimi { .. } => ProviderKind::Kimi,
+            Self::Muse { .. } => ProviderKind::Muse,
             Self::OhMyPi { .. } => ProviderKind::OhMyPi,
             Self::Pi { .. } => ProviderKind::Pi,
         }
@@ -455,6 +484,7 @@ impl ProviderResumeCursor {
             | Self::OpenCode2 { session_id, .. }
             | Self::Grok { session_id }
             | Self::Kimi { session_id }
+            | Self::Muse { session_id, .. }
             | Self::OhMyPi { session_id, .. }
             | Self::Pi { session_id, .. } => session_id,
             Self::Codex { thread_id } => thread_id,

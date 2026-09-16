@@ -816,6 +816,9 @@ impl Backend for WakuBackend {
                     }
                     ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
                     ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
+                    ProviderKind::Muse => {
+                        crate::muse_session::list_provider_sessions(&binary, limit)?
+                    }
                     ProviderKind::OhMyPi | ProviderKind::Pi => {
                         crate::pi_session::list_provider_sessions(provider, limit)?
                     }
@@ -898,6 +901,14 @@ impl Backend for WakuBackend {
                             provider,
                             &binary,
                             &cwd,
+                            session_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    ProviderResumeCursor::Muse { session_id, .. } => {
+                        let binary = self.provider_binary(ProviderKind::Muse)?;
+                        crate::muse_session::provider_session_history(
+                            &binary,
                             session_id,
                             VISIBLE_TURN_LIMIT,
                         )?
@@ -1594,6 +1605,19 @@ impl WakuBackend {
                 self.fork_response_with_driver(source, cwd, turns_to_remove)?,
                 HashMap::new(),
             )),
+            ProviderKind::Muse => {
+                let Some(ProviderResumeCursor::Muse { session_id, .. }) =
+                    source.provider_cursor.as_ref()
+                else {
+                    bail!("Muse Code's native session is unavailable");
+                };
+                let fork = fork_provider_session(ProviderSessionForkRequest::Muse {
+                    binary: self.provider_binary(ProviderKind::Muse)?,
+                    session_id: session_id.clone(),
+                    turn_count: provider_turn_count,
+                })?;
+                Ok((fork.cursor, HashMap::new()))
+            }
             ProviderKind::Cursor => {
                 let fork = fork_provider_session(ProviderSessionForkRequest::Cursor {
                     source: source.clone(),
@@ -1916,6 +1940,31 @@ impl WakuBackend {
                     title: format!("{} (rewind)", source.display_title()),
                 })?
                 .cursor;
+                Ok((Some(cursor), HashMap::new(), false))
+            }
+            ProviderKind::Muse => {
+                let cursor = if let Some(driver) = self
+                    .sessions
+                    .lock()
+                    .get(&source.id)
+                    .map(|(_, driver)| driver.clone())
+                {
+                    driver
+                        .rollback(rollback_turns)?
+                        .ok_or_else(|| anyhow!("Muse Code returned no rewound-session cursor"))?
+                } else {
+                    let Some(ProviderResumeCursor::Muse { session_id, .. }) =
+                        source.provider_cursor.as_ref()
+                    else {
+                        bail!("Muse Code's native session is unavailable");
+                    };
+                    fork_provider_session(ProviderSessionForkRequest::Muse {
+                        binary: binary.to_owned(),
+                        session_id: session_id.clone(),
+                        turn_count: provider_turn_count,
+                    })?
+                    .cursor
+                };
                 Ok((Some(cursor), HashMap::new(), false))
             }
             ProviderKind::Codex
@@ -2713,6 +2762,15 @@ fn fork_provider_session(
             crate::copilot_session::fork_session_at_turn(
                 &binary, &cwd, &session_id, turn_count, &title,
             )?,
+            HashMap::new(),
+            None,
+        ),
+        ProviderSessionForkRequest::Muse {
+            binary,
+            session_id,
+            turn_count,
+        } => (
+            crate::muse_session::fork_session_at_turn(&binary, &session_id, turn_count)?,
             HashMap::new(),
             None,
         ),
