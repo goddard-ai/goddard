@@ -66,6 +66,15 @@ actions!(
     ]
 );
 
+/// ⌘1–⌘9 — arm the composer on the nth visible card. While the overlay owns
+/// the keymap this shadows the sidebar's session chords, which have no
+/// business retargeting the background session.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku_big_picture, no_json)]
+pub struct SelectBigPictureCard {
+    pub index: usize,
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", DismissBigPicture, Some("BigPicture")),
@@ -73,6 +82,13 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("right", BigPictureRight, Some("BigPicture")),
         KeyBinding::new("enter", BigPictureConfirm, Some("BigPicture")),
     ]);
+    for index in 0..9 {
+        cx.bind_keys([KeyBinding::new(
+            &format!("secondary-{}", index + 1),
+            SelectBigPictureCard { index },
+            Some("BigPicture"),
+        )]);
+    }
 }
 
 /// A mounted card. Slots outlive their session's rank so an evicted card can
@@ -442,6 +458,24 @@ impl Waku {
     }
 
     fn toggle_big_picture_target(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.big_picture.highlighted = Some(session_id);
+        let target = (self.big_picture.target != Some(session_id)).then_some(session_id);
+        self.set_big_picture_target(target, cx);
+    }
+
+    /// ⌘n — arm the nth card in row-major order, or peel the target off if
+    /// it's already armed. An index past the visible grid does nothing; the
+    /// sidebar chord it shadows must never leak through to selection.
+    fn select_big_picture_card_action(
+        &mut self,
+        action: &SelectBigPictureCard,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let order = self.big_picture_navigable();
+        let Some(session_id) = order.get(action.index).copied() else {
+            return;
+        };
         self.big_picture.highlighted = Some(session_id);
         let target = (self.big_picture.target != Some(session_id)).then_some(session_id);
         self.set_big_picture_target(target, cx);
@@ -1147,6 +1181,7 @@ impl Waku {
             .on_action(cx.listener(Self::big_picture_left_action))
             .on_action(cx.listener(Self::big_picture_right_action))
             .on_action(cx.listener(Self::big_picture_confirm_action))
+            .on_action(cx.listener(Self::select_big_picture_card_action))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_big_picture(window, cx)),
