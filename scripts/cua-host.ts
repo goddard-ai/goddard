@@ -13,6 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { wakuCacheDir } from "./cache-dir";
 
 const root = resolve(import.meta.dir, "..");
 const revision = "1b50c02e2d34734f64d2d22f54eb76cc97b4a663";
@@ -31,7 +32,7 @@ export async function prepareCuaHost(): Promise<string> {
   const key = createHash("sha256")
     .update(revision + extension + header + compiler)
     .digest("hex");
-  const cache = join(root, ".waku-cache/cua-host");
+  const cache = join(wakuCacheDir(), "cua-host");
   const destination = join(cache, key);
   const library =
     process.platform === "darwin"
@@ -52,7 +53,12 @@ export async function prepareCuaHost(): Promise<string> {
       )
         throw new Error("Cua source revision mismatch");
       await $`git -C ${staging} sparse-checkout set libs/cua-driver/rust libs/cua-driver/contract`.quiet();
-      await rename(staging, source);
+      try {
+        await rename(staging, source);
+      } catch (error) {
+        if (!existsSync(join(source, "libs/cua-driver/rust/Cargo.lock")))
+          throw error;
+      }
     } finally {
       await rm(staging, { recursive: true, force: true });
     }

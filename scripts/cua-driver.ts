@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { wakuCacheDir } from "./cache-dir";
 import { writeCuaSkill } from "./cua-api";
 import { prepareCuaHost } from "./cua-host";
 
@@ -51,7 +52,7 @@ export function cuaPlatform(
 
 export async function prepareCuaSdk(platform = cuaPlatform()): Promise<string> {
   const [checksum, library] = artifacts[platform];
-  const cacheRoot = join(root, ".waku-cache", "cua-driver", cuaVersion);
+  const cacheRoot = join(wakuCacheDir(), "cua-driver", cuaVersion);
   const destination = join(cacheRoot, platform);
   const support = platform.startsWith("windows")
     ? "cua-driver-uia.exe"
@@ -83,7 +84,11 @@ export async function prepareCuaSdk(platform = cuaPlatform()): Promise<string> {
       if (!existsSync(join(unpacked, file)))
         throw new Error(`Cua SDK archive is missing ${file}`);
     }
-    await rename(unpacked, destination);
+    try {
+      await rename(unpacked, destination);
+    } catch (error) {
+      if (!existsSync(join(destination, library))) throw error;
+    }
   } finally {
     await rm(staging, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ import { lstat, readdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { wakuCacheDir } from "./cache-dir";
 
 const projectRoot = resolve(import.meta.dir, "..");
 const userHome = homedir();
@@ -62,8 +63,11 @@ async function existingTargets(): Promise<Target[]> {
   return targets;
 }
 
-// Checkout-local state and build artifacts. Keep the release cache intact.
+// Checkout-local state and build artifacts.
 addCandidate(join(projectRoot, "temp"));
+// Debug helper cache in the shared build cache, plus its old checkout-local
+// location. Keep the release cache intact.
+addCandidate(join(wakuCacheDir(), "computer-use", "debug"));
 addCandidate(join(projectRoot, ".waku-cache", "computer-use", "debug"));
 addCandidate(join(projectRoot, "target", "debug", "Goddard Debug.app"));
 // Pre-rename builds used the Waku name.

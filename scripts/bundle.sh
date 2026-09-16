@@ -3,7 +3,11 @@ set -eu
 
 profile="${1:-debug}"
 cargo_target_dir="${CARGO_TARGET_DIR:-target}"
-debug_identity_cache=".waku-cache/codesign/debug-identity"
+# Shared build cache (see scripts/cache-dir.ts): worktrees share the codesign
+# identity, downloaded SDKs, and compiled helpers instead of resolving them
+# per checkout.
+waku_cache="${WAKU_CACHE_DIR:-$HOME/Library/Caches/waku-build}"
+debug_identity_cache="$waku_cache/codesign/debug-identity"
 codesign_identity_from_environment=0
 if [ -n "${WAKU_CODESIGN_IDENTITY:-}" ]; then
   codesign_identity="$WAKU_CODESIGN_IDENTITY"
@@ -90,7 +94,7 @@ helper_fingerprint="$({
   printf '%s\n' "cua-in-process-v1" "$helper_name" "$bundle_identifier.computer-use" "$codesign_identity" "$(uname -m)-apple-macos13.0"
   xcrun swiftc -version
 } | shasum -a 256 | awk '{ print $1 }')"
-helper_cache_root=".waku-cache/computer-use/$profile"
+helper_cache_root="$waku_cache/computer-use/$profile"
 helper_cache_entry="$helper_cache_root/$helper_fingerprint"
 cached_helper_bundle="$helper_cache_entry/$helper_name.app"
 
@@ -145,7 +149,7 @@ fi
 # `cargo clean` cannot evict it. Bump the version and checksum together.
 sparkle_version="2.9.4"
 sparkle_sha256="ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9"
-sparkle_cache_root=".waku-cache/sparkle"
+sparkle_cache_root="$waku_cache/sparkle"
 sparkle_cache_entry="$sparkle_cache_root/$sparkle_version"
 sparkle_framework_source="$sparkle_cache_entry/Sparkle.framework"
 

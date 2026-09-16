@@ -93,8 +93,9 @@ enables Cua's existing cursor facility and main loop; it does not implement
 input, capture, or rendering. Authorization still uses Cua's original checks.
 
 The SDK uses its own pinned Rust toolchain and lockfile, isolated from Goddard's
-workspace. Sources and builds are cached under `.waku-cache/cua-host` so normal
-dev rebuilds reuse the compiled SDK. The macOS bundle, Windows installer/zip,
+workspace. Sources and builds are cached in the shared build cache
+(`scripts/cache-dir.ts`) under `cua-host/`, so normal dev rebuilds — across
+worktrees too — reuse the compiled SDK. The macOS bundle, Windows installer/zip,
 Linux tarball, and dev watcher package the same host-enabled SDK. `scripts/cua-api.ts` reads the native tool
 metadata during packaging and writes the complete API reference into the
 bundled skill. Bump the version, all platform checksums, and

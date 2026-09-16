@@ -23,7 +23,7 @@ bun run release
 - Framework embedding + pinned Sparkle version:
   [`scripts/bundle.sh`](scripts/bundle.sh) (bump `sparkle_version` and
   `sparkle_sha256` together; the distribution is cached under
-  `.waku-cache/sparkle/`).
+  `~/Library/Caches/waku-build/sparkle/`).
 - Release automation: [`scripts/release.ts`](scripts/release.ts),
   [`scripts/appcast.ts`](scripts/appcast.ts),
   [`scripts/changelog.ts`](scripts/changelog.ts).
@@ -52,8 +52,8 @@ Sparkle key as kero, and the matching public key is already in Info.plist.
 Nothing to do.
 
 On a fresh machine, restore the key from the password-manager backup with the
-Sparkle tools (they land in `.waku-cache/sparkle/<version>/bin` after any
-build, or download the release from
+Sparkle tools (they land in `~/Library/Caches/waku-build/sparkle/<version>/bin`
+after any build, or download the release from
 [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases)):
 
 ```sh
@@ -258,7 +258,7 @@ secrets first:
 | `WAKU_DOWNLOAD_URL_PREFIX` | `https://releases.waku.sh/` | base URL in the appcast |
 | `WAKU_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
 | `WAKU_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
-| `SPARKLE_BIN` | the `.waku-cache` copy | Sparkle tools directory |
+| `SPARKLE_BIN` | the `~/Library/Caches/waku-build` copy | Sparkle tools directory |
 | `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 

@@ -66,7 +66,7 @@ Environment:
   WAKU_HISTORY_COUNT            prior archives pulled for deltas (default: 15)
   WAKU_NO_HISTORY=1             skip pulling prior archives (no deltas)
   SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
-                                under .waku-cache/sparkle)
+                                under ~/Library/Caches/waku-build/sparkle)
   SPARKLE_PRIVATE_KEY           Sparkle EdDSA private key (otherwise keychain);
                                 local builds skip the appcast when no usable
                                 key is found
