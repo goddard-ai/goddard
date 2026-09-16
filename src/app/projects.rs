@@ -232,6 +232,7 @@ fn apply_row_select(
 const PROJECTS_ROW_HEIGHT: f32 = 30.0;
 const PROJECTS_HEADER_HEIGHT: f32 = 48.0;
 const PROJECTS_TOOLBAR_HEIGHT: f32 = 40.0;
+const PROJECTS_CONTENT_MAX_WIDTH: f32 = 900.0;
 
 /// Per-project page state: tab, per-tab filters, fetched tables, selection,
 /// and the docked composer. Kept in `Waku::projects_page_states` by project
@@ -1279,10 +1280,20 @@ impl Waku {
             .on_action(cx.listener(Self::focus_projects_filter_action))
             .on_action(cx.listener(Self::dismiss_projects_layer_action))
             .child(self.render_projects_header(project_id, tab, github_enabled, cx))
-            .child(self.render_projects_toolbar(project_id, tab, detail_open, cx))
-            .child(content)
-            .children(self.render_projects_bulk_bar(project_id, cx))
-            .child(self.render_projects_composer(project_id, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .max_w(px(PROJECTS_CONTENT_MAX_WIDTH))
+                    .mx_auto()
+                    .flex()
+                    .flex_col()
+                    .child(self.render_projects_toolbar(project_id, tab, detail_open, cx))
+                    .child(content)
+                    .children(self.render_projects_bulk_bar(project_id, cx))
+                    .child(self.render_projects_composer(project_id, cx)),
+            )
             .into_any_element()
     }
 
