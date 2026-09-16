@@ -1877,6 +1877,14 @@ pub struct Waku {
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
     /// the first fold. See `transcript_rows_fingerprint`.
     transcript_row_kinds_fingerprint: Cell<Option<u64>>,
+    /// The session whose last fold included the working indicator — the
+    /// settle transition that arms the fade is "same session, indicator
+    /// dropped". `None` once the row retires or the session switches.
+    working_indicator_session: Cell<Option<Uuid>>,
+    /// A settled turn's indicator stays mounted for
+    /// [`WORKING_INDICATOR_FADE_OUT`] while the row renderer fades it out and
+    /// schedules the splice that retires it.
+    working_indicator_fade: Cell<Option<WorkingIndicatorFade>>,
     /// The navigation rail's turn list, shared by `Rc` so a frame hands the
     /// rail a pointer instead of re-extracting every turn's snippets. Rebuilt
     /// by `navigation_turns` when the row-kinds fingerprint moves.
@@ -3951,6 +3959,8 @@ impl Waku {
                 projects_page_states: HashMap::new(),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
+                working_indicator_session: Cell::new(None),
+                working_indicator_fade: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),
                 transcript_navigation_turns_fingerprint: Cell::new(None),
                 assistant_footer_cache: RefCell::new(HashMap::new()),

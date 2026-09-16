@@ -21,11 +21,55 @@ impl Waku {
                 transcript_rows_fingerprint(session, &self.expanded_turns)
             });
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
-            let next_kinds = self.selected_transcript_row_kinds();
+            let mut next_kinds = self.selected_transcript_row_kinds();
+            self.retain_fading_working_indicator(&mut next_kinds);
+            self.working_indicator_session.set(
+                self.selected_session()
+                    .map(|session| session.id)
+                    .filter(|_| next_kinds.contains(&TranscriptRowKind::WorkingIndicator)),
+            );
             *self.transcript_row_kinds.borrow_mut() = next_kinds;
             self.transcript_row_kinds_fingerprint.set(Some(fingerprint));
         }
         self.transcript_row_kinds.borrow().len()
+    }
+
+    /// A settled turn's working indicator lingers for
+    /// [`WORKING_INDICATOR_FADE_OUT`] while it fades out, instead of the jump
+    /// cut the fold alone would produce. The row renderer animates the fade
+    /// and schedules the splice that retires the row.
+    fn retain_fading_working_indicator(&self, next_kinds: &mut Vec<TranscriptRowKind>) {
+        let session_id = self.selected_session().map(|session| session.id);
+        let live = next_kinds.contains(&TranscriptRowKind::WorkingIndicator);
+        if let Some(fade) = self.working_indicator_fade.get() {
+            // A fresh live turn, a session switch, or the window's end all
+            // retire the fade.
+            let fading = !live
+                && Some(fade.session_id) == session_id
+                && fade.started.elapsed() < WORKING_INDICATOR_FADE_OUT;
+            self.working_indicator_fade.set(fading.then_some(fade));
+            if fading {
+                next_kinds.push(TranscriptRowKind::WorkingIndicator);
+            }
+            return;
+        }
+        // The fold just dropped the indicator this session was showing: a
+        // turn settled. Keep the row for the fade.
+        let Some(session_id) = session_id else { return };
+        if live || self.working_indicator_session.get() != Some(session_id) {
+            return;
+        }
+        let turn_id = self
+            .selected_session()
+            .and_then(|session| session.turns.last())
+            .map_or_else(Uuid::nil, |turn| turn.id);
+        self.working_indicator_fade.set(Some(WorkingIndicatorFade {
+            session_id,
+            turn_id,
+            started: Instant::now(),
+            removal_scheduled: false,
+        }));
+        next_kinds.push(TranscriptRowKind::WorkingIndicator);
     }
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
@@ -491,8 +535,31 @@ pub(super) enum TranscriptRowKind {
     /// The live turn's footer — pulsing dots plus "Working for Ns". Present
     /// from the moment the prompt lands until the turn settles, so a provider
     /// that has not produced a chunk yet still shows visible progress, and a
-    /// streaming one shows it below whatever content has arrived.
+    /// streaming one shows it below whatever content has arrived. A settled
+    /// turn's indicator is held for [`WORKING_INDICATOR_FADE_OUT`] while it
+    /// fades out.
     WorkingIndicator,
+}
+
+/// How long a settled turn's working indicator stays mounted while it fades
+/// out — a jump cut under the settling fold reads as a flicker.
+pub(super) const WORKING_INDICATOR_FADE_OUT: Duration = Duration::from_millis(300);
+
+/// A working indicator outliving its busy state: the row stays in the fold
+/// for [`WORKING_INDICATOR_FADE_OUT`] while the renderer eases its opacity
+/// to zero, then a scheduled splice retires it.
+#[derive(Clone, Copy)]
+pub(super) struct WorkingIndicatorFade {
+    /// The fade belongs to one session's transcript; a session switch
+    /// discards it rather than trailing a ghost row into the next view.
+    pub session_id: Uuid,
+    /// Keys the row's `with_animation`, so a re-armed fade starts a fresh
+    /// animation clock instead of inheriting a finished one.
+    pub turn_id: Uuid,
+    pub started: Instant,
+    /// The retiring splice is scheduled — repainting the row must not stack
+    /// timers.
+    pub removal_scheduled: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -204,6 +204,7 @@ impl Waku {
     ) -> AnyElement {
         self.prefetch_checkpoint_refs(cx);
         self.sync_transcript_rows();
+        self.retire_fading_working_indicator(cx);
         self.sync_transcript_layout_width(window);
         self.apply_pending_transcript_search_reveal(window, cx);
         self.prune_transcript_annotations(cx);
@@ -2402,13 +2403,28 @@ impl Waku {
     /// The live turn's closing row: the thinking mark and "Working for Ns". It is
     /// on screen from the moment the prompt lands — before the provider has
     /// produced a single chunk — and stays below whatever streams in until
-    /// the turn settles into its "Worked for N" fold.
+    /// the turn settles into its "Worked for N" fold, then lingers for a
+    /// [`WORKING_INDICATOR_FADE_OUT`] fade rather than a jump cut.
     fn render_working_indicator_row(&self, theme: &Theme) -> AnyElement {
         let session = self.selected_session();
+        let fade = self
+            .working_indicator_fade
+            .get()
+            .filter(|fade| session.is_some_and(|session| session.id == fade.session_id));
         let elapsed = session
             .and_then(|session| session.turns.last())
-            .filter(|turn| turn.status == TurnStatus::Running)
-            .map(|turn| unix_time().saturating_sub(turn.started_at))
+            .map(|turn| {
+                if fade.is_some() {
+                    // The turn already settled; hold the label at its final
+                    // duration for the fade.
+                    turn.completed_at.unwrap_or_else(unix_time)
+                } else if turn.status == TurnStatus::Running {
+                    unix_time()
+                } else {
+                    turn.started_at
+                }
+                .saturating_sub(turn.started_at)
+            })
             .unwrap_or(0);
         // A parked turn is waiting on detached work, not working.
         let label = if session.is_some_and(|session| session.status == SessionStatus::Background) {
@@ -2419,7 +2435,7 @@ impl Waku {
                 duration = format_working_elapsed(elapsed)
             )
         };
-        div()
+        let row = div()
             .h(px(22.0))
             .flex()
             .items_center()
@@ -2432,8 +2448,64 @@ impl Waku {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(label)),
-            )
-            .into_any_element()
+            );
+        let Some(fade) = fade else {
+            return row.into_any_element();
+        };
+        row.with_animation(
+            SharedString::from(format!("working-indicator-fade-{}", fade.turn_id)),
+            Animation::new(WORKING_INDICATOR_FADE_OUT),
+            |element, delta| element.opacity(1.0 - delta),
+        )
+        .into_any_element()
+    }
+
+    /// Schedule the splice that retires a fading working indicator. This runs
+    /// from `render_transcript` rather than the row itself because the list is
+    /// virtualized: a reader parked mid-transcript never paints the tail row,
+    /// and its timer must not depend on the row being visible.
+    fn retire_fading_working_indicator(&self, cx: &mut Context<Self>) {
+        let Some(fade) = self.working_indicator_fade.get() else {
+            return;
+        };
+        if fade.removal_scheduled {
+            return;
+        }
+        self.working_indicator_fade.set(Some(WorkingIndicatorFade {
+            removal_scheduled: true,
+            ..fade
+        }));
+        let turn_id = fade.turn_id;
+        // Reduce-motion renders the fade's end state, so the row retires
+        // immediately rather than lingering invisible.
+        let delay = if cx.reduce_motion() {
+            Duration::ZERO
+        } else {
+            WORKING_INDICATOR_FADE_OUT.saturating_sub(fade.started.elapsed())
+        };
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |this, cx| {
+                // Only the fade this timer belongs to retires the row; a
+                // re-armed or already-cleared fade leaves it alone.
+                if this
+                    .working_indicator_fade
+                    .get()
+                    .is_some_and(|fade| fade.turn_id == turn_id)
+                {
+                    let previous_kinds = this.transcript_row_kinds.borrow().clone();
+                    this.working_indicator_fade.set(None);
+                    // The transcript itself did not change, so the fold cache
+                    // must be forced to drop the ghost row.
+                    this.transcript_row_kinds_fingerprint.set(None);
+                    this.splice_active_transcript_rows_after_visibility_change(
+                        &previous_kinds,
+                    );
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// The turn's tool activity as a disclosure: the summary line toggles the
