@@ -130,7 +130,11 @@ impl Waku {
             Query::Pending => fallback,
             Query::Missing(token) => {
                 let fetch_path = workspace_path.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+                let Some(workspace) = self.workspace_client_for_path(&fetch_path) else {
+                    // Offline remote owner: leave the miss uncached so the
+                    // next read retries once the host reconnects.
+                    return fallback;
+                };
                 cx.spawn(async move |waku, cx| {
                     let result = cx
                         .background_executor()
@@ -441,9 +445,13 @@ impl Waku {
         if self.branch_operation_pending {
             return;
         }
+        let Some(workspace) = self.workspace_client_for_path(&path) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         self.branch_operation_pending = true;
         cx.notify();
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

@@ -1508,12 +1508,16 @@ impl Waku {
         let generation = self.sidebar_branch_scan_generation.get().wrapping_add(1);
         self.sidebar_branch_scan_generation.set(generation);
 
+        // This scan runs one batched git pass on the local daemon; remote
+        // rows keep no label until the scan learns per-daemon batches.
         let local_project_ids = self
             .state
             .sessions
             .iter()
             .filter(|session| {
-                session.has_started() && matches!(&session.workspace, SessionWorkspace::Local)
+                session.has_started()
+                    && matches!(&session.workspace, SessionWorkspace::Local)
+                    && !self.is_remote_session(session.id)
             })
             .map(|session| session.project_id)
             .collect::<HashSet<_>>();
@@ -1585,6 +1589,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| session.has_started())
+            .filter(|session| !self.is_remote_session(session.id))
             .filter_map(|session| self.workspace_path_for_session(session))
             .map(Path::to_path_buf)
             .collect::<Vec<_>>();
@@ -1666,6 +1671,10 @@ impl Waku {
         let mut targets: Vec<(Uuid, PathBuf, Option<String>)> = Vec::new();
         for session in &self.state.sessions {
             if !session.has_started() || session.archived_at.is_some() {
+                continue;
+            }
+            // PR lookups run gh against the checkout on the local daemon.
+            if self.is_remote_session(session.id) {
                 continue;
             }
             let (cwd, branch) = match &session.workspace {

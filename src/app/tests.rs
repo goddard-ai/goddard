@@ -121,8 +121,12 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
     let web_task_id = web_task.id;
 
     let mut catalog = vec![local];
-    let removed =
-        merge_remote_session_catalog(&mut catalog, vec![local_projection, web_task], |_| false);
+    let removed = merge_remote_session_catalog(
+        &mut catalog,
+        vec![local_projection, web_task],
+        |_| false,
+        |_| false,
+    );
 
     assert!(removed.is_empty());
     assert_eq!(catalog.len(), 2);

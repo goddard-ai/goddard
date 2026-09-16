@@ -162,7 +162,7 @@ enum PaletteAction {
     Resume,
     ChooseResumeProvider,
     SelectResumeProvider(ProviderKind),
-    ResumeProviderSession(ProviderSessionSummary),
+    ResumeProviderSession(waku_client::DaemonKey, ProviderSessionSummary),
     OpenProject,
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
@@ -418,7 +418,7 @@ pub(super) struct CommandPaletteUi {
     message_matches_query: Option<String>,
     message_matches: HashMap<Uuid, crate::persistence::SessionMessageMatch>,
     message_search_pending: bool,
-    provider_sessions: Vec<ProviderSessionSummary>,
+    provider_sessions: Vec<(waku_client::DaemonKey, ProviderSessionSummary)>,
     resume_provider: ProviderKind,
     provider_sessions_pending: bool,
     provider_session_import: Option<ProviderResumeCursor>,
@@ -493,7 +493,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.daemon.is_remote() {
+        // Scripts run in a desktop terminal, so only local-daemon projects
+        // qualify — refuse outright when none exist.
+        if self
+            .state
+            .projects
+            .iter()
+            .all(|project| self.is_remote_project(project.id))
+        {
             self.show_toast(tr!("command_palette.run_script_remote"));
             cx.notify();
             return;
@@ -1344,7 +1351,7 @@ impl Waku {
         self.command_palette
             .provider_sessions
             .iter()
-            .filter(|native| {
+            .filter(|(_, native)| {
                 !self.state.sessions.iter().any(|session| {
                     session.provider_cursor.as_ref().is_some_and(|cursor| {
                         cursor.provider() == native.provider()
@@ -1353,17 +1360,29 @@ impl Waku {
                 })
             })
             .enumerate()
-            .map(|(order, native)| {
+            .map(|(order, (key, native))| {
                 let provider = native.provider();
                 let age = super::sidebar::format_time_ago(now.saturating_sub(native.updated_at));
                 let path = native.cwd.to_string_lossy();
+                let host = match key {
+                    waku_client::DaemonKey::Local => None,
+                    waku_client::DaemonKey::Remote(host) => self
+                        .remote_host_name(*host)
+                        .map(|name| format!("{name} · ")),
+                }
+                .unwrap_or_default();
                 CommandPaletteItem {
                     section: PaletteSection::Sessions,
                     label: native.title.clone(),
-                    detail: Some(format!("{} · {} · {age}", provider.short_name(), path)),
+                    detail: Some(format!(
+                        "{}{} · {} · {age}",
+                        host,
+                        provider.short_name(),
+                        path
+                    )),
                     icon: PaletteIcon::Provider(provider),
                     shortcut: None,
-                    action: PaletteAction::ResumeProviderSession(native.clone()),
+                    action: PaletteAction::ResumeProviderSession(*key, native.clone()),
                     content_match: None,
                     search_text: format!(
                         "{} {} {} {} {} resume continue terminal cli session conversation",
@@ -1429,11 +1448,13 @@ impl Waku {
     }
 
     fn command_palette_run_script_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        // Scripts launch in a desktop terminal — only local-daemon projects
+        // have a path it can open.
         let projects = self
             .state
             .projects
             .iter()
-            .filter(|project| !project.is_projectless())
+            .filter(|project| !project.is_projectless() && !self.is_remote_project(project.id))
             .collect::<Vec<_>>();
         let current = self
             .selected_session()
@@ -1946,6 +1967,7 @@ impl Waku {
 
     fn import_provider_session(
         &mut self,
+        key: waku_client::DaemonKey,
         summary: ProviderSessionSummary,
         history: ProviderSessionHistory,
         window: &mut Window,
@@ -1971,16 +1993,16 @@ impl Waku {
             return;
         }
 
-        let project_id = if let Some(project) = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.path == summary.cwd)
-        {
+        // Match on path *and* owner: `/repo` locally and `/repo` on a remote
+        // host are different projects.
+        let project_id = if let Some(project) = self.state.projects.iter().find(|project| {
+            project.path == summary.cwd && self.daemons.project_owner(project.id) == key
+        }) {
             project.id
         } else {
             let project = Project::from_path(summary.cwd.clone());
             let project_id = project.id;
+            self.daemons.claim_project(project_id, key);
             self.state.projects.push(project);
             self.analytics.track(crate::analytics::Event::ProjectAdded);
             project_id
@@ -2008,6 +2030,7 @@ impl Waku {
         session.messages = history.messages;
         session.turns = history.turns;
         let session_id = session.id;
+        self.daemons.claim_session(session_id, key);
         self.state.push_session(session);
 
         self.close_command_palette(window, cx);
@@ -2019,6 +2042,7 @@ impl Waku {
 
     fn load_command_palette_provider_session(
         &mut self,
+        key: waku_client::DaemonKey,
         summary: ProviderSessionSummary,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2056,7 +2080,7 @@ impl Waku {
         let cursor = summary.cursor.clone();
         let fetch = self
             .store
-            .provider_session_history(cursor.clone(), summary.cwd.clone());
+            .provider_session_history(key, cursor.clone(), summary.cwd.clone());
         let window_handle = window.window_handle();
         cx.notify();
 
@@ -2095,7 +2119,7 @@ impl Waku {
                         && waku.command_palette.view == CommandPaletteView::Resume
                         && waku.command_palette.provider_session_generation == generation
                     {
-                        waku.import_provider_session(summary, history, window, cx);
+                        waku.import_provider_session(key, summary, history, window, cx);
                     }
                 });
             });
@@ -2132,8 +2156,8 @@ impl Waku {
                 self.open_command_palette_resume_view(Some(provider), cx);
                 return;
             }
-            PaletteAction::ResumeProviderSession(summary) => {
-                self.load_command_palette_provider_session(summary, window, cx);
+            PaletteAction::ResumeProviderSession(key, summary) => {
+                self.load_command_palette_provider_session(key, summary, window, cx);
                 return;
             }
             PaletteAction::OpenRunScript => {
@@ -2255,7 +2279,7 @@ impl Waku {
             PaletteAction::Resume
             | PaletteAction::ChooseResumeProvider
             | PaletteAction::SelectResumeProvider(_)
-            | PaletteAction::ResumeProviderSession(_)
+            | PaletteAction::ResumeProviderSession(..)
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_) => {
                 unreachable!("view-navigation actions are handled before closing the palette")
@@ -2289,7 +2313,7 @@ impl Waku {
             .command_palette
             .results
             .iter()
-            .filter(|item| matches!(&item.action, PaletteAction::ResumeProviderSession(_)))
+            .filter(|item| matches!(&item.action, PaletteAction::ResumeProviderSession(..)))
             .count();
         let results_pending = match view {
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
@@ -2503,7 +2527,7 @@ impl Waku {
                     }
                 };
                 let importing = match &item.action {
-                    PaletteAction::ResumeProviderSession(summary) => self
+                    PaletteAction::ResumeProviderSession(_, summary) => self
                         .command_palette
                         .provider_session_import
                         .as_ref()

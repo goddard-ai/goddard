@@ -647,6 +647,11 @@ impl Waku {
         else {
             return;
         };
+        // An offline remote keeps its last-loaded rows rather than flipping
+        // to a spinner that can never resolve.
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            return;
+        };
         let Some(state) = self.projects_page_states.get_mut(&project_id) else {
             return;
         };
@@ -661,8 +666,6 @@ impl Waku {
             state.branches = github::GitHubFetch::Loading;
         }
         cx.notify();
-
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let resolved = cx
                 .background_executor()
@@ -905,7 +908,11 @@ impl Waku {
         else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1009,7 +1016,11 @@ impl Waku {
         else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let _ = cx
                 .background_executor()
@@ -1118,6 +1129,11 @@ impl Waku {
         else {
             return;
         };
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         let Some(state) = self.projects_page_states.get_mut(&project_id) else {
             return;
         };
@@ -1126,7 +1142,6 @@ impl Waku {
         }
         state.fetching_remotes.insert(remote.clone());
         cx.notify();
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         let fetch_remote = remote.clone();
         cx.spawn(async move |waku, cx| {
             let _ = cx
@@ -2370,7 +2385,7 @@ impl Waku {
                 .disabled(is_main),
             );
 
-            if !self.daemon.is_remote() && !self.open_in_apps.is_empty() {
+            if !self.is_remote_path(&path) && !self.open_in_apps.is_empty() {
                 let apps = self.open_in_apps.clone();
                 let open_path = path.clone();
                 items.push(MenuItem::Submenu {

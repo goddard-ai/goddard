@@ -280,6 +280,11 @@ impl Waku {
         else {
             return;
         };
+        // The run lands in a desktop PTY; a remote project root is not a
+        // local path it could open.
+        if self.is_remote_project(project.id) {
+            return;
+        }
         let project_path = project.path.clone();
         let mut command = CustomCommand::new(script.command.clone());
         command.name = Some(script.name.clone());

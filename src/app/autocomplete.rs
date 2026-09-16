@@ -159,7 +159,10 @@ impl Waku {
                     self.slash_command_index_key = None;
                 }
                 let path = project_path.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+                let Some(workspace) = self.workspace_client_for_path(&path) else {
+                    self.slash_command_index_loading = false;
+                    return;
+                };
                 cx.spawn(async move |waku, cx| {
                     let commands = cx
                         .background_executor()
@@ -210,7 +213,10 @@ impl Waku {
                     self.mention_file_index_path = None;
                 }
                 let path = project_path.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+                let Some(workspace) = self.workspace_client_for_path(&path) else {
+                    self.mention_file_index_loading = false;
+                    return;
+                };
                 cx.spawn(async move |waku, cx| {
                     let files = cx
                         .background_executor()

@@ -8,12 +8,14 @@ mod client;
 pub mod command_env;
 pub mod composer_complete;
 pub mod computer_use;
+mod daemons;
 pub mod driver;
 pub mod persistence;
 mod process;
 mod workspace_client;
 
 pub use client::DaemonClient;
+pub use daemons::{DaemonKey, DaemonMap};
 pub use process::{
     DEFAULT_EXPOSED_DAEMON_PORT, DaemonExposureSettings, DaemonProcess, DaemonStatus,
     DaemonSupervisor, parse_allowed_origins,

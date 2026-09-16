@@ -14,6 +14,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::daemons::{DaemonKey, DaemonMap};
 use crate::{Command, DaemonExposureSettings, DaemonSettings, DaemonSupervisor, ResponsePayload};
 use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::i18n::AppLanguage;
@@ -155,6 +156,31 @@ fn default_right_panel_width() -> f32 {
     DEFAULT_RIGHT_PANEL_WIDTH
 }
 
+/// A daemon reachable over the network, shown in the same window as the
+/// local catalog. The record id is the stable identity the merged catalog
+/// claims rows against, so renames and re-pointed addresses never orphan
+/// projects. `token` is a bearer secret; it lives in app.json beside the
+/// local daemon's `daemon_exposure` token, which the file's 0600 write mode
+/// already covers.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteHost {
+    pub id: Uuid,
+    pub name: String,
+    pub address: String,
+    pub token: String,
+}
+
+/// One daemon's catalog contribution: its project list plus the list-only
+/// session projection carried by `LoadTaskState`. Cached per remote host so
+/// an unreachable daemon's rows still render, marked offline.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct TaskCatalog {
+    #[serde(default)]
+    pub projects: Vec<Project>,
+    #[serde(default)]
+    pub sessions: Vec<AgentSession>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RememberedModelTraits {
     provider: ProviderKind,
@@ -169,40 +195,83 @@ pub struct RememberedModelTraits {
 
 /// Remote composer-draft proxy. Draft bytes and attachments remain owned by
 /// the daemon even though the desktop keeps an in-memory editing snapshot.
+/// With several daemons connected, each draft routes to the daemon that owns
+/// its session or project; the snapshot is kept per daemon so diffs never
+/// cross hosts.
 #[derive(Clone)]
 pub struct ComposerDraftStore {
-    daemon: DaemonSupervisor,
+    daemons: DaemonMap,
     save_state: Arc<Mutex<ComposerDraftSaveState>>,
 }
 
 #[derive(Default)]
 struct ComposerDraftSaveState {
-    snapshot: ComposerDrafts,
+    snapshots: HashMap<DaemonKey, ComposerDrafts>,
     latest_generation: u64,
 }
 
 impl ComposerDraftStore {
-    pub fn remote(daemon: DaemonSupervisor) -> Self {
+    pub fn remote(daemons: DaemonMap) -> Self {
         Self {
-            daemon,
+            daemons,
             save_state: Arc::new(Mutex::new(ComposerDraftSaveState::default())),
         }
     }
 
+    /// The subset of `drafts` whose targets `key` owns.
+    fn drafts_for(&self, key: DaemonKey, drafts: &ComposerDrafts) -> ComposerDrafts {
+        ComposerDrafts {
+            sessions: drafts
+                .sessions
+                .iter()
+                .filter(|(id, _)| self.daemons.session_owner(**id) == key)
+                .map(|(id, draft)| (*id, draft.clone()))
+                .collect(),
+            new_sessions: drafts
+                .new_sessions
+                .iter()
+                .filter(|(id, _)| self.daemons.project_owner(**id) == key)
+                .map(|(id, draft)| (*id, draft.clone()))
+                .collect(),
+        }
+    }
+
     pub fn load(&self) -> io::Result<ComposerDrafts> {
-        match self
-            .daemon
-            .client()
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadComposerDrafts)
-            .map_err(to_io_error)?
-        {
-            ResponsePayload::ComposerDrafts { drafts } => {
-                self.save_state.lock().snapshot = drafts.clone();
-                Ok(drafts)
+        let mut merged = ComposerDrafts::default();
+        let mut loaded = HashMap::new();
+        let mut first_error = None;
+        for (key, daemon) in self.daemons.connected() {
+            match daemon
+                .client()
+                .request(Uuid::nil(), Uuid::nil(), Command::LoadComposerDrafts)
+                .map_err(to_io_error)
+            {
+                Ok(ResponsePayload::ComposerDrafts { drafts }) => {
+                    merged
+                        .sessions
+                        .extend(drafts.sessions.iter().map(|(k, v)| (*k, v.clone())));
+                    merged
+                        .new_sessions
+                        .extend(drafts.new_sessions.iter().map(|(k, v)| (*k, v.clone())));
+                    loaded.insert(key, drafts);
+                }
+                Ok(_) => {
+                    return Err(io::Error::other(
+                        "Goddard daemon returned an invalid composer-drafts response",
+                    ));
+                }
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
             }
-            _ => Err(io::Error::other(
-                "Goddard daemon returned an invalid composer-drafts response",
-            )),
+        }
+        self.save_state.lock().snapshots = loaded;
+        match first_error {
+            // A daemon that is still connecting contributes nothing yet; its
+            // drafts diff in on the first save after its snapshot arrives.
+            Some(error) if merged.sessions.is_empty() && merged.new_sessions.is_empty() => {
+                Err(error)
+            }
+            _ => Ok(merged),
         }
     }
 
@@ -214,29 +283,42 @@ impl ComposerDraftStore {
         if generation < state.latest_generation {
             return Ok(());
         }
-        let changes = composer_draft_changes(&state.snapshot, &drafts);
-        if changes.is_empty() {
-            state.latest_generation = generation;
-            return Ok(());
-        }
-        match self
-            .daemon
-            .client()
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::ApplyComposerDraftChanges { changes },
-            )
-            .map_err(to_io_error)?
-        {
-            ResponsePayload::Ack => {
-                state.snapshot = drafts;
-                state.latest_generation = generation;
-                Ok(())
+        let mut first_error = None;
+        for (key, daemon) in self.daemons.connected() {
+            let owned = self.drafts_for(key, &drafts);
+            let previous = state.snapshots.get(&key).cloned().unwrap_or_default();
+            let changes = composer_draft_changes(&previous, &owned);
+            if changes.is_empty() {
+                state.snapshots.insert(key, owned);
+                continue;
             }
-            _ => Err(io::Error::other(
-                "Goddard daemon returned an invalid composer-drafts save response",
-            )),
+            match daemon
+                .client()
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::ApplyComposerDraftChanges { changes },
+                )
+                .map_err(to_io_error)
+            {
+                Ok(ResponsePayload::Ack) => {
+                    state.snapshots.insert(key, owned);
+                }
+                Ok(_) => {
+                    return Err(io::Error::other(
+                        "Goddard daemon returned an invalid composer-drafts save response",
+                    ));
+                }
+                // Keep this daemon's previous snapshot so its missed changes
+                // diff out again on the next save.
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        state.latest_generation = generation;
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
         }
     }
 }
@@ -382,6 +464,9 @@ pub struct AppSettings {
     /// Experimental: GitHub issues and pull requests on the Projects page,
     /// sidebar rows, and the right panel.
     pub github_enabled: bool,
+    /// Saved remote daemons connected alongside the local one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_hosts: Vec<RemoteHost>,
 }
 
 impl Default for AppSettings {
@@ -414,6 +499,7 @@ impl Default for AppSettings {
             big_picture_enabled: false,
             git_panel_enabled: false,
             github_enabled: false,
+            remote_hosts: Vec::new(),
         }
     }
 }
@@ -627,6 +713,10 @@ pub struct PersistedState {
     pub git_panel_enabled: bool,
     #[serde(default)]
     pub github_enabled: bool,
+    /// Saved remote daemons connected alongside the local one; app-owned,
+    /// persisted through `app_settings`/`apply_app_settings`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_hosts: Vec<RemoteHost>,
     #[serde(default = "default_sidebar_visibility")]
     pub sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
@@ -741,6 +831,7 @@ impl PersistedState {
             big_picture_enabled: false,
             git_panel_enabled: false,
             github_enabled: false,
+            remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
             git_panel_visible: false,
@@ -962,6 +1053,7 @@ impl PersistedState {
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
             github_enabled: self.github_enabled,
+            remote_hosts: self.remote_hosts.clone(),
         }
     }
 
@@ -1027,6 +1119,7 @@ impl PersistedState {
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
         self.github_enabled = settings.github_enabled;
+        self.remote_hosts = settings.remote_hosts;
     }
 
     fn apply_app_state(&mut self, app_state: AppState) {
@@ -1253,12 +1346,14 @@ pub struct StateStore {
     app_state_path: PathBuf,
     app_settings_path: PathBuf,
     legacy_settings_paths: Vec<PathBuf>,
-    daemon: DaemonSupervisor,
+    remote_catalogs_path: PathBuf,
+    daemons: DaemonMap,
     remote_default_cwd: Mutex<Option<PathBuf>>,
     /// A task snapshot may only be written after this client has successfully
     /// loaded the daemon's authoritative state. Falling back to an empty UI
     /// after a transient RPC failure must never turn the next ordinary save
-    /// into a destructive replacement of the daemon database.
+    /// into a destructive replacement of the daemon database. Per remote
+    /// host, `DaemonMap::catalog_loaded` gates the same way.
     task_state_loaded: AtomicBool,
 }
 
@@ -1284,11 +1379,36 @@ impl StateStore {
             app_state_path: default_app_state_path(),
             app_settings_path: default_app_settings_path(),
             legacy_settings_paths: default_legacy_settings_paths(),
+            remote_catalogs_path: default_app_state_path().with_file_name("remote-catalogs.json"),
             path: Self::default_path(),
-            daemon,
+            daemons: DaemonMap::new(daemon),
             remote_default_cwd: Mutex::new(None),
             task_state_loaded: AtomicBool::new(false),
         }
+    }
+
+    /// Shared daemon registry — the app claims catalog rows and resolves
+    /// per-session/per-project routing through the same map this store
+    /// partitions writes by.
+    pub fn daemons(&self) -> DaemonMap {
+        self.daemons.clone()
+    }
+
+    /// Last catalog each remote host reported, for seeding the merged view
+    /// while its supervisor is still connecting.
+    pub fn load_remote_catalogs(&self) -> HashMap<Uuid, TaskCatalog> {
+        fs::read(&self.remote_catalogs_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn write_remote_catalogs(&self, catalogs: &HashMap<Uuid, TaskCatalog>) -> io::Result<()> {
+        write_json_atomically(&self.remote_catalogs_path, catalogs)
+    }
+
+    pub fn remote_catalogs_path(&self) -> PathBuf {
+        self.remote_catalogs_path.clone()
     }
 
     pub fn session_message_search(
@@ -1296,20 +1416,38 @@ impl StateStore {
         query: String,
         limit: usize,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
-        let daemon = self.daemon.clone();
-        move || match daemon
-            .client()
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SearchSessionMessages { query, limit },
-            )
-            .map_err(to_io_error)?
-        {
-            ResponsePayload::SessionMessageMatches { matches } => Ok(matches),
-            _ => Err(io::Error::other(
-                "Goddard daemon returned an invalid message-search response",
-            )),
+        let daemons = self.daemons.clone();
+        move || {
+            let mut matches = Vec::new();
+            let mut first_error = None;
+            for (_, daemon) in daemons.connected() {
+                match daemon.client().request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::SearchSessionMessages {
+                        query: query.clone(),
+                        limit,
+                    },
+                ) {
+                    Ok(ResponsePayload::SessionMessageMatches { matches: found }) => {
+                        matches.extend(found)
+                    }
+                    Ok(_) => {
+                        return Err(io::Error::other(
+                            "Goddard daemon returned an invalid message-search response",
+                        ));
+                    }
+                    Err(error) if first_error.is_none() => {
+                        first_error = Some(io::Error::other(error.to_string()));
+                    }
+                    Err(_) => {}
+                }
+            }
+            matches.truncate(limit);
+            match (matches.is_empty(), first_error) {
+                (true, Some(error)) => Err(error),
+                _ => Ok(matches),
+            }
         }
     }
 
@@ -1317,42 +1455,69 @@ impl StateStore {
         &self,
         provider: ProviderKind,
         limit: usize,
-    ) -> impl FnOnce() -> io::Result<Vec<ProviderSessionSummary>> + Send + 'static {
-        let daemon = self.daemon.clone();
-        move || match daemon
-            .client()
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::ListProviderSessions { provider, limit },
-            )
-            .map_err(to_io_error)?
-        {
-            ResponsePayload::ProviderSessions { sessions } => Ok(sessions),
-            _ => Err(io::Error::other(
-                "Goddard daemon returned an invalid provider-session response",
-            )),
+    ) -> impl FnOnce() -> io::Result<Vec<(DaemonKey, ProviderSessionSummary)>> + Send + 'static
+    {
+        let daemons = self.daemons.clone();
+        move || {
+            let mut sessions = Vec::new();
+            let mut first_error = None;
+            for (key, daemon) in daemons.connected() {
+                match daemon.client().request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::ListProviderSessions { provider, limit },
+                ) {
+                    Ok(ResponsePayload::ProviderSessions { sessions: reported }) => {
+                        sessions.extend(reported.into_iter().map(|session| (key, session)))
+                    }
+                    Ok(_) => {
+                        return Err(io::Error::other(
+                            "Goddard daemon returned an invalid provider-session response",
+                        ));
+                    }
+                    Err(error) if first_error.is_none() => {
+                        first_error = Some(io::Error::other(error.to_string()));
+                    }
+                    Err(_) => {}
+                }
+            }
+            sessions.sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
+            sessions.truncate(limit);
+            match (sessions.is_empty(), first_error) {
+                (true, Some(error)) => Err(error),
+                _ => Ok(sessions),
+            }
         }
     }
 
+    /// Load one provider-native conversation. `key` routes to the daemon the
+    /// session's project belongs to — provider history lives on the host that
+    /// ran it.
     pub fn provider_session_history(
         &self,
+        key: DaemonKey,
         cursor: ProviderResumeCursor,
         cwd: PathBuf,
     ) -> impl FnOnce() -> io::Result<ProviderSessionHistory> + Send + 'static {
-        let daemon = self.daemon.clone();
-        move || match daemon
-            .client()
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::LoadProviderSession { cursor, cwd },
-            )
-            .map_err(to_io_error)?
-        {
-            ResponsePayload::ProviderSessionHistory { history } => Ok(history),
-            _ => Err(io::Error::other(
-                "Goddard daemon returned an invalid provider-session history response",
+        let daemon = self.daemons.supervisor(key);
+        move || match daemon {
+            Some(daemon) => match daemon
+                .client()
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::LoadProviderSession { cursor, cwd },
+                )
+                .map_err(to_io_error)?
+            {
+                ResponsePayload::ProviderSessionHistory { history } => Ok(history),
+                _ => Err(io::Error::other(
+                    "Goddard daemon returned an invalid provider-session history response",
+                )),
+            },
+            None => Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the session's daemon is not connected",
             )),
         }
     }
@@ -1391,7 +1556,8 @@ impl StateStore {
 
     pub fn load(&self) -> io::Result<PersistedState> {
         let (projects, mut sessions, default_cwd) = match self
-            .daemon
+            .daemons
+            .local()
             .client()
             .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
             .map_err(to_io_error)?
@@ -1439,7 +1605,13 @@ impl StateStore {
         if session.detail_loaded {
             return Ok(());
         }
-        match hydrate_session(&self.daemon, session.id)? {
+        let Some(daemon) = self.daemons.daemon_for_session(session.id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the session's daemon is not connected",
+            ));
+        };
+        match hydrate_session(&daemon, session.id)? {
             Some(stored) => {
                 *session = stored;
                 Ok(())
@@ -1451,6 +1623,11 @@ impl StateStore {
         }
     }
 
+    /// Partition the merged catalog back to its owning daemons: each receives
+    /// only its own projects, live session ids, and dirty rows, so one
+    /// daemon's data never lands in another's database. A daemon that rejects
+    /// or is unreachable keeps its dirty ids queued for the next save while
+    /// the rest still commit.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
         self.write_app_settings(&state.app_settings())?;
         self.write_app_state(&state.app_state())?;
@@ -1461,32 +1638,63 @@ impl StateStore {
             ));
         }
         let dirty_ids = state.dirty_sessions.clone();
-        // Drafts stay local until their first prompt: a session that has not
-        // started owns no daemon row, and shipping one would catalogue it as
-        // a phantom "New task" skeleton in every client's next load.
-        let sessions: Vec<AgentSession> = state
-            .sessions
-            .iter()
-            .filter(|session| dirty_ids.contains(&session.id) && session.has_started())
-            .cloned()
-            .collect();
-        let sent_ids = sessions
-            .iter()
-            .map(|session| session.id)
-            .collect::<HashSet<_>>();
-        let live_session_ids = state.sessions.iter().map(|session| session.id).collect();
-        self.daemon
-            .client()
-            .notify(
+        let mut saved_ids = HashSet::new();
+        let mut first_error = None;
+        for (key, daemon) in self.daemons.connected() {
+            if !self.daemons.catalog_loaded(key) {
+                continue;
+            }
+            let owned = |id: &Uuid| match key {
+                DaemonKey::Local => !self.daemons.is_remote_session(*id),
+                DaemonKey::Remote(_) => self.daemons.session_owner(*id) == key,
+            };
+            let projects = state
+                .projects
+                .iter()
+                .filter(|project| match key {
+                    DaemonKey::Local => !self.daemons.is_remote_project(project.id),
+                    DaemonKey::Remote(_) => self.daemons.project_owner(project.id) == key,
+                })
+                .cloned()
+                .collect();
+            let live_session_ids = state
+                .sessions
+                .iter()
+                .filter(|session| owned(&session.id))
+                .map(|session| session.id)
+                .collect();
+            // Drafts stay local until their first prompt: a session that has
+            // not started owns no daemon row, and shipping one would
+            // catalogue it as a phantom "New task" skeleton in every client's
+            // next load.
+            let sessions: Vec<AgentSession> = state
+                .sessions
+                .iter()
+                .filter(|session| {
+                    dirty_ids.contains(&session.id)
+                        && session.has_started()
+                        && owned(&session.id)
+                })
+                .cloned()
+                .collect();
+            let dirty_for_daemon: HashSet<Uuid> =
+                sessions.iter().map(|session| session.id).collect();
+            match daemon.client().notify(
                 Uuid::nil(),
                 Uuid::nil(),
                 Command::SaveTaskState {
-                    projects: state.projects.clone(),
+                    projects,
                     live_session_ids,
                     sessions,
                 },
-            )
-            .map_err(to_io_error)?;
+            ) {
+                Ok(()) => saved_ids.extend(dirty_for_daemon),
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(to_io_error(error));
+                }
+                Err(_) => {}
+            }
+        }
         // Skipped drafts remain dirty so the save after their first prompt
         // still publishes them even if that path forgets to re-mark them.
         let remaining_ids = state
@@ -1496,23 +1704,35 @@ impl StateStore {
             .collect::<HashSet<_>>();
         state
             .dirty_sessions
-            .retain(|id| remaining_ids.contains(id) && !sent_ids.contains(id));
-        Ok(())
+            .retain(|id| remaining_ids.contains(id) && !saved_ids.contains(id));
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     pub fn remove_session(&self, session_id: Uuid) -> io::Result<()> {
-        self.daemon
-            .client()
-            .notify(session_id, Uuid::nil(), Command::RemoveSession)
-            .map_err(to_io_error)
+        let result = match self.daemons.daemon_for_session(session_id) {
+            Some(daemon) => daemon
+                .client()
+                .notify(session_id, Uuid::nil(), Command::RemoveSession)
+                .map_err(to_io_error),
+            // The owning daemon is gone or unreachable; the row is already
+            // unclaimed locally and there is nobody left to tell.
+            None => Ok(()),
+        };
+        self.daemons.drop_session(session_id);
+        result
     }
 
     pub fn blob_sweep(&self) -> impl FnOnce() + Send + 'static {
-        let daemon = self.daemon.clone();
+        let daemons = self.daemons.clone();
         move || {
-            let _ = daemon
-                .client()
-                .request(Uuid::nil(), Uuid::nil(), Command::SweepBlobs);
+            for (_, daemon) in daemons.connected() {
+                let _ = daemon
+                    .client()
+                    .request(Uuid::nil(), Uuid::nil(), Command::SweepBlobs);
+            }
         }
     }
 

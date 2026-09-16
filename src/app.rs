@@ -754,9 +754,35 @@ struct PreparedDriver {
     events: Receiver<DriverEvent>,
 }
 
-struct RemoteTaskStateSnapshot {
-    projects: Vec<Project>,
-    sessions: Vec<AgentSession>,
+/// One daemon's catalog contribution to the merged project/session lists,
+/// tagged with the daemon it came from so writes route back to the owner.
+type RemoteTaskStateSnapshot = waku_client::persistence::TaskCatalog;
+
+/// Fold a cached remote catalog into the merged view before the host's
+/// supervisor exists. Rows are claimed to the host immediately so a local
+/// `SaveTaskState` never claims them and RPCs route correctly the moment the
+/// host connects.
+fn seed_remote_catalog(
+    state: &mut PersistedState,
+    daemons: &waku_client::DaemonMap,
+    host: Uuid,
+    catalog: &RemoteTaskStateSnapshot,
+) {
+    state.projects.extend(catalog.projects.iter().cloned());
+    state.sessions.extend(catalog.sessions.iter().cloned());
+    daemons.replace_remote_catalog(
+        host,
+        &catalog
+            .projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>(),
+        &catalog
+            .sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>(),
+    );
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1322,6 +1348,21 @@ pub struct Waku {
     /// app entity. Debug builds can replace it independently after a rebuild;
     /// all live driver handles below are lightweight RPC proxies.
     daemon: waku_client::DaemonSupervisor,
+    /// Every daemon this window shows — the local supervisor plus one per
+    /// connected remote host — and which daemon owns each catalog row. Shared
+    /// with `store` and `composer_draft_store` so reads, writes, and routing
+    /// agree.
+    daemons: waku_client::DaemonMap,
+    /// Remote hosts that have not connected yet or dropped their supervisor,
+    /// host id → last connection error. Cleared on a successful install.
+    remote_errors: HashMap<Uuid, String>,
+    /// Daemon settings mirrored per remote host. Binary overrides and custom
+    /// commands are host-local, so `state`'s copy stays the local daemon's.
+    remote_daemon_settings: HashMap<Uuid, waku_client::DaemonSettings>,
+    /// Each remote host's last applied catalog, persisted so an unreachable
+    /// host still renders its rows at launch.
+    remote_catalogs: HashMap<Uuid, RemoteTaskStateSnapshot>,
+    remote_catalogs_path: std::path::PathBuf,
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
@@ -1574,13 +1615,19 @@ pub struct Waku {
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
     event_wake_tx: smol::channel::Sender<()>,
-    task_state_sync_tx: Sender<Result<RemoteTaskStateSnapshot, String>>,
-    task_state_sync_events: Receiver<Result<RemoteTaskStateSnapshot, String>>,
+    task_state_sync_tx: Sender<(
+        waku_client::DaemonKey,
+        Result<RemoteTaskStateSnapshot, String>,
+    )>,
+    task_state_sync_events: Receiver<(
+        waku_client::DaemonKey,
+        Result<RemoteTaskStateSnapshot, String>,
+    )>,
     /// `settingsChanged` broadcasts forwarded by the task-state sync worker:
     /// the authoritative daemon document each time another client — or an
     /// agent — rewrites it.
-    daemon_settings_tx: Sender<waku_client::DaemonSettings>,
-    daemon_settings_events: Receiver<waku_client::DaemonSettings>,
+    daemon_settings_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonSettings)>,
+    daemon_settings_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonSettings)>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -2774,10 +2821,28 @@ impl Waku {
     ) -> Entity<Self> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let store = StateStore::remote(daemon.clone());
+        let daemons = store.daemons();
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
-        let composer_draft_store = ComposerDraftStore::remote(daemon.clone());
+        let composer_draft_store = ComposerDraftStore::remote(daemons.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
+        // Remote hosts connect in the background after the entity exists;
+        // seed each one's cached catalog now so its projects and sessions are
+        // on screen — read-only until live — before the first frame.
+        let mut remote_catalogs = store.load_remote_catalogs();
+        remote_catalogs
+            .retain(|host, _| state.remote_hosts.iter().any(|remote| remote.id == *host));
+        let remote_host_ids = state
+            .remote_hosts
+            .iter()
+            .map(|host| host.id)
+            .collect::<Vec<_>>();
+        for host in remote_host_ids {
+            if let Some(catalog) = remote_catalogs.get(&host) {
+                seed_remote_catalog(&mut state, &daemons, host, catalog);
+            }
+        }
+        let remote_catalogs_path = store.remote_catalogs_path();
         let home_directory = crate::projectless::home_directory();
         // Custom commands moved from this app's settings file into the
         // daemon's document. Seed the daemon list with any file-side commands
@@ -3801,6 +3866,11 @@ impl Waku {
 
             Self {
                 daemon,
+                daemons,
+                remote_errors: HashMap::new(),
+                remote_daemon_settings: HashMap::new(),
+                remote_catalogs,
+                remote_catalogs_path,
                 daemon_hostname,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
@@ -4229,7 +4299,8 @@ impl Waku {
         // that there is an entity to notify and deliberately not before the
         // first frame.
         entity.update(cx, |this, cx| {
-            this.restart_task_state_sync();
+            this.start_task_state_sync(waku_client::DaemonKey::Local, this.daemon.clone());
+            this.connect_remote_hosts(cx);
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);
             }

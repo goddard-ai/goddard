@@ -1831,7 +1831,7 @@ impl Waku {
                 self.open_right_panel_file(relative_path, cx);
             }
             TranscriptLinkRoute::Finder(path) => {
-                if self.daemon.is_remote() {
+                if self.is_remote_path(&path) {
                     self.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
                 } else {
@@ -2642,7 +2642,11 @@ impl Waku {
             self.right_panel_terminal_commands
                 .insert(terminal_id, command.clone());
         }
-        if cfg!(windows) || self.daemon.is_remote() {
+        if cfg!(windows)
+            || self
+                .selected_workspace_path()
+                .is_some_and(|path| self.is_remote_path(path))
+        {
             self.open_right_panel_surface(surface, cx);
             return;
         }
@@ -2820,13 +2824,6 @@ impl Waku {
     }
 
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
-        if self.daemon.is_remote() {
-            // A desktop PTY would interpret the daemon's cwd on the wrong
-            // machine. Keep the surface unavailable until the protocol grows
-            // a daemon-owned streaming terminal.
-            self.right_panel_terminals.remove(&terminal_id);
-            return;
-        }
         let Some(working_directory) = self
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf)
@@ -2834,6 +2831,13 @@ impl Waku {
             self.right_panel_terminals.remove(&terminal_id);
             return;
         };
+        if self.is_remote_path(&working_directory) {
+            // A desktop PTY would interpret the remote cwd on the wrong
+            // machine. Keep the surface unavailable until the protocol grows
+            // a daemon-owned streaming terminal.
+            self.right_panel_terminals.remove(&terminal_id);
+            return;
+        }
         if !working_directory.is_dir() {
             // The workspace is gone — typically an archived session's
             // worktree awaiting restore. A PTY launched now would fall back
@@ -3472,7 +3476,7 @@ impl Waku {
         name: &str,
         is_dir: bool,
     ) -> Vec<MenuItem> {
-        if self.daemon.is_remote() {
+        if self.is_remote_path(absolute_path) {
             return Vec::new();
         }
         let mut items = Vec::new();
@@ -3934,6 +3938,9 @@ impl Waku {
             }
             return;
         };
+        let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+            return;
+        };
         let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) else {
             return;
         };
@@ -3944,7 +3951,6 @@ impl Waku {
         editor.reading = true;
         editor.read_epoch += 1;
         let epoch = editor.read_epoch;
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
 
         cx.spawn(async move |waku, cx| {
             let read = cx
@@ -4350,7 +4356,11 @@ impl Waku {
         } else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -5334,8 +5344,10 @@ impl Waku {
             Query::Ready(entries) => self.right_panel_working_tree = (*entries).clone(),
             Query::Pending => {}
             Query::Missing(token) => {
+                let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+                    return;
+                };
                 let expanded = self.right_panel_expanded_paths.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
                 cx.spawn(async move |waku, cx| {
                     let entries = cx
                         .background_executor()
@@ -5484,7 +5496,12 @@ impl Waku {
         self.right_panel_diff_error = None;
         cx.notify();
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+            self.right_panel_diff_loading = false;
+            self.right_panel_diff_error = Some(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

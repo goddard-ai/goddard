@@ -78,8 +78,21 @@ impl Waku {
             .insert(reference.to_owned(), RemoteImageState::Loading);
         let cache_key = reference.to_owned();
         let fetch_reference = cache_key.clone();
+        // The blob lives on the daemon that staged it — resolve by the
+        // attachment's host path. No path hint means the local daemon.
+        let daemon = match daemon_path {
+            Some(path) => match self.daemon_for_path(path) {
+                Some(daemon) => daemon,
+                None => {
+                    self.remote_images
+                        .borrow_mut()
+                        .insert(reference.to_owned(), RemoteImageState::Unavailable);
+                    return None;
+                }
+            },
+            None => self.daemon.clone(),
+        };
         let daemon_path = daemon_path.map(Path::to_path_buf);
-        let daemon = self.daemon.clone();
         cx.spawn(async move |waku, cx| {
             let image = cx
                 .background_executor()

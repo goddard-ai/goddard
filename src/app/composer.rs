@@ -2223,8 +2223,13 @@ impl Waku {
             return false;
         }
         let paths = paths.to_vec();
-        let daemon = self.daemon.clone();
         let draft_owner = self.composer_draft_key();
+        let daemon = draft_owner.and_then(|key| self.daemon_for_draft_key(key));
+        let Some(daemon) = daemon else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return false;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -2340,8 +2345,13 @@ impl Waku {
             return;
         }
 
-        let daemon = self.daemon.clone();
         let draft_owner = self.composer_draft_key();
+        let daemon = draft_owner.and_then(|key| self.daemon_for_draft_key(key));
+        let Some(daemon) = daemon else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let stored = cx
                 .background_executor()
@@ -2951,7 +2961,9 @@ impl Waku {
                     })
                     .flatten()
             });
-            let can_reveal = !self.daemon.is_remote();
+            // Reveal acts on this Mac's filesystem; a remote host's staged
+            // path means nothing to Finder.
+            let can_reveal = !self.is_remote_path(&attachment.path);
             if attachment.is_image {
                 if let Some(attachment_image) = attachment_image.as_ref() {
                     let preview_image = attachment_image.clone();
@@ -4281,13 +4293,10 @@ impl Waku {
     /// that runs `git pull` in a terminal tab. Counts come from the local
     /// tracking ref, so they reflect the last fetch. Only drafts show it — a
     /// started task's checkout state is its agent's concern — and only local
-    /// daemons, whose checkout a desktop terminal can actually reach.
+    /// workspaces, whose checkout a desktop terminal can actually reach.
     pub(super) fn render_sync_notice(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.daemon.is_remote() {
-            return None;
-        }
         let session = self.selected_session()?;
-        if session.has_started() || session.is_busy() {
+        if session.has_started() || session.is_busy() || self.is_remote_session(session.id) {
             return None;
         }
         self.selected_project()

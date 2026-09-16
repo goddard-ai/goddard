@@ -88,9 +88,13 @@ impl Waku {
             SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
             _ => None,
         };
+        let Some(workspace) = self.workspace_client_for_session(session_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         self.worktree_creation_pending = true;
         cx.notify();
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let base_branch = base_ref.clone();
             let result = cx
@@ -161,7 +165,9 @@ impl Waku {
     /// submit. Git refuses to remove a dirty worktree, so this cannot destroy
     /// work.
     pub(super) fn remove_draft_worktree(&self, path: PathBuf, cx: &mut Context<Self>) {
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_path(&path) else {
+            return;
+        };
         cx.background_executor()
             .spawn(async move {
                 let _ = workspace.request(waku_client::WorkspaceOperation::RemoveWorktree {
@@ -218,7 +224,11 @@ impl Waku {
         else {
             return;
         };
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         let Some(project_path) = self
             .state
             .projects
@@ -335,7 +345,9 @@ impl Waku {
     /// take. Its content is only a copy of the source checkout's state, so
     /// nothing unique is lost.
     fn discard_worktree_copy(&self, path: PathBuf, cx: &mut Context<Self>) {
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_path(&path) else {
+            return;
+        };
         cx.background_executor()
             .spawn(async move {
                 let _ = workspace
@@ -353,7 +365,7 @@ impl Waku {
     /// session's latest checkpoint — the same order `prepare_submission`
     /// uses.
     pub(super) fn restore_missing_worktree(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.daemon.is_remote() {
+        if self.is_remote_session(session_id) {
             return;
         }
         let Some((project_path, path, branch)) = self
@@ -377,7 +389,9 @@ impl Waku {
             return;
         }
         let archive_ref = checkpoint::archive_ref(session_id);
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_session(session_id) else {
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let ensured = cx
                 .background_executor()
@@ -536,7 +550,9 @@ impl Waku {
             .detach();
         }
         for (session_id, path) in ready {
-            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+            let Some(workspace) = self.workspace_client_for_session(session_id) else {
+                continue;
+            };
             cx.spawn(async move |waku, cx| {
                 let worktree_path = path.clone();
                 let removed = cx

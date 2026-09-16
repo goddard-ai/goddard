@@ -237,7 +237,12 @@ impl Waku {
         if !needs_hydration || !self.session_hydrations.insert(session_id) {
             return;
         }
-        let daemon = self.daemon.clone();
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            // Offline remote host: drop the mark so hydration retries when
+            // the supervisor registers and the row is re-selected.
+            self.session_hydrations.remove(&session_id);
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -456,6 +461,8 @@ impl Waku {
         session.runtime_mode = runtime_mode;
         session.sandboxed = sandboxed;
         let id = session.id;
+        self.daemons
+            .claim_session(id, self.daemons.project_owner(project_id));
         self.state.push_session(session);
         self.select_session(id, cx);
     }
@@ -706,8 +713,9 @@ impl Waku {
                 self.state.selected_project = None;
             }
         }
-        if let Some(project_path) = project_path {
-            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        if let Some(project_path) = project_path
+            && let Some(workspace) = self.workspace_client_for_path(&project_path)
+        {
             cx.background_executor()
                 .spawn(async move {
                     let _ = workspace.request(waku_client::WorkspaceOperation::DeleteSessionRefs {
@@ -820,8 +828,12 @@ impl Waku {
         if self.archive_dialog.is_some() || !self.archive_preview_pending.insert(session_id) {
             return;
         }
+        let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.archive_preview_pending.remove(&session_id);
+            self.finish_archive_session(session_id, sidebar_position, window, cx);
+            return;
+        };
         let window_handle = window.window_handle();
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let preview = cx
                 .background_executor()
@@ -2785,6 +2797,7 @@ impl Waku {
                         project.id == session.project_id
                             && project.is_projectless()
                             && !crate::projectless::is_legacy_root_path(&project.path)
+                            && !self.is_remote_project(project.id)
                     })
             })
             .map(|session| session.id)
@@ -2793,6 +2806,9 @@ impl Waku {
             return;
         }
 
+        // Projectless workspaces stay local: the projectless root is a path
+        // under `~/.waku` on the creating host, and "no project" should not
+        // pick a host at random.
         let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx

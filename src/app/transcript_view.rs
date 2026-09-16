@@ -1206,9 +1206,11 @@ impl Waku {
             .iter()
             .map(|turn| turn.turn_count.saturating_sub(1))
             .collect::<Vec<_>>();
+        let Some(workspace) = self.workspace_client_for_session(session_id) else {
+            return;
+        };
         self.checkpoint_ref_prefetch
             .set(Some((session_id, generation)));
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |this, cx| {
             let existing = cx
                 .background_executor()
@@ -1416,7 +1418,10 @@ impl Waku {
                             )
                         })
                         .collect();
-                    let attachments_can_reveal = !self.daemon.is_remote();
+                    let attachments_can_reveal = !self
+                        .state
+                        .selected_session
+                        .is_some_and(|id| self.is_remote_session(id));
                     let menu = self.menu_handle(format!("message-{}", message.id), cx);
                     let user_message_viewport = (message.role == MessageRole::User).then(|| {
                         self.user_message_viewports
@@ -1819,7 +1824,14 @@ impl Waku {
             turn_id,
             turn_count,
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_session(session_id) else {
+            self.changed_files_diffs.insert(
+                turn_id,
+                ChangedFilesDiff::Failed(tr!("errors.daemon_disconnected").into()),
+            );
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

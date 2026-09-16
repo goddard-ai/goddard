@@ -212,6 +212,11 @@ impl Waku {
         else {
             return;
         };
+        // An offline remote keeps its last-loaded rows rather than flipping
+        // to a spinner that can never resolve.
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            return;
+        };
         let Some(browser) = self.github_browsers.get_mut(&project_id) else {
             return;
         };
@@ -231,8 +236,6 @@ impl Waku {
         // stays on screen until the fresh one lands.
         let open_detail = browser.detail;
         cx.notify();
-
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let resolved = cx
                 .background_executor()
@@ -329,6 +332,9 @@ impl Waku {
         else {
             return;
         };
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            return;
+        };
         let Some(browser) = self.github_browsers.get_mut(&project_id) else {
             return;
         };
@@ -338,7 +344,6 @@ impl Waku {
         browser.details.insert(detail, GitHubFetch::Loading);
         cx.notify();
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let value = cx
                 .background_executor()
@@ -382,7 +387,11 @@ impl Waku {
         else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let value = cx
                 .background_executor()
@@ -452,6 +461,15 @@ impl Waku {
             GitHubItemKind::PullRequest => waku_client::WorkItemKind::PullRequest,
             GitHubItemKind::Issue => waku_client::WorkItemKind::Issue,
         };
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            if let Some(browser) = self.github_browsers.get_mut(&project_id) {
+                browser
+                    .comment_post_errors
+                    .insert(detail, tr!("errors.daemon_disconnected"));
+            }
+            cx.notify();
+            return;
+        };
         let Some(browser) = self.github_browsers.get_mut(&project_id) else {
             return;
         };
@@ -459,7 +477,6 @@ impl Waku {
         browser.comment_post_errors.remove(&detail);
         cx.notify();
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         let submitted = body.clone();
         cx.spawn(async move |waku, cx| {
             let result = cx
@@ -770,6 +787,13 @@ impl Waku {
         else {
             return;
         };
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            if let Some(browser) = self.github_browsers.get_mut(&project_id) {
+                browser.fix_preparing.remove(&detail);
+            }
+            cx.notify();
+            return;
+        };
         let Some(browser) = self.github_browsers.get_mut(&project_id) else {
             return;
         };
@@ -806,7 +830,6 @@ impl Waku {
         browser.fix_preparing.insert(detail);
         cx.notify();
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         let fetch_branch = local_branch.clone();
         let entity = cx.entity().downgrade();
         cx.spawn(async move |_, cx| {

@@ -179,8 +179,18 @@ impl Waku {
         });
         cx.notify();
 
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace_client = self.workspace_client_for_path(&workspace);
         cx.spawn(async move |waku, cx| {
+            let Some(workspace_client) = workspace_client else {
+                let _ = waku.update(cx, move |waku, cx| {
+                    if let Some(dialog) = waku.commit_dialog.as_mut() {
+                        dialog.snapshot_loading = false;
+                        dialog.error = Some(tr!("errors.daemon_disconnected"));
+                    }
+                    cx.notify();
+                });
+                return;
+            };
             let result = cx
                 .background_executor()
                 .spawn(async move {
@@ -217,6 +227,17 @@ impl Waku {
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Surface an error on the open dialog — or a toast when it has been
+    /// closed or replaced by another workspace's dialog since `id` was taken.
+    fn commit_dialog_error(&mut self, id: Uuid, error: String, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.commit_dialog.as_mut().filter(|dialog| dialog.id == id) {
+            dialog.error = Some(error);
+        } else {
+            self.show_toast(error);
+        }
         cx.notify();
     }
 
@@ -324,7 +345,10 @@ impl Waku {
         window_handle: gpui::AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace_client) = self.workspace_client_for_path(&workspace) else {
+            self.commit_dialog_error(id, tr!("errors.daemon_disconnected"), cx);
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let generation_workspace = workspace.clone();
             let result = cx
@@ -406,7 +430,10 @@ impl Waku {
         window_handle: gpui::AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace_client) = self.workspace_client_for_path(&workspace) else {
+            self.commit_dialog_error(id, tr!("errors.daemon_disconnected"), cx);
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let operation_workspace = workspace.clone();
             let result = cx

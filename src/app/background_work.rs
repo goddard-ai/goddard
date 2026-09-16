@@ -1011,7 +1011,9 @@ impl Waku {
         workspace_path: Option<&Path>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.daemon.is_remote() {
+        // "Open in …" launches local apps; a remote workspace path does not
+        // exist on this machine.
+        if workspace_path.is_some_and(|path| self.is_remote_path(path)) {
             return None;
         }
         let path: Rc<Path> = Rc::from(workspace_path?);

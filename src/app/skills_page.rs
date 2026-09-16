@@ -136,11 +136,13 @@ impl Waku {
 
     /// `(display name, path)` per scannable project. Projectless workspaces
     /// are generated directories that never hold curated skills.
+    /// The scan runs on the local daemon's filesystem; remote projects are
+    /// excluded until the scan learns per-daemon batches.
     fn skill_scan_projects(&self) -> Vec<(String, PathBuf)> {
         self.state
             .projects
             .iter()
-            .filter(|project| !project.is_projectless())
+            .filter(|project| !project.is_projectless() && !self.is_remote_project(project.id))
             .map(|project| (project.display_name(), project.path.clone()))
             .collect()
     }

@@ -120,9 +120,12 @@ pub(super) fn session_has_active_provider_turn(session: &AgentSession) -> bool {
 /// metadata is copied from the projection. A locally attached runtime remains
 /// authoritative for transient status and timestamps until its own events are
 /// drained.
+/// `owns` scopes deletions to the merging daemon's rows: a remote host's
+/// session must never vanish because the *local* daemon's snapshot lacks it.
 pub(super) fn merge_remote_session_catalog(
     local: &mut Vec<AgentSession>,
     remote: Vec<AgentSession>,
+    owns: impl Fn(Uuid) -> bool,
     has_local_runtime: impl Fn(Uuid) -> bool,
 ) -> Vec<Uuid> {
     let remote_ids = remote
@@ -131,10 +134,14 @@ pub(super) fn merge_remote_session_catalog(
         .collect::<HashSet<_>>();
     let removed = local
         .iter()
-        .filter(|session| session.has_started() && !remote_ids.contains(&session.id))
+        .filter(|session| {
+            session.has_started() && owns(session.id) && !remote_ids.contains(&session.id)
+        })
         .map(|session| session.id)
         .collect::<Vec<_>>();
-    local.retain(|session| !session.has_started() || remote_ids.contains(&session.id));
+    local.retain(|session| {
+        !session.has_started() || !owns(session.id) || remote_ids.contains(&session.id)
+    });
 
     for remote in remote {
         if let Some(local) = local.iter_mut().find(|session| session.id == remote.id) {
@@ -1060,13 +1067,22 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
 }
 
 impl Waku {
-    pub(super) fn restart_task_state_sync(&self) {
-        let clients = self.daemon.subscribe_clients();
+    /// Follow one daemon's client stream and mirror its task state and
+    /// settings into the merged catalog. Runs once per connected daemon —
+    /// the local supervisor at launch plus one per remote host — and ends
+    /// when the supervisor's client channel closes, which is how a removed
+    /// host's worker stops.
+    pub(super) fn start_task_state_sync(
+        &self,
+        key: waku_client::DaemonKey,
+        supervisor: waku_client::DaemonSupervisor,
+    ) {
+        let clients = supervisor.subscribe_clients();
         let results = self.task_state_sync_tx.clone();
         let settings_updates = self.daemon_settings_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
-            .name("waku-task-state-sync".into())
+            .name(format!("waku-task-state-sync-{key:?}"))
             .spawn(move || {
                 let Ok(mut client) = clients.recv() else {
                     return;
@@ -1078,7 +1094,7 @@ impl Waku {
                     let revisions = client.subscribe_task_state();
                     let settings = client.subscribe_settings();
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
-                    if results.send(result).is_err() {
+                    if results.send((key, result)).is_err() {
                         return;
                     }
                     signal_event_pump(&event_wake);
@@ -1107,7 +1123,7 @@ impl Waku {
                                 while revisions.try_recv().is_ok() {}
                                 let result = load_remote_task_state(&client)
                                     .map_err(|error| error.to_string());
-                                if results.send(result).is_err() {
+                                if results.send((key, result)).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1122,7 +1138,7 @@ impl Waku {
                                     };
                                     break replacement;
                                 };
-                                if settings_updates.send(settings).is_err() {
+                                if settings_updates.send((key, settings)).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1135,34 +1151,39 @@ impl Waku {
     }
 
     fn drain_task_state_sync_events(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut latest = None;
-        while let Ok(result) = self.task_state_sync_events.try_recv() {
-            latest = Some(result);
+        // Snapshots from several daemons interleave on one channel; keep the
+        // newest per daemon rather than only the newest overall.
+        let mut latest: HashMap<waku_client::DaemonKey, Result<RemoteTaskStateSnapshot, String>> =
+            HashMap::new();
+        while let Ok((key, result)) = self.task_state_sync_events.try_recv() {
+            latest.insert(key, result);
         }
-        let Some(result) = latest else {
+        if latest.is_empty() {
             return false;
-        };
-        match result {
-            Ok(snapshot) => {
-                self.apply_remote_task_state(snapshot, cx);
-                true
-            }
-            Err(error) => {
-                eprintln!("could not refresh daemon task state: {error}");
-                false
+        }
+        for (key, result) in latest {
+            match result {
+                Ok(snapshot) => self.apply_remote_task_state(key, snapshot, cx),
+                Err(error) => {
+                    eprintln!("could not refresh daemon task state: {error}");
+                }
             }
         }
+        true
     }
 
     fn drain_daemon_settings_events(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut latest = None;
-        while let Ok(settings) = self.daemon_settings_events.try_recv() {
-            latest = Some(settings);
+        let mut latest: HashMap<waku_client::DaemonKey, waku_client::DaemonSettings> =
+            HashMap::new();
+        while let Ok((key, settings)) = self.daemon_settings_events.try_recv() {
+            latest.insert(key, settings);
         }
-        let Some(settings) = latest else {
+        if latest.is_empty() {
             return false;
-        };
-        self.apply_remote_daemon_settings(settings, cx);
+        }
+        for (key, settings) in latest {
+            self.apply_remote_daemon_settings(key, settings, cx);
+        }
         true
     }
 
@@ -1173,9 +1194,21 @@ impl Waku {
     /// settings write the user did not see happen, so it gets a toast.
     fn apply_remote_daemon_settings(
         &mut self,
+        key: waku_client::DaemonKey,
         settings: waku_client::DaemonSettings,
         cx: &mut Context<Self>,
     ) {
+        // Remote hosts keep their own mirror — provider binary overrides and
+        // custom commands are host-local — while `state` stays the merged
+        // copy of the local daemon's document.
+        if let waku_client::DaemonKey::Remote(host) = key {
+            if let Some(supervisor) = self.daemons.supervisor(key) {
+                supervisor.note_remote_settings(settings.clone());
+            }
+            self.remote_daemon_settings.insert(host, settings);
+            cx.notify();
+            return;
+        }
         let known: HashSet<Uuid> = self
             .state
             .custom_commands
@@ -1198,13 +1231,17 @@ impl Waku {
 
     fn apply_remote_task_state(
         &mut self,
+        key: waku_client::DaemonKey,
         snapshot: RemoteTaskStateSnapshot,
         cx: &mut Context<Self>,
     ) {
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
+        // Only this daemon's rows may be removed or replaced — the merged
+        // list also carries every other host's sessions and projects.
         let removed = merge_remote_session_catalog(
             &mut self.state.sessions,
-            snapshot.sessions,
+            snapshot.sessions.clone(),
+            |session_id| self.daemons.session_owner(session_id) == key,
             |session_id| runtime_ids.contains(&session_id),
         );
         for session_id in &removed {
@@ -1217,7 +1254,29 @@ impl Waku {
             self.project_switcher.session_removed(*session_id);
             self.transcript_scroll_positions.remove(session_id);
         }
-        self.state.projects = snapshot.projects;
+        self.state
+            .projects
+            .retain(|project| self.daemons.project_owner(project.id) != key);
+        self.state
+            .projects
+            .extend(snapshot.projects.iter().cloned());
+        if let waku_client::DaemonKey::Remote(host) = key {
+            self.daemons.replace_remote_catalog(
+                host,
+                &snapshot
+                    .projects
+                    .iter()
+                    .map(|project| project.id)
+                    .collect::<Vec<_>>(),
+                &snapshot
+                    .sessions
+                    .iter()
+                    .map(|session| session.id)
+                    .collect::<Vec<_>>(),
+            );
+            self.remote_catalogs.insert(host, snapshot);
+            self.save_remote_catalogs();
+        }
 
         let attach = self
             .state
@@ -1283,7 +1342,12 @@ impl Waku {
         {
             return;
         }
-        let daemon = self.daemon.clone();
+        let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
+            // The owning remote host has not connected yet. Leave the pending
+            // mark: its first catalog snapshot re-enters here for every busy
+            // session it reports.
+            return;
+        };
         let event_wake = self.event_wake_tx.clone();
         cx.spawn(async move |waku, cx| {
             let result = cx
@@ -1295,6 +1359,419 @@ impl Waku {
             });
         })
         .detach();
+    }
+
+    /// The supervisor that owns a session — `None` when its remote host is
+    /// configured but not connected, or the record was removed.
+    pub(super) fn daemon_for_session(
+        &self,
+        session_id: Uuid,
+    ) -> Option<waku_client::DaemonSupervisor> {
+        self.daemons.daemon_for_session(session_id)
+    }
+
+    pub(super) fn daemon_for_project(
+        &self,
+        project_id: Uuid,
+    ) -> Option<waku_client::DaemonSupervisor> {
+        self.daemons.daemon_for_project(project_id)
+    }
+
+    /// Resolve a filesystem path to the daemon that owns it: the project — or
+    /// session worktree — containing it. Local projects win over remote ones
+    /// on an identical path string; a path no catalog row owns is local. The
+    /// key is returned even when its remote supervisor is not connected, so
+    /// callers can distinguish "offline remote" from "local".
+    pub(super) fn daemon_key_for_path(&self, path: &std::path::Path) -> waku_client::DaemonKey {
+        let mut remote_match = None;
+        let mut remote_len = 0;
+        for project in &self.state.projects {
+            if path == project.path || path.starts_with(&project.path) {
+                match self.daemons.project_owner(project.id) {
+                    waku_client::DaemonKey::Local => return waku_client::DaemonKey::Local,
+                    waku_client::DaemonKey::Remote(host) => {
+                        if project.path.as_os_str().len() > remote_len {
+                            remote_len = project.path.as_os_str().len();
+                            remote_match = Some(host);
+                        }
+                    }
+                }
+            }
+        }
+        for session in &self.state.sessions {
+            let Some(workspace) = session.workspace.path() else {
+                continue;
+            };
+            if path == workspace || path.starts_with(workspace) {
+                match self.daemons.session_owner(session.id) {
+                    waku_client::DaemonKey::Local => return waku_client::DaemonKey::Local,
+                    waku_client::DaemonKey::Remote(host) => {
+                        if workspace.as_os_str().len() > remote_len {
+                            remote_len = workspace.as_os_str().len();
+                            remote_match = Some(host);
+                        }
+                    }
+                }
+            }
+        }
+        remote_match
+            .map(waku_client::DaemonKey::Remote)
+            .unwrap_or(waku_client::DaemonKey::Local)
+    }
+
+    /// The supervisor for `path`'s owner, falling back to the local daemon
+    /// only when the owner is local. A disconnected remote resolves to its
+    /// missing supervisor, not to the wrong machine.
+    pub(super) fn daemon_for_path(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<waku_client::DaemonSupervisor> {
+        self.daemons.supervisor(self.daemon_key_for_path(path))
+    }
+
+    /// Whether `path` lives on a remote host's filesystem — gates every
+    /// local-OS affordance (reveal, open-in-app, desktop terminal).
+    pub(super) fn is_remote_path(&self, path: &std::path::Path) -> bool {
+        self.daemon.is_remote()
+            || matches!(
+                self.daemon_key_for_path(path),
+                waku_client::DaemonKey::Remote(_)
+            )
+    }
+
+    pub(super) fn workspace_client_for_project(
+        &self,
+        project_id: Uuid,
+    ) -> Option<waku_client::WorkspaceClient> {
+        self.daemon_for_project(project_id)
+            .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+    }
+
+    pub(super) fn workspace_client_for_session(
+        &self,
+        session_id: Uuid,
+    ) -> Option<waku_client::WorkspaceClient> {
+        self.daemon_for_session(session_id)
+            .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+    }
+
+    /// `None` when the path's remote owner is offline — never the local
+    /// daemon, which would run the request against a different filesystem.
+    pub(super) fn workspace_client_for_path(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<waku_client::WorkspaceClient> {
+        self.daemon_for_path(path)
+            .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+    }
+
+    /// The daemon that should store and serve a composer draft target — the
+    /// session's owner for `Session`, the prospective project's owner for
+    /// `NewSession`.
+    pub(super) fn daemon_for_draft_key(
+        &self,
+        key: crate::persistence::ComposerDraftKey,
+    ) -> Option<waku_client::DaemonSupervisor> {
+        match key {
+            crate::persistence::ComposerDraftKey::Session(session_id) => {
+                self.daemon_for_session(session_id)
+            }
+            crate::persistence::ComposerDraftKey::NewSession(project_id) => {
+                self.daemon_for_project(project_id)
+            }
+        }
+    }
+
+    /// Whether the composer draft target's owner is a remote host.
+    // Used by the hosts UI in a follow-up commit.
+    #[allow(dead_code)]
+    pub(super) fn is_remote_draft_key(&self, key: crate::persistence::ComposerDraftKey) -> bool {
+        match key {
+            crate::persistence::ComposerDraftKey::Session(session_id) => {
+                self.is_remote_session(session_id)
+            }
+            crate::persistence::ComposerDraftKey::NewSession(project_id) => {
+                self.is_remote_project(project_id)
+            }
+        }
+    }
+
+    /// Whether a catalog row lives on another host — true when the row's
+    /// owner is a remote host, or when the app itself is bound to a remote
+    /// primary daemon (the env-var connection mode, where every row is).
+    pub(super) fn is_remote_session(&self, session_id: Uuid) -> bool {
+        self.daemon.is_remote() || self.daemons.is_remote_session(session_id)
+    }
+
+    pub(super) fn is_remote_project(&self, project_id: Uuid) -> bool {
+        self.daemon.is_remote() || self.daemons.is_remote_project(project_id)
+    }
+
+    /// Daemon settings effective for a session's host: the remote mirror when
+    /// the session belongs to a remote daemon, the merged local document
+    /// otherwise.
+    pub(super) fn daemon_settings_for_session(
+        &self,
+        session_id: Uuid,
+    ) -> waku_client::DaemonSettings {
+        match self.daemons.session_owner(session_id) {
+            waku_client::DaemonKey::Remote(host) => self
+                .remote_daemon_settings
+                .get(&host)
+                .cloned()
+                .unwrap_or_else(|| self.daemon.settings()),
+            waku_client::DaemonKey::Local => self.state.daemon_settings(),
+        }
+    }
+
+    /// Persist the per-host catalog cache off the UI thread.
+    fn save_remote_catalogs(&self) {
+        let catalogs = self.remote_catalogs.clone();
+        let path = self.remote_catalogs_path.clone();
+        std::thread::Builder::new()
+            .name("waku-remote-catalogs".into())
+            .spawn(move || {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let Ok(bytes) = serde_json::to_vec_pretty(&catalogs) else {
+                    return;
+                };
+                let _ = std::fs::write(path, bytes);
+            })
+            .ok();
+    }
+
+    /// Connect every saved remote host. Each gets its own retry loop so one
+    /// dead host never delays the others; a host whose record was removed
+    /// stops being retried.
+    pub(super) fn connect_remote_hosts(&mut self, cx: &mut Context<Self>) {
+        for host in self.state.remote_hosts.clone() {
+            self.connect_remote_host(host, cx);
+        }
+    }
+
+    fn connect_remote_host(
+        &mut self,
+        host: waku_client::persistence::RemoteHost,
+        cx: &mut Context<Self>,
+    ) {
+        let host_id = host.id;
+        cx.spawn(async move |waku, cx| {
+            loop {
+                let attempt = cx
+                    .background_executor()
+                    .spawn({
+                        let host = host.clone();
+                        async move {
+                            waku_client::DaemonSupervisor::connect(
+                                &host.address,
+                                host.token.clone(),
+                            )
+                        }
+                    })
+                    .await;
+                match attempt {
+                    Ok(supervisor) => {
+                        let _ = waku.update(cx, |waku, cx| {
+                            waku.install_remote_daemon(host_id, supervisor, cx)
+                        });
+                        return;
+                    }
+                    Err(error) => {
+                        let keep_trying = waku
+                            .update(cx, |waku, cx| {
+                                let configured = waku
+                                    .state
+                                    .remote_hosts
+                                    .iter()
+                                    .any(|host| host.id == host_id);
+                                if configured {
+                                    waku.remote_errors.insert(host_id, error.to_string());
+                                    cx.notify();
+                                }
+                                configured
+                            })
+                            .unwrap_or(false);
+                        if !keep_trying {
+                            return;
+                        }
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_secs(10))
+                            .await;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// A remote supervisor answered: register it so routing, task-state sync,
+    /// and draft storage see it, and pull that host's composer drafts into the
+    /// merged map without touching keys another daemon owns.
+    fn install_remote_daemon(
+        &mut self,
+        host: Uuid,
+        supervisor: waku_client::DaemonSupervisor,
+        cx: &mut Context<Self>,
+    ) {
+        self.daemons.add_remote(host, supervisor.clone());
+        self.remote_errors.remove(&host);
+        self.start_task_state_sync(waku_client::DaemonKey::Remote(host), supervisor);
+        let drafts = self.composer_draft_store.clone();
+        let daemons = self.daemons.clone();
+        cx.spawn(async move |waku, cx| {
+            let merged = cx
+                .background_executor()
+                .spawn(async move { drafts.load() })
+                .await;
+            let _ = waku.update(cx, |waku, _| {
+                if let Ok(loaded) = merged {
+                    let owns = |id: &Uuid, session: bool| {
+                        let owner = if session {
+                            daemons.session_owner(*id)
+                        } else {
+                            daemons.project_owner(*id)
+                        };
+                        owner == waku_client::DaemonKey::Remote(host)
+                    };
+                    waku.composer_drafts
+                        .sessions
+                        .extend(loaded.sessions.into_iter().filter(|(id, _)| owns(id, true)));
+                    waku.composer_drafts.new_sessions.extend(
+                        loaded
+                            .new_sessions
+                            .into_iter()
+                            .filter(|(id, _)| owns(id, false)),
+                    );
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Save a remote host record and start its connect loop.
+    // Called from the hosts settings UI in a follow-up commit.
+    #[allow(dead_code)]
+    pub(super) fn add_remote_host(
+        &mut self,
+        name: String,
+        address: String,
+        token: String,
+        cx: &mut Context<Self>,
+    ) {
+        let host = waku_client::persistence::RemoteHost {
+            id: Uuid::new_v4(),
+            name,
+            address,
+            token,
+        };
+        self.state.remote_hosts.push(host.clone());
+        self.save();
+        self.connect_remote_host(host, cx);
+        cx.notify();
+    }
+
+    /// Drop a host record: its supervisor and sync worker stop, its catalog
+    /// leaves the merged lists, and its cache entry is forgotten. The remote
+    /// daemon's own persisted state is untouched — re-adding the host brings
+    /// the rows back.
+    // Called from the hosts settings UI in a follow-up commit.
+    #[allow(dead_code)]
+    pub(super) fn remove_remote_host(&mut self, host: Uuid, cx: &mut Context<Self>) {
+        if !self
+            .state
+            .remote_hosts
+            .iter()
+            .any(|record| record.id == host)
+        {
+            return;
+        }
+        self.state.remote_hosts.retain(|record| record.id != host);
+        self.save();
+
+        let remote = waku_client::DaemonKey::Remote(host);
+        let removed_sessions = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| self.daemons.session_owner(session.id) == remote)
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        self.state
+            .sessions
+            .retain(|session| self.daemons.session_owner(session.id) != remote);
+        self.state
+            .projects
+            .retain(|project| self.daemons.project_owner(project.id) != remote);
+        self.daemons.remove_remote(host);
+        self.remote_daemon_settings.remove(&host);
+        self.remote_errors.remove(&host);
+        self.remote_catalogs.remove(&host);
+        self.save_remote_catalogs();
+
+        for session_id in &removed_sessions {
+            self.runtime_attach_pending.remove(session_id);
+            self.runtime_attach_misses.remove(session_id);
+            self.runtimes.remove(session_id);
+            self.background_work.remove(session_id);
+            self.remove_right_panel_session_state(*session_id, cx);
+            self.task_switcher.remove(*session_id);
+            self.project_switcher.session_removed(*session_id);
+            self.transcript_scroll_positions.remove(session_id);
+        }
+        if self
+            .state
+            .selected_session
+            .is_some_and(|selected| removed_sessions.contains(&selected))
+        {
+            self.state.selected_session = None;
+        }
+        if self.state.selected_project.is_some_and(|selected| {
+            !self
+                .state
+                .projects
+                .iter()
+                .any(|project| project.id == selected)
+        }) {
+            self.state.selected_project = self.state.projects.first().map(|project| project.id);
+        }
+        cx.notify();
+    }
+
+    /// Display label for a host id — the saved name, for sidebar grouping and
+    /// settings rows.
+    pub(super) fn remote_host_name(&self, host: Uuid) -> Option<String> {
+        self.state
+            .remote_hosts
+            .iter()
+            .find(|record| record.id == host)
+            .map(|record| record.name.clone())
+    }
+
+    /// Whether the host's supervisor is currently registered — its catalog
+    /// may still be showing cached rows when this is false.
+    // Used by the hosts UI in a follow-up commit.
+    #[allow(dead_code)]
+    pub(super) fn remote_host_connected(&self, host: Uuid) -> bool {
+        self.daemons
+            .supervisor(waku_client::DaemonKey::Remote(host))
+            .is_some()
+    }
+
+    /// Which remote host owns a session, for badge/label lookups.
+    // Used by the hosts UI in a follow-up commit.
+    #[allow(dead_code)]
+    pub(super) fn session_host(&self, session_id: Uuid) -> waku_client::DaemonKey {
+        self.daemons.session_owner(session_id)
+    }
+
+    /// Which remote host owns a project, for badge/label lookups.
+    // Used by the hosts UI in a follow-up commit.
+    #[allow(dead_code)]
+    pub(super) fn project_host(&self, project_id: Uuid) -> waku_client::DaemonKey {
+        self.daemons.project_owner(project_id)
     }
 
     fn finish_runtime_attachment(
@@ -1930,13 +2407,15 @@ impl Waku {
                 turn_count,
                 project_path,
             } = request;
+            let Some(workspace) = self.workspace_client_for_session(session_id) else {
+                continue;
+            };
             if !self
                 .checkpoint_captures_in_flight
                 .insert((session_id, turn_count))
             {
                 continue;
             }
-            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
             cx.spawn(async move |waku, cx| {
                 let captured = cx
                     .background_executor()
@@ -2106,12 +2585,8 @@ impl Waku {
             ProviderKind::Grok => Some("Grok Build"),
             _ => None,
         };
-        let binary = binary_provider.and_then(|_| {
-            self.probes
-                .iter()
-                .find(|probe| probe.provider == provider)
-                .and_then(|probe| probe.path.clone())
-        });
+        let binary =
+            binary_provider.and_then(|_| self.provider_binary_for_session(session_id, provider));
         if let Some(provider_name) = binary_provider
             && binary.is_none()
         {
@@ -2138,8 +2613,13 @@ impl Waku {
         } else {
             None
         };
+        let Some(workspace_client) = self.workspace_client_for_session(source.id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         let request = ResponseForkRequest {
-            workspace_client: waku_client::WorkspaceClient::new(self.daemon.client()),
+            workspace_client,
             source,
             source_workspace_path,
             fork_title,
@@ -2211,6 +2691,8 @@ impl Waku {
         self.invalidate_checkpoint_refs();
 
         let fork_id = forked.id;
+        self.daemons
+            .claim_session(fork_id, self.daemons.session_owner(session_id));
         self.state.push_session(forked);
         self.analytics
             .track(crate::analytics::Event::ResponseForked {
@@ -2479,12 +2961,7 @@ impl Waku {
                 || (source.provider == ProviderKind::OpenCode2 && driver.is_none())
                 || (source.provider == ProviderKind::Grok && retained_turn_count > 0));
         let binary = needs_binary
-            .then(|| {
-                self.probes
-                    .iter()
-                    .find(|probe| probe.provider == source.provider)
-                    .and_then(|probe| probe.path.clone())
-            })
+            .then(|| self.provider_binary_for_session(session_id, source.provider))
             .flatten();
         if needs_binary && binary.is_none() {
             self.show_toast(tr!(
@@ -2538,8 +3015,13 @@ impl Waku {
             cx.notify();
             return;
         };
+        let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         let request = MessageRewindRequest {
-            workspace_client: waku_client::WorkspaceClient::new(self.daemon.client()),
+            workspace_client,
             session_id,
             provider,
             provider_cursor,
@@ -2939,16 +3421,43 @@ impl Waku {
         .detach();
     }
 
+    /// The CLI path that launches `provider` on the daemon owning
+    /// `session_id`. A remote host resolves its own override or the bare
+    /// command name against its own PATH — a locally probed absolute path is
+    /// meaningless there. `None` means the local probe found no install.
+    fn provider_binary_for_session(
+        &self,
+        session_id: Uuid,
+        provider: ProviderKind,
+    ) -> Option<PathBuf> {
+        match self.daemons.session_owner(session_id) {
+            waku_client::DaemonKey::Remote(_) => Some(
+                self.daemon_settings_for_session(session_id)
+                    .provider_binary_overrides
+                    .get(&provider)
+                    .cloned()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from(provider.command())),
+            ),
+            waku_client::DaemonKey::Local => self
+                .probes
+                .iter()
+                .find(|probe| probe.provider == provider)
+                .and_then(|probe| probe.path.clone()),
+        }
+    }
+
     fn driver_start_request_for_session(
         &self,
         session: &AgentSession,
         cwd: PathBuf,
     ) -> anyhow::Result<DriverStartRequest> {
+        let daemon = self
+            .daemons
+            .daemon_for_session(session.id)
+            .ok_or_else(|| anyhow::anyhow!("the task's daemon is not connected"))?;
         let binary = self
-            .probes
-            .iter()
-            .find(|probe| probe.provider == session.provider)
-            .and_then(|probe| probe.path.clone())
+            .provider_binary_for_session(session.id, session.provider)
             .ok_or_else(|| {
                 anyhow::anyhow!(tr!(
                     "errors.provider_not_found",
@@ -2979,7 +3488,7 @@ impl Waku {
                 provider_cursor: session.provider_cursor.clone(),
             },
             event_wake: self.event_wake_tx.clone(),
-            daemon: self.daemon.clone(),
+            daemon,
         })
     }
 
@@ -3027,9 +3536,13 @@ impl Waku {
             cx.notify();
             return;
         };
+        let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         self.goal_runtime_starts.insert(session_id);
         cx.notify();
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -3707,7 +4220,10 @@ impl Waku {
         }
         cx.notify();
 
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()

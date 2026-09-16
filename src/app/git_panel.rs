@@ -578,7 +578,13 @@ impl Waku {
         let base = panel.base.clone();
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         let generation = self.git_panel_generation;
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            if let Some(panel) = self.git_panel.as_mut() {
+                panel.snapshot_loading = false;
+            }
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -725,7 +731,13 @@ impl Waku {
         panel.commits_loading = true;
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            if let Some(panel) = self.git_panel.as_mut() {
+                panel.commits_loading = false;
+            }
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -780,9 +792,11 @@ impl Waku {
         };
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            return;
+        };
         self.git_panel_file_diffs
             .insert(key.clone(), GitPanelFileDiff::Loading);
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
         let path = path.to_owned();
         cx.spawn(async move |waku, cx| {
             let result = cx
@@ -985,7 +999,14 @@ impl Waku {
         else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1014,7 +1035,14 @@ impl Waku {
         else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1038,7 +1066,14 @@ impl Waku {
         let Some((op_id, workspace)) = self.begin_git_panel_op(GitPanelPending::Pushing, cx) else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1060,7 +1095,14 @@ impl Waku {
         else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1125,7 +1167,14 @@ impl Waku {
         else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1157,7 +1206,14 @@ impl Waku {
         else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1203,7 +1259,14 @@ impl Waku {
         else {
             return;
         };
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1354,7 +1417,11 @@ impl Waku {
         };
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1603,8 +1670,14 @@ impl Waku {
             tree_scroll: ScrollHandle::new(),
             tree_scrollbar: ScrollbarState::new(),
         });
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            if let Some(diff) = self.git_panel_commit_diff.as_mut() {
+                diff.state = GitPanelCommitDiffState::Failed(tr!("errors.daemon_disconnected"));
+            }
+            cx.notify();
+            return;
+        };
         cx.notify();
-        let client = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

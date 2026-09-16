@@ -331,9 +331,20 @@ impl Waku {
             return;
         };
         let provider = SharedString::new_static(invocation.provider.display_name());
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace_client = self.workspace_client_for_path(&cwd);
         let view = view.downgrade();
         cx.spawn(async move |_, cx| {
+            let Some(workspace_client) = workspace_client else {
+                let _ = view.update(cx, |view, cx| {
+                    view.apply_command_generation(
+                        generation,
+                        provider,
+                        Err(tr!("errors.daemon_disconnected")),
+                        cx,
+                    );
+                });
+                return;
+            };
             let result = cx
                 .background_executor()
                 .spawn(async move {
@@ -376,7 +387,8 @@ impl Waku {
         command: Option<CustomCommand>,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
-        if self.daemon.is_remote() {
+        // A desktop PTY can only open on a local working directory.
+        if self.is_remote_path(&working_directory) {
             return None;
         }
         let session = session.filter(|session_id| {
@@ -435,9 +447,6 @@ impl Waku {
             return;
         };
         if !self.right_panel_terminals.contains_key(&terminal_id) {
-            if self.daemon.is_remote() {
-                return;
-            }
             let working_directory = record.working_directory.clone().or_else(|| {
                 record
                     .session
@@ -450,7 +459,9 @@ impl Waku {
                     .and_then(|session| self.workspace_path_for_session(session))
                     .map(Path::to_path_buf)
             });
-            let Some(working_directory) = working_directory else {
+            let Some(working_directory) =
+                working_directory.filter(|directory| !self.is_remote_path(directory))
+            else {
                 return;
             };
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
