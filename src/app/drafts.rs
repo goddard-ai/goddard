@@ -1,6 +1,82 @@
 use super::*;
 
+use crate::md::selection::{FileAnnotation, Span, TextKey};
+use crate::persistence::{
+    ComposerDraftAnnotation, ComposerDraftAnnotationSpan, ComposerDraftFileAnnotation,
+};
+
 const COMPOSER_DRAFT_SAVE_DELAY: Duration = Duration::from_millis(250);
+
+impl From<&Span> for ComposerDraftAnnotationSpan {
+    fn from(span: &Span) -> Self {
+        Self {
+            row: span.key.row.to_string(),
+            index: span.key.index,
+            start: span.range.start,
+            end: span.range.end,
+            text: span.text.to_string(),
+            block_break: span.block_break,
+        }
+    }
+}
+
+impl From<ComposerDraftAnnotationSpan> for Span {
+    fn from(span: ComposerDraftAnnotationSpan) -> Self {
+        Self {
+            key: TextKey::new(span.row, span.index),
+            range: span.start..span.end,
+            text: Rc::from(span.text),
+            block_break: span.block_break,
+        }
+    }
+}
+
+impl From<&FileAnnotation> for ComposerDraftFileAnnotation {
+    fn from(file: &FileAnnotation) -> Self {
+        Self {
+            path: file.path.clone(),
+            start: file.range.start,
+            end: file.range.end,
+            start_line: file.start_line,
+            end_line: file.end_line,
+        }
+    }
+}
+
+impl From<ComposerDraftFileAnnotation> for FileAnnotation {
+    fn from(file: ComposerDraftFileAnnotation) -> Self {
+        Self {
+            path: file.path,
+            range: file.start..file.end,
+            start_line: file.start_line,
+            end_line: file.end_line,
+        }
+    }
+}
+
+impl From<&TranscriptAnnotation> for ComposerDraftAnnotation {
+    fn from(annotation: &TranscriptAnnotation) -> Self {
+        Self {
+            id: annotation.id,
+            message_id: annotation.message_id,
+            spans: annotation.spans.iter().map(Into::into).collect(),
+            comment: annotation.comment.clone(),
+            file: annotation.file.as_ref().map(Into::into),
+        }
+    }
+}
+
+impl From<ComposerDraftAnnotation> for TranscriptAnnotation {
+    fn from(annotation: ComposerDraftAnnotation) -> Self {
+        Self {
+            id: annotation.id,
+            message_id: annotation.message_id,
+            spans: annotation.spans.into_iter().map(Into::into).collect(),
+            comment: annotation.comment,
+            file: annotation.file.map(Into::into),
+        }
+    }
+}
 
 impl From<&ComposerAttachment> for crate::persistence::ComposerDraftAttachment {
     fn from(attachment: &ComposerAttachment) -> Self {
@@ -87,10 +163,45 @@ impl Waku {
         self.selected_composer_draft_key()
     }
 
+    /// The session's annotations in draft form: the live transcript set,
+    /// every file editor's pins, and restored file annotations still waiting
+    /// on their editor — merged in creation order like `drain_annotations`.
+    fn composer_draft_annotations(&self) -> Vec<ComposerDraftAnnotation> {
+        let mut annotations = self
+            .transcript_selection
+            .annotations
+            .borrow()
+            .items
+            .clone();
+        for editor in self.right_panel_file_editors.values() {
+            annotations.extend(editor.annotations.borrow().items.iter().cloned());
+        }
+        annotations.extend(
+            self.pending_file_annotations
+                .values()
+                .flatten()
+                .cloned(),
+        );
+        annotations.sort_by_key(|annotation| annotation.id);
+        annotations.iter().map(Into::into).collect()
+    }
+
+    /// Build the live composer's draft for `key`. Annotations belong to the
+    /// session on screen, so a foreign slot — a Big Picture card or the
+    /// overlay's new-task draft — keeps whatever its draft already holds
+    /// rather than inheriting the live set.
     pub(super) fn current_composer_draft(
         &self,
+        key: Option<crate::persistence::ComposerDraftKey>,
         cx: &App,
     ) -> crate::persistence::ComposerDraft {
+        let annotations = if key == self.selected_composer_draft_key() {
+            self.composer_draft_annotations()
+        } else {
+            key.and_then(|key| self.composer_drafts.get(key))
+                .map(|draft| draft.annotations.clone())
+                .unwrap_or_default()
+        };
         crate::persistence::ComposerDraft {
             // Collapsed paste blocks have no draft slot of their own — the
             // shared schema is just text — so they fold in here and come back
@@ -104,6 +215,7 @@ impl Waku {
                 .iter()
                 .map(crate::persistence::ComposerDraftAttachment::from)
                 .collect(),
+            annotations,
         }
     }
 
@@ -113,7 +225,7 @@ impl Waku {
         let Some(key) = self.composer_draft_key() else {
             return false;
         };
-        let draft = self.current_composer_draft(cx);
+        let draft = self.current_composer_draft(Some(key), cx);
         self.composer_drafts.set(key, draft)
     }
 
@@ -191,17 +303,21 @@ impl Waku {
     /// The lookup is entirely in memory; attachments carry their cached file
     /// metadata so a session switch never stats their paths.
     pub(super) fn restore_selected_composer_draft(&mut self, cx: &mut Context<Self>) {
-        let draft = self
-            .composer_draft_key()
+        let key = self.composer_draft_key();
+        let draft = key
             .and_then(|key| self.composer_drafts.get(key))
             .cloned()
             .unwrap_or_default();
-        self.apply_composer_draft(draft, cx);
+        self.apply_composer_draft(key, draft, cx);
     }
 
     /// Push a draft into the live composer — text and attachment chips alike.
+    /// Annotations rejoin the live set only when `key` is the selected
+    /// session's slot: a foreign draft's highlights keep living in the draft
+    /// until its session comes on screen.
     pub(super) fn apply_composer_draft(
         &mut self,
+        key: Option<crate::persistence::ComposerDraftKey>,
         draft: crate::persistence::ComposerDraft,
         cx: &mut Context<Self>,
     ) {
@@ -213,9 +329,56 @@ impl Waku {
         // The previous target's blocks already folded into its draft text;
         // a restored draft carries them inline, not as cards.
         self.composer_pasted_blocks.clear();
+        if key == self.selected_composer_draft_key() {
+            self.restore_draft_annotations(draft.annotations);
+        }
         self.composer
             .update(cx, |input, cx| input.set_content(draft.text, cx));
         cx.notify();
+    }
+
+    /// Load a draft's annotations as the selected session's live set. The
+    /// visible transcript items park under their owning session first —
+    /// `reset_visible_state` performs the same swap, so a later reset is a
+    /// no-op round trip. File annotations whose editor is already on screen
+    /// seed its store; the rest wait in `pending_file_annotations` for the
+    /// file to open.
+    fn restore_draft_annotations(&mut self, draft_annotations: Vec<ComposerDraftAnnotation>) {
+        let mut items = Vec::new();
+        let mut pending: HashMap<String, Vec<TranscriptAnnotation>> = HashMap::new();
+        for annotation in draft_annotations {
+            self.annotation_next_id = self
+                .annotation_next_id
+                .max(annotation.id.saturating_add(1));
+            let annotation = TranscriptAnnotation::from(annotation);
+            if let Some(file) = &annotation.file {
+                pending.entry(file.path.clone()).or_default().push(annotation);
+            } else {
+                items.push(annotation);
+            }
+        }
+        {
+            let mut annotations = self.transcript_selection.annotations.borrow_mut();
+            if let Some(owner) =
+                std::mem::replace(&mut self.annotation_session, self.state.selected_session)
+            {
+                self.transcript_annotations
+                    .insert(owner, std::mem::take(&mut annotations.items));
+            }
+            annotations.items = items;
+            annotations.hovered = None;
+            annotations.hovered_ref = None;
+            annotations.editing = None;
+        }
+        if let Some(id) = self.state.selected_session {
+            self.transcript_annotations.remove(&id);
+        }
+        for (path, editor) in self.right_panel_file_editors.iter_mut() {
+            if let Some(annotations) = pending.remove(path) {
+                editor.annotations.borrow_mut().items = annotations;
+            }
+        }
+        self.pending_file_annotations = pending;
     }
 
     /// Debounce disk traffic while keeping serialization and filesystem I/O on

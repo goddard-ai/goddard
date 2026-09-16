@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ProviderKind, RuntimeMode } from '@waku/client';
+import { annotationBubbleContent, annotationPromptPrefix } from '@waku/client/composer-annotations';
 import {
   rememberedModelTraits,
   rememberComposerSession,
@@ -268,7 +269,8 @@ export default function NewTaskScreen() {
 
   async function start() {
     const value = prompt.trim();
-    if (!selectedProject || !provider || !value || submitting) return;
+    const submittedAnnotations = draftSync.currentAnnotations();
+    if (!selectedProject || !provider || (!value && !submittedAnnotations.length) || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -277,11 +279,18 @@ export default function NewTaskScreen() {
         setSubmitting(false);
         return;
       }
+      const expanded = composerProviderPrompt(provider, value, commands);
+      let display = value;
+      let providerPrompt = expanded;
+      if (submittedAnnotations.length) {
+        display = annotationBubbleContent(submittedAnnotations, value);
+        providerPrompt = (annotationPromptPrefix(submittedAnnotations) + (expanded ?? value)).trimEnd();
+      }
       const session = await runtime.createTask(
         selectedProject.id,
         provider,
         isolated && !projectless,
-        value,
+        display,
         {
           model,
           reasoningEffort,
@@ -290,7 +299,7 @@ export default function NewTaskScreen() {
           runtimeMode,
           baseBranch,
         },
-        composerProviderPrompt(provider, value, commands),
+        providerPrompt,
       );
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const address = daemon.activeProfile?.address;
@@ -359,7 +368,8 @@ export default function NewTaskScreen() {
     ?? branches.data?.default_branch
     ?? branches.data?.current
     ?? 'Default branch';
-  const startDisabled = !selectedProject || !provider || !prompt.trim() || submitting;
+  const startDisabled = !selectedProject || !provider
+    || (!prompt.trim() && !draftSync.currentAnnotations().length) || submitting;
 
   return (
     <KeyboardAvoidingView

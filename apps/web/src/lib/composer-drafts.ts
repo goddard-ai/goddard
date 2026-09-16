@@ -21,6 +21,7 @@ export function composerDraftFor(
   return {
     text: draft?.text ?? '',
     attachments: draft?.attachments ?? [],
+    annotations: draft?.annotations ?? [],
   }
 }
 
@@ -51,7 +52,7 @@ export function moveComposerDraftToEmpty(
   if (draftEmpty(sourceDraft) || !draftEmpty(composerDraftFor(drafts, destination))) return []
   const changes: ComposerDraftChange[] = []
   const destinationChange = setComposerDraft(drafts, destination, sourceDraft)
-  const sourceChange = setComposerDraft(drafts, source, { text: '', attachments: [] })
+  const sourceChange = setComposerDraft(drafts, source, { text: '', attachments: [], annotations: [] })
   if (destinationChange) changes.push(destinationChange)
   if (sourceChange) changes.push(sourceChange)
   return changes
@@ -61,14 +62,16 @@ function normalizeDraft(draft: ComposerDraft): ComposerDraft {
   return {
     text: draft.text ?? '',
     attachments: draft.attachments ?? [],
+    annotations: draft.annotations ?? [],
   }
 }
 
 function draftEmpty(draft: ComposerDraft): boolean {
-  return !(draft.text?.length || draft.attachments?.length)
+  return !(draft.text?.length || draft.attachments?.length || draft.annotations?.length)
 }
 
 function draftsEqual(left: ComposerDraft, right: ComposerDraft): boolean {
   return left.text === right.text
     && JSON.stringify(left.attachments) === JSON.stringify(right.attachments)
+    && JSON.stringify(left.annotations) === JSON.stringify(right.annotations)
 }

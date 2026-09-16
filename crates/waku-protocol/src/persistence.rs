@@ -23,17 +23,64 @@ pub struct ComposerDraftAttachment {
     pub session_id: Option<Uuid>,
 }
 
+/// One painted element's slice of an annotated passage, keyed the way the
+/// renderer keys text elements: a `message-{id}` or `file:{path}` row plus the
+/// element's index within that row. `start`/`end` are byte offsets into
+/// `text`, which snapshots the element's flat text at selection time so the
+/// quote survives later edits to the message or file.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct ComposerDraftAnnotationSpan {
+    pub row: String,
+    pub index: usize,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    pub block_break: bool,
+}
+
+/// Right-panel file provenance for a draft annotation: the workspace-relative
+/// path, the byte range the pinned highlight covers in the file's text, and
+/// the 1-based lines covering it at selection time for the prompt's
+/// `[Selected lines N-M]` marker.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct ComposerDraftFileAnnotation {
+    pub path: String,
+    pub start: usize,
+    pub end: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+/// A commented highlight staged with the draft — a passage of an assistant
+/// message or a file-editor selection plus the user's comment. `id` persists
+/// so creation order survives a save and a session's next id stays above
+/// everything restored.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct ComposerDraftAnnotation {
+    pub id: u64,
+    /// The message the spans were taken from. Nil when `file` is set.
+    #[ts(type = "string")]
+    pub message_id: Uuid,
+    pub spans: Vec<ComposerDraftAnnotationSpan>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<ComposerDraftFileAnnotation>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct ComposerDraft {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<ComposerDraftAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<ComposerDraftAnnotation>,
 }
 
 impl ComposerDraft {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.attachments.is_empty()
+        self.text.is_empty() && self.attachments.is_empty() && self.annotations.is_empty()
     }
 }
 

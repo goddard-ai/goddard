@@ -14,5 +14,6 @@ export {
 export * from "./generated";
 export * from "./event-reducer";
 export * from "./transcript-presentation";
+export * from "./composer-annotations";
 export * from "./composer-preferences";
 export * from "./provider-probe-cache";

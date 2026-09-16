@@ -5,6 +5,7 @@ import type {
   AgentSession,
   BranchSnapshot,
   ComposerDraft,
+  ComposerDraftAnnotation,
   GoalOperation,
   MessageAttachment,
   PlanUsage,
@@ -13,6 +14,7 @@ import type {
   ProviderProbe,
   ThreadGoalStatus,
 } from '@waku/client'
+import { annotationBubbleContent, annotationPromptPrefix } from '@waku/client'
 import {
   useEffect,
   useRef,
@@ -206,6 +208,9 @@ export function Composer({
   const mounted = useRef(true)
   const draftChange = useRef(onComposerDraftChange)
   draftChange.current = onComposerDraftChange
+  // The web composer has no annotation UI; carry the hydrated set through
+  // unchanged so a text edit does not strip another client's comments.
+  const draftAnnotations = useRef(initialComposerDraft?.annotations ?? [])
   const busy = ['connecting', 'working', 'waiting', 'background'].includes(session.status)
   const runningTurnId = [...session.turns].reverse().find((turn) => turn.status === 'running')?.id
   const escapeStopTarget = `${session.id}:${runningTurnId ?? ''}`
@@ -216,7 +221,9 @@ export function Composer({
   const selectedModel = probe.data?.models.find((model) => model.id === session.model)
     ?? probe.data?.models.find((model) => model.is_default)
     ?? probe.data?.models[0]
-  const hasDraft = Boolean(prompt.trim() || attachments.length)
+  const hasDraft = Boolean(
+    prompt.trim() || attachments.length || draftAnnotations.current.length,
+  )
   const canSteer = busy && session.status !== 'connecting' && runtime?.supportsSteer
   const workspace = session.workspace ?? { kind: 'local' as const }
   const projectChoices = selectableProjects(projects, project)
@@ -350,7 +357,7 @@ export function Composer({
   }, [])
 
   useEffect(() => {
-    draftChange.current?.({ text: prompt, attachments })
+    draftChange.current?.({ text: prompt, attachments, annotations: draftAnnotations.current })
   }, [attachments, prompt])
 
   async function activateDraft() {
@@ -467,26 +474,52 @@ export function Composer({
     return true
   }
 
+  function submissionPrompts(
+    submittedPrompt: string,
+    submittedAttachments: MessageAttachment[],
+    submittedAnnotations: ComposerDraftAnnotation[],
+  ): { displayPrompt: string; providerPrompt?: string } {
+    const expanded = providerPromptOverride(submittedPrompt, submittedAttachments)
+    if (!submittedAnnotations.length) {
+      return { displayPrompt: submittedPrompt, providerPrompt: expanded }
+    }
+    const base = expanded ?? [
+      submittedPrompt.trim(),
+      submittedAttachments.map(attachmentPromptToken).join(' '),
+    ].filter(Boolean).join(' ')
+    return {
+      displayPrompt: annotationBubbleContent(submittedAnnotations, submittedPrompt.trim()),
+      providerPrompt: (annotationPromptPrefix(submittedAnnotations) + base).trimEnd(),
+    }
+  }
+
   async function submit() {
-    if (submitting || (!prompt.trim() && attachments.length === 0)) return
+    if (submitting || !hasDraft) return
     if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
     const submittedAttachments = attachments
+    const submittedAnnotations = draftAnnotations.current
     let cleared = false
     setSubmitting(true)
     try {
       const target = await activateDraft()
-      const pending = sendPrompt(
-        target,
+      const { displayPrompt, providerPrompt } = submissionPrompts(
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments),
+        submittedAnnotations,
+      )
+      const pending = sendPrompt(
+        target,
+        displayPrompt,
+        submittedAttachments,
+        providerPrompt,
       )
       onComposerDraftSubmitted?.()
       setPrompt('')
       setCursor(0)
       setDismissedAutocomplete(null)
       setAttachments([])
+      draftAnnotations.current = []
       cleared = true
       if (draft) {
         const optimistic = config
@@ -499,6 +532,7 @@ export function Composer({
       if (cleared && mounted.current) {
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
+        draftAnnotations.current = submittedAnnotations
       }
       toast.error(errorMessage(error))
     } finally {
@@ -511,26 +545,34 @@ export function Composer({
     if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
     const submittedAttachments = attachments
+    const submittedAnnotations = draftAnnotations.current
     let cleared = false
     setSubmitting(true)
     try {
-      const pending = steerPrompt(
-        session,
+      const { displayPrompt, providerPrompt } = submissionPrompts(
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments),
+        submittedAnnotations,
+      )
+      const pending = steerPrompt(
+        session,
+        displayPrompt,
+        submittedAttachments,
+        providerPrompt,
       )
       onComposerDraftSubmitted?.()
       setPrompt('')
       setCursor(0)
       setDismissedAutocomplete(null)
       setAttachments([])
+      draftAnnotations.current = []
       cleared = true
       await pending
     } catch (error) {
       if (cleared && mounted.current) {
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
+        draftAnnotations.current = submittedAnnotations
       }
       toast.error(errorMessage(error))
     } finally {

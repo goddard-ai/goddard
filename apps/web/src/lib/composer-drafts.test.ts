@@ -19,7 +19,7 @@ describe('composer drafts', () => {
 
     expect(change).toEqual({
       target: { type: 'newSession', projectId: 'waku' },
-      draft: { text: 'from web', attachments: [] },
+      draft: { text: 'from web', attachments: [], annotations: [] },
     })
     expect(drafts.sessions?.other?.text).toBe('from desktop')
   })

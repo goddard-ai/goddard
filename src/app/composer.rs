@@ -2641,7 +2641,8 @@ impl Waku {
             // The drain consumed the highlights; hand them back so the
             // restored draft still carries its comments — file annotations
             // return to their editors, the rest to the transcript store. A
-            // file whose editor is gone simply drops its annotation.
+            // file whose editor is gone parks in `pending_file_annotations`
+            // until it opens again.
             let (file_annotations, transcript_annotations): (Vec<_>, Vec<_>) = submission
                 .annotations
                 .into_iter()
@@ -2652,10 +2653,16 @@ impl Waku {
                 .items
                 .extend(transcript_annotations);
             for annotation in file_annotations {
-                if let Some(file) = &annotation.file
-                    && let Some(editor) = self.right_panel_file_editors.get_mut(&file.path)
-                {
-                    editor.annotations.borrow_mut().items.push(annotation);
+                let Some(file) = &annotation.file else {
+                    continue;
+                };
+                match self.right_panel_file_editors.get_mut(&file.path) {
+                    Some(editor) => editor.annotations.borrow_mut().items.push(annotation),
+                    None => self
+                        .pending_file_annotations
+                        .entry(file.path.clone())
+                        .or_default()
+                        .push(annotation),
                 }
             }
         }

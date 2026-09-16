@@ -11,11 +11,13 @@
 //! A file annotation quotes as `@path` plus a `[Selected lines N-M]` marker
 //! and a fenced block instead of a plain passage.
 //!
-//! Annotations live in memory only, one set per session. The transcript's
+//! Annotations are session-scoped and persist inside the composer draft, so
+//! they survive restarts and sync like the draft's text. The transcript's
 //! painted set sits on [`TranscriptSelection`] so the renderer can reach it
 //! from paint closures; each file editor carries its own list on
 //! [`RightPanelFileEditor`], painted inside the field and parked with the
-//! session's panel state. Session switches park and restore both (see
+//! session's panel state; a file annotation whose editor does not exist waits
+//! in `pending_file_annotations`. Session switches park and restore both (see
 //! `reset_visible_state`), and sending drains them into the prompt.
 //!
 //! A submission's drained set also parks under its user message
@@ -415,6 +417,7 @@ impl Waku {
         }
         self.transcript_selection.selection.borrow_mut().clear();
         self.annotation_hover = None;
+        self.schedule_composer_draft_save(cx);
         self.open_annotation_editor(id, true, AnnotationTarget::Transcript, window, cx);
         // Focus is on the just-clicked "Add to chat" button, which is gone by
         // the time the editor closes — return to the composer instead.
@@ -486,6 +489,7 @@ impl Waku {
         }
         state.update(cx, |input, cx| input.clear_selection(cx));
         self.annotation_hover = None;
+        self.schedule_composer_draft_save(cx);
         self.open_annotation_editor(
             id,
             true,
@@ -567,6 +571,7 @@ impl Waku {
             }
             annotations.editing = None;
         }
+        self.schedule_composer_draft_save(cx);
         self.restore_annotation_focus(editor.previous_focus, cx);
         cx.notify();
     }
@@ -588,6 +593,7 @@ impl Waku {
         }
         self.annotation_comment_input
             .update(cx, |input, cx| input.set_content("", cx));
+        self.schedule_composer_draft_save(cx);
         let focus = editor
             .previous_focus
             .unwrap_or_else(|| self.composer_focus(cx));
@@ -624,6 +630,7 @@ impl Waku {
                 .unwrap_or_else(|| self.composer_focus(cx));
             window.focus(&focus, cx);
         }
+        self.schedule_composer_draft_save(cx);
         cx.notify();
     }
 
@@ -650,6 +657,8 @@ impl Waku {
             annotations.hovered = None;
             annotations.editing = None;
         }
+        self.pending_file_annotations.clear();
+        self.schedule_composer_draft_save(cx);
         cx.notify();
     }
 
@@ -662,13 +671,19 @@ impl Waku {
     }
 
     /// The composer chip count and the "is there anything to send" check:
-    /// transcript annotations plus every file editor's.
+    /// transcript annotations, every file editor's, and restored file
+    /// annotations still waiting on their editor.
     pub(super) fn annotation_count(&self) -> usize {
         self.transcript_selection.annotations.borrow().items.len()
             + self
                 .right_panel_file_editors
                 .values()
                 .map(|editor| editor.annotations.borrow().items.len())
+                .sum::<usize>()
+            + self
+                .pending_file_annotations
+                .values()
+                .map(Vec::len)
                 .sum::<usize>()
     }
 
@@ -683,12 +698,16 @@ impl Waku {
                 .right_panel_file_editors
                 .values()
                 .any(|editor| !editor.annotations.borrow().items.is_empty())
+            || self
+                .pending_file_annotations
+                .values()
+                .any(|items| !items.is_empty())
     }
 
     /// Drain the live sets for a submission — transcript annotations plus
-    /// every file editor's, merged in creation order so the "Annotation N"
-    /// labels match the order the user made them. Parked sets for other
-    /// sessions are untouched — only what was on screen ships.
+    /// every file editor's and any still pending, merged in creation order so
+    /// the "Annotation N" labels match the order the user made them. Parked
+    /// sets for other sessions are untouched — only what was on screen ships.
     pub(super) fn drain_annotations(&mut self) -> Vec<TranscriptAnnotation> {
         self.annotation_editor = None;
         self.annotation_hover = None;
@@ -705,6 +724,11 @@ impl Waku {
             annotations.hovered = None;
             items.extend(annotations.items.drain(..));
         }
+        items.extend(
+            std::mem::take(&mut self.pending_file_annotations)
+                .into_values()
+                .flatten(),
+        );
         items.sort_by_key(|annotation| annotation.id);
         items
     }
@@ -781,20 +805,27 @@ impl Waku {
     /// from the session entirely. Runs once per frame and only when the set is
     /// non-empty, so the common path costs one emptiness check.
     pub(super) fn prune_transcript_annotations(&mut self, cx: &mut Context<Self>) {
-        {
+        let pruned = {
             let mut annotations = self.transcript_selection.annotations.borrow_mut();
             if annotations.items.is_empty() {
                 return;
             }
-            let Some(session) = self.selected_session() else {
-                annotations.items.clear();
-                return;
-            };
-            annotations.items.retain(|annotation| {
-                session.messages.iter().any(|message| {
-                    message.id == annotation.message_id && message.role == MessageRole::Assistant
-                })
-            });
+            let before = annotations.items.len();
+            match self.selected_session() {
+                Some(session) => {
+                    annotations.items.retain(|annotation| {
+                        session.messages.iter().any(|message| {
+                            message.id == annotation.message_id
+                                && message.role == MessageRole::Assistant
+                        })
+                    });
+                }
+                None => annotations.items.clear(),
+            }
+            annotations.items.len() != before
+        };
+        if pruned {
+            self.schedule_composer_draft_save(cx);
         }
         let editor_gone = self.annotation_editor.as_ref().is_some_and(|editor| {
             self.annotation_store(&editor.target).is_none_or(|store| {

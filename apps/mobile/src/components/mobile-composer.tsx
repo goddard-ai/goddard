@@ -5,6 +5,7 @@ import type {
   PendingUserInput,
   UserInputAnswer,
 } from '@waku/client';
+import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken } from '@waku/client';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -375,8 +376,9 @@ export function MobileComposer({
   async function submit() {
     const prompt = draft.trim();
     const submittedAttachments = attachments;
+    const submittedAnnotations = draftSync.currentAnnotations();
     if (
-      (!prompt && submittedAttachments.length === 0)
+      (!prompt && submittedAttachments.length === 0 && submittedAnnotations.length === 0)
       || submitting
       || pendingAttachmentImports.current > 0
     ) return;
@@ -385,10 +387,20 @@ export function MobileComposer({
     try {
       const commands = prompt.startsWith('/') ? await contextPicker.getCommands() : [];
       if (await localCommands.execute(prompt, commands)) return;
-      const providerPrompt = composerProviderPrompt(session.provider, prompt, commands, submittedAttachments);
+      const expanded = composerProviderPrompt(session.provider, prompt, commands, submittedAttachments);
+      let displayPrompt = prompt;
+      let providerPrompt = expanded;
+      if (submittedAnnotations.length) {
+        displayPrompt = annotationBubbleContent(submittedAnnotations, prompt);
+        const base = expanded ?? [
+          prompt,
+          submittedAttachments.map(attachmentPromptToken).join(' '),
+        ].filter(Boolean).join(' ');
+        providerPrompt = (annotationPromptPrefix(submittedAnnotations) + base).trimEnd();
+      }
       onSubmitted?.();
-      if (canSteer) await runtime.steerPrompt(session, prompt, submittedAttachments, providerPrompt);
-      else await runtime.sendPrompt(session, prompt, submittedAttachments, providerPrompt);
+      if (canSteer) await runtime.steerPrompt(session, displayPrompt, submittedAttachments, providerPrompt);
+      else await runtime.sendPrompt(session, displayPrompt, submittedAttachments, providerPrompt);
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
@@ -570,7 +582,7 @@ export function MobileComposer({
             <SendButton
               busy={submitting}
               disabled={
-                (!draft.trim() && attachments.length === 0)
+                (!draft.trim() && attachments.length === 0 && draftSync.currentAnnotations().length === 0)
                 || submitting
                 || importingAttachments
                 || disconnected

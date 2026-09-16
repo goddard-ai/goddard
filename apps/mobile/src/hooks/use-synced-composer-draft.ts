@@ -1,5 +1,6 @@
 import type {
   ComposerDraft,
+  ComposerDraftAnnotation,
   ComposerDraftAttachment,
   ComposerDrafts,
   ComposerDraftTarget,
@@ -17,6 +18,9 @@ import { useDaemon } from '@/lib/daemon-context';
 export interface SynchronizedComposerDraft {
   text: string;
   attachments: ComposerDraftAttachment[];
+  /** Comment annotations staged by a client that has annotation UI. Mobile
+   * never edits them; they ride along so a save here cannot strip them. */
+  annotations: ComposerDraftAnnotation[];
 }
 
 interface SyncedComposerDraftOptions {
@@ -34,6 +38,9 @@ interface SyncedComposerDraftOptions {
 interface SyncedComposerDraft {
   markEdited: () => void;
   removeSubmittedDraft: () => void;
+  /** Annotations staged by a client with annotation UI. Read at submit time so
+   * they fold into the prompt instead of vanishing with the draft. */
+  currentAnnotations: () => ComposerDraftAnnotation[];
 }
 
 /**
@@ -66,8 +73,17 @@ export function useSyncedComposerDraft({
   targetRef.current = target;
   const clientRef = useRef(daemon.client);
   clientRef.current = daemon.client;
-  const valueRef = useRef<SynchronizedComposerDraft>({ text, attachments: attachments ?? [] });
-  valueRef.current = { text, attachments: attachments ?? [] };
+  const annotationsRef = useRef<ComposerDraftAnnotation[]>([]);
+  const valueRef = useRef<SynchronizedComposerDraft>({
+    text,
+    attachments: attachments ?? [],
+    annotations: [],
+  });
+  valueRef.current = {
+    text,
+    attachments: attachments ?? [],
+    annotations: annotationsRef.current,
+  };
   const hydrateRef = useRef(onHydrate);
   hydrateRef.current = onHydrate;
 
@@ -104,6 +120,7 @@ export function useSyncedComposerDraft({
           && (authoritative || !hasDraftContent(valueRef.current))
         ) {
           const synchronized = normalizeDraft(draftForTarget(drafts, activeTarget));
+          annotationsRef.current = synchronized.annotations;
           valueRef.current = synchronized;
           hydrateRef.current(synchronized);
         }
@@ -196,6 +213,7 @@ export function useSyncedComposerDraft({
   const removeSubmittedDraft = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     tracker.markSynchronized();
+    annotationsRef.current = [];
     const client = clientRef.current;
     const activeTarget = targetRef.current;
     if (!client || !activeTarget) return;
@@ -207,7 +225,9 @@ export function useSyncedComposerDraft({
       .catch(() => {});
   }, [queue, tracker]);
 
-  return { markEdited, removeSubmittedDraft };
+  const currentAnnotations = useCallback(() => annotationsRef.current, []);
+
+  return { markEdited, removeSubmittedDraft, currentAnnotations };
 }
 
 function composerDraftTargetKey(
@@ -234,11 +254,12 @@ function normalizeDraft(draft: ComposerDraft | undefined): SynchronizedComposerD
   return {
     text: draft?.text ?? '',
     attachments: draft?.attachments ?? [],
+    annotations: draft?.annotations ?? [],
   };
 }
 
 function hasDraftContent(draft: SynchronizedComposerDraft): boolean {
-  return Boolean(draft.text.trim() || draft.attachments.length);
+  return Boolean(draft.text.trim() || draft.attachments.length || draft.annotations.length);
 }
 
 function draftPayload(draft: SynchronizedComposerDraft): ComposerDraft | null {
@@ -246,5 +267,6 @@ function draftPayload(draft: SynchronizedComposerDraft): ComposerDraft | null {
   return {
     text: draft.text,
     ...(draft.attachments.length ? { attachments: draft.attachments } : {}),
+    ...(draft.annotations.length ? { annotations: draft.annotations } : {}),
   };
 }

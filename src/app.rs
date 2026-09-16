@@ -2041,8 +2041,9 @@ pub struct Waku {
     transcript_selection: TranscriptSelection,
     /// Annotation sets parked while their session is off screen. The live set
     /// travels inside `transcript_selection.annotations`; switching sessions
-    /// swaps the two under `annotation_session`. In-memory only — never
-    /// persisted.
+    /// swaps the two under `annotation_session`. The durable copy rides the
+    /// session's composer draft — this map is the in-memory fallback for the
+    /// swap.
     transcript_annotations: HashMap<Uuid, Vec<TranscriptAnnotation>>,
     /// Which session's annotations are currently loaded into
     /// `transcript_selection.annotations`.
@@ -2065,6 +2066,13 @@ pub struct Waku {
     /// Sets drained into a queued follow-up, keyed by `QueuedMessage::id`;
     /// the message picks them back up when it leaves the queue.
     queued_annotations: HashMap<Uuid, Vec<TranscriptAnnotation>>,
+    /// File annotations from the selected session's draft whose editor does
+    /// not exist yet, keyed by workspace-relative path. Seeded into the
+    /// editor when the file opens (or comes back with parked panel state);
+    /// until then they still count in the composer chip and drain into
+    /// submissions. The draft is their durable home — this is only the
+    /// materialization for the session on screen.
+    pending_file_annotations: HashMap<String, Vec<TranscriptAnnotation>>,
     /// `Annotation N` citation under the pointer; `visible` once the hover
     /// delay elapsed.
     annotation_ref_hover: Option<annotations::AnnotationRefHover>,
@@ -3014,6 +3022,7 @@ impl Waku {
         let crate::persistence::ComposerDraft {
             text: initial_composer_text,
             attachments: initial_composer_attachments,
+            annotations: initial_composer_annotations,
         } = initial_composer_draft;
         if !initial_composer_text.is_empty() {
             composer.update(cx, |input, cx| input.set_content(initial_composer_text, cx));
@@ -3022,6 +3031,30 @@ impl Waku {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        // The saved draft's annotations reopen with the selected session:
+        // transcript highlights go straight into the selection's painted
+        // store, file ones wait for their editor to exist.
+        let transcript_selection = TranscriptSelection::default();
+        let mut pending_file_annotations: HashMap<String, Vec<TranscriptAnnotation>> =
+            HashMap::new();
+        let mut annotation_next_id = 1u64;
+        {
+            let mut items = Vec::new();
+            for annotation in initial_composer_annotations {
+                let annotation = TranscriptAnnotation::from(annotation);
+                annotation_next_id =
+                    annotation_next_id.max(annotation.id.saturating_add(1));
+                if let Some(file) = &annotation.file {
+                    pending_file_annotations
+                        .entry(file.path.clone())
+                        .or_default()
+                        .push(annotation);
+                } else {
+                    items.push(annotation);
+                }
+            }
+            transcript_selection.annotations.borrow_mut().items = items;
+        }
         let probes = ProviderKind::ALL
             .into_iter()
             .map(|provider| ProviderProbe {
@@ -4062,16 +4095,17 @@ impl Waku {
                 activity_diffs: RefCell::new(HashMap::new()),
                 activity_diff_viewports: RefCell::new(HashMap::new()),
                 markdown_link_handler,
-                transcript_selection: TranscriptSelection::default(),
+                transcript_selection,
                 transcript_annotations: HashMap::new(),
                 annotation_session: initial_session,
-                annotation_next_id: 1,
+                annotation_next_id,
                 annotation_editor: None,
                 annotation_comment_input,
                 annotation_hover: None,
                 annotation_press: None,
                 sent_annotations: HashMap::new(),
                 queued_annotations: HashMap::new(),
+                pending_file_annotations,
                 annotation_ref_hover: None,
                 annotation_ref_sets: RefCell::new(HashMap::new()),
                 annotation_ref_sets_fingerprint: Cell::new(None),

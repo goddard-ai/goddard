@@ -26,8 +26,9 @@ use waku_protocol::theme::ThemeSettings;
 
 pub use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 pub use waku_protocol::persistence::{
-    ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
-    ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
+    ComposerDraft, ComposerDraftAnnotation, ComposerDraftAnnotationSpan, ComposerDraftAttachment,
+    ComposerDraftChange, ComposerDraftFileAnnotation, ComposerDraftKey, ComposerDraftTarget,
+    ComposerDrafts, SessionMessageMatch,
 };
 
 const STATE_VERSION: u32 = 5;

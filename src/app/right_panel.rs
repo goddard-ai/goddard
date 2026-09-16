@@ -1839,6 +1839,16 @@ impl Waku {
             session_id,
         );
         self.replace_active_right_panel_state(state);
+        // The draft restored ahead of this swap holds the session's file
+        // annotations. Hand each returning editor its share; an editor whose
+        // path has none keeps an empty set — the draft is the authority, not
+        // whatever the parked store still held.
+        for (path, editor) in self.right_panel_file_editors.iter_mut() {
+            editor.annotations.borrow_mut().items = self
+                .pending_file_annotations
+                .remove(path)
+                .unwrap_or_default();
+        }
         self.sync_right_panel_diff_tree_rows(cx);
         // A read in flight when this session was switched away from had its
         // result dropped, and the flag it left behind would stop the editor
@@ -3746,6 +3756,16 @@ impl Waku {
                 .accessibility_label(relative_path.to_owned())
         });
 
+        // A draft-restored annotation for this file joins its editor now —
+        // until this point it lived in `pending_file_annotations`, still
+        // counted by the composer chip and drained into submissions.
+        let annotations = Annotations {
+            items: self
+                .pending_file_annotations
+                .remove(relative_path)
+                .unwrap_or_default(),
+            ..Default::default()
+        };
         self.right_panel_file_editors.insert(
             relative_path.to_owned(),
             RightPanelFileEditor {
@@ -3755,7 +3775,7 @@ impl Waku {
                 dirty: false,
                 reading: false,
                 read_epoch: 0,
-                annotations: Default::default(),
+                annotations: Rc::new(RefCell::new(annotations)),
             },
         );
 

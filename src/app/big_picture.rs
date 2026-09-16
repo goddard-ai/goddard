@@ -453,7 +453,7 @@ impl Waku {
         // a card's session draft or the new-task draft — before the selected
         // session's draft takes the composer back.
         if let Some(key) = self.big_picture.draft_key.take() {
-            let draft = self.current_composer_draft(cx);
+            let draft = self.current_composer_draft(Some(key), cx);
             if self.composer_drafts.set(key, draft) {
                 self.schedule_composer_draft_save(cx);
             }
@@ -581,7 +581,7 @@ impl Waku {
             return;
         }
         if let Some(previous) = self.big_picture.draft_key {
-            let draft = self.current_composer_draft(cx);
+            let draft = self.current_composer_draft(Some(previous), cx);
             if self.composer_drafts.set(previous, draft) {
                 self.schedule_composer_draft_save(cx);
             }
@@ -591,7 +591,7 @@ impl Waku {
             .and_then(|key| self.composer_drafts.get(key))
             .cloned()
             .unwrap_or_default();
-        self.apply_composer_draft(draft, cx);
+        self.apply_composer_draft(next, draft, cx);
     }
 
     pub(super) fn set_big_picture_target(
