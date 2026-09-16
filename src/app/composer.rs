@@ -3546,7 +3546,7 @@ impl Waku {
                                             .hover(|element| element.opacity(0.9))
                                             .active(|element| element.opacity(0.8))
                                             .child(icon(
-                                                "icons/arrow-up.svg",
+                                                "icons/send.svg",
                                                 16.0,
                                                 theme.on_inverse,
                                             ))
@@ -3585,7 +3585,7 @@ impl Waku {
                                         .active(|element| element.opacity(0.8))
                                 })
                                 .child(icon(
-                                    "icons/arrow-up.svg",
+                                    "icons/send.svg",
                                     16.0,
                                     if can_send {
                                         theme.on_inverse

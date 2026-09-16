@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>Graphic</title>
+    <g id="Graphic" stroke="none" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round" stroke-width="1">
+        <g id="Group" transform="translate(3.3333, 3.3333)" stroke="#000000">
+            <polyline id="Path" stroke-width="1.33333333" points="-3.73034936e-14 4.06666667 4.66666667 -0.6 9.33333333 4.06666667"></polyline>
+            <line x1="4.66666667" y1="10.1333333" x2="4.66666667" y2="-0.5" id="Path" stroke-width="1.33333333"></line>
+        </g>
+    </g>
+</svg>
