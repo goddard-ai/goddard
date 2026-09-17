@@ -3185,6 +3185,7 @@ impl Waku {
                                 waku.mark_session_unread(session_id, cx);
                             });
                         })
+                        .shortcut_action(&MarkSessionUnread)
                         .icon("icons/eye-off.svg"),
                         MenuItem::new(tr!("session.copy_working_directory"), move |_, cx| {
                             let _ = copy_waku.update(cx, |waku, cx| {
