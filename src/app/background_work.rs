@@ -1708,7 +1708,7 @@ fn render_background_summary_card(
         .w(px(300.0))
         .rounded(px(15.0))
         .border(hairline())
-        .border_color(theme.border_strong)
+        .border_color(theme.border_subtle)
         .overflow_hidden()
         .bg(theme.raised)
         .shadow_lg()

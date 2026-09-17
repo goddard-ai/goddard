@@ -4279,7 +4279,7 @@ impl Waku {
                     .rounded(px(16.0))
                     .overflow_hidden()
                     .border(hairline())
-                    .border_color(theme.border_strong)
+                    .border_color(theme.border_subtle)
                     .bg(theme.raised)
                     .shadow_lg()
                     .flex()

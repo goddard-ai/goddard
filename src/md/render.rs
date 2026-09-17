@@ -203,6 +203,11 @@ pub struct Palette {
     pub tertiary: Hsla,
     pub ghost: Hsla,
     pub border: Hsla,
+    /// Outlines on filled blocks — tables, code blocks — whose fill already
+    /// delimits them.
+    pub border_subtle: Hsla,
+    /// Decorative rules — quote bars, horizontal rules.
+    pub separator: Hsla,
     pub inset: Hsla,
     pub overlay: Hsla,
     pub code_text: Hsla,
@@ -239,6 +244,8 @@ impl Palette {
             tertiary: theme.text_tertiary,
             ghost: theme.text_ghost,
             border: theme.border,
+            border_subtle: theme.border_subtle,
+            separator: theme.separator,
             inset: theme.inset,
             overlay: theme.overlay,
             code_text: theme.code_text,
@@ -1835,7 +1842,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                         .w(px(2.0))
                         .flex_none()
                         .rounded_full()
-                        .bg(ctx.palette.border),
+                        .bg(ctx.palette.separator),
                 )
                 .child(
                     div()
@@ -1864,7 +1871,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             .w_full()
             .h(hairline())
             .my(px(4.0))
-            .bg(ctx.palette.border)
+            .bg(ctx.palette.separator)
             .into_any_element(),
     }
 }
@@ -2166,7 +2173,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .min_w_0()
         .rounded(px(10.0))
         .border(hairline())
-        .border_color(ctx.palette.border)
+        .border_color(ctx.palette.border_subtle)
         .bg(ctx.palette.inset)
         .overflow_hidden()
         .child(
@@ -2178,7 +2185,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .flex()
                 .items_center()
                 .border_b(hairline())
-                .border_color(ctx.palette.border)
+                .border_color(ctx.palette.separator)
                 .child(
                     div()
                         .min_w_0()
@@ -2283,7 +2290,7 @@ fn render_table(
         .min_w_0()
         .rounded(px(10.0))
         .border(hairline())
-        .border_color(ctx.palette.border)
+        .border_color(ctx.palette.border_subtle)
         .overflow_hidden()
         .flex()
         .flex_col();
@@ -2323,7 +2330,7 @@ fn table_row(
         .when(divider, |element| {
             element
                 .border_b(hairline())
-                .border_color(ctx.palette.border)
+                .border_color(ctx.palette.separator)
         });
     for (index, cell) in cells.iter().enumerate() {
         let key = ctx.next_key();

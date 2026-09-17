@@ -265,7 +265,7 @@ impl Waku {
             .hover(|element| element.bg(theme.overlay))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tooltip))
-            .child(context_gauge(percent, theme.border_strong, fill));
+            .child(context_gauge(percent, theme.separator, fill));
 
         Some(popover(
             trigger,
@@ -389,7 +389,7 @@ fn usage_panel(
         .p(px(14.0))
         .rounded(px(12.0))
         .border(hairline())
-        .border_color(theme.border_strong)
+        .border_color(theme.border_subtle)
         .bg(theme.raised)
         .shadow_lg()
         .flex()

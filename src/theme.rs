@@ -50,10 +50,11 @@ fn wash(color: u32, alpha: f32) -> Hsla {
 
 /// WCAG 2.2 §1.4.11 floor for non-text contrast: a boundary needed to
 /// identify a component must sit 3:1 against the colors it touches.
-/// `border_strong` — the outline on interactive controls — is held a step
-/// above so the two tiers never collapse into each other.
-const BORDER_CONTRAST: f32 = 3.0;
-const BORDER_STRONG_CONTRAST: f32 = 4.0;
+/// `border_strong` — the outline on interactive controls — carries that
+/// floor; `border` sits a half-step under for outlines that organize
+/// rather than identify.
+const BORDER_CONTRAST: f32 = 2.5;
+const BORDER_STRONG_CONTRAST: f32 = 3.0;
 /// Outlines on components whose own fill already delimits them — the
 /// composer card, inset text fields, panel cards. The boundary is
 /// reinforcement rather than identification, so 2:1 keeps it soft without
@@ -1427,10 +1428,11 @@ pub fn apply_theme_preference(
 mod tests {
     use super::*;
 
-    /// Every palette's borders must clear the WCAG non-text floor (3:1) —
-    /// and decorative separators their lower 1.5:1 floor — on every surface
-    /// they can be painted on. This is the check `from_spec` solves for,
-    /// asserted per theme so a new or edited scheme can't regress it.
+    /// Every palette's line tokens must hit their solved floors — the 3:1
+    /// WCAG floor on `border_strong`, the lower targets on `border`,
+    /// `border_subtle`, and `separator` — on every surface they can be
+    /// painted on. This is the check `from_spec` solves for, asserted per
+    /// theme so a new or edited scheme can't regress it.
     #[test]
     fn borders_clear_the_contrast_floor() {
         for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {

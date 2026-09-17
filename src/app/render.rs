@@ -1097,7 +1097,7 @@ impl Waku {
                     .py(px(7.0))
                     .rounded(px(12.0))
                     .border(hairline())
-                    .border_color(theme.border_strong)
+                    .border_color(theme.border_subtle)
                     .bg(theme.raised)
                     .shadow_lg()
                     .flex()

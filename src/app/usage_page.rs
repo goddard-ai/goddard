@@ -1568,7 +1568,7 @@ fn usage_chart_readout(
         .py(px(7.0))
         .rounded(px(10.0))
         .border(hairline())
-        .border_color(theme.border_strong)
+        .border_color(theme.border_subtle)
         .bg(theme.raised)
         .shadow_md()
         .flex()
