@@ -330,6 +330,20 @@ impl KeybindingService {
         })
     }
 
+    /// Persist a manual layout choice. `locked` records that detection
+    /// should not override the pick on restart.
+    pub fn set_layout(&mut self, id: &str, locked: bool) -> Result<(), CommitError> {
+        self.file.layout.mode = if locked { "manual" } else { "auto" }.to_string();
+        self.file.layout.fallback_layout_id = Some(id.to_string());
+        self.file.layout.locked = locked;
+        self.write()
+    }
+
+    /// The layout the file last pinned, if any.
+    pub fn saved_layout(&self) -> Option<&str> {
+        self.file.layout.fallback_layout_id.as_deref()
+    }
+
     /// Restore the `.bak` of last known-good data, if present.
     pub fn restore_backup(&mut self) -> Result<(), CommitError> {
         let backup = self.path.with_extension("json.bak");

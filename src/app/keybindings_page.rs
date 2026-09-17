@@ -172,9 +172,13 @@ impl KeybindingsUi {
             .unwrap_or_else(|| KeybindingService::load(PathBuf::new()));
         let snapshot = service.snapshot();
 
-        // Auto-detect from the OS input source; unmatched layouts fall back
-        // to US ANSI with an honest `Unrecognized` marker.
-        let (layout, layout_source) = detect_layout(cx.keyboard_layout().id());
+        // A manually picked layout wins; otherwise auto-detect from the OS
+        // input source, falling back to US ANSI when unrecognized.
+        let (layout, layout_source) = service
+            .saved_layout()
+            .and_then(LayoutId::parse)
+            .map(|id| (id, LayoutSource::Manual))
+            .unwrap_or_else(|| detect_layout(cx.keyboard_layout().id()));
 
         let filtered = (0..snapshot.rows.len()).collect();
         let conflicts = compute_conflicts(&snapshot);
@@ -751,11 +755,42 @@ impl super::Waku {
                     )
                     .child(div().w(px(320.0)).child(ui.search.clone()))
                     .child(
+                        // Click cycles the bundled layouts and pins the pick
+                        // in keybindings.json (manual mode).
                         div()
+                            .id("keybindings-layout")
                             .ml_auto()
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .rounded(px(4.0))
                             .text_size(sp(12.0))
                             .text_color(theme.text_secondary)
-                            .child(format!("{source_label} · {}", layout.name)),
+                            .cursor_pointer()
+                            .hover(|element| element.bg(theme.overlay))
+                            .child(format!("{source_label} · {}", layout.name))
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                if let Some(ui) = this.keybindings.as_mut() {
+                                    let layouts = crate::keybindings::bundled_layouts();
+                                    let next = layouts
+                                        .iter()
+                                        .position(|layout| layout.id == ui.layout)
+                                        .map(|index| (index + 1) % layouts.len())
+                                        .unwrap_or(0);
+                                    if let Some(layout) = layouts.get(next) {
+                                        ui.layout = layout.id;
+                                        ui.layout_source = LayoutSource::Manual;
+                                        if ui
+                                            .service
+                                            .set_layout(layout.id.as_str(), true)
+                                            .is_err()
+                                        {
+                                            ui.commit_error =
+                                                Some("could not save layout".into());
+                                        }
+                                    }
+                                }
+                                cx.notify();
+                            })),
                     ),
             );
 
