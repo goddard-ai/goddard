@@ -3583,6 +3583,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(5.0))
+                    .min_h(sp(15.0))
                     .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
                     .line_height(sp(15.0))
                     .when_some(detail_label, |element, label| {
