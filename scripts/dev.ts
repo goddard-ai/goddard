@@ -2,8 +2,8 @@
 
 import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
-import { watch, type FSWatcher } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync, watch, type FSWatcher } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import readline from "node:readline";
 import { WakuClient } from "../packages/waku-client/src/client";
 
@@ -24,6 +24,9 @@ const appExecutablePath = isMacOS
   : appPath;
 const daemonToken =
   process.env.GODDARD_DAEMON_TOKEN ?? crypto.randomUUID().replaceAll("-", "");
+// The app's "auto-restart" command palette toggle lands here; the app only
+// offers it when the watcher hands it this path.
+const devStatePath = join(targetDir, "debug", "goddard-dev.json");
 const externalDaemonAddress = process.env.GODDARD_DAEMON_ADDRESS;
 const interactive = process.stdin.isTTY === true;
 const stdoutIsTTY = process.stdout.isTTY === true;
@@ -772,11 +775,40 @@ function closeCommandLoop(): void {
   commandInput = undefined;
 }
 
+// Read on each build so a palette toggle mid-build takes effect immediately.
+function autoRestartEnabled(): boolean {
+  try {
+    const state = JSON.parse(readFileSync(devStatePath, "utf8")) as {
+      auto_restart?: unknown;
+    };
+    return state.auto_restart === true;
+  } catch {
+    return false;
+  }
+}
+
 async function stopApp(): Promise<void> {
   const waiter = app;
   app = undefined;
   if (isMacOS) {
-    await $`pkill -TERM -x ${appName}`.quiet().nothrow();
+    // SIGTERM never reaches the app's quit hooks, and they are what flush UI
+    // state to disk for the next launch. Ask for a graceful quit first and
+    // only fall back to the kill if the app hangs. The `is running` guard
+    // matters: a bare `tell application ... to quit` would launch it. Naming
+    // the bundle by path keeps other worktrees' "Goddard Debug" instances
+    // from being quit — a bare name hits whichever copy LaunchServices picks.
+    await $`osascript -e 'if application "${appPath}" is running then tell application "${appPath}" to quit'`
+      .quiet()
+      .nothrow();
+    if (waiter?.exitCode === null) {
+      const exited = await Promise.race([
+        waiter.exited.then(() => true),
+        Bun.sleep(3_000).then(() => false),
+      ]);
+      if (!exited) {
+        await $`pkill -TERM -f ${appExecutablePath}`.quiet().nothrow();
+      }
+    }
   } else if (waiter?.exitCode === null) {
     waiter.kill("SIGTERM");
   }
@@ -799,6 +831,9 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
       GODDARD_DAEMON_PATH: daemonPath,
       GODDARD_DAEMON_ADDRESS: daemonAddress,
       GODDARD_DAEMON_TOKEN: daemonToken,
+      // Marks this launch as watcher-owned; the app writes its auto-restart
+      // toggle to this file and the watcher reads it after each build.
+      GODDARD_DEV_STATE: devStatePath,
     },
     stdout: "inherit",
     stderr: "inherit",
@@ -899,6 +934,31 @@ function startWatchers(): void {
   });
   rootWatcher.on("error", reportWatcherError);
   watchers.push(rootWatcher);
+
+  // The app's auto-restart palette toggle lands in this file; echo flips so
+  // the terminal shows the same state the palette does.
+  let lastAutoRestart: boolean | undefined;
+  try {
+    const devStateWatcher = watch(
+      dirname(devStatePath),
+      (_eventType, filename) => {
+        if (filename?.toString() !== basename(devStatePath)) return;
+        const enabled = autoRestartEnabled();
+        if (enabled === lastAutoRestart) return;
+        lastAutoRestart = enabled;
+        console.log(
+          enabled
+            ? "[goddard-dev] Auto-restart enabled — the app relaunches after each successful build."
+            : "[goddard-dev] Auto-restart disabled — press a + enter to relaunch.",
+        );
+      },
+    );
+    devStateWatcher.on("error", reportWatcherError);
+    watchers.push(devStateWatcher);
+  } catch {
+    // target/debug does not exist until the first build; the toggle simply
+    // stays quiet until the app's own write creates the file there.
+  }
 }
 
 async function drainBuildQueue(): Promise<void> {
@@ -967,12 +1027,22 @@ async function drainBuildQueue(): Promise<void> {
 
       // The daemon survives app relaunches, so a finished build only needs a
       // hint. A protocol change is the exception: the rebuilt app cannot
-      // safely attach to the stale daemon, so 'b' must restart it first.
+      // safely attach to the stale daemon, so 'b' must restart it first —
+      // even auto-restart defers, since that restart would kill live sessions.
       if (protocolDirty) {
         daemonRestartPending = true;
         console.log(
           "[goddard-dev] App rebuilt, but the protocol changed — press b + enter to restart the daemon and relaunch.",
         );
+      } else if (autoRestartEnabled() && app !== undefined) {
+        // The app's "auto-restart" palette toggle is on and it is still
+        // running; an app the user quit stays quit.
+        console.log(
+          daemonRebuilt
+            ? "[goddard-dev] App rebuilt — auto-restarting (the daemon also rebuilt; press b + enter to restart it)."
+            : "[goddard-dev] App rebuilt — auto-restarting.",
+        );
+        await relaunchApp();
       } else {
         console.log(
           daemonRebuilt

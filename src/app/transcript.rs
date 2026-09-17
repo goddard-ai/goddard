@@ -280,7 +280,14 @@ impl Waku {
                 .get(&session_id)
                 .copied()
                 .map(TranscriptLanding::Position),
-            SessionActivationTransition::Visit => None,
+            // A position restored from disk claims only the first visit after
+            // launch; later plain visits land at the last prompt like usual.
+            SessionActivationTransition::Visit => self
+                .startup_scroll_restores
+                .remove(&session_id)
+                .then(|| self.transcript_scroll_positions.get(&session_id).copied())
+                .flatten()
+                .map(TranscriptLanding::Position),
         }
         .or_else(|| self.session_open_landing(session_id));
         self.transcript_landing = landing.map(|landing| (session_id, landing));
@@ -313,7 +320,11 @@ impl Waku {
         }
     }
 
-    fn scroll_to_transcript_landing(&mut self, landing: TranscriptLanding, cx: &mut Context<Self>) {
+    pub(super) fn scroll_to_transcript_landing(
+        &mut self,
+        landing: TranscriptLanding,
+        cx: &mut Context<Self>,
+    ) {
         match landing {
             TranscriptLanding::Position(offset) => {
                 self.transcript_anchor_following.set(false);

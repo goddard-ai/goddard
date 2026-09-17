@@ -168,6 +168,16 @@ command_palette.inspect_elements:
   en: "Goddard: Inspect elements"
 command_palette.inspect_colors:
   en: "Goddard: Inspect colors"
+command_palette.enable_auto_restart:
+  en: "Goddard: Enable auto-restart on rebuild"
+command_palette.disable_auto_restart:
+  en: "Goddard: Disable auto-restart on rebuild"
+command_palette.auto_restart_enabled:
+  en: "Auto-restart enabled — the app relaunches after each successful build."
+command_palette.auto_restart_disabled:
+  en: "Auto-restart disabled."
+command_palette.auto_restart_failed:
+  en: "Could not update the dev state file: %{error}"
 element_inspector.copied:
   en: Element label copied
 element_inspector.colors_copied:

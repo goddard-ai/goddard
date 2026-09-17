@@ -83,6 +83,11 @@ command_palette.show_right_panel: 显示右侧面板
 command_palette.hide_right_panel: 隐藏右侧面板
 command_palette.inspect_elements: "Goddard: 检查元素"
 command_palette.inspect_colors: "Goddard: 检查颜色"
+command_palette.enable_auto_restart: "Goddard: 启用构建成功后自动重启"
+command_palette.disable_auto_restart: "Goddard: 禁用构建成功后自动重启"
+command_palette.auto_restart_enabled: "已启用自动重启 — 每次构建成功后应用都会重新启动。"
+command_palette.auto_restart_disabled: "已禁用自动重启。"
+command_palette.auto_restart_failed: "无法更新开发状态文件：%{error}"
 element_inspector.copied: 已复制元素标签
 element_inspector.colors_copied: 已复制元素颜色
 command_palette.current: 当前

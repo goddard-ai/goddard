@@ -182,6 +182,7 @@ enum PaletteAction {
     NewCustomCommand,
     InspectElements,
     InspectColors,
+    ToggleAutoRestart,
     OpenRunScript,
     ChooseRunScriptProject(Uuid),
     RunScript {
@@ -1159,6 +1160,24 @@ impl Waku {
                 None,
                 PaletteAction::InspectColors,
                 "goddard inspect colors theme token hsla pick hover",
+                next(),
+            ));
+        }
+        // GODDARD_DEV_STATE only exists when the dev watcher launched this
+        // app; a release build or a bare debug binary must not offer the
+        // toggle.
+        if self.dev_state_path.is_some() {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!(if self.auto_restart_enabled {
+                    "command_palette.disable_auto_restart"
+                } else {
+                    "command_palette.enable_auto_restart"
+                }),
+                "icons/rotate-cw.svg",
+                None,
+                PaletteAction::ToggleAutoRestart,
+                "auto restart relaunch rebuild dev watcher toggle enable disable",
                 next(),
             ));
         }
@@ -2278,6 +2297,7 @@ impl Waku {
             PaletteAction::InspectColors => {
                 element_inspector::start(element_inspector::InspectorMode::Colors, window, cx);
             }
+            PaletteAction::ToggleAutoRestart => self.toggle_auto_restart(cx),
             PaletteAction::RunScript { project, script } => {
                 self.settings_page = None;
                 self.run_project_script(project, script, window, cx);
@@ -2291,6 +2311,30 @@ impl Waku {
                 unreachable!("view-navigation actions are handled before closing the palette")
             }
         }
+    }
+
+    /// Flip the dev watcher's auto-restart flag — the file it handed this
+    /// app through `GODDARD_DEV_STATE`. Only reachable when the path exists.
+    fn toggle_auto_restart(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.dev_state_path.clone() else {
+            return;
+        };
+        let enabled = !self.auto_restart_enabled;
+        match write_auto_restart(&path, enabled) {
+            Ok(()) => {
+                self.auto_restart_enabled = enabled;
+                self.show_success_toast(tr!(if enabled {
+                    "command_palette.auto_restart_enabled"
+                } else {
+                    "command_palette.auto_restart_disabled"
+                }));
+            }
+            Err(error) => self.show_toast(tr!(
+                "command_palette.auto_restart_failed",
+                error = error.to_string()
+            )),
+        }
+        cx.notify();
     }
 
     pub(super) fn render_command_palette(
