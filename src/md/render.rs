@@ -1342,6 +1342,10 @@ fn registry_point(
 /// passes ⌘L's `AddToChat`, making the gesture "select this and annotate it"
 /// without the action handler seeing anything but an ordinary settled
 /// selection. Surfaces that pass `None` keep plain click behavior under ⌥.
+/// An ⌥-click landing on an existing annotation highlight never reaches the
+/// dispatch: the annotation listeners run first and consume the armed
+/// fallback, so the click reopens that comment's editor instead of stacking
+/// a new annotation on top.
 pub fn install_selection_input(
     region: HitboxId,
     window: &mut Window,

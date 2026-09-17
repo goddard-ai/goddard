@@ -1460,6 +1460,16 @@ impl Waku {
                 if annotation_hit_at(&selection, event.position) != Some(press.id) {
                     return;
                 }
+                // An ⌥-click arrives with its line fallback still armed —
+                // release and clear it so the selection's own mouse-up does
+                // not stack a new annotation over the highlight this click
+                // is reopening. A drag bailed above with the fallback still
+                // armed, so it keeps annotating the dragged range.
+                let mut settled = selection.selection.borrow_mut();
+                if settled.release() {
+                    settled.clear();
+                }
+                drop(settled);
                 let _ = waku.update(cx, |this, cx| {
                     this.open_annotation_editor(
                         press.id,

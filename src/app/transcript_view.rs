@@ -512,8 +512,10 @@ impl Waku {
             |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
             move |_, region, window, _| {
                 // ⌥-click selects the pressed line and opens the annotation
-                // editor; ⌥-drag annotates a custom range — the action is ⌘L
-                // either way, fired on mouse-up once the selection settles.
+                // editor — or reopens an existing highlight's editor when the
+                // click lands on one; ⌥-drag annotates a custom range. The
+                // action is ⌘L either way, fired on mouse-up once the
+                // selection settles.
                 md::render::install_selection_input(
                     region,
                     window,
