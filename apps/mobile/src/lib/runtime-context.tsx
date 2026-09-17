@@ -618,6 +618,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           prompt: providerPrompt,
           turnId: submitted.turnId,
           messageId: submitted.messageId,
+          attachments,
         },
         current.id,
         runtime.runtimeId,

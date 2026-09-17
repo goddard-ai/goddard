@@ -24,8 +24,8 @@ use crossbeam_channel::{Receiver, SendError, Sender, unbounded};
 
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
-    BackgroundWorkKey, DriverEvent, GoalOperation, ProviderKind, ProviderResumeCursor, RuntimeMode,
-    UserInputAnswer,
+    BackgroundWorkKey, DriverEvent, GoalOperation, MessageAttachment, ProviderKind,
+    ProviderResumeCursor, RuntimeMode, UserInputAnswer,
 };
 
 /// Provider events remain synchronous to send from reader threads, while the
@@ -88,6 +88,10 @@ impl DriverHandle {
 
     pub fn prompt(&self, prompt: String) {
         self.inner.prompt(prompt);
+    }
+
+    pub fn prompt_with_attachments(&self, prompt: String, attachments: Vec<MessageAttachment>) {
+        self.inner.prompt_with_attachments(prompt, attachments);
     }
 
     /// Whether this transport can inject a user message into the currently
@@ -153,6 +157,12 @@ impl DriverHandle {
 
 pub trait DriverControl: Send + Sync {
     fn prompt(&self, prompt: String);
+    /// `prompt` already carries the attachments' `@`-mention text; transports
+    /// with a native attachment channel send them structurally too, and the
+    /// rest fall back to the mention text alone.
+    fn prompt_with_attachments(&self, prompt: String, _attachments: Vec<MessageAttachment>) {
+        self.prompt(prompt);
+    }
     fn supports_steer(&self) -> bool {
         false
     }

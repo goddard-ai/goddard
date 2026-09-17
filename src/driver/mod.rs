@@ -297,12 +297,14 @@ impl DriverControl for RemoteDriverControl {
         turn_id: Option<uuid::Uuid>,
         message_id: Option<uuid::Uuid>,
         hidden: bool,
+        attachments: Vec<waku_protocol::model::MessageAttachment>,
     ) {
         self.notify(waku_client::Command::Prompt {
             prompt,
             turn_id,
             message_id,
             hidden,
+            attachments,
         });
     }
 

@@ -761,6 +761,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             prompt: providerPrompt,
             turnId: submittedTurn?.id ?? null,
             messageId: submittedMessage?.id ?? null,
+            attachments,
           },
           session.id,
           runtime.runtimeId,

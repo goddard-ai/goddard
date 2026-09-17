@@ -1046,6 +1046,7 @@ impl Backend for WakuBackend {
                     turn_id,
                     message_id,
                     hidden,
+                    ..
                 } = &command
                 {
                     // Publish the submission into the runtime's event stream
@@ -2565,7 +2566,9 @@ fn handle_driver_command(
     command: Command,
 ) -> anyhow::Result<ResponsePayload> {
     match command {
-        Command::Prompt { prompt, .. } => driver.prompt(prompt),
+        Command::Prompt {
+            prompt, attachments, ..
+        } => driver.prompt_with_attachments(prompt, attachments),
         Command::Steer { prompt } => driver.steer(prompt),
         Command::Cancel => driver.cancel(),
         Command::CancelComputerUse => driver.cancel_computer_use(),
