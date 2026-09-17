@@ -419,8 +419,19 @@ impl Waku {
     ) {
         self.settings_page = None;
         // The page claims the main area — a selected terminal gives way and
-        // the Terminals group folds, same as picking a chat does.
+        // the Terminals group folds, same as picking a chat does. A selected
+        // task gives way too: park the transcript's draft, panel, and scroll
+        // position the same way a terminal takeover does, and drop any
+        // activation still in flight so it cannot hand the area back.
         self.selected_terminal = None;
+        if self.state.selected_session.is_some() {
+            self.capture_and_save_current_composer_draft(cx);
+            self.store_selected_right_panel_state();
+            self.store_transcript_scroll_position();
+            self.state.selected_session = None;
+            self.save();
+        }
+        self.pending_session_activation = None;
         if self
             .sidebar_collapsed_groups
             .insert(SidebarGroup::Terminals)
