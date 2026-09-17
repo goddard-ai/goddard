@@ -319,6 +319,7 @@ mod implementation {
             ("theme.overlay_strong", theme.overlay_strong),
             ("theme.border", theme.border),
             ("theme.border_strong", theme.border_strong),
+            ("theme.border_subtle", theme.border_subtle),
             ("theme.separator", theme.separator),
             ("theme.sidebar_border", theme.sidebar_border),
             ("theme.text", theme.text),

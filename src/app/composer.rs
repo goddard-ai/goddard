@@ -489,7 +489,7 @@ impl Waku {
                 .pb(px(10.0))
                 .rounded(px(16.0))
                 .border(hairline())
-                .border_color(theme.border)
+                .border_color(theme.border_subtle)
                 .bg(theme.composer)
                 .tab_index(0)
                 .tab_group()

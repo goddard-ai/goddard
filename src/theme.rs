@@ -54,6 +54,11 @@ fn wash(color: u32, alpha: f32) -> Hsla {
 /// above so the two tiers never collapse into each other.
 const BORDER_CONTRAST: f32 = 3.0;
 const BORDER_STRONG_CONTRAST: f32 = 4.0;
+/// Outlines on components whose own fill already delimits them — the
+/// composer card, inset text fields, panel cards. The boundary is
+/// reinforcement rather than identification, so 2:1 keeps it soft without
+/// disappearing; roughly GitHub's default input-border weight.
+const BORDER_SUBTLE_CONTRAST: f32 = 2.0;
 /// Decorative rules — fold dividers, menu separators, guide rails — are
 /// exempt from §1.4.11, but "exempt" is no license to be invisible: held to
 /// 1.5:1, roughly GitHub's border-muted weight.
@@ -171,6 +176,10 @@ pub struct Theme {
 
     pub border: Hsla,
     pub border_strong: Hsla,
+    /// Soft outline on a component whose fill already delimits it — composer
+    /// card, inset text fields, filled cards. Below the §1.4.11 floor because
+    /// the boundary isn't what identifies the component.
+    pub border_subtle: Hsla,
     /// Decorative hairlines — fold dividers, menu and settings separators,
     /// sidebar guide rails. Below the component-boundary floor by design.
     pub separator: Hsla,
@@ -303,6 +312,8 @@ impl Theme {
         .map(rgb);
         let border_pairs = surfaces.map(|surface| (surface, surface));
         let separator = contrast_wash(neutral, spec.is_dark, &border_pairs, SEPARATOR_CONTRAST);
+        let border_subtle =
+            contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_SUBTLE_CONTRAST);
         let border = contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_CONTRAST);
         let border_strong =
             contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_STRONG_CONTRAST);
@@ -314,7 +325,7 @@ impl Theme {
             spec.sidebar_border,
             spec.is_dark,
             &sidebar_pairs,
-            BORDER_CONTRAST,
+            BORDER_SUBTLE_CONTRAST,
         );
         let danger: Hsla = rgb(spec.danger).into();
         Self {
@@ -337,6 +348,7 @@ impl Theme {
 
             border,
             border_strong,
+            border_subtle,
             separator,
             sidebar_border,
 
@@ -1440,6 +1452,7 @@ mod tests {
             // the assert on the intent, not the rounding.
             for (token, line, target) in [
                 ("separator", theme.separator, SEPARATOR_CONTRAST),
+                ("border_subtle", theme.border_subtle, BORDER_SUBTLE_CONTRAST),
                 ("border", theme.border, BORDER_CONTRAST),
                 ("border_strong", theme.border_strong, BORDER_STRONG_CONTRAST),
             ] {
@@ -1453,7 +1466,7 @@ mod tests {
                     );
                 }
             }
-            let floor = BORDER_CONTRAST - 0.01;
+            let floor = BORDER_SUBTLE_CONTRAST - 0.01;
             // The sidebar divider is painted on `surface` and must also read
             // against the sidebar fill it separates.
             let surface = theme.surface.to_rgb();
