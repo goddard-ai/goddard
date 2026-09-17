@@ -21,7 +21,7 @@
 //! request threads are.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read as _, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
@@ -99,7 +99,8 @@ impl std::fmt::Display for MuseError {
 /// its events arrive on a [`MuseSubscription`].
 pub(crate) struct MuseHost {
     child: StdMutex<Child>,
-    writer: StdMutex<ChildStdin>,
+    /// `None` once shutdown closes the pipe — the EOF the host exits on.
+    writer: StdMutex<Option<ChildStdin>>,
     pending: StdMutex<HashMap<u64, Sender<Result<Value, MuseError>>>>,
     next_request_id: AtomicU64,
     hub: StdMutex<HashMap<String, Vec<(usize, Sender<MuseFrame>)>>>,
@@ -150,20 +151,34 @@ impl MuseService {
 
 impl Drop for MuseService {
     fn drop(&mut self) {
-        // Last strong handle wins teardown. The reader thread holds only a
-        // Weak, so it can never keep the host — and therefore itself — alive.
+        let Some(slot) = self.slot.as_ref().and_then(Weak::upgrade) else {
+            if Arc::strong_count(&self.inner) == 1 {
+                self.inner.shutdown(HOST_EXIT_TIMEOUT);
+            }
+            return;
+        };
+        // The last strong handle wins teardown, decided under the slot lock:
+        // `acquire`/`attached` upgrade the running Weak while holding it, so
+        // the count check cannot race a new handle into existence.
+        let mut state = slot.state.lock().unwrap();
         if Arc::strong_count(&self.inner) > 1 {
             return;
         }
-        if let Some(slot) = self.slot.as_ref().and_then(Weak::upgrade) {
-            let mut state = slot.state.lock().unwrap();
-            *state = PoolState::Stopping;
+        // Only the generation the slot still names may move it to Stopping —
+        // a stale handle of a superseded dead host must shut its own process
+        // down without clobbering the replacement's `Running` state.
+        let mine = matches!(&*state, PoolState::Running(host) if host.ptr_eq(&Arc::downgrade(&self.inner)));
+        if !mine {
+            drop(state);
             self.inner.shutdown(HOST_EXIT_TIMEOUT);
-            *state = PoolState::Vacant;
-            slot.changed.notify_all();
-        } else {
-            self.inner.shutdown(HOST_EXIT_TIMEOUT);
+            return;
         }
+        *state = PoolState::Stopping;
+        drop(state);
+        self.inner.shutdown(HOST_EXIT_TIMEOUT);
+        let mut state = slot.state.lock().unwrap();
+        *state = PoolState::Vacant;
+        slot.changed.notify_all();
     }
 }
 
@@ -298,65 +313,50 @@ impl MuseHost {
                 binary.display()
             )
         })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("muse serve stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("muse serve stdout unavailable"))?;
+        let (stdin, stdout) = match (child.stdin.take(), child.stdout.take()) {
+            (Some(stdin), Some(stdout)) => (stdin, stdout),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow!("muse serve stdio pipes unavailable"));
+            }
+        };
 
         let host = Arc::new(Self {
             child: StdMutex::new(child),
-            writer: StdMutex::new(stdin),
+            writer: StdMutex::new(Some(stdin)),
             pending: StdMutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(1),
             hub: StdMutex::new(HashMap::new()),
             next_subscriber: AtomicU64::new(1),
             alive: AtomicBool::new(true),
         });
-        host.send(&json!({
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
+        // The reader starts before `initialize` so the handshake rides the
+        // same request path — and its command timeout — as every later call.
+        // A hung or non-MSP binary cannot block spawn forever, and every
+        // failure below kills the child instead of leaking it.
+        let reader_host = Arc::downgrade(&host);
+        if let Err(error) = thread::Builder::new()
+            .name("waku-muse-reader".into())
+            .spawn(move || reader_loop(reader_host, BufReader::new(stdout)))
+        {
+            host.shutdown(Duration::ZERO);
+            return Err(error.into());
+        }
+        let result = match host.call(
+            "initialize",
+            json!({
                 "clientInfo": {
                     "name": "waku",
                     "title": "Goddard",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
-            },
-        }))?;
-
-        // Read the handshake response inline: the reader thread cannot start
-        // until the host is shared, and `initialize` must be the first frame.
-        let mut lines = BufReader::new(stdout);
-        let result = loop {
-            let mut line = String::new();
-            match lines.read_line(&mut line) {
-                Ok(0) => return Err(anyhow!("muse serve closed stdout during initialize")),
-                Ok(_) if line.trim().is_empty() => continue,
-                Ok(_) => match serde_json::from_str::<Value>(&line) {
-                    Ok(frame) if frame.get("id").and_then(Value::as_u64) == Some(0) => {
-                        if let Some(error) = frame.get("error") {
-                            return Err(anyhow!(
-                                "muse serve rejected initialize: {}",
-                                error
-                                    .get("message")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("unknown error")
-                            ));
-                        }
-                        break frame.get("result").cloned().unwrap_or(Value::Null);
-                    }
-                    // Tolerate interleaved notifications ahead of the reply.
-                    Ok(_) => continue,
-                    Err(_) => continue,
-                },
-                Err(error) => {
-                    return Err(anyhow!("could not read muse serve: {error}"));
-                }
+            }),
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                host.shutdown(Duration::ZERO);
+                return Err(anyhow!("muse serve did not initialize: {}", error.message()));
             }
         };
 
@@ -377,14 +377,10 @@ impl MuseHost {
             "muse serve ready: version={server_version} fingerprint={} durability={durability}",
             fingerprint.as_deref().unwrap_or("absent"),
         ));
-        host.notify("initialized", json!({}))?;
-
-        // The reader holds only a Weak: a host whose last session dropped
-        // must die, and a strong handle here would keep it alive forever.
-        let reader_host = Arc::downgrade(&host);
-        thread::Builder::new()
-            .name("waku-muse-reader".into())
-            .spawn(move || reader_loop(reader_host, lines))?;
+        if let Err(error) = host.notify("initialized", json!({})) {
+            host.shutdown(Duration::ZERO);
+            return Err(error.into());
+        }
         Ok(host)
     }
 
@@ -446,6 +442,12 @@ impl MuseHost {
         let line = serde_json::to_string(frame)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         let mut writer = self.writer.lock().unwrap();
+        let Some(writer) = writer.as_mut() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "muse serve stdin is closed",
+            ));
+        };
         writer.write_all(line.as_bytes())?;
         writer.write_all(b"\n")?;
         writer.flush()
@@ -551,7 +553,9 @@ impl MuseHost {
     /// Owned hosts only — the pool never runs this against a foreign process.
     fn shutdown(&self, budget: Duration) {
         self.alive.store(false, Ordering::Relaxed);
-        drop(self.writer.lock().unwrap());
+        // Take the pipe out of the mutex — dropping the guard alone leaves
+        // stdin open and the host never sees the EOF that makes it exit.
+        self.writer.lock().unwrap().take();
         let deadline = std::time::Instant::now() + budget;
         loop {
             let mut child = self.child.lock().unwrap();
@@ -612,17 +616,21 @@ impl Drop for MuseSubscription {
 fn reader_loop(host: Weak<MuseHost>, mut lines: BufReader<impl std::io::Read>) {
     loop {
         let mut line = String::new();
-        let read = match lines.read_line(&mut line) {
+        // Bound the buffer BEFORE the host fills it: a newline-free stream
+        // must not grow `line` past the cap.
+        let read = {
+            let mut bounded = (&mut lines).take(MAX_LINE_BYTES as u64 + 1);
+            bounded.read_line(&mut line)
+        };
+        match read {
             Ok(0) => break,
             Ok(bytes) if bytes > MAX_LINE_BYTES => {
                 log("muse serve emitted an overlong line; treating the host as dead");
                 break;
             }
-            Ok(_) => line.trim().is_empty().then_some(()).is_none(),
+            Ok(_) if line.trim().is_empty() => continue,
+            Ok(_) => {}
             Err(_) => break,
-        };
-        if !read {
-            continue;
         }
         let Ok(frame) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -685,7 +693,8 @@ if [ "$1" = "serve" ]; then
     esac
     case "$line" in
       *'"initialize"'*)
-        echo '{"jsonrpc":"2.0","id":0,"result":{"serverInfo":{"name":"muse","version":"0.0.0-test"},"schema":{"version":1,"fingerprint":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},"sessionDurability":"durable"}}'
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"serverInfo\":{\"name\":\"muse\",\"version\":\"0.0.0-test\"},\"schema\":{\"version\":1,\"fingerprint\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},\"sessionDurability\":\"durable\"}}"
         ;;
       *'"session/start"'*|*'"session/resume"'*|*'"session/read"'*)
         sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
