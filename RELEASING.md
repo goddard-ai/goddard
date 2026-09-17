@@ -7,11 +7,9 @@ the native Linux and Windows updaters read architecture-specific feeds and
 verify artifacts with the same EdDSA key. One release workflow produces all
 platform artifacts and feeds.
 
-Once set up, cutting a release is:
-
-```sh
-bun run release
-```
+Once set up, cutting a release is pushing a `v*` tag (or running the Release
+workflow manually) — see [Cutting a release](#cutting-a-release). `bun run
+release` only ever builds local artifacts; publishing is CI's job.
 
 - Updater code: [`src/updater.rs`](src/updater.rs) — loads the embedded
   Sparkle.framework on macOS and owns the signed native flows on Linux and
@@ -114,8 +112,7 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    counter. Prerelease versions (`-beta.1`) become GitHub prereleases through
    CI: their versioned assets upload normally, but `sync-release` skips the
    appcasts and `latest-*` pointers, so the update feeds keep serving the
-   stable channel. The local `bun run release` publish path still refuses
-   them outright.
+   stable channel.
 2. **Write the release notes** — changes accumulate as fragments in
    `.changelog/` (one `.md` file per change, one bullet each, named
    `highlight-`/`feat-`/`exp-`/`fix-<slug>.md` to pick the `###` section; highlights
@@ -126,22 +123,20 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    ```
    This creates the `## [<version>]` section for the Cargo version and deletes
    the consumed fragments. Commit it with the version bump.
-3. **Run it:**
+3. **Release it through CI** — push a `v<version>` tag, or Actions → Release →
+   Run workflow (see below). `bun run release` stays local-only: it builds,
+   signs, notarizes, and writes the DMG + zip + appcast into `dist/`, which is
+   what the workflow uploads as the GitHub release's assets and
+   `sync-release.yml` mirrors to R2. To validate a release build by hand:
    ```sh
-   bun run release
+   bun run release --local
    ```
 
-The script checks R2 up front (bucket reachable, version not already
-published), builds and signs the app via `scripts/bundle.sh release`, verifies
+The script builds and signs the app via `scripts/bundle.sh release`, verifies
 the bundled JS REPL and computer-use helper, builds the styled DMG, notarizes
-and staples DMG + app, zips the app for Sparkle, pulls the recent archives
-from R2 so `generate_appcast` can build binary deltas, attaches the changelog
-section as release notes, regenerates the signed `appcast.xml`, and uploads
-everything with immutable cache headers (the appcast itself stays
-`max-age=300`). When it finishes:
-
-- **Download link**: `https://releases.goddardai.org/Goddard-<version>.dmg`
-- **In-app updates**: served from the same origin via the appcast.
+and staples DMG + app, zips the app for Sparkle, attaches the changelog
+section as release notes, and regenerates the signed `appcast.xml` when a
+usable Sparkle key is present.
 
 Test by keeping an older build around, launching it, and choosing
 **Check for Updates…**.
@@ -158,8 +153,7 @@ The Release workflow runs two ways:
   whatever `Cargo.toml` says and drafts it as `v<version>`; that tag is created
   at the built commit when you publish the draft.
 
-macOS CI runs `bun run release --local`, which signs, notarizes, and writes the
-same artifacts as a local release:
+macOS CI runs `bun run release --local`, which signs, notarizes, and writes:
 
 - `Goddard-<version>.dmg`
 - `Goddard-<version>.zip`
@@ -261,18 +255,13 @@ secrets first:
 
 | Flag / Env | Default | Purpose |
 | --- | --- | --- |
-| `--local` | — | build, notarize, and write the DMG + zip without publishing; still writes the appcast when a usable Sparkle key is found |
-| `--force` | — | re-publish a version that already exists in R2 |
-| `--adhoc`, `--skip-notarize` | — | local test builds (imply `--local`) |
+| `--local` | — | accepted for CI clarity; every run is local |
+| `--adhoc`, `--skip-notarize` | — | unsigned/notarization-free test builds |
 | `--skip-build` | — | reuse existing release binaries |
 | `--build-number <n>` / `WAKU_BUILD_NUMBER` | derived | `CFBundleVersion` override |
-| `WAKU_R2_REMOTE` | `r2` | rclone remote name |
-| `WAKU_R2_BUCKET` | `goddard-releases` | R2 bucket |
 | `WAKU_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
-| `WAKU_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
-| `WAKU_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
 | `SPARKLE_BIN` | the `~/Library/Caches/goddard-build` copy | Sparkle tools directory |
-| `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
+| `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; builds without them compile analytics out |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 
 ---

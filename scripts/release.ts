@@ -24,20 +24,20 @@ const packageName = "waku";
 const defaultNotaryProfile = "NOTARY";
 const projectRoot = resolve(import.meta.dir, "..");
 
-const help = `Build, notarize, and publish a production release of Goddard.
+const help = `Build, notarize, and package a production release of Goddard.
 
 Usage:
-  bun run release [options]
+  bun run release [--local] [options]
 
-The default run builds a signed, notarized DMG, packages the Sparkle update
-archive, regenerates the signed appcast (with binary deltas against recent
-releases), and uploads everything to Cloudflare R2 — the bucket behind
-https://releases.goddardai.org. One-time setup lives in RELEASING.md.
+Every run is local: the script builds a signed, notarized DMG, packages the
+Sparkle update archive, and — when a Sparkle key is available — regenerates
+the signed appcast into dist/. Publishing to Cloudflare R2 is the release
+workflow's job: CI builds with this script, drafts a GitHub release from
+dist/, and sync-release.yml mirrors it to the bucket. One-time setup lives
+in RELEASING.md.
 
 Options:
-  --local                       Build, notarize, and write the DMG + zip
-                                without publishing to R2
-  --force                       Publish even if this version is already in R2
+  --local                       Accepted for CI clarity; all builds are local
   --output <path>               DMG output path (default: dist/Goddard-<version>.dmg)
   --signing-identity <name>     Developer ID Application identity selector
                                 (or WAKU_SIGNING_IDENTITY; required unless --adhoc)
@@ -49,29 +49,24 @@ Options:
   --volume-name <name>          Mounted DMG name (default: Goddard)
   --skip-build                  Reuse target/release/goddard, goddard_js_repl, and
                                 goddard-daemon
-  --skip-notarize               Unnotarized signed DMG (implies --local)
-  --adhoc                       Ad-hoc sign, no notarization (implies --local)
+  --skip-notarize               Unnotarized signed DMG
+  --adhoc                       Ad-hoc sign, no notarization
   --help                        Show this help
 
 Environment:
   WAKU_SIGNING_IDENTITY         Developer ID Application identity selector
   WAKU_ANALYTICS_ENDPOINT       analytics endpoint embedded at build time
   WAKU_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
-                                (required to publish; unset local builds
-                                compile analytics out)
-  WAKU_R2_REMOTE                rclone remote name (default: r2)
-  WAKU_R2_BUCKET                R2 bucket name (default: goddard-releases)
-  WAKU_DOWNLOAD_URL_PREFIX      base URL served by the bucket
+                                (unset builds compile analytics out)
+  WAKU_DOWNLOAD_URL_PREFIX      base URL the appcast links to
                                 (default: ${defaultDownloadUrlPrefix})
-  WAKU_HISTORY_COUNT            prior archives pulled for deltas (default: 15)
-  WAKU_NO_HISTORY=1             skip pulling prior archives (no deltas)
   SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
                                 under ~/Library/Caches/goddard-build/sparkle)
   SPARKLE_PRIVATE_KEY           Sparkle EdDSA private key (otherwise keychain);
-                                local builds skip the appcast when no usable
+                                the appcast step is skipped when no usable
                                 key is found
 
-Before the first production release:
+Before the first release:
   xcrun notarytool store-credentials NOTARY   # notarization credentials
   See RELEASING.md for the R2 bucket, rclone remote, and Sparkle key setup.
 `;
@@ -81,7 +76,6 @@ const { values } = parseArgs({
   options: {
     adhoc: { type: "boolean" },
     "build-number": { type: "string" },
-    force: { type: "boolean" },
     help: { type: "boolean", short: "h" },
     local: { type: "boolean" },
     "notary-profile": { type: "string" },
@@ -151,32 +145,9 @@ const explicitBuildNumber =
   values["build-number"] ?? process.env.WAKU_BUILD_NUMBER;
 const analyticsEndpoint = process.env.WAKU_ANALYTICS_ENDPOINT?.trim();
 const analyticsWebsiteId = process.env.WAKU_ANALYTICS_WEBSITE_ID?.trim();
-const localOnly = values.local ?? false;
-const force = values.force ?? false;
-// Publishing requires a Developer ID-signed, notarized DMG, so the flags that
-// weaken signing imply --local.
-const publishing = !localOnly && !adhoc && !skipNotarize;
-
-const r2Remote = process.env.WAKU_R2_REMOTE ?? "r2";
-const r2Bucket = process.env.WAKU_R2_BUCKET ?? "goddard-releases";
-const r2Destination = `${r2Remote}:${r2Bucket}`;
-// A bucket-scoped R2 API token cannot create buckets, and rclone otherwise
-// checks/creates one before writing. The bucket must already exist.
-const rcloneFlags = ["--s3-no-check-bucket"];
 const downloadUrlPrefix =
   process.env.WAKU_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
-const historyCount = Number(process.env.WAKU_HISTORY_COUNT ?? "15");
-const skipHistory = process.env.WAKU_NO_HISTORY === "1";
 
-// Publishing uploads straight to the release bucket and updates the feeds —
-// that only ever happens from CI. Local runs must pass --local (or one of
-// the flags that imply it); WAKU_ALLOW_LOCAL_PUBLISH=1 is the escape hatch.
-if (publishing && !process.env.GITHUB_ACTIONS && process.env.WAKU_ALLOW_LOCAL_PUBLISH !== "1") {
-  throw new Error(
-    "Publishing is CI-only. Rerun with --local for a local build, " +
-      "or set WAKU_ALLOW_LOCAL_PUBLISH=1 to override.",
-  );
-}
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
 }
@@ -190,15 +161,7 @@ if (explicitBuildNumber && !/^\d+(?:\.\d+){0,2}$/.test(explicitBuildNumber)) {
     "--build-number must contain one to three period-separated integers.",
   );
 }
-if (!Number.isSafeInteger(historyCount) || historyCount < 0) {
-  throw new Error("WAKU_HISTORY_COUNT must be a non-negative integer.");
-}
 if (!values["skip-build"] && (!analyticsEndpoint || !analyticsWebsiteId)) {
-  if (publishing) {
-    throw new Error(
-      "Set WAKU_ANALYTICS_ENDPOINT and WAKU_ANALYTICS_WEBSITE_ID before building a release.",
-    );
-  }
   console.warn(
     "WAKU_ANALYTICS_ENDPOINT/WAKU_ANALYTICS_WEBSITE_ID unset — " +
       "building with analytics disabled.",
@@ -220,10 +183,6 @@ if (!adhoc && !skipNotarize) {
   requireTool("xcrun");
   requireTool("spctl");
 }
-if (publishing) {
-  requireTool("rclone");
-}
-
 process.chdir(projectRoot);
 
 const metadata = JSON.parse(
@@ -241,43 +200,6 @@ const shortVersion = version.split("-", 1)[0];
 const buildNumber = explicitBuildNumber ?? derivedBuildNumber(version);
 const dmgName = `${appName}-${version}.dmg`;
 const zipName = `${appName}-${version}.zip`;
-if (publishing && version !== shortVersion) {
-  throw new Error(
-    `Version ${version} is a prerelease, and the appcast serves a single ` +
-      "stable channel. Release a stable version, or build with --local.",
-  );
-}
-if (!publishing) {
-  const reason = localOnly ? "--local" : adhoc ? "--adhoc" : "--skip-notarize";
-  console.log(`Building without publishing (${reason}).`);
-}
-
-// Fail before the long build: the bucket must exist and the version must be
-// new. An unreachable remote should not surface after notarization.
-if (publishing) {
-  logStep(`Checking ${r2Destination}`);
-  const listing = await $`rclone lsf ${r2Destination} ${rcloneFlags}`
-    .quiet()
-    .nothrow();
-  if (listing.exitCode !== 0) {
-    const detail = listing.stderr.toString().trim();
-    if (detail.includes("directory not found")) {
-      throw new Error(
-        `R2 bucket "${r2Bucket}" does not exist on remote "${r2Remote}". ` +
-          "Create it in the Cloudflare dashboard and attach the " +
-          "releases.goddardai.org custom domain (see RELEASING.md), then re-run.",
-      );
-    }
-    throw new Error(`Cannot reach ${r2Destination}: ${detail}`);
-  }
-  const published = listing.stdout.toString().split("\n").filter(Boolean);
-  if (published.includes(zipName) && !force) {
-    throw new Error(
-      `${zipName} is already published — bump the version in Cargo.toml, ` +
-        "or pass --force to re-release it.",
-    );
-  }
-}
 
 const outputPath = resolve(
   projectRoot,
@@ -643,57 +565,11 @@ try {
   logStep(`Packaging ${zipName}`);
   await $`ditto -c -k --keepParent ${appBundle} ${zipPath}`;
 
-  // A clean staging directory holds this release plus, when publishing, the
-  // recent history generate_appcast needs to build binary deltas.
+  // A clean staging directory holds this release's archive for
+  // generate_appcast.
   const updatesDirectory = join(projectRoot, "dist", "updates");
   await rm(updatesDirectory, { force: true, recursive: true });
   await mkdir(updatesDirectory, { recursive: true });
-
-  if (publishing && !skipHistory) {
-    logStep(
-      `Selecting the ${historyCount} most recent archives from R2 (for deltas)`,
-    );
-    type RemoteFile = { Name: string; IsDir: boolean };
-    const remoteFiles = JSON.parse(
-      await $`rclone lsjson ${r2Destination} ${rcloneFlags} --files-only --include ${"*.zip"} --include ${"appcast.xml"}`
-        .quiet()
-        .text(),
-    ) as RemoteFile[];
-    // Pre-rename releases were published as Waku-<version>.zip; keep matching
-    // them so the regenerated feed retains history and can build deltas.
-    const archivePattern = /^(?:Waku|Goddard)-(.+)\.zip$/;
-    const archiveVersion = (name: string) =>
-      archivePattern.exec(name)?.[1] ?? "";
-    const versionOrder = new Intl.Collator("en", { numeric: true });
-    const recentArchives = remoteFiles
-      .filter(
-        ({ Name, IsDir }) =>
-          !IsDir && archivePattern.test(Name) && Name !== zipName,
-      )
-      .sort((a, b) =>
-        versionOrder.compare(archiveVersion(b.Name), archiveVersion(a.Name)),
-      )
-      .slice(0, historyCount)
-      .map(({ Name }) => Name);
-    const historyFiles = [
-      ...(remoteFiles.some(({ Name }) => Name === "appcast.xml")
-        ? ["appcast.xml"]
-        : []),
-      ...recentArchives,
-    ];
-    if (historyFiles.length > 0) {
-      const includeFlags = historyFiles.flatMap((name) => [
-        "--include",
-        `/${name}`,
-      ]);
-      await $`rclone copy ${r2Destination} ${updatesDirectory} ${rcloneFlags} ${includeFlags}`;
-    }
-    console.log(
-      recentArchives.length > 0
-        ? `Pulled ${recentArchives.join(", ")}`
-        : "No prior archives found.",
-    );
-  }
 
   await $`ditto ${zipPath} ${join(updatesDirectory, zipName)}`;
 
@@ -717,44 +593,18 @@ try {
       : `No "${version}" section in CHANGELOG.md — attached fallback notes.`,
   );
 
-  if (publishing) {
+  // A signed feed is a nicety, not a requirement: keep producing it when a
+  // usable Sparkle key is around (CI exports SPARKLE_PRIVATE_KEY and uploads
+  // the result), and warn instead of failing when there isn't one.
+  try {
     logStep("Generating the signed appcast");
     await generateAppcast(updatesDirectory, downloadUrlPrefix);
     await $`ditto ${join(updatesDirectory, "appcast.xml")} ${join(projectRoot, "dist", "appcast.xml")}`;
-  } else {
-    // The DMG/zip are handed out directly, so a signed feed is a nicety for
-    // local builds, not a requirement: keep producing it when a usable
-    // Sparkle key is around (CI exports SPARKLE_PRIVATE_KEY and uploads the
-    // result), and warn instead of failing when there isn't one.
-    try {
-      logStep("Generating the signed appcast (optional for local builds)");
-      await generateAppcast(updatesDirectory, downloadUrlPrefix);
-      await $`ditto ${join(updatesDirectory, "appcast.xml")} ${join(projectRoot, "dist", "appcast.xml")}`;
-    } catch (error) {
-      await rm(join(projectRoot, "dist", "appcast.xml"), { force: true });
-      console.warn(
-        `Skipping the update feed: ${error instanceof Error ? error.message : error}`,
-      );
-    }
-  }
-
-  if (publishing) {
-    // Archives and the DMG are immutable once published → cache forever.
-    // appcast.xml changes every release → keep it fresh so update checks are
-    // never served stale.
-    const immutableCache =
-      "Cache-Control: public, max-age=31536000, immutable";
-    logStep(`Uploading ${dmgName} to ${r2Destination}`);
-    await $`rclone copyto ${outputPath} ${`${r2Destination}/${dmgName}`} ${rcloneFlags} --header-upload ${immutableCache} --progress`;
-    logStep(`Uploading update archives to ${r2Destination}`);
-    await $`rclone copy ${updatesDirectory} ${r2Destination} ${rcloneFlags} --exclude ${"appcast.xml"} --exclude ${"old_updates/**"} --header-upload ${immutableCache} --progress`;
-    logStep("Uploading appcast.xml");
-    await $`rclone copyto ${join(updatesDirectory, "appcast.xml")} ${`${r2Destination}/appcast.xml`} ${rcloneFlags} --header-upload ${"Cache-Control: public, max-age=300, must-revalidate"}`;
-
-    console.log(`\nGoddard ${version} (build ${buildNumber}) is live:`);
-    console.log(`  download : ${downloadUrlPrefix}${dmgName}`);
-    console.log(`  update   : ${downloadUrlPrefix}${zipName}`);
-    console.log(`  feed     : ${downloadUrlPrefix}appcast.xml`);
+  } catch (error) {
+    await rm(join(projectRoot, "dist", "appcast.xml"), { force: true });
+    console.warn(
+      `Skipping the update feed: ${error instanceof Error ? error.message : error}`,
+    );
   }
 
   console.log(`\nDMG ready: ${outputPath}`);
