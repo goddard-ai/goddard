@@ -2444,7 +2444,7 @@ impl Waku {
         );
         let group_icon = match group {
             SidebarGroup::Projectless => "icons/chat.svg",
-            SidebarGroup::Terminals => "icons/terminal.svg",
+            SidebarGroup::Terminals => "icons/terminal-prompt.svg",
             _ if collapsed => "icons/folder.svg",
             _ => "icons/folder-open.svg",
         };

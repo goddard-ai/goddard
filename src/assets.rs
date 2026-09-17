@@ -226,6 +226,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "stop-filled",
     "target",
     "terminal",
+    "terminal-prompt",
     "terminal-square",
     "trash",
     "whole-word",
