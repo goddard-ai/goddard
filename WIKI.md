@@ -600,8 +600,8 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | Jump to task 1–9 | ⌘1–⌘9 (hold ⌘ to see the chips) |
 | Navigate back / forward | ⌘[ / ⌘] |
 | Previous / next turn | ⌘⌥↑ / ⌘⌥↓ |
-| Latest unseen completion | ⌘D or Ctrl+` |
-| Mark unread, go to next unseen | ⌘⇧D |
+| Next unread completion (idle tasks once drained) | ⌘D or Ctrl+` |
+| Mark unread, go to next unread | ⌘⇧D |
 | Task switcher | Ctrl+Tab / Ctrl+Shift+Tab |
 | Project switcher (in a New Task draft) | hold ⌘, tap N |
 | Toggle sidebar / right panel | ⌘B / ⌘⌥B |

@@ -4,7 +4,7 @@ use super::composer::{
     visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
-use super::sessions::next_unread_completion;
+use super::sessions::{next_idle_session, next_unread_completion};
 use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::sidebar::SidebarRow;
 use super::transcript_view::changed_files_diff_file_lines;
@@ -934,6 +934,87 @@ fn next_unread_completion_skips_ineligible_sessions() {
     assert_eq!(
         next_unread_completion(&sessions, &queued_only, &rows, None, None, None, None),
         None
+    );
+}
+
+#[test]
+fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
+    let top = Uuid::new_v4();
+    let middle = Uuid::new_v4();
+    let bottom = Uuid::new_v4();
+    let sessions = vec![
+        started_session(top),
+        started_session(middle),
+        started_session(bottom),
+    ];
+    let rows = vec![
+        SidebarRow::Session(top),
+        SidebarRow::Session(middle),
+        SidebarRow::Session(bottom),
+    ];
+
+    // With no current session — the New task page, or just after an archive —
+    // the rotation enters at the topmost non-busy row.
+    assert_eq!(next_idle_session(&sessions, &rows, None, None), Some(top));
+    // On an idle session the walk continues below it.
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(top), None),
+        Some(middle)
+    );
+    // …and wraps to the top at the bottom of the list.
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(bottom), None),
+        Some(top)
+    );
+
+    // A busy current session is not in the rotation, so the entry point is
+    // again the topmost non-busy row rather than whatever sits below it.
+    let mut sessions = sessions;
+    sessions[0].status = SessionStatus::Working;
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(top), None),
+        Some(middle)
+    );
+    // Busy rows are skipped outright: wrapping from the bottom lands past
+    // the busy top row on middle.
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(bottom), None),
+        Some(middle)
+    );
+    // A pending activation counts as on-screen, and when every other row is
+    // busy or claimed there is no target.
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(bottom), Some(middle)),
+        None
+    );
+    sessions[1].status = SessionStatus::Waiting;
+    assert_eq!(
+        next_idle_session(&sessions, &rows, None, None),
+        Some(bottom)
+    );
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(bottom), None),
+        None
+    );
+
+    // A failed turn still counts as idle — the user should be able to land on
+    // it — and pinned rows join the same flat positional rotation.
+    let pinned_top = Uuid::new_v4();
+    let unpinned = Uuid::new_v4();
+    let mut failed = started_session(unpinned);
+    failed.status = SessionStatus::Failed;
+    let sessions = vec![pinned_session(pinned_top, 300), failed];
+    let rows = vec![
+        SidebarRow::Session(pinned_top),
+        SidebarRow::Session(unpinned),
+    ];
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(pinned_top), None),
+        Some(unpinned)
+    );
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(unpinned), None),
+        Some(pinned_top)
     );
 }
 

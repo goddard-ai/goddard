@@ -1090,18 +1090,21 @@ impl Waku {
         ));
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         let selected = self.state.selected_session;
+        let pending = self
+            .pending_session_activation
+            .map(|pending| pending.session_id);
         if sessions::next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
             &rows,
             selected,
-            self.pending_session_activation
-                .map(|pending| pending.session_id),
+            pending,
             selected,
             selected
                 .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
                 .map(|index| index + 1),
         )
+        .or_else(|| sessions::next_idle_session(&self.state.sessions, &rows, selected, pending))
         .is_some()
         {
             commands.push(CommandPaletteItem::command(

@@ -131,6 +131,39 @@ pub(super) fn next_unread_completion(
         .or_else(|| sidebar::next_sidebar_session_in_rows(rows, anchor_row.unwrap_or(0), eligible))
 }
 
+/// The drained-queue landing for the unread jumps: when nothing is unread a
+/// press cycles through the non-busy sessions instead of dead-ending on the
+/// New task page. A selected session that is itself in the rotation
+/// continues the walk below its row — wrapping to the top — while anything
+/// else enters at the topmost non-busy row: sidebar order is the importance
+/// order, so a drained queue restarts at the most important task.
+pub(super) fn next_idle_session(
+    sessions: &[AgentSession],
+    rows: &[sidebar::SidebarRow],
+    selected_session: Option<Uuid>,
+    pending_activation: Option<Uuid>,
+) -> Option<Uuid> {
+    let by_id = sessions
+        .iter()
+        .map(|session| (session.id, session))
+        .collect::<HashMap<_, _>>();
+    let non_busy = |session_id: Uuid| {
+        by_id
+            .get(&session_id)
+            .is_some_and(|session| !session.is_busy())
+    };
+    let eligible = |session_id: Uuid| {
+        Some(session_id) != selected_session
+            && Some(session_id) != pending_activation
+            && non_busy(session_id)
+    };
+    let start = selected_session
+        .filter(|session_id| non_busy(*session_id))
+        .and_then(|session_id| sidebar::sidebar_session_row_index(rows, session_id))
+        .map_or(0, |index| index + 1);
+    sidebar::next_sidebar_session_in_rows(rows, start, eligible)
+}
+
 impl Waku {
     pub(crate) fn open_task_from_notification(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.select_session(session_id, cx);
@@ -770,8 +803,9 @@ impl Waku {
     }
 
     /// Moves selection after the viewed task departs: the next unread session,
-    /// like GoToNextUnreadCompletion anchored at the departed row, or the
-    /// project's New task composer when nothing is waiting.
+    /// like GoToNextUnreadCompletion anchored at the departed row, then the
+    /// top of the idle rotation, then the project's New task composer when
+    /// nothing navigable remains.
     fn select_session_fallback(
         &mut self,
         project_id: Uuid,
@@ -784,16 +818,20 @@ impl Waku {
         self.state.selected_session = None;
         self.settings_page = None;
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let pending = self
+            .pending_session_activation
+            .map(|pending| pending.session_id);
         if let Some(session_id) = next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
             &rows,
             self.state.selected_session,
-            self.pending_session_activation
-                .map(|pending| pending.session_id),
+            pending,
             Some(departed_session),
             departed_row,
-        ) {
+        )
+        .or_else(|| next_idle_session(&self.state.sessions, &rows, None, pending))
+        {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
             if projectless {
@@ -1592,8 +1630,8 @@ impl Waku {
 
     /// ⌘D / ctrl-backtick: the next unread completion. Pinned tasks lead
     /// while an unpinned session is current — see [`next_unread_completion`]
-    /// for the scan order — and the New task page is the landing when
-    /// nothing is unread.
+    /// for the scan order — then a drained queue cycles into the idle
+    /// rotation, and only a list with nothing navigable lands on New task.
     pub(super) fn go_to_next_unread_completion_action(
         &mut self,
         _: &GoToNextUnreadCompletion,
@@ -1602,18 +1640,21 @@ impl Waku {
     ) {
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         let selected = self.state.selected_session;
+        let pending = self
+            .pending_session_activation
+            .map(|pending| pending.session_id);
         let target = next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
             &rows,
             selected,
-            self.pending_session_activation
-                .map(|pending| pending.session_id),
+            pending,
             selected,
             selected
                 .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
                 .map(|index| index + 1),
-        );
+        )
+        .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending));
         match target {
             Some(target) => self.go_to_unread_target(target, window, cx),
             None => self.new_session_action(&NewSession, window, cx),
@@ -1661,8 +1702,8 @@ impl Waku {
     /// ⌘⇧D: mark the viewed task unread — it stays a GoToNextUnreadCompletion
     /// candidate for a later ⌘D — then jump to the next unread session per
     /// the shared scan. The just-marked session is the anchor but never a
-    /// candidate, so with nothing else unread the jump lands on the New task
-    /// page.
+    /// candidate, so a drained queue moves into the idle rotation below it
+    /// and only a list with nothing navigable lands on the New task page.
     pub(super) fn mark_unread_and_go_to_next_unread_action(
         &mut self,
         _: &MarkUnreadAndGoToNextUnread,
@@ -1674,18 +1715,21 @@ impl Waku {
         }
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         let selected = self.state.selected_session;
+        let pending = self
+            .pending_session_activation
+            .map(|pending| pending.session_id);
         let target = next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
             &rows,
             selected,
-            self.pending_session_activation
-                .map(|pending| pending.session_id),
+            pending,
             selected,
             selected
                 .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
                 .map(|index| index + 1),
-        );
+        )
+        .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending));
         match target {
             Some(target) => self.go_to_unread_target(target, window, cx),
             None => self.new_session_action(&NewSession, window, cx),
