@@ -283,16 +283,16 @@ const SHADOW_BLEED: Pixels = px(100.0);
 ///
 /// GPUI transforms only SVG subtrees, so the "grow" is painted as a clip: the
 /// visible region eases from a zero-size rect at the anchor out to the
-/// shadow-dilated bounds while the child drifts a few px toward the anchor. At
-/// these durations it reads as a small scale. Drive it with `with_animation`;
-/// under reduce-motion the oneshot delta is 1 and it renders settled.
+/// shadow-dilated bounds while the child fades in and drifts a few px toward
+/// the anchor. At these durations it reads as a small scale. Drive it with
+/// `with_animation`; under reduce-motion the oneshot delta is 1 and it renders
+/// settled.
 ///
-/// The child stays opaque through the reveal rather than fading. GPUI applies
-/// opacity per primitive — there is no group compositing — and the drop-shadow
-/// silhouette fills the card's interior beneath the fill, so a translucent
-/// card shows it as a dark cast that vanishes on the last frame: a dark-to-
-/// light sweep on light themes. The opaque card occludes the silhouette for
-/// the whole animation and the clip reveals card and shadow together.
+/// The fade depends on the shadow shader clipping its silhouette to outside
+/// the element: GPUI applies opacity per primitive rather than compositing the
+/// group, so if the silhouette covered the interior a translucent card would
+/// show it as a dark cast that vanishes on the last frame — a dark-to-light
+/// sweep on light themes.
 pub struct SurfaceReveal<E> {
     child: Option<E>,
     /// The window-space point the surface grows out of — the click for a
@@ -334,7 +334,7 @@ where
 }
 
 /// The window-modal entrance: grow from the card's own center, settle a few
-/// px downward.
+/// px downward, fade in.
 pub fn modal_enter<E>(id: impl Into<ElementId>, child: E) -> AnimationElement<SurfaceReveal<E>>
 where
     E: Styled + IntoElement + 'static,
@@ -402,8 +402,11 @@ where
         let mut child = self
             .child
             .take()
-            .expect("request_layout runs once per frame")
-            .into_any_element();
+            .expect("request_layout runs once per frame");
+        if self.progress < 1.0 {
+            child = child.opacity(self.progress.max(0.0));
+        }
+        let mut child = child.into_any_element();
         let layout_id = child.request_layout(window, cx);
         (layout_id, child)
     }
