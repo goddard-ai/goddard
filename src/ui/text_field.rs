@@ -59,17 +59,19 @@ impl ParentElement for TextField {
 }
 
 impl RenderOnce for TextField {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
-        let focus_handle = self.input.read(cx).focus();
+        let ring = self.input.read(cx).show_focus_ring(window);
         self.base
-            .track_focus(&focus_handle)
             .h(px(28.0))
             .px(px(8.0))
             .rounded(px(8.0))
             .border(hairline())
-            .border_color(theme.border_strong)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .border_color(if ring {
+                theme.accent
+            } else {
+                theme.border_strong
+            })
             .bg(theme.inset)
             .flex()
             .items_center()

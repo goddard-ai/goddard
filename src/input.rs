@@ -691,6 +691,9 @@ pub struct TextInput {
     /// A plain click landed while the field was unfocused; unless it grows
     /// into a drag-selection first, the release selects everything.
     focus_click_select_all: bool,
+    /// The current focus visit arrived via keyboard (Tab or a shortcut), so
+    /// chrome may paint the accent focus ring; a focusing click keeps it off.
+    focused_via_keyboard: bool,
     /// Language for paint-only syntax colouring, in code mode.
     language: Option<Lang>,
     /// Cached token spans over `content`, as absolute byte ranges. Recomputed
@@ -796,6 +799,7 @@ impl TextInput {
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
+            focused_via_keyboard: false,
             language: None,
             highlight: Vec::new(),
             search_matches: Vec::new(),
@@ -844,6 +848,12 @@ impl TextInput {
 
     pub fn is_visually_focused(&self, window: &Window) -> bool {
         self.focus_handle.is_focused(window) || self.context_menu_preserves_visual_focus()
+    }
+
+    /// Chrome's accent ring: only when this focus visit began from the
+    /// keyboard, so a mouse-clicked field stays quiet while it is typed in.
+    pub fn show_focus_ring(&self, window: &Window) -> bool {
+        self.is_visually_focused(window) && self.focused_via_keyboard
     }
 
     pub fn preserve_visual_focus_for_context_menu(
@@ -1281,11 +1291,15 @@ impl TextInput {
         cx.notify();
     }
 
-    fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Regaining focus is a gesture boundary — Zed finalizes its last
         // transaction here too — so edits from separate visits never merge
         // into one undo step.
         self.history.seal();
+        // Sample the modality once, when focus lands: typing afterward keeps
+        // `last_input_was_keyboard` true, but the ring must not appear for a
+        // visit that began with a click.
+        self.focused_via_keyboard = window.last_input_was_keyboard();
         self.blink_cursor.update(cx, |cursor, cx| cursor.start(cx));
         cx.emit(InputEvent::Focus);
     }
@@ -1297,6 +1311,7 @@ impl TextInput {
             cx.notify();
             return;
         }
+        self.focused_via_keyboard = false;
         self.blink_cursor.update(cx, |cursor, cx| cursor.stop(cx));
     }
 
