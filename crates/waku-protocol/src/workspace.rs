@@ -593,6 +593,16 @@ pub enum WorkspaceOperation {
         branch: String,
         create: bool,
     },
+    /// Hard-reset a linked worktree's detached HEAD to `base_ref` — an
+    /// unstarted draft re-picking its base after the worktree was already
+    /// created. HEAD stays detached, so branches other worktrees have
+    /// checked out are valid targets, and working-tree changes are
+    /// discarded. Returns `BranchChanged`.
+    ResetWorktree {
+        #[ts(type = "string")]
+        path: PathBuf,
+        base_ref: String,
+    },
     CreateWorktree {
         #[ts(type = "string")]
         project_path: PathBuf,

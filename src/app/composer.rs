@@ -4609,7 +4609,7 @@ impl Waku {
             .to_path_buf();
         let branch_enabled =
             !session.is_some_and(|session| session.is_busy()) && !self.branch_operation_pending;
-        let planned_worktree = matches!(workspace, SessionWorkspace::NewWorktree { .. });
+        let picks_base = worktrees::workspace_picks_base(&workspace, session);
         let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
         let selected_branch = match &workspace {
             SessionWorkspace::Local => snapshot.display_branch().map(str::to_owned),
@@ -4617,6 +4617,12 @@ impl Waku {
                 .clone()
                 .or_else(|| snapshot.default_branch.clone())
                 .or_else(|| snapshot.display_branch().map(str::to_owned)),
+            SessionWorkspace::Worktree { base_branch, .. } if picks_base => snapshot
+                .current
+                .clone()
+                .or_else(|| base_branch.clone())
+                .or_else(|| snapshot.default_branch.clone())
+                .or_else(|| snapshot.detached_head.clone()),
             SessionWorkspace::Worktree { branch, .. } => snapshot
                 .current
                 .clone()
@@ -4710,11 +4716,11 @@ impl Waku {
                 Vec::new()
             },
         );
-        let allow_create = !planned_worktree;
+        let allow_create = !picks_base;
         let actions = Rc::new(
             visible_branches
                 .iter()
-                .filter(|branch| planned_worktree || !branch.checked_out_elsewhere)
+                .filter(|branch| picks_base || !branch.checked_out_elsewhere)
                 .map(|branch| BranchPickerAction::Checkout(branch.name.clone()))
                 .chain(allow_create.then_some(BranchPickerAction::Create))
                 .collect::<Vec<_>>(),
@@ -4812,8 +4818,7 @@ impl Waku {
                                         return div().into_any_element();
                                     };
                                     let selected = branch.name == list_selected_branch;
-                                    let disabled =
-                                        branch.checked_out_elsewhere && !planned_worktree;
+                                    let disabled = branch.checked_out_elsewhere && !picks_base;
                                     let highlighted = highlight
                                         .and_then(|index| list_actions.get(index))
                                         .is_some_and(|action| {

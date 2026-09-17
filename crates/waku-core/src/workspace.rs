@@ -139,6 +139,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
                 crate::git_branch::checkout(&cwd, &branch)?
             },
         },
+        WorkspaceOperation::ResetWorktree { path, base_ref } => WorkspaceResult::BranchChanged {
+            snapshot: crate::git_branch::reset_to_base(&path, &base_ref)?,
+        },
         WorkspaceOperation::CreateWorktree {
             project_path,
             name,
