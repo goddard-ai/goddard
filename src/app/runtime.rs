@@ -211,6 +211,12 @@ pub(super) fn merge_remote_session_catalog(
             local.created_at = remote.created_at;
             local.last_reply_at = remote.last_reply_at;
             local.archived_at = remote.archived_at;
+            // A hydrated session's workspace is at least as fresh as the
+            // stored column the projection carries — and may hold an unsaved
+            // move — so only skeletons adopt it.
+            if !local.detail_loaded {
+                local.workspace = remote.workspace;
+            }
             if !has_local_runtime(local.id) {
                 local.status = remote.status;
                 local.updated_at = remote.updated_at;

@@ -1,0 +1,1 @@
+- Keep worktree badges, branch labels, and checkout status on sidebar tasks across restarts instead of waiting for each task to be resumed

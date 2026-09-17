@@ -1325,7 +1325,9 @@ impl AgentSession {
             title: self.title.clone(),
             auto_title: self.auto_title.clone(),
             project_id: self.project_id,
-            workspace: SessionWorkspace::Local,
+            // A list column, not detail: rows render worktree badges and
+            // branch labels from it before the session is ever opened.
+            workspace: self.workspace.clone(),
             workspace_moved_from: None,
             provider: self.provider,
             model: self.model.clone(),
@@ -5240,6 +5242,12 @@ mod tests {
         session.title = "Visible title".into();
         session.model = Some("gpt-5".into());
         session.status = SessionStatus::Working;
+        session.workspace = SessionWorkspace::Worktree {
+            path: PathBuf::from("/tmp/waku-worktrees/task"),
+            name: "task".into(),
+            branch: Some("waku/task".into()),
+            base_branch: None,
+        };
         session.begin_turn("A large prompt");
         session.messages.push(Message::new(
             MessageRole::Assistant,
@@ -5266,6 +5274,7 @@ mod tests {
         assert_eq!(projection.title, "Visible title");
         assert_eq!(projection.model.as_deref(), Some("gpt-5"));
         assert_eq!(projection.status, SessionStatus::Working);
+        assert_eq!(projection.workspace, session.workspace);
         assert!(!projection.detail_loaded);
         assert!(projection.messages.is_empty());
         assert!(projection.transcript_blocks.is_empty());

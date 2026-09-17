@@ -34,9 +34,8 @@ use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
     DriverEvent, Message, MessageAttachment, MessageRole, ProviderKind, QueuedMessage,
-    ReasoningBlock,
-    RuntimeEventCursor, SessionStatus, TranscriptBlock, TurnStatus, UserInputOption,
-    UserInputQuestion,
+    ReasoningBlock, RuntimeEventCursor, SessionStatus, SessionWorkspace, TranscriptBlock,
+    TurnStatus, UserInputOption, UserInputQuestion,
 };
 
 #[test]
@@ -139,6 +138,51 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
     assert_eq!(merged_local.messages.len(), 1);
     assert_eq!(merged_local.messages[0].content, "keep this transcript");
     assert!(catalog.iter().any(|session| session.id == web_task_id));
+}
+
+#[test]
+fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
+    let project_id = Uuid::new_v4();
+    let worktree = SessionWorkspace::Worktree {
+        path: std::path::PathBuf::from("/tmp/worktrees/task"),
+        name: "task".into(),
+        branch: Some("waku/task".into()),
+        base_branch: None,
+    };
+
+    // A skeleton row has no workspace of its own beyond what the daemon
+    // stored — the projection's column is authoritative for it.
+    let skeleton = AgentSession::new(project_id, ProviderKind::Codex).list_projection();
+    assert_eq!(skeleton.workspace, SessionWorkspace::Local);
+    let skeleton_id = skeleton.id;
+    let mut remote = skeleton.clone();
+    remote.workspace = worktree.clone();
+
+    // A hydrated session may hold an unsaved move; the projection must not
+    // clobber it.
+    let mut hydrated = AgentSession::new(project_id, ProviderKind::Codex);
+    hydrated.workspace = worktree.clone();
+    let hydrated_id = hydrated.id;
+    let mut stale_remote = hydrated.list_projection();
+    stale_remote.workspace = SessionWorkspace::Local;
+
+    let mut catalog = vec![skeleton, hydrated];
+    merge_remote_session_catalog(&mut catalog, vec![remote, stale_remote], |_| false);
+
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|session| session.id == skeleton_id)
+            .map(|session| &session.workspace),
+        Some(&worktree)
+    );
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|session| session.id == hydrated_id)
+            .map(|session| &session.workspace),
+        Some(&worktree)
+    );
 }
 
 #[test]

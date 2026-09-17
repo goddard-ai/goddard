@@ -48,6 +48,12 @@ export const sessions = sqliteTable(
     archivedAt: integer("archived_at"),
     /** When the session was pinned to the sidebar top, unix seconds. */
     pinnedAt: integer("pinned_at"),
+    /**
+     * JSON-serialized SessionWorkspace, duplicated from `session_details.data`
+     * so list rows can show worktree state without hydrating the session.
+     * NULL while the session works in the project's ordinary checkout.
+     */
+    workspace: text("workspace"),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),

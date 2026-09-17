@@ -57,6 +57,13 @@
       "when": 1789584932248,
       "tag": "0007_loving_prism",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789663878346,
+      "tag": "0008_brainy_synch",
+      "breakpoints": true
     }
   ]
 }

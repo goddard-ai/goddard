@@ -1191,7 +1191,8 @@ impl StateStore {
         let mut sessions = connection
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
-                        created_at, updated_at, last_reply_at, archived_at, pinned_at
+                        created_at, updated_at, last_reply_at, archived_at, pinned_at,
+                        workspace
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1211,6 +1212,7 @@ impl StateStore {
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<i64>>(10)?,
                     row.get::<_, Option<i64>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1564,6 +1566,7 @@ type SessionColumns = (
     Option<i64>,
     Option<i64>,
     Option<i64>,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -1585,13 +1588,21 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at,
         archived_at,
         pinned_at,
+        workspace,
     ) = row;
+    // The column duplicates the detail blob's workspace so list rows can show
+    // it. Rows migrated before the column existed or whose JSON fails to parse
+    // still come up local; `hydrate` restores the authoritative value.
+    let mut workspace = workspace
+        .and_then(|workspace| serde_json::from_str::<SessionWorkspace>(&workspace).ok())
+        .unwrap_or_default();
+    workspace.backfill_worktree_name();
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         title,
         auto_title,
         project_id: Uuid::parse_str(&project_id).ok()?,
-        workspace: SessionWorkspace::Local,
+        workspace,
         workspace_moved_from: None,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
@@ -1848,8 +1859,9 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 /// listing sessions never has to deserialize a transcript.
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
-         created_at, updated_at, last_reply_at, archived_at, pinned_at
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         created_at, updated_at, last_reply_at, archived_at, pinned_at,
+         workspace
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -1861,7 +1873,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          updated_at    = excluded.updated_at,
          last_reply_at = excluded.last_reply_at,
          archived_at   = excluded.archived_at,
-         pinned_at     = excluded.pinned_at";
+         pinned_at     = excluded.pinned_at,
+         workspace     = excluded.workspace";
 
 const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, bookmark, position, created_at)
      VALUES(?1, ?2, ?3, ?4, ?5, ?6)
@@ -1907,6 +1920,13 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         session
             .pinned_at
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
+        // Local stays NULL the way the detail blob omits it, so the column is
+        // only ever populated for sessions that live in a worktree.
+        if session.workspace.is_local() {
+            Value::Null
+        } else {
+            serde_json::to_string(&session.workspace).map_or(Value::Null, Value::Text)
+        },
     ]
 }
 
@@ -2295,17 +2315,27 @@ mod tests {
         let reopened = store_in(&directory);
         let mut restored = reopened.load().unwrap();
         let session = &restored.sessions[0];
-        // The list has everything it renders...
+        // The list has everything it renders — including the workspace, a
+        // column of its own so the sidebar's worktree state survives restart
+        // without hydrating every session.
         assert_eq!(session.title, AgentSession::DEFAULT_TITLE);
         assert_eq!(session.auto_title.as_deref(), Some("Investigate"));
         assert_eq!(session.display_title(), "Investigate");
         assert_eq!(session.id, id);
         assert!(session.last_reply_at.is_some());
+        assert_eq!(
+            session.workspace,
+            SessionWorkspace::Worktree {
+                path: PathBuf::from("/tmp/worktrees/investigate"),
+                name: "investigate".into(),
+                branch: Some("waku/investigate".into()),
+                base_branch: None,
+            }
+        );
         // ...and none of what it does not.
         assert!(!session.detail_loaded);
         assert!(session.messages.is_empty());
         assert!(session.turns.is_empty());
-        assert_eq!(session.workspace, SessionWorkspace::Local);
         // A skeleton still counts as started, since only started sessions
         // are stored at all.
         assert!(session.has_started());
@@ -3159,6 +3189,80 @@ mod tests {
             .unwrap();
         assert_eq!(title, AgentSession::DEFAULT_TITLE);
         assert_eq!(auto_title.as_deref(), Some("Investigate the parser"));
+    }
+
+    #[test]
+    fn workspace_migration_backfills_the_column_from_session_details() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATIONS_TABLE).unwrap();
+        // Every migration before the workspace column, recorded as applied.
+        for (tag, sql) in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO migrations(tag, applied_at) VALUES(?1, 0)",
+                    params![tag],
+                )
+                .unwrap();
+        }
+        for id in ["session-1", "session-2"] {
+            connection
+                .execute(
+                    "INSERT INTO sessions(
+                        id, project_id, title, provider, status,
+                        created_at, updated_at
+                     ) VALUES(?1, 'project-1', 'Task', 'codex', 'idle', 1, 1)",
+                    params![id],
+                )
+                .unwrap();
+        }
+        // A stored worktree session carries the workspace inside the detail
+        // blob; a local session omits the field entirely.
+        connection
+            .execute(
+                "INSERT INTO session_details(session_id, data) VALUES(
+                    'session-1',
+                    '{\"workspace\":{\"kind\":\"worktree\",\"path\":\"/tmp/wt/task\",\"name\":\"task\",\"branch\":\"wt/task\"}}'
+                 )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO session_details(session_id, data) VALUES(
+                    'session-2', '{}'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(apply_migrations(&connection).unwrap(), 1);
+        let workspace: Option<String> = connection
+            .query_row(
+                "SELECT workspace FROM sessions WHERE id = 'session-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let parsed: SessionWorkspace =
+            serde_json::from_str(&workspace.expect("workspace backfilled")).unwrap();
+        assert_eq!(
+            parsed,
+            SessionWorkspace::Worktree {
+                path: PathBuf::from("/tmp/wt/task"),
+                name: "task".into(),
+                branch: Some("wt/task".into()),
+                base_branch: None,
+            }
+        );
+        let local: Option<String> = connection
+            .query_row(
+                "SELECT workspace FROM sessions WHERE id = 'session-2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(local, None);
     }
 
     #[test]

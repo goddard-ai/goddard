@@ -1789,7 +1789,9 @@ mod tests {
         assert_eq!(after.workspace, worktree);
         assert_eq!(after.turns.len(), 1);
 
-        // The projection of a task the daemon never stored creates no row.
+        // The projection of a task the daemon never stored creates no row,
+        // and the stored task's skeleton still reports its worktree — the
+        // sidebar's badge must not depend on a hydrate.
         let ResponsePayload::TaskState { sessions, .. } = client
             .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
             .unwrap()
@@ -1797,6 +1799,13 @@ mod tests {
             panic!("expected daemon task state");
         };
         assert!(!sessions.iter().any(|session| session.id == ghost_id));
+        assert_eq!(
+            sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(|session| &session.workspace),
+            Some(&worktree)
+        );
 
         client.shutdown();
         server.join().unwrap();

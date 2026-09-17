@@ -1097,11 +1097,14 @@ fn session_projection_precedes(
 
 /// Applies the fields a list projection legitimately carries.
 ///
-/// A skeleton's workspace, transcript and cursors are placeholders — only its
-/// column values are real, and only while the projection is at least as new
-/// as what is stored. `status` is skipped while the daemon owns a live
-/// runtime for the session: busy state belongs to that runtime, not to a
-/// client's possibly-stale row. Returns whether anything was applied.
+/// A skeleton's transcript and cursors are placeholders — only its column
+/// values are real, and only while the projection is at least as new as what
+/// is stored. `workspace` is a column too, but it is not merged here: a
+/// client's copy may predate a move the daemon already recorded, and the
+/// stored row stays authoritative either way. `status` is skipped while the
+/// daemon owns a live runtime for the session: busy state belongs to that
+/// runtime, not to a client's possibly-stale row. Returns whether anything
+/// was applied.
 fn merge_session_list_columns(
     existing: &mut AgentSession,
     incoming: AgentSession,
