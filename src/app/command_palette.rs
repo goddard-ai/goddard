@@ -1099,10 +1099,8 @@ impl Waku {
             &rows,
             selected,
             pending,
-            selected,
-            selected
-                .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
-                .map(|index| index + 1),
+            None,
+            None,
         )
         .or_else(|| sessions::next_idle_session(&self.state.sessions, &rows, selected, pending))
         .is_some()

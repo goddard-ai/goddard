@@ -712,7 +712,7 @@ fn next_unread_completion_scans_below_the_anchor_and_wraps_to_the_top() {
         next_unread_completion(&sessions, &unseen, &rows, None, None, None, None),
         Some(first)
     );
-    // A departed anchor scans at the slot its row vacated — index 2 is where
+    // An anchor outside the rows still scans positionally — index 2 is where
     // the third row slid in once the second row was gone.
     let departed_rows = vec![
         SidebarRow::Search,

@@ -858,10 +858,8 @@ impl Waku {
             selected,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
-            selected,
-            selected
-                .and_then(|session_id| sidebar_session_row_index(&rows, session_id))
-                .map(|index| index + 1),
+            None,
+            None,
         );
         let enabled = target.is_some();
         // A blocked task outranks plain completions, so the target being one
@@ -2369,7 +2367,7 @@ impl Waku {
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         let landing = match sidebar_session_row_index(&rows, session_id) {
             Some(position) => sessions::ArchiveLanding::Neighbor(position),
-            None => sessions::ArchiveLanding::NextUnread(None),
+            None => sessions::ArchiveLanding::NextUnread,
         };
         self.archive_session(session_id, landing, window, cx);
     }
