@@ -63,7 +63,10 @@ impl ShortcutHint {
                     None => window
                         .focused(cx)
                         .and_then(|focus| {
-                            window.highest_precedence_binding_for_action_in(action.as_ref(), &focus)
+                            window.highest_precedence_binding_for_action_in(
+                                action.as_ref(),
+                                &focus,
+                            )
                         })
                         .or_else(|| highest_precedence_binding(action.as_ref(), &[], cx)),
                 }?;
