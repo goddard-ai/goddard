@@ -1675,7 +1675,7 @@ impl Waku {
                 .child(meta_parts.join(" · ")),
         );
 
-        section = section.child(div().w_full().h(hairline()).bg(theme.border));
+        section = section.child(div().w_full().h(hairline()).bg(theme.separator));
 
         if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
             section = section.child(self.github_markdown_section(

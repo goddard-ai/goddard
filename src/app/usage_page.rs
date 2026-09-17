@@ -775,7 +775,7 @@ impl Waku {
         let bounds_cell = self.usage_chart_bounds.clone();
         let paint_series = series.clone();
         let paint_ticks = ticks.clone();
-        let grid_color = theme.border;
+        let grid_color = theme.separator;
         let hover_color = theme.text_ghost;
         let plot_canvas = canvas(
             |_, _, _| (),

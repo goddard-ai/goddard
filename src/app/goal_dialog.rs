@@ -503,7 +503,7 @@ impl Waku {
             ));
         }
         let card = card
-            .child(div().mx(px(8.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(8.0)).h(hairline()).bg(theme.separator))
             .child(actions_column);
 
         let scrim = if theme.is_dark {

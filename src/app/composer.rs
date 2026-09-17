@@ -1158,7 +1158,13 @@ impl Waku {
                                 });
                             }),
                     )
-                    .child(div().w(px(34.0)).h(hairline()).my(px(3.0)).bg(theme.border));
+                    .child(
+                        div()
+                            .w(px(34.0))
+                            .h(hairline())
+                            .my(px(3.0))
+                            .bg(theme.separator),
+                    );
 
                 // One predicate with the `tab` cycle, so clicking and cycling
                 // agree on which tabs are usable.
@@ -4009,7 +4015,13 @@ impl Waku {
                         .child(rows)
                         .when_some(create_row, |element, create_row| {
                             element
-                                .child(div().mx(px(6.0)).my(px(4.0)).h(hairline()).bg(theme.border))
+                                .child(
+                                    div()
+                                        .mx(px(6.0))
+                                        .my(px(4.0))
+                                        .h(hairline())
+                                        .bg(theme.separator),
+                                )
                                 .child(create_row)
                                 .child(div().h(px(4.0)))
                         })

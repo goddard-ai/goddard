@@ -2403,7 +2403,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(10.0))
-            .child(div().h(hairline()).flex_1().bg(theme.border))
+            .child(div().h(hairline()).flex_1().bg(theme.separator))
             .child(
                 div()
                     .id(SharedString::from(format!("turn-fold-{turn_id}")))
@@ -2432,7 +2432,7 @@ impl Waku {
                         this.toggle_turn_fold(turn_id, expanded, cx);
                     })),
             )
-            .child(div().h(hairline()).flex_1().bg(theme.border))
+            .child(div().h(hairline()).flex_1().bg(theme.separator))
             .into_any_element()
     }
 

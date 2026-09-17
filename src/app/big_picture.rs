@@ -1487,7 +1487,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(10.0))
-            .child(div().h(hairline()).flex_1().bg(theme.border))
+            .child(div().h(hairline()).flex_1().bg(theme.separator))
             .child(
                 div()
                     .h(px(24.0))
@@ -1511,7 +1511,7 @@ impl Waku {
                         theme.text_tertiary,
                     )),
             )
-            .child(div().h(hairline()).flex_1().bg(theme.border))
+            .child(div().h(hairline()).flex_1().bg(theme.separator))
             .into_any_element()
     }
 

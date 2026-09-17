@@ -436,7 +436,7 @@ fn usage_panel(
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );
     if plan.is_some() || error.is_some() || plan_loading {
-        panel = panel.child(div().h(hairline()).flex_none().bg(theme.border));
+        panel = panel.child(div().h(hairline()).flex_none().bg(theme.separator));
     }
 
     if let Some(plan) = plan {

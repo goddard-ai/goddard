@@ -1034,7 +1034,7 @@ impl Waku {
                             )),
                     )
                     .when(enabled, |card| {
-                        card.child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+                        card.child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
                             .child(
                                 div()
                                     .w_full()
@@ -1055,7 +1055,7 @@ impl Waku {
                                     )
                                     .child(sound_selector),
                             )
-                            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+                            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
                             .child(
                                 div()
                                     .w_full()
@@ -3214,7 +3214,7 @@ impl Waku {
             ))
             .when(!match_system, |element| {
                 element
-                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
                     .child(settings_row(
                         tr!("settings.appearance"),
                         tr!("settings.appearance_mode_description"),
@@ -3222,14 +3222,14 @@ impl Waku {
                         theme,
                     ))
             })
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(settings_row(
                 tr!("settings.light_theme"),
                 tr!("settings.light_theme_description"),
                 light_theme_selector,
                 theme,
             ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(settings_row(
                 tr!("settings.dark_theme"),
                 tr!("settings.dark_theme_description"),
@@ -3242,7 +3242,7 @@ impl Waku {
                 // switch.
                 let transparent = self.state.sidebar_transparency;
                 element
-                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
                     .child(
                         div()
                             .w_full()
@@ -3286,7 +3286,7 @@ impl Waku {
                             )),
                     )
             })
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(
                 div()
                     .w_full()
@@ -3318,21 +3318,21 @@ impl Waku {
                     )
                     .child(language_selector),
             )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(settings_row(
                 tr!("settings.ui_font"),
                 tr!("settings.ui_font_description"),
                 ui_font_selector,
                 theme,
             ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(settings_row(
                 tr!("settings.code_font"),
                 tr!("settings.code_font_description"),
                 code_font_selector,
                 theme,
             ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(
                 div()
                     .w_full()
@@ -3364,7 +3364,7 @@ impl Waku {
                     )
                     .child(ui_font_size_selector),
             )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(
                 div()
                     .w_full()
@@ -3396,7 +3396,7 @@ impl Waku {
                     )
                     .child(code_font_size_selector),
             )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(
                 div()
                     .w_full()
@@ -3428,7 +3428,7 @@ impl Waku {
                     )
                     .child(terminal_font_size_selector),
             )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(settings_row(
                 tr!("settings.thick_borders"),
                 tr!("settings.thick_borders_description"),
@@ -3663,7 +3663,13 @@ impl Waku {
                             .icon("icons/search.svg", 13.0),
                         ),
                     )
-                    .child(div().mx(px(8.0)).h(hairline()).flex_none().bg(theme.border))
+                    .child(
+                        div()
+                            .mx(px(8.0))
+                            .h(hairline())
+                            .flex_none()
+                            .bg(theme.separator),
+                    )
                     .child(rows)
                     .child(div().h(px(4.0)))
                     .into_any_element()

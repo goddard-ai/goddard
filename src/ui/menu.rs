@@ -1292,7 +1292,7 @@ fn render_menu_item(
             .my(px(4.0))
             .mx(px(6.0))
             .h(hairline())
-            .bg(theme.border)
+            .bg(theme.separator)
             .into_any_element(),
         MenuItem::Header(label) => div()
             .px(px(10.0))

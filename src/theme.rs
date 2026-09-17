@@ -54,6 +54,10 @@ fn wash(color: u32, alpha: f32) -> Hsla {
 /// above so the two tiers never collapse into each other.
 const BORDER_CONTRAST: f32 = 3.0;
 const BORDER_STRONG_CONTRAST: f32 = 4.5;
+/// Decorative rules — fold dividers, menu separators, guide rails — are
+/// exempt from §1.4.11, but "exempt" is no license to be invisible: held to
+/// 1.5:1, roughly GitHub's border-muted weight.
+const SEPARATOR_CONTRAST: f32 = 1.5;
 
 fn luminance(rgb: Rgba) -> f32 {
     fn linear(channel: f32) -> f32 {
@@ -167,6 +171,9 @@ pub struct Theme {
 
     pub border: Hsla,
     pub border_strong: Hsla,
+    /// Decorative hairlines — fold dividers, menu and settings separators,
+    /// sidebar guide rails. Below the component-boundary floor by design.
+    pub separator: Hsla,
     pub sidebar_border: Hsla,
 
     pub text: Hsla,
@@ -295,6 +302,7 @@ impl Theme {
         ]
         .map(rgb);
         let border_pairs = surfaces.map(|surface| (surface, surface));
+        let separator = contrast_wash(neutral, spec.is_dark, &border_pairs, SEPARATOR_CONTRAST);
         let border = contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_CONTRAST);
         let border_strong =
             contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_STRONG_CONTRAST);
@@ -329,6 +337,7 @@ impl Theme {
 
             border,
             border_strong,
+            separator,
             sidebar_border,
 
             text: rgb(spec.text).into(),
@@ -1406,9 +1415,10 @@ pub fn apply_theme_preference(
 mod tests {
     use super::*;
 
-    /// Every palette's borders must clear the WCAG non-text floor (3:1) on
-    /// every surface they can be painted on — the check `from_spec` solves
-    /// for, asserted per theme so a new or edited scheme can't regress it.
+    /// Every palette's borders must clear the WCAG non-text floor (3:1) —
+    /// and decorative separators their lower 1.5:1 floor — on every surface
+    /// they can be painted on. This is the check `from_spec` solves for,
+    /// asserted per theme so a new or edited scheme can't regress it.
     #[test]
     fn borders_clear_the_contrast_floor() {
         for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {
@@ -1425,11 +1435,12 @@ mod tests {
             .map(Hsla::to_rgb);
             // f32 solve noise sits under the floor by ~1e-6; the epsilon keeps
             // the assert on the intent, not the rounding.
-            let floor = BORDER_CONTRAST - 0.01;
-            for (token, line) in [
-                ("border", theme.border),
-                ("border_strong", theme.border_strong),
+            for (token, line, target) in [
+                ("separator", theme.separator, SEPARATOR_CONTRAST),
+                ("border", theme.border, BORDER_CONTRAST),
+                ("border_strong", theme.border_strong, BORDER_CONTRAST),
             ] {
+                let floor = target - 0.01;
                 let line_rgb = line.to_rgb();
                 for surface in surfaces {
                     let ratio = contrast_ratio(surface.blend(line_rgb), surface);
@@ -1439,6 +1450,7 @@ mod tests {
                     );
                 }
             }
+            let floor = BORDER_CONTRAST - 0.01;
             // The sidebar divider is painted on `surface` and must also read
             // against the sidebar fill it separates.
             let surface = theme.surface.to_rgb();

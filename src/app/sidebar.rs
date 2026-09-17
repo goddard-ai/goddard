@@ -1877,7 +1877,7 @@ impl Waku {
                                 .left_0()
                                 .w_full()
                                 .h(hairline())
-                                .bg(theme.border),
+                                .bg(theme.separator),
                         )
                     }),
             )
@@ -2552,7 +2552,7 @@ impl Waku {
                         .top(px(19.0))
                         .bottom(px(-2.0))
                         .w(hairline())
-                        .bg(theme.border),
+                        .bg(theme.separator),
                 )
             },
         )
@@ -3032,7 +3032,7 @@ impl Waku {
                         .top_0()
                         .bottom_0()
                         .w(hairline())
-                        .bg(theme.border),
+                        .bg(theme.separator),
                 )
             })
             .when_some(shortcut_index, |element, index| {

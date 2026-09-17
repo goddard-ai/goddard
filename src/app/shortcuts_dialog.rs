@@ -1073,7 +1073,7 @@ impl Waku {
                     .child(tr!("shortcuts.title")),
             )
             .child(body)
-            .child(div().mx(px(8.0)).h(hairline()).bg(theme.border))
+            .child(div().mx(px(8.0)).h(hairline()).bg(theme.separator))
             .child(div().p(px(8.0)).child(done_row));
 
         let scrim = if theme.is_dark {

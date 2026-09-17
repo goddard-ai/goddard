@@ -1121,7 +1121,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .child(primary)
-                .child(div().w(hairline()).h_full().flex_none().bg(theme.border))
+                .child(div().w(hairline()).h_full().flex_none().bg(theme.separator))
                 .child(menu)
                 .into_any_element(),
         )
@@ -1282,7 +1282,7 @@ impl Waku {
             .flex()
             .items_center()
             .child(primary)
-            .child(div().w(hairline()).h_full().flex_none().bg(theme.border))
+            .child(div().w(hairline()).h_full().flex_none().bg(theme.separator))
             .child(menu)
             .into_any_element()
     }
@@ -1667,7 +1667,7 @@ fn render_background_summary_card(
         ));
     }
     if has_environment && has_background {
-        content = content.child(div().mx(px(8.0)).h(hairline()).bg(theme.border));
+        content = content.child(div().mx(px(8.0)).h(hairline()).bg(theme.separator));
     }
     if !processes.is_empty() {
         content = content.child(render_background_summary_section(
@@ -1690,7 +1690,7 @@ fn render_background_summary_card(
         ));
     }
     if has_identifiers && (has_environment || has_background) {
-        content = content.child(div().mx(px(8.0)).h(hairline()).bg(theme.border));
+        content = content.child(div().mx(px(8.0)).h(hairline()).bg(theme.separator));
     }
     if let Some(identifiers) = identifiers {
         content = content.child(render_task_identifiers_section(
