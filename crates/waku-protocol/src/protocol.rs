@@ -352,6 +352,28 @@ pub enum Command {
         #[serde(default)]
         delivery: AgentPromptDelivery,
     },
+    /// Read the daemon-owned friends document (friend code, friends,
+    /// pending requests, transfers). Global command — nil session id.
+    GetFriends,
+    /// Send a friend request to a `gfr-` code. `name` is our display name
+    /// as the peer will see it.
+    SendFriendRequest { code: String, name: String },
+    /// Accept or decline an incoming friend request.
+    RespondFriendRequest { node_id: String, accept: bool },
+    RemoveFriend { node_id: String },
+    /// Offer a file or directory to a friend. Spawns a transfer; progress
+    /// arrives through `FriendsChanged` broadcasts.
+    SendFileToFriend {
+        node_id: String,
+        #[ts(type = "string")]
+        path: PathBuf,
+        note: Option<String>,
+    },
+    CancelTransfer { transfer_id: Uuid },
+    /// On-demand presence check — dial the friend and report the outcome via
+    /// `FriendsChanged` (updates `last_seen`/`online`). No-op if a fresher
+    /// cached probe exists.
+    ProbeFriend { node_id: String },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -475,6 +497,12 @@ pub enum ServerMessage {
     SettingsChanged {
         settings: DaemonSettings,
     },
+    /// The friends document changed — new request, friend added, transfer
+    /// progress. Carries the whole document; it's small and every client
+    /// applies it wholesale.
+    FriendsChanged {
+        state: crate::friends::FriendsState,
+    },
     ShuttingDown,
 }
 
@@ -542,6 +570,10 @@ pub enum ResponsePayload {
     },
     TaskStateSaved {
         sessions: Vec<AgentSession>,
+    },
+    /// The daemon-owned friends document, as read for `getFriends`.
+    Friends {
+        state: crate::friends::FriendsState,
     },
     Session {
         session: Option<AgentSession>,

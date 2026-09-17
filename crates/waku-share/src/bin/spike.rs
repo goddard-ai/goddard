@@ -50,7 +50,11 @@ async fn main() -> anyhow::Result<()> {
             alice_key,
             RelayMode::Disabled,
             FriendsProtocol::new(
-                Arc::new(|_id, _name| RequestDecision::Decline),
+                Arc::new(|_id, _name| {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let _ = tx.send(RequestDecision::Decline);
+                    rx
+                }),
                 Arc::new(|_offer| {}),
                 Arc::new(move |_id, ticket| {
                     let _ = done_tx.try_send(ticket);
@@ -70,8 +74,12 @@ async fn main() -> anyhow::Result<()> {
             bob_key,
             RelayMode::Disabled,
             FriendsProtocol::new(
-                Arc::new(|_id, name| RequestDecision::Accept {
-                    our_name: format!("bob (accepting {name})"),
+                Arc::new(|_id, name| {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let _ = tx.send(RequestDecision::Accept {
+                        our_name: format!("bob (accepting {name})"),
+                    });
+                    rx
                 }),
                 Arc::new({
                     let bob_ep_holder = bob_ep_holder.clone();

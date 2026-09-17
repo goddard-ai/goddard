@@ -27,6 +27,10 @@ pub struct Friend {
     pub name: String,
     pub node_id: EndpointId,
     pub added_at_ms: u64,
+    /// Last successful contact (probe, request, offer, or done). Presence is
+    /// derived from this — there is no heartbeat.
+    #[serde(default)]
+    pub last_seen_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +77,14 @@ impl FriendStore {
     pub fn is_friend(&self, node: &EndpointId) -> bool {
         self.friends.contains_key(node)
     }
+
+    /// Record a successful contact — probes, offers, done notifications.
+    /// Presence renders from this, never from a heartbeat.
+    pub fn mark_seen(&mut self, node: &EndpointId) {
+        if let Some(friend) = self.friends.get_mut(node) {
+            friend.last_seen_ms = Some(now_ms());
+        }
+    }
 }
 
 /// Wire messages on the friends channel. JSON + u32 length prefix; the
@@ -100,6 +112,8 @@ pub enum FriendsMessage {
     /// Generic acknowledgement for one-way messages; needed because closing
     /// the connection right after `finish()` can drop unflushed stream data.
     Ack,
+    /// Liveness probe — presence is lazy (dial on demand), never heartbeated.
+    Ping,
 }
 
 /// What the local user decided about an incoming request.
@@ -108,9 +122,14 @@ pub enum RequestDecision {
     Decline,
 }
 
-/// Callback the host app installs to decide friend requests.
-pub type RequestHandler =
-    Arc<dyn Fn(EndpointId, String) -> RequestDecision + Send + Sync>;
+/// Callback the host app installs to decide friend requests. It returns a
+/// oneshot the acceptor awaits — the UI can take minutes to answer without
+/// blocking the protocol task. Timeout defaults to decline.
+pub type RequestHandler = Arc<
+    dyn Fn(EndpointId, String) -> tokio::sync::oneshot::Receiver<RequestDecision>
+        + Send
+        + Sync,
+>;
 
 /// An incoming transfer offer, already parsed and sender-authenticated.
 pub struct OfferInfo {
@@ -172,7 +191,18 @@ impl ProtocolHandler for FriendsProtocol {
         let msg = read_message(&mut recv).await.map_err(accept_err)?;
         match msg {
             FriendsMessage::FriendRequest { name } => {
-                let reply = match (self.on_request)(remote, name.clone()) {
+                let decision_rx = (self.on_request)(remote, name.clone());
+                let decision = match tokio::time::timeout(
+                    std::time::Duration::from_secs(300),
+                    decision_rx,
+                )
+                .await
+                {
+                    Ok(Ok(decision)) => decision,
+                    // Timed out or the request was dropped — decline.
+                    _ => RequestDecision::Decline,
+                };
+                let reply = match decision {
                     RequestDecision::Accept { our_name } => {
                         {
                             let mut store = self.store.lock().await;
@@ -182,6 +212,7 @@ impl ProtocolHandler for FriendsProtocol {
                                     name: name.clone(),
                                     node_id: remote,
                                     added_at_ms: now_ms(),
+                                    last_seen_ms: Some(now_ms()),
                                 },
                             );
                             store.requests.retain(|r| r.node_id != remote);
@@ -195,7 +226,15 @@ impl ProtocolHandler for FriendsProtocol {
                 send.finish()?;
             }
             FriendsMessage::Offer { name, note, ticket } => {
-                let is_friend = self.store.lock().await.is_friend(&remote);
+                let is_friend = {
+                    let mut store = self.store.lock().await;
+                    let is_friend = store.is_friend(&remote);
+                    if is_friend {
+                        store.mark_seen(&remote);
+                        let _ = store.save();
+                    }
+                    is_friend
+                };
                 if is_friend {
                     (self.on_offer)(OfferInfo {
                         from: remote,
@@ -213,7 +252,18 @@ impl ProtocolHandler for FriendsProtocol {
                 }
                 send.finish()?;
             }
+            FriendsMessage::Ping => {
+                write_message(&mut send, &FriendsMessage::Ack)
+                    .await
+                    .map_err(accept_err)?;
+                send.finish()?;
+            }
             FriendsMessage::TransferDone { ticket } => {
+                {
+                    let mut store = self.store.lock().await;
+                    store.mark_seen(&remote);
+                    let _ = store.save();
+                }
                 (self.on_done)(remote, ticket);
                 write_message(&mut send, &FriendsMessage::Ack)
                     .await
@@ -263,6 +313,7 @@ pub async fn send_friend_request(
                     name: name.clone(),
                     node_id: remote,
                     added_at_ms: now_ms(),
+                    last_seen_ms: Some(now_ms()),
                 },
             );
             store.requests.retain(|r| r.node_id != remote);
@@ -302,6 +353,26 @@ pub async fn send_offer(
         FriendsMessage::OfferDecline => bail!("offer declined"),
         _ => bail!("unexpected reply to offer"),
     }
+}
+
+/// Dial a friend to check liveness. This is the only presence mechanism —
+/// callers decide when a surface needs it (opening the Friends tab, Send),
+/// cache the result briefly, and render `last_seen` on miss.
+pub async fn probe(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    timeout: std::time::Duration,
+) -> bool {
+    let fut = async {
+        let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        write_message(&mut send, &FriendsMessage::Ping).await?;
+        send.finish()?;
+        let reply = read_message(&mut recv).await;
+        conn.close(0u32.into(), b"done");
+        anyhow::Ok(matches!(reply?, FriendsMessage::Ack))
+    };
+    matches!(tokio::time::timeout(timeout, fut).await, Ok(Ok(true)))
 }
 
 /// Tell the original sender the download finished and verified. Waits for
