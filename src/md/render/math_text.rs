@@ -555,6 +555,11 @@ impl Element for MathText {
                 }
             }
         }
+        for range in &self.flat.file_refs {
+            for rect in self.geometry.range_rects(range) {
+                super::paint_dotted_underline(window, rect, self.palette.tertiary);
+            }
+        }
         if let Some(range) = self.selection.selection.borrow().wash_range(&self.key) {
             for rect in self.geometry.range_rects(&range) {
                 wash(rect, self.palette.selection, 0.0, window);

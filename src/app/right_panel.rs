@@ -524,6 +524,7 @@ fn review_diff_flat_text(
         code_ranges: Vec::new(),
         annotation_refs: Vec::new(),
         commit_refs: Vec::new(),
+        file_refs: Vec::new(),
         math: None,
     }
 }

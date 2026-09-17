@@ -22,7 +22,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
@@ -295,6 +295,10 @@ pub struct FlatText {
     /// Git commit SHAs: byte ranges paired with the written SHA. Painted as a
     /// dotted underline; hovering previews the commit.
     pub commit_refs: Vec<(Range<usize>, String)>,
+    /// `@`-mention file references: byte ranges painted with a dotted
+    /// underline. The click itself rides `links` — each range has a matching
+    /// entry there whose "URL" is the mention's resolved absolute path.
+    pub file_refs: Vec<Range<usize>>,
     pub math: Option<Rc<math_text::MathData>>,
 }
 
@@ -412,6 +416,7 @@ pub fn flatten(
         code_ranges,
         annotation_refs: Vec::new(),
         commit_refs: Vec::new(),
+        file_refs: Vec::new(),
         math: (!math.is_empty()).then(|| Rc::new(math_text::MathData::new(math))),
     }
 }
@@ -454,6 +459,46 @@ fn commit_references(flat: &FlatText) -> Vec<(Range<usize>, String)> {
             // this pass. Links and rendered math own their own interaction.
             (!linked_or_math_range(flat, &range))
                 .then(|| (range, found.as_str().to_ascii_lowercase()))
+        })
+        .collect()
+}
+
+/// An `@path` token — the composer file mention's submitted form. The `@`
+/// must not follow a word character, so `user@host` is not a mention, and the
+/// path runs to whitespace; punctuation typed right after it is prose, not
+/// path, and gets trimmed below.
+static FILE_MENTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[^\w@])(@\S+)").unwrap());
+
+/// The `(byte range, absolute target)` pairs of every `@`-mention in a flat
+/// text. Relative tokens resolve against the session workspace, matching how
+/// the composer writes them; mentions inside code, links, or math keep their
+/// own meaning and are skipped.
+fn file_references(flat: &FlatText, workspace: &Path) -> Vec<(Range<usize>, String)> {
+    FILE_MENTION
+        .captures_iter(flat.text.as_ref())
+        .filter_map(|captures| {
+            let found = captures.get(1)?;
+            let token = found.as_str().trim_end_matches(|c| {
+                matches!(
+                    c,
+                    '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '`'
+                )
+            });
+            let mention = token.strip_prefix('@')?;
+            if mention.is_empty() {
+                return None;
+            }
+            let range = found.start()..found.start() + token.len();
+            if decorated_range(flat, &range) {
+                return None;
+            }
+            let path = Path::new(mention);
+            let resolved = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workspace.join(path)
+            };
+            Some((range, resolved.to_string_lossy().into_owned()))
         })
         .collect()
 }
@@ -505,6 +550,7 @@ pub fn flatten_plain(
         code_ranges: Vec::new(),
         annotation_refs: Vec::new(),
         commit_refs: Vec::new(),
+        file_refs: Vec::new(),
         math: None,
     }
 }
@@ -688,6 +734,9 @@ pub struct Ctx<'a> {
     /// Whether hexadecimal commit references get the transcript's hover and
     /// click affordance.
     commit_refs: bool,
+    /// The workspace `@`-mentions in this row resolve against, when the row
+    /// presents them as file links (user prompts).
+    file_link_root: Option<PathBuf>,
     /// Cross-frame flatten cache, when this render has one to consult.
     cache: Option<&'a MarkdownView>,
     next_ordinal: Cell<usize>,
@@ -719,6 +768,7 @@ impl<'a> Ctx<'a> {
             image_placeholder: None,
             annotation_ref_labels: 0,
             commit_refs: false,
+            file_link_root: None,
             cache: None,
             next_ordinal: Cell::new(0),
             starts_block: Cell::new(true),
@@ -772,6 +822,13 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Enable `@`-mention file references for this row, resolved against
+    /// `workspace`. `None` leaves the tokens plain text.
+    pub fn with_file_link_root(mut self, workspace: Option<PathBuf>) -> Self {
+        self.file_link_root = workspace;
+        self
+    }
+
     pub fn with_search_highlights(mut self, highlights: SearchHighlights) -> Self {
         self.search = Some(highlights);
         self
@@ -819,6 +876,7 @@ impl<'a> Ctx<'a> {
             image_placeholder: self.image_placeholder.clone(),
             annotation_ref_labels: self.annotation_ref_labels,
             commit_refs: self.commit_refs,
+            file_link_root: self.file_link_root.clone(),
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
             starts_block: Cell::new(self.starts_block.get()),
@@ -868,6 +926,11 @@ impl<'a> Ctx<'a> {
                 }
                 if self.commit_refs {
                     flat.commit_refs = commit_references(&flat);
+                }
+                if let Some(root) = &self.file_link_root {
+                    let refs = file_references(&flat, root);
+                    flat.file_refs = refs.iter().map(|(range, _)| range.clone()).collect();
+                    flat.links.extend(refs);
                 }
             }
             flat
@@ -929,6 +992,7 @@ fn text_element_with_selection(
         let code_ranges = flat.code_ranges.clone();
         let annotation_refs = flat.annotation_refs.clone();
         let commit_refs = flat.commit_refs.clone();
+        let file_refs = flat.file_refs.clone();
         let layout = layout.clone();
         let key = key.clone();
         move |_, _, window, _| {
@@ -1041,6 +1105,14 @@ fn text_element_with_selection(
                     for rect in range_rects(&layout, range, 0.0, 0.0) {
                         paint_dotted_underline(window, rect, color);
                     }
+                }
+            }
+            // `@`-mentions ride `links` for the click and pointer cursor but
+            // carry no link-styled run — the dotted underline is their only
+            // affordance.
+            for range in &file_refs {
+                for rect in range_rects(&layout, range, 0.0, 0.0) {
+                    paint_dotted_underline(window, rect, ref_underline);
                 }
             }
             if let Some(range) = selection.selection.borrow().wash_range(&key) {
@@ -2020,6 +2092,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             code_ranges: Vec::new(),
             annotation_refs: Vec::new(),
             commit_refs: Vec::new(),
+            file_refs: Vec::new(),
             math: None,
         }
     });
@@ -2809,6 +2882,67 @@ mod tests {
         assert_eq!(
             commit_references(&flat),
             vec![(19..26, "abcdef1".to_owned())]
+        );
+    }
+
+    fn file_refs(text: &str) -> Vec<(Range<usize>, String)> {
+        file_references(
+            &flatten_plain(
+                text.to_owned(),
+                crate::fonts::DEFAULT_UI_FAMILY,
+                FontWeight::NORMAL,
+                palette().text,
+            ),
+            Path::new("/repo"),
+        )
+    }
+
+    #[test]
+    fn file_references_match_mentions_and_resolve_against_the_workspace() {
+        assert_eq!(
+            file_refs("look at @src/app.rs please"),
+            vec![(8..19, "/repo/src/app.rs".to_owned())]
+        );
+        assert_eq!(
+            file_refs("@/abs/path.rs and @dir/"),
+            vec![
+                (0..13, "/abs/path.rs".to_owned()),
+                (18..23, "/repo/dir/".to_owned()),
+            ]
+        );
+        assert!(file_refs("mail user@host.com").is_empty());
+        assert!(file_refs("no mention").is_empty());
+    }
+
+    #[test]
+    fn file_references_trim_prose_punctuation() {
+        assert_eq!(
+            file_refs("see (@src/a.rs), then @b.md."),
+            vec![
+                (5..14, "/repo/src/a.rs".to_owned()),
+                (22..27, "/repo/b.md".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn file_references_skip_code_and_links() {
+        let mut flat = flatten_plain(
+            "run `@gen.sh` then @real.sh".to_owned(),
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        flat.code_ranges.push(4..13);
+        assert_eq!(
+            file_references(&flat, Path::new("/repo")),
+            vec![(19..27, "/repo/real.sh".to_owned())]
+        );
+        flat.code_ranges.clear();
+        flat.links.push((4..13, "https://example.com".to_owned()));
+        assert_eq!(
+            file_references(&flat, Path::new("/repo")),
+            vec![(19..27, "/repo/real.sh".to_owned())]
         );
     }
 }

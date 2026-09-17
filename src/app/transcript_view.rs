@@ -1457,6 +1457,12 @@ impl Waku {
                         )
                         .with_context_menu(menu.clone())
                         .with_commit_refs(message.role == MessageRole::Assistant);
+                    if message.role == MessageRole::User {
+                        ctx = ctx.with_file_link_root(
+                            self.selected_workspace_path()
+                                .map(std::path::Path::to_path_buf),
+                        );
+                    }
                     if let Some(highlights) = self.transcript_search_highlights(message_index) {
                         ctx = ctx.with_search_highlights(highlights);
                     }
