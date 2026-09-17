@@ -17,6 +17,15 @@ similar = "3"
 ts-rs = { version = "12.0.1", features = ["chrono-impl", "serde-json-impl", "uuid-impl"] }
 uuid = { version = "1.18", features = ["v4", "serde"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",

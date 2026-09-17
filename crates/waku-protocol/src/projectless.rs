@@ -34,7 +34,22 @@ pub fn is_projectless_path(path: &Path) -> bool {
             || root
                 .parent()
                 .is_some_and(|legacy_root| is_legacy_workspace_path(path, legacy_root))
+            || legacy_home_root(&root).is_some_and(|legacy_home| {
+                path.starts_with(legacy_home.join("projects"))
+                    || is_legacy_workspace_path(path, &legacy_home)
+            })
     })
+}
+
+/// The pre-Goddard home directory beside the workspace root's — `~/.waku`
+/// for a local `~/.goddard/projects` root, or the remote install's `.waku`
+/// when the client carries a remote root. Sessions recorded before the
+/// rename still reference workspaces under it.
+fn legacy_home_root(workspace_root: &Path) -> Option<PathBuf> {
+    workspace_root
+        .parent()?
+        .parent()
+        .map(|home| home.join(crate::identity::LEGACY_HOME_DIRECTORY_NAME))
 }
 
 pub fn needs_migration(path: &Path) -> bool {

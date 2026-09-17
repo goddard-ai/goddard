@@ -8818,11 +8818,9 @@ name = "waku-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "libc",
  "serde_json",
  "waku-core",
  "waku-protocol",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8833,6 +8831,7 @@ dependencies = [
  "base64",
  "chrono",
  "dirs",
+ "libc",
  "objc2-foundation 0.3.2",
  "rust-i18n",
  "serde",
@@ -8840,6 +8839,7 @@ dependencies = [
  "similar",
  "ts-rs",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

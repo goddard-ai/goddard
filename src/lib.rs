@@ -279,10 +279,11 @@ impl WakuApplicationExt for Application {
 }
 
 pub fn run() {
-    // Copy pre-Goddard state directories before anything reads the new
-    // locations. Failures are non-fatal: the app runs on a fresh slate and
-    // the sentinel left behind retries the copy next launch.
-    let migration = waku_protocol::migration::migrate_legacy_directories();
+    // Adopt pre-Goddard state under ~/.goddard before anything reads the new
+    // location — small files copy, workspaces and worktrees link over. The
+    // daemon migrates the data directory it owns. Failures are non-fatal: the
+    // app runs on whatever did migrate and retries the rest next launch.
+    let migration = waku_protocol::migration::migrate_home_directory();
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Goddard daemon: {error:#}"));
     gpui_platform::application()

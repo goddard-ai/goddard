@@ -11,12 +11,20 @@ use waku_protocol::{
 };
 
 fn main() -> anyhow::Result<()> {
-    for failure in waku_protocol::migration::migrate_legacy_directories().failures {
+    let mut migration = waku_protocol::migration::migrate_home_directory();
+    migration.extend(waku_core::migration::migrate_data_directory());
+    for failure in &migration.failures {
         eprintln!(
-            "Goddard: could not copy {} to {} ({:#}); starting with fresh state — restart to retry",
+            "Goddard: could not migrate {} to {} ({:#}); starting with fresh state — restart to retry",
             failure.legacy.display(),
             failure.destination.display(),
             failure.error
+        );
+    }
+    for skipped in &migration.skipped {
+        eprintln!(
+            "Goddard: left legacy item {} unmigrated",
+            skipped.display()
         );
     }
     let arguments = Arguments::parse(std::env::args().skip(1))?;
@@ -52,7 +60,7 @@ fn main() -> anyhow::Result<()> {
             .name("goddard-daemon-parent".into())
             .spawn(move || {
                 while !monitor_shutdown.load(Ordering::Acquire) {
-                    if !process_is_alive(parent_pid) {
+                    if !waku_protocol::pid::is_alive(parent_pid) {
                         monitor_shutdown.store(true, Ordering::Release);
                         break;
                     }
@@ -150,42 +158,6 @@ impl Arguments {
             allow_non_loopback,
         })
     }
-}
-
-#[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
-    let result = unsafe { libc::kill(pid as i32, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// Windows reuses process ids, so the handle is opened for the narrowest
-/// right that answers the question and closed immediately. A pid that no
-/// longer exists fails to open; one that has exited but is still held open by
-/// another handle reports an exit code instead of `STILL_ACTIVE`.
-#[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-    use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-
-    unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle.is_null() {
-            return false;
-        }
-        let mut exit_code = 0_u32;
-        let read = GetExitCodeProcess(handle, &mut exit_code);
-        CloseHandle(handle);
-        // A failed read leaves the parent's state unknown; outliving the app
-        // is the safer error than shutting a live daemon down.
-        read == 0 || exit_code == STILL_ACTIVE as u32
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn process_is_alive(_pid: u32) -> bool {
-    true
 }
 
 #[cfg(test)]

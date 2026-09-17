@@ -57,13 +57,29 @@ pub fn home_directory() -> Option<PathBuf> {
 
 /// Existing builds created dated workspaces directly under `~/.goddard`; keep
 /// recognizing those paths while all new workspaces live under `projects/`.
+/// Sessions recorded before the rename may also carry workspaces under the
+/// pre-Goddard `~/.waku` home.
 pub fn is_projectless_path(path: &Path) -> bool {
     workspace_root().is_some_and(|root| {
         path.starts_with(&root)
             || root
                 .parent()
                 .is_some_and(|legacy_root| is_legacy_workspace_path(path, legacy_root))
+            || legacy_home_root(&root).is_some_and(|legacy_home| {
+                path.starts_with(legacy_home.join("projects"))
+                    || is_legacy_workspace_path(path, &legacy_home)
+            })
     })
+}
+
+/// The pre-Goddard home directory beside the workspace root's — `~/.waku`
+/// for a local `~/.goddard/projects` root, or the remote install's `.waku`
+/// when the client carries a remote root.
+fn legacy_home_root(workspace_root: &Path) -> Option<PathBuf> {
+    workspace_root
+        .parent()?
+        .parent()
+        .map(|home| home.join(waku_protocol::identity::LEGACY_HOME_DIRECTORY_NAME))
 }
 
 /// Whether an existing projectless workspace still uses the pre-`projects/`
@@ -124,8 +140,14 @@ fn archive_path_in(root: &Path, path: &Path) -> Option<PathBuf> {
 /// bounds a mistaken or hostile request to `~/.goddard`-managed directories.
 fn validate_workspace_path_in(root: &Path, path: &Path) -> io::Result<()> {
     let legacy_root = root.parent();
+    let legacy_home = legacy_home_root(root);
     let projectless = path.starts_with(root)
-        || legacy_root.is_some_and(|legacy_root| is_legacy_workspace_path(path, legacy_root));
+        || legacy_root.is_some_and(|legacy_root| is_legacy_workspace_path(path, legacy_root))
+        || legacy_home.as_ref().is_some_and(|legacy_home| {
+            path != *legacy_home
+                && (path.starts_with(legacy_home.join("projects"))
+                    || is_legacy_workspace_path(path, legacy_home))
+        });
     if projectless && path != root && legacy_root.is_none_or(|legacy_root| path != legacy_root) {
         Ok(())
     } else {
