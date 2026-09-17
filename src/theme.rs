@@ -1431,6 +1431,9 @@ pub fn apply_theme_preference(
     cx: &mut App,
 ) {
     crate::platform::set_window_appearance(window, native_override(settings));
+    // "Reduce transparency" kills the vibrancy the effect relies on; the
+    // sidebar paints solid as if the toggle were off.
+    let sidebar_transparent = sidebar_transparent && !crate::platform::reduce_transparency();
     let system_dark = matches!(
         cx.window_appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
