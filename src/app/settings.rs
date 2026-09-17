@@ -10,6 +10,10 @@ const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 /// two-column layout and needs the extra room for the chart.
 const SETTINGS_USAGE_MAX_WIDTH: f32 = 1024.0;
 
+/// The Git page's Worktrees/Branches tables carry five-column rows, so it
+/// shares the Usage page's wide layout rather than the form width.
+const SETTINGS_GIT_MAX_WIDTH: f32 = SETTINGS_USAGE_MAX_WIDTH;
+
 /// Uniform height hint for the virtualized archived-chat rows, so the
 /// scrollbar knows the total extent before rows are measured.
 const ARCHIVED_SESSION_ROW_HEIGHT: f32 = 45.0;
@@ -458,6 +462,7 @@ impl Waku {
             .w_full()
             .max_w(px(match page {
                 SettingsPage::Usage => SETTINGS_USAGE_MAX_WIDTH,
+                SettingsPage::Git => SETTINGS_GIT_MAX_WIDTH,
                 _ => SETTINGS_CONTENT_MAX_WIDTH,
             }))
             .mx_auto()

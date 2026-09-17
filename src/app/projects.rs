@@ -3066,6 +3066,7 @@ impl Waku {
             .flex_1()
             .min_h_0()
             .w_full()
+            .pb(px(32.0))
             .flex()
             .flex_col()
             .on_action(cx.listener(Self::select_all_git_rows_action))
