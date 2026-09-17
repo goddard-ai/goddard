@@ -124,8 +124,10 @@ fn default_open_at_last_prompt() -> bool {
     true
 }
 
+/// Sidebar transparency rides on macOS Sidebar vibrancy — a real backdrop
+/// blur. Where no blur exists the feature stays off by default.
 fn default_sidebar_transparency() -> bool {
-    true
+    cfg!(target_os = "macos")
 }
 
 fn default_sidebar_shortcut_tags() -> bool {
@@ -501,7 +503,7 @@ impl Default for AppSettings {
             open_at_last_prompt: true,
             sync_with_merge: false,
             new_worktree_default_branch: false,
-            sidebar_transparency: true,
+            sidebar_transparency: default_sidebar_transparency(),
             thick_borders: false,
             high_contrast: false,
             three_finger_swipe_navigation: false,
@@ -841,7 +843,7 @@ impl PersistedState {
             open_at_last_prompt: true,
             sync_with_merge: false,
             new_worktree_default_branch: false,
-            sidebar_transparency: true,
+            sidebar_transparency: default_sidebar_transparency(),
             thick_borders: false,
             high_contrast: false,
             three_finger_swipe_navigation: false,
@@ -1839,11 +1841,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sidebar_transparency_defaults_on_and_persists_as_an_app_preference() {
+    fn sidebar_transparency_defaults_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
-        assert!(defaults.sidebar_transparency);
+        assert_eq!(defaults.sidebar_transparency, cfg!(target_os = "macos"));
         let mut state = PersistedState::empty();
-        assert!(state.sidebar_transparency);
+        assert_eq!(state.sidebar_transparency, cfg!(target_os = "macos"));
         state.sidebar_transparency = false;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
         assert_eq!(settings["sidebar_transparency"], false);
