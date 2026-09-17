@@ -434,6 +434,7 @@ pub struct MenuChip {
     disabled: bool,
     height: Option<Pixels>,
     background: Option<Hsla>,
+    icon_size: f32,
 }
 
 impl MenuChip {
@@ -452,6 +453,7 @@ impl MenuChip {
             disabled: false,
             height: None,
             background: None,
+            icon_size: 12.0,
         }
     }
 
@@ -472,6 +474,12 @@ impl MenuChip {
 
     pub fn icon(mut self, path: &'static str, color: Hsla) -> Self {
         self.icon = Some((path, color));
+        self
+    }
+
+    /// Override the icon's edge length; chips default to 12px.
+    pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_size = size;
         self
     }
 
@@ -579,18 +587,18 @@ impl RenderOnce for MenuChip {
             })
             .when(self.disabled, |element| element.opacity(0.7))
             .when_some(self.icon, |element, (path, color)| {
-                let mark = icon(path, 12.0, color);
+                let mark = icon(path, self.icon_size, color);
                 match badge {
                     Some((badge, badge_color)) => element.child(
                         div()
                             .relative()
-                            .w(sp(12.0))
-                            .h(sp(12.0))
+                            .w(sp(self.icon_size))
+                            .h(sp(self.icon_size))
                             .flex_none()
                             .child(mark)
                             .child(div().absolute().top_0().left_0().child(icon(
                                 badge,
-                                12.0,
+                                self.icon_size,
                                 badge_color,
                             ))),
                     ),

@@ -1976,6 +1976,7 @@ impl Waku {
                     },
                     theme.text_tertiary,
                 )
+                .icon_size(14.0)
                 .label(selected_mode.label())
                 .caret(false)
                 .selected(handle.is_open())
