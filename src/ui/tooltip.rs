@@ -60,8 +60,17 @@ impl Tooltip {
         label: impl Into<SharedString>,
         action: &dyn Action,
     ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+        Self::text_with_hint(label, ShortcutHint::action(action))
+    }
+
+    /// `text` plus a prebuilt hint — for chords that reach the action through
+    /// a chord-sharing sibling, like
+    /// `ShortcutHint::action(&NewSession).shadowed_by(&SwitchProjectForward)`.
+    pub fn text_with_hint(
+        label: impl Into<SharedString>,
+        hint: ShortcutHint,
+    ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
         let label = label.into();
-        let hint = ShortcutHint::action(action);
         move |window, cx| {
             Tooltip::new(label.clone())
                 .shortcut(hint.clone())

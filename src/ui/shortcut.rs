@@ -17,6 +17,12 @@ pub enum ShortcutHint {
     /// never drift from the binding it advertises.
     Action {
         action: Rc<dyn Action>,
+        /// Actions allowed to win `action`'s keystroke without hiding the
+        /// hint — the winner's handler propagates the chord back to `action`.
+        /// ⌘N is registered to the project switcher, which falls through to
+        /// New Session when no draft can take it, so New Task surfaces
+        /// advertise the chord through `.shadowed_by(&SwitchProjectForward)`.
+        shadowed_by: Vec<Rc<dyn Action>>,
         /// Resolve as if this handle were focused. Required when the surface
         /// showing the hint owns focus while the shortcut belongs to another
         /// element's context — a text field's Cut while its menu card is
@@ -33,6 +39,7 @@ impl ShortcutHint {
     pub fn action(action: &dyn Action) -> Self {
         Self::Action {
             action: action.boxed_clone().into(),
+            shadowed_by: Vec::new(),
             focus: None,
         }
     }
@@ -40,8 +47,19 @@ impl ShortcutHint {
     pub fn action_in(action: &dyn Action, focus: &FocusHandle) -> Self {
         Self::Action {
             action: action.boxed_clone().into(),
+            shadowed_by: Vec::new(),
             focus: Some(focus.clone()),
         }
+    }
+
+    /// Keep the hint when `other` shadows this action's binding — for chords
+    /// two actions share, where the registered winner propagates the
+    /// keystroke back to this one.
+    pub fn shadowed_by(mut self, other: &dyn Action) -> Self {
+        if let Self::Action { shadowed_by, .. } = &mut self {
+            shadowed_by.push(other.boxed_clone().into());
+        }
+        self
     }
 
     /// The display string, or `None` when the action has no binding in the
@@ -49,7 +67,11 @@ impl ShortcutHint {
     pub fn resolve(&self, window: &Window, cx: &App) -> Option<String> {
         match self {
             Self::Text(label) => Some(label.to_string()),
-            Self::Action { action, focus } => {
+            Self::Action {
+                action,
+                shadowed_by,
+                focus,
+            } => {
                 let binding = match focus {
                     Some(focus) => {
                         window.highest_precedence_binding_for_action_in(action.as_ref(), focus)
@@ -60,16 +82,16 @@ impl ShortcutHint {
                     // not hold during a window's first render. The `_in`
                     // lookup returns `None` there instead; fall back to an
                     // empty stack so context-free bindings still resolve.
-                    None => window
-                        .focused(cx)
-                        .and_then(|focus| {
-                            window.highest_precedence_binding_for_action_in(
-                                action.as_ref(),
-                                &focus,
-                            )
-                        })
-                        .or_else(|| highest_precedence_binding(action.as_ref(), &[], cx)),
-                }?;
+                    None => window.focused(cx).and_then(|focus| {
+                        window.highest_precedence_binding_for_action_in(
+                            action.as_ref(),
+                            &focus,
+                        )
+                    }),
+                }
+                .or_else(|| {
+                    highest_precedence_binding(action.as_ref(), &[], shadowed_by, cx)
+                })?;
                 Some(binding_label(&binding))
             }
         }
@@ -86,6 +108,7 @@ impl ShortcutHint {
 fn highest_precedence_binding(
     action: &dyn Action,
     context_stack: &[KeyContext],
+    shadowed_by: &[Rc<dyn Action>],
     cx: &App,
 ) -> Option<KeyBinding> {
     let keymap = cx.key_bindings();
@@ -98,7 +121,12 @@ fn highest_precedence_binding(
                 .bindings_for_input(binding.keystrokes(), context_stack)
                 .0
                 .first()
-                .is_some_and(|found| found.action().partial_eq(binding.action()))
+                .is_some_and(|found| {
+                    found.action().partial_eq(binding.action())
+                        || shadowed_by
+                            .iter()
+                            .any(|action| found.action().partial_eq(action.as_ref()))
+                })
         })
         .cloned()
 }
@@ -325,6 +353,55 @@ mod tests {
             assert_eq!(
                 ShortcutHint::text("⌘V").resolve(window, cx).as_deref(),
                 Some("⌘V")
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn resolve_sees_through_a_propagating_shadow(cx: &mut gpui::TestAppContext) {
+        // The keymap's ⌘N pair: the switcher is registered second at the same
+        // depth, wins the chord, and propagates to New Session when no draft
+        // can take it.
+        cx.update(|cx| {
+            cx.bind_keys([
+                KeyBinding::new("secondary-n", crate::NewSession, None),
+                KeyBinding::new("secondary-n", crate::SwitchProjectForward, None),
+            ]);
+        });
+        let (view, cx) = cx.add_window_view(|_, cx| Harness {
+            field_focus: cx.focus_handle(),
+            other_focus: cx.focus_handle(),
+        });
+        let other_focus = view.read_with(cx, |harness, _| harness.other_focus.clone());
+
+        cx.update(|window, cx| window.focus(&other_focus, cx));
+        cx.update(|window, cx| {
+            // The winner's own hint resolves as usual.
+            assert_eq!(
+                ShortcutHint::action(&crate::SwitchProjectForward)
+                    .resolve(window, cx)
+                    .as_deref(),
+                Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N"))
+            );
+            // The shadowed binding resolves only once the shadowing action is
+            // declared a propagator.
+            assert_eq!(
+                ShortcutHint::action(&crate::NewSession).resolve(window, cx),
+                None
+            );
+            assert_eq!(
+                ShortcutHint::action(&crate::NewSession)
+                    .shadowed_by(&crate::SwitchProjectForward)
+                    .resolve(window, cx)
+                    .as_deref(),
+                Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N"))
+            );
+            // An unrelated action does not lift the shadow.
+            assert_eq!(
+                ShortcutHint::action(&crate::NewSession)
+                    .shadowed_by(&crate::ToggleSidebar)
+                    .resolve(window, cx),
+                None
             );
         });
     }

@@ -888,7 +888,9 @@ impl Waku {
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_task"),
                 "icons/pencil.svg",
-                Some(ShortcutHint::action(&NewSession)),
+                Some(
+                    ShortcutHint::action(&NewSession).shadowed_by(&SwitchProjectForward),
+                ),
                 PaletteAction::NewTask,
                 "new task session chat conversation start",
                 next(),

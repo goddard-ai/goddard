@@ -1145,13 +1145,13 @@ impl Waku {
         id: &'static str,
         icon_path: &'static str,
         label: String,
-        shortcut_action: &dyn gpui::Action,
+        shortcut_hint: ShortcutHint,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let group_name = SharedString::from(format!("{id}-shortcut"));
-        let shortcut = ShortcutHint::action(shortcut_action).resolve(window, cx);
+        let shortcut = shortcut_hint.resolve(window, cx);
         div()
             .id(id)
             .group(group_name.clone())
@@ -1205,7 +1205,9 @@ impl Waku {
             "sidebar-new-session",
             "icons/compose.svg",
             tr!("menu.new_task"),
-            &NewSession,
+            // ⌘N is registered to the project switcher, which propagates the
+            // chord here when no draft can take it.
+            ShortcutHint::action(&NewSession).shadowed_by(&SwitchProjectForward),
             window,
             cx,
         )
@@ -1226,7 +1228,7 @@ impl Waku {
                 "sidebar-search",
                 "icons/search.svg",
                 tr!("sidebar.search"),
-                &ToggleCommandPalette,
+                ShortcutHint::action(&ToggleCommandPalette),
                 window,
                 cx,
             )
@@ -1256,7 +1258,7 @@ impl Waku {
                 "sidebar-projects",
                 "icons/projects.svg",
                 tr!("sidebar.projects"),
-                &ToggleProjectsPage,
+                ShortcutHint::action(&ToggleProjectsPage),
                 window,
                 cx,
             )
@@ -2443,12 +2445,19 @@ impl Waku {
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
                         .tooltip(if group == SidebarGroup::Terminals {
-                            Tooltip::text_with_action(
+                            Tooltip::text_with_hint(
                                 tr!("right_panel.new_terminal"),
-                                &NewTerminal,
+                                ShortcutHint::action(&NewTerminal),
                             )
                         } else {
-                            Tooltip::text_with_action(tr!("menu.new_task"), &NewSession)
+                            // ⌘N is registered to the project switcher, which
+                            // propagates the chord here when no draft can take
+                            // it.
+                            Tooltip::text_with_hint(
+                                tr!("menu.new_task"),
+                                ShortcutHint::action(&NewSession)
+                                    .shadowed_by(&SwitchProjectForward),
+                            )
                         })
                         .child(icon("icons/compose.svg", 14.0, theme.text_secondary))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
