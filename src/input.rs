@@ -643,6 +643,21 @@ fn collapsible_paste(mode: FieldMode, text: &str) -> bool {
             || text.matches('\n').count() >= COLLAPSED_PASTE_MIN_NEWLINES)
 }
 
+/// The `(open, close)` pair a delimiter keystroke wraps a selection in.
+/// Symmetric for quotes, and a bracket's closer wraps as readily as its
+/// opener — the pair a `)` types is still `()`.
+fn surround_pair(text: &str) -> Option<(&'static str, &'static str)> {
+    Some(match text {
+        "\"" => ("\"", "\""),
+        "'" => ("'", "'"),
+        "`" => ("`", "`"),
+        "(" | ")" => ("(", ")"),
+        "[" | "]" => ("[", "]"),
+        "{" | "}" => ("{", "}"),
+        _ => return None,
+    })
+}
+
 /// Tallest an [`auto_height`](TextInput::auto_height) field grows before
 /// its text scrolls under an overlay scrollbar instead of growing the card.
 const AUTO_HEIGHT_MAX: Pixels = px(300.);
@@ -670,6 +685,11 @@ pub struct TextInput {
     /// A newline inside a Markdown list item continues the list rather than
     /// breaking the line plainly — see [`TextInput::list_continuation`].
     list_continuation: bool,
+    /// A typed quote, backtick, or bracket over a non-empty selection wraps
+    /// the text in the matching pair instead of replacing it — an editor
+    /// affordance fields opt into; plain inputs like find bars keep the
+    /// replace behavior.
+    wrap_selection: bool,
     /// The field owns its height and text metrics, growing with its content
     /// up to [`AUTO_HEIGHT_MAX`] before it scrolls; otherwise a
     /// multi-line field inherits the embedding view's metrics.
@@ -800,6 +820,7 @@ impl TextInput {
             masked: false,
             submit_on_enter: false,
             list_continuation: false,
+            wrap_selection: false,
             auto_height: false,
             max_lines: None,
             min_height: px(24.),
@@ -990,6 +1011,14 @@ impl TextInput {
     /// the caret on the blank line that steps out of the list.
     pub fn list_continuation(mut self) -> Self {
         self.list_continuation = true;
+        self
+    }
+
+    /// Opt into selection wrapping: typing a quote, backtick, or bracket —
+    /// either half of a pair — over a non-empty selection surrounds the
+    /// text and keeps it selected, the way editors do.
+    pub fn wrap_selection(mut self) -> Self {
+        self.wrap_selection = true;
         self
     }
 
@@ -2120,7 +2149,7 @@ impl TextInput {
         }
     }
 
-    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         let Some(clipboard) = cx.read_from_clipboard() else {
             return;
         };
@@ -2141,7 +2170,7 @@ impl TextInput {
             cx.emit(CollapsedPaste(text));
             return;
         }
-        self.replace_text_in_range(None, &text, window, cx);
+        self.replace_committed(None, &text, false, cx);
         self.history.seal();
     }
 
@@ -2175,6 +2204,74 @@ impl TextInput {
             self.replace_text_in_range(None, "", window, cx);
             self.history.seal();
         }
+    }
+
+    /// Apply committed text over `range_utf16` — the selection when `None`,
+    /// as it is for typing, paste, and the editing actions. `surround`
+    /// marks the plain typing path: a delimiter keystroke over a non-empty
+    /// selection wraps it when the field opted in via
+    /// [`Self::wrap_selection`]. Paste passes `false` so the clipboard's
+    /// text always replaces.
+    fn replace_committed(
+        &mut self,
+        range_utf16: Option<Range<usize>>,
+        new_text: &str,
+        surround: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.read_only {
+            return;
+        }
+        // While text is marked, macOS reports replacement ranges relative to
+        // the marked text, so the marked span itself is the commit target —
+        // Zed's reading of the protocol. Absolute ranges only arrive outside
+        // composition (e.g. the Accessibility Keyboard's completions).
+        let composing = self.marked_range.is_some();
+        let range = self.marked_range.clone().unwrap_or_else(|| {
+            range_utf16
+                .as_ref()
+                .map(|range| self.range_from_utf16(range))
+                .unwrap_or(self.selected_range.clone())
+        });
+        // Wrapping splices the pair around the selection's own text and
+        // keeps that text selected, so a second delimiter re-wraps it.
+        let pair = (surround
+            && self.wrap_selection
+            && !composing
+            && !range.is_empty()
+            && range == self.selected_range)
+            .then(|| surround_pair(new_text))
+            .flatten();
+        let (new_text, selection) = match pair {
+            Some((open, close)) => {
+                let start = range.start + open.len();
+                (
+                    format!("{open}{}{close}", &self.content[range.clone()]),
+                    start..start + (range.end - range.start),
+                )
+            }
+            None => {
+                let offset = range.start + new_text.len();
+                (new_text.to_owned(), offset..offset)
+            }
+        };
+        self.record_edit_history(&range, &new_text, composing);
+        let previous = self.content.clone();
+        self.content =
+            (self.content[..range.start].to_owned() + &new_text + &self.content[range.end..])
+                .into();
+        self.selected_range = selection;
+        self.marked_range = None;
+        self.vertical_navigation = None;
+        if composing {
+            self.history.finalize_composition();
+        }
+        self.refresh_highlight();
+        self.pause_blink_cursor(cx);
+        if previous != self.content {
+            cx.emit(InputEvent::Edited);
+        }
+        cx.notify();
     }
 
     /// Route a splice into the history before it is applied: composition
@@ -2508,37 +2605,7 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.read_only {
-            return;
-        }
-        // While text is marked, macOS reports replacement ranges relative to
-        // the marked text, so the marked span itself is the commit target —
-        // Zed's reading of the protocol. Absolute ranges only arrive outside
-        // composition (e.g. the Accessibility Keyboard's completions).
-        let composing = self.marked_range.is_some();
-        let range = self.marked_range.clone().unwrap_or_else(|| {
-            range_utf16
-                .as_ref()
-                .map(|range| self.range_from_utf16(range))
-                .unwrap_or(self.selected_range.clone())
-        });
-        self.record_edit_history(&range, new_text, composing);
-        let previous = self.content.clone();
-        self.content =
-            (self.content[..range.start].to_owned() + new_text + &self.content[range.end..]).into();
-        let offset = range.start + new_text.len();
-        self.selected_range = offset..offset;
-        self.marked_range = None;
-        self.vertical_navigation = None;
-        if composing {
-            self.history.finalize_composition();
-        }
-        self.refresh_highlight();
-        self.pause_blink_cursor(cx);
-        if previous != self.content {
-            cx.emit(InputEvent::Edited);
-        }
-        cx.notify();
+        self.replace_committed(range_utf16, new_text, true, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -3521,6 +3588,7 @@ impl ComposerInput {
                 .text_metrics(14.0, 24.0)
                 .media_paste()
                 .list_continuation()
+                .wrap_selection()
                 .syntax(Some("markdown"))
                 .accessibility_label(tr!("a11y.composer"))
                 .placeholder(tr!("input.do_anything"))
@@ -3704,10 +3772,11 @@ mod tests {
     use super::TokenClass;
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
-        DeleteToParagraphEnd, EditHistory, FieldMode, SearchPaint, TextInput, UNDO_GROUP_INTERVAL,
-        UNDO_HISTORY_CAP, collapsible_paste, cursor_should_be_visible, input_text_runs,
-        media_paste_entries, next_word_boundary, pasted_text_for_mode, previous_word_boundary,
-        single_line_scroll, trimmed_splice, visual_row_count, word_range_at,
+        DeleteToParagraphEnd, EditHistory, FieldMode, Paste, SearchPaint, TextInput,
+        UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, Undo, collapsible_paste, cursor_should_be_visible,
+        input_text_runs, media_paste_entries, next_word_boundary, pasted_text_for_mode,
+        previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
+        word_range_at,
     };
 
     struct InputHarness {
@@ -4505,6 +4574,120 @@ mod tests {
         cx.simulate_keystrokes("escape");
 
         cx.read_entity(&input, |input, _| assert_eq!(input.content(), "abc"));
+    }
+
+    /// Typing a delimiter over a selection wraps the text in the pair and
+    /// keeps the wrapped text selected — the editor behavior the composer
+    /// opts into. A bracket's closer wraps as readily as its opener.
+    #[gpui::test]
+    fn a_delimiter_wraps_the_selection_in_an_opted_in_field(cx: &mut TestAppContext) {
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).wrap_selection();
+                input.set_content("say foo loudly", cx);
+                input
+            });
+            InputHarness {
+                input,
+                width: px(300.),
+            }
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.run_until_parked();
+
+        for (typed, open, close) in [
+            ("(", "(", ")"),
+            (")", "(", ")"),
+            ("[", "[", "]"),
+            ("{", "{", "}"),
+            ("\"", "\"", "\""),
+            ("'", "'", "'"),
+            ("`", "`", "`"),
+        ] {
+            cx.update(|_, cx| {
+                input.update(cx, |input, cx| {
+                    input.set_content("say foo loudly", cx);
+                    input.select_range(4..7, cx);
+                })
+            });
+            cx.update(|window, cx| {
+                input.update(cx, |input, cx| {
+                    input.replace_text_in_range(None, typed, window, cx);
+                })
+            });
+            cx.read_entity(&input, |input, _| {
+                assert_eq!(
+                    input.content(),
+                    format!("say {open}foo{close} loudly"),
+                    "typing {typed}"
+                );
+                assert_eq!(
+                    input.selected_range(),
+                    5..8,
+                    "the wrapped text stays selected after typing {typed}"
+                );
+            });
+        }
+
+        // The wrap undoes as one step, restoring both text and selection.
+        cx.update(|window, cx| input.update(cx, |input, cx| input.undo(&Undo, window, cx)));
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "say foo loudly");
+            assert_eq!(input.selected_range(), 4..7);
+        });
+
+        // With nothing selected the same keystroke is a plain insert.
+        cx.update(|_, cx| input.update(cx, |input, cx| input.select_range(0..0, cx)));
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_text_in_range(None, "(", window, cx);
+            })
+        });
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "(say foo loudly");
+            assert_eq!(input.selected_range(), 1..1);
+        });
+    }
+
+    /// A field that did not opt in keeps the plain replace, and so does a
+    /// paste carrying a delimiter in one that did — the clipboard's text
+    /// always wins over the wrapping affordance.
+    #[gpui::test]
+    fn a_delimiter_replaces_without_the_opt_in_or_on_paste(cx: &mut TestAppContext) {
+        let (input, cx) = setup_input(cx, "say foo loudly", px(300.));
+        cx.update(|_, cx| input.update(cx, |input, cx| input.select_range(4..7, cx)));
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_text_in_range(None, "(", window, cx);
+            })
+        });
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "say ( loudly");
+            assert_eq!(input.selected_range(), 5..5);
+        });
+
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).wrap_selection();
+                input.set_content("say foo loudly", cx);
+                input
+            });
+            InputHarness {
+                input,
+                width: px(300.),
+            }
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("(".to_owned()));
+            input.update(cx, |input, cx| input.select_range(4..7, cx));
+        });
+        cx.update(|window, cx| input.update(cx, |input, cx| input.paste(&Paste, window, cx)));
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "say ( loudly");
+            assert_eq!(input.selected_range(), 5..5);
+        });
     }
 
     /// Type each string in sequence at `at`, advancing the caret, the way
