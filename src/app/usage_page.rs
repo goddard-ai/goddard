@@ -63,6 +63,7 @@ impl Waku {
         }
         if page == SettingsPage::Friends {
             self.probe_friends(cx);
+            self.start_friends_presence_loop(cx);
         }
         cx.notify();
     }

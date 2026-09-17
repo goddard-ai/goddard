@@ -1403,21 +1403,59 @@ impl Waku {
             .detach();
     }
 
+    /// Presence is lazy but the open page refreshes it: while Settings →
+    /// Friends stays mounted, re-probe every ~60s (the daemon still dedupes
+    /// verdicts fresher than 30s). Leaving the page or reopening it retires
+    /// the previous loop via the generation counter.
+    pub(super) fn start_friends_presence_loop(&mut self, cx: &mut Context<Self>) {
+        let generation = self.friends_probe_generation.get().wrapping_add(1);
+        self.friends_probe_generation.set(generation);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.friends_probe_generation.get() != generation
+                            || this.settings_page != Some(SettingsPage::Friends)
+                        {
+                            return false;
+                        }
+                        this.probe_friends(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     /// Send one friends command off the UI thread; results arrive through
-    /// the `friendsChanged` broadcast.
+    /// the `friendsChanged` broadcast, failures through a toast.
     pub(super) fn friends_command(
         &self,
         command: waku_client::Command,
         cx: &mut Context<Self>,
     ) {
         let client = self.daemon.client();
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(error) = client.request(Uuid::nil(), Uuid::nil(), command) {
-                    eprintln!("friends command failed: {error}");
-                }
-            })
-            .detach();
+        cx.spawn(async move |this, cx| {
+            let error = cx
+                .background_executor()
+                .spawn(async move { client.request(Uuid::nil(), Uuid::nil(), command) })
+                .await
+                .err()
+                .map(|error| error.to_string());
+            if let Some(error) = error {
+                let _ = this.update(cx, |this, cx| {
+                    this.show_toast(tr!("friends.command_failed", error = error));
+                });
+            }
+        })
+        .detach();
     }
 
     /// Fold a `settingsChanged` broadcast into the local mirrors. The

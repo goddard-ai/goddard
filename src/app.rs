@@ -1874,6 +1874,9 @@ pub struct Waku {
     friends_events: Receiver<waku_client::friends::FriendsState>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
+    /// Generation guard for the while-open presence re-probe loop — a new
+    /// loop (or leaving the page) retires the previous one.
+    friends_probe_generation: Cell<u64>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -4521,6 +4524,7 @@ impl Waku {
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),
+                friends_probe_generation: Cell::new(0),
                 sidebar_terminal_repo_roots: RefCell::new(HashMap::new()),
                 sidebar_terminal_repo_scan_fingerprint: Cell::new(None),
                 sidebar_terminal_repo_scan_generation: Cell::new(0),

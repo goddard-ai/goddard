@@ -3401,3 +3401,5 @@ friends.quarantined_hint:
   en: "This session holds files received from a friend. The agent can't open or run them until you trust the transfer."
 friends.trust:
   en: Trust files
+friends.command_failed:
+  en: "Friend command failed: {error}"
