@@ -310,6 +310,7 @@ input.filter_projects: 筛选项目
 input.search_or_enter_address: 搜索或输入网址
 input.find: 查找
 input.replace: 替换
+input.go_to_line: 行号或 行:列
 common.checking: 正在检查…
 common.refresh: 刷新
 common.recheck: 重新检查
@@ -1226,6 +1227,9 @@ find.close: 关闭（Esc）
 find.replace: 替换（Enter）
 find.replace_all: 全部替换（%{shortcut}）
 find.toggle_replace: 展开或收起替换栏
+
+go_to_line.count: "共 %{total} 行"
+go_to_line.range: "第 1–%{total} 行"
 common.dismiss_notification: 关闭通知
 common.reveal_in_finder: 在文件管理器中显示
 attachments.close_preview: 关闭图片预览

@@ -571,6 +571,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::copy_selection_action))
             .on_action(cx.listener(Self::add_to_chat_action))
             .on_action(cx.listener(Self::copy_working_directory_action))
+            .on_action(cx.listener(Self::open_go_to_line_action))
             .on_action(cx.listener(Self::open_find_action))
             .on_action(cx.listener(Self::open_find_replace_action))
             .on_action(cx.listener(Self::close_find_action))

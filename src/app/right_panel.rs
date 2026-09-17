@@ -24,7 +24,7 @@ enum TranscriptLinkRoute {
     External,
 }
 
-fn positive_number(value: &str) -> bool {
+pub(super) fn positive_number(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| byte.is_ascii_digit())
         && value.parse::<usize>().is_ok_and(|value| value > 0)
@@ -63,6 +63,40 @@ fn strip_file_location(target: &str) -> &str {
     } else {
         before_last
     }
+}
+
+/// The line target on a transcript file link — the `:line`, `:line:column`,
+/// or `#LlineCcolumn` suffix `strip_file_location` removes from the path.
+/// Mirrors that stripping exactly, so a location that survives as part of the
+/// path is never also reported here.
+fn file_link_location(target: &str) -> Option<(usize, Option<usize>)> {
+    let target = target.trim();
+    if let Some((_, fragment)) = target.rsplit_once('#')
+        && line_fragment(fragment)
+    {
+        let location = fragment.strip_prefix('L')?;
+        let (line, column) = match location.split_once('C') {
+            Some((line, column)) => (line, Some(column)),
+            None => (location, None),
+        };
+        let column = match column {
+            Some(column) => Some(column.parse().ok()?),
+            None => None,
+        };
+        return Some((line.parse().ok()?, column));
+    }
+
+    let (before_last, last) = target.rsplit_once(':')?;
+    if !positive_number(last) {
+        return None;
+    }
+    let last = last.parse().ok()?;
+    if let Some((_, line)) = before_last.rsplit_once(':')
+        && positive_number(line)
+    {
+        return Some((line.parse().ok()?, Some(last)));
+    }
+    Some((last, None))
 }
 
 fn hex_value(byte: u8) -> Option<u8> {
@@ -790,7 +824,7 @@ fn visible_working_tree_entries(
 
 /// The language name for a file, as understood by [`crate::md::highlight`].
 /// Names the lexer does not know simply render unhighlighted.
-fn file_highlighter_language(relative_path: &str) -> &'static str {
+pub(super) fn file_highlighter_language(relative_path: &str) -> &'static str {
     let path = Path::new(relative_path);
     let file_name = path
         .file_name()
@@ -1828,8 +1862,18 @@ impl Waku {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         match transcript_link_route(target, self.selected_workspace_path()) {
             TranscriptLinkRoute::ProjectFile(relative_path) => {
+                // A `file:line` target rides the same pending slot the finder
+                // uses: the editor takes focus and the jump lands once the
+                // file's first read does.
+                let location = file_link_location(target);
                 self.open_right_panel_surface(RightPanelSurface::Files, cx);
-                self.open_right_panel_file(relative_path, cx);
+                self.open_right_panel_file(relative_path.clone(), cx);
+                if let Some((line, column)) = location {
+                    self.right_panel_pending_file_focus = Some(PendingFileFocus {
+                        path: relative_path,
+                        position: Some((line, column.unwrap_or(1))),
+                    });
+                }
             }
             TranscriptLinkRoute::Finder(path) => {
                 if self.is_remote_path(&path) {
@@ -1903,6 +1947,7 @@ impl Waku {
         // washes stored mid-search. A pending finder focus handoff names one
         // of the outgoing editors too.
         self.reset_file_search_for_session(cx);
+        self.reset_go_to_line_for_session(cx);
         self.right_panel_pending_file_focus = None;
         self.reload_clean_right_panel_file_editors(cx);
         self.state.right_panel_visible = self.right_panel_visible;
@@ -4036,14 +4081,25 @@ impl Waku {
 
         // An open find bar follows whichever file this body is showing; a
         // cheap comparison every frame, one recompute on the frame after the
-        // visible file actually changes.
+        // visible file actually changes. The go-to-line bar instead closes —
+        // its live preview would be a surprise in a file it never targeted.
         self.sync_file_search_target(relative_path, cx);
+        self.sync_go_to_line_target(relative_path, cx);
         let find_bar = self.render_file_search_bar(pane_width, writable, window, cx);
 
         let theme = Theme::current(cx);
-        let field = editor_state.read(cx);
-        let line_count = field.content().split('\n').count().max(1);
-        let heights = field.wrapped_line_heights();
+        let (line_count, heights) = {
+            let field = editor_state.read(cx);
+            (
+                field.content().split('\n').count().max(1),
+                field.wrapped_line_heights(),
+            )
+        };
+        let reading = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .is_some_and(|editor| editor.reading);
+        let go_to_line_bar = self.render_go_to_line_bar(line_count, reading, window, cx);
         // A mono digit advances ~0.6em, so the gutter tracks the font size.
         let digit_width = (text_size * 0.6).ceil();
         let gutter_width = 20.0 + digit_width * (line_count.to_string().len() as f32);
@@ -4121,6 +4177,7 @@ impl Waku {
             .text_size(px(text_size))
             .line_height(px(line_height))
             .children(find_bar)
+            .children(go_to_line_bar)
             .child(
                 div()
                     .flex_1()

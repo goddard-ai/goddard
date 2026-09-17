@@ -132,6 +132,7 @@ actions!(
         ToggleFindWholeWord,
         ToggleFindRegex,
         ReplaceAllMatches,
+        OpenGoToLine,
         ExitPanelFullscreen,
         BrowserBack,
         BrowserForward,
@@ -740,6 +741,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Waku")),
         KeyBinding::new("secondary-g", FindNext, Some("Waku")),
         KeyBinding::new("secondary-shift-g", FindPrevious, Some("Waku")),
+        // VS Code's other half of the pair: ctrl-g opens go-to-line. The
+        // terminal keeps the keystroke — ^G is real input to a pty.
+        KeyBinding::new("ctrl-g", OpenGoToLine, Some("Waku && !Terminal")),
         // Scoped to the editor pane: escape closes the bar there and
         // falls through to CancelTurn anywhere else.
         KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
