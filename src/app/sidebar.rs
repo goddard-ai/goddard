@@ -1038,14 +1038,22 @@ impl Waku {
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.bg(theme.overlay_strong))
                 .tooltip(Tooltip::text(tr!("sidebar.options")))
-                .child(icon("icons/list-filter.svg", 14.0, theme.text_secondary)),
+                .child(icon("icons/ellipsis.svg", 14.0, theme.text_secondary)),
             "sidebar-options-menu",
             &menu,
             MenuAlign::BelowLeft,
             move |_| {
+                let new_project_weak = weak.clone();
                 let grouping_weak = weak.clone();
                 let ordering_weak = weak.clone();
                 vec![
+                    MenuItem::new(tr!("project.new_project"), move |_, cx| {
+                        let _ = new_project_weak.update(cx, |this, cx| {
+                            this.add_project(cx);
+                        });
+                    })
+                    .shortcut_action(&NewProject),
+                    MenuItem::Separator,
                     MenuItem::submenu_with_value(
                         tr!("sidebar.grouping"),
                         sidebar_grouping_label(grouping),
@@ -1105,42 +1113,12 @@ impl Waku {
                 ]
             },
         );
-        let add_project = div()
-            .id("add-project")
-            .tab_index(0)
-            .w(px(20.0))
-            .h(px(22.0))
-            .rounded(px(8.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text_with_action(
-                tr!("project.new_project"),
-                &NewProject,
-            ))
-            .child(icon("icons/folder-new.svg", 14.0, theme.text_secondary))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, _, cx| {
-                cx.stop_propagation();
-                this.add_project(cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.add_project(cx);
-                    cx.stop_propagation();
-                }
-            }));
 
         div()
             .flex()
             .items_center()
             .gap(px(2.0))
             .child(options)
-            .child(add_project)
     }
 
     fn render_sidebar_action_row(
