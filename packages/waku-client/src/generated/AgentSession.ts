@@ -72,7 +72,13 @@ archived_at?: number | null,
  * When the session was pinned to the top of the sidebar, unix seconds.
  * `None` while the session sits in its ordinary group.
  */
-pinned_at?: number | null, provider_cursor: ProviderResumeCursor | null,
+pinned_at?: number | null,
+/**
+ * Received-file sessions start quarantined: the transfer's files sit in
+ * the workspace untouched until the user explicitly trusts them, and
+ * the daemon refuses prompts while this is set.
+ */
+quarantined?: boolean, provider_cursor: ProviderResumeCursor | null,
 /**
  * Slash commands the provider reported for this session's live process,
  * kept so a resumed session still completes them before its next

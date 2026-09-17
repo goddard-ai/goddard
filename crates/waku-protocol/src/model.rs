@@ -1240,6 +1240,11 @@ pub struct AgentSession {
     /// `None` while the session sits in its ordinary group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned_at: Option<u64>,
+    /// Received-file sessions start quarantined: the transfer's files sit in
+    /// the workspace untouched until the user explicitly trusts them, and
+    /// the daemon refuses prompts while this is set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub quarantined: bool,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Slash commands the provider reported for this session's live process,
@@ -1326,6 +1331,7 @@ impl AgentSession {
             last_reply_at: None,
             archived_at: None,
             pinned_at: None,
+            quarantined: false,
             detail_loaded: true,
             provider_cursor: None,
             available_commands: Vec::new(),
@@ -1369,6 +1375,7 @@ impl AgentSession {
             last_reply_at: self.last_reply_at,
             archived_at: self.archived_at,
             pinned_at: self.pinned_at,
+            quarantined: self.quarantined,
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,

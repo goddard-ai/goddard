@@ -76,4 +76,4 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, };
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, note: string | null, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, };

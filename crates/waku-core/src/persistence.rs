@@ -1619,6 +1619,9 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at: last_reply_at.map(|at| at as u64),
         archived_at: archived_at.map(|at| at as u64),
         pinned_at: pinned_at.map(|at| at as u64),
+        // Skeletons err toward locked: hydration replaces the flag, and a
+        // transfer session must never look trusted before its detail loads.
+        quarantined: true,
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,

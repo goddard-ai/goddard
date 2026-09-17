@@ -3585,9 +3585,103 @@ impl Waku {
         }
     }
 
+    /// The composer slot for a quarantined received-file session: a card
+    /// explaining the boundary plus the Trust action that clears it.
+    fn render_quarantine_card(&self, session_id: Uuid, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        div()
+            .flex_none()
+            .px(px(20.0 - COMPOSER_OVERHANG))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                    .mx_auto()
+                    .rounded(px(18.0))
+                    .border(hairline())
+                    .border_color(theme.border)
+                    .bg(theme.composer)
+                    .py(px(10.0))
+                    .px(px(14.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icon("icons/lock.svg", 14.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text)
+                                    .child(tr!("friends.quarantined_title")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("friends.quarantined_hint")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("trust-transfer")
+                            .tab_index(0)
+                            .focus_visible(|style| {
+                                style.border(hairline()).border_color(theme.accent)
+                            })
+                            .h(px(26.0))
+                            .px(px(10.0))
+                            .flex_none()
+                            .rounded(px(8.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .cursor_default()
+                            .bg(theme.inverse)
+                            .hover(|element| element.bg(theme.inverse.opacity(0.85)))
+                            .child(icon("icons/lock-open.svg", 12.0, theme.on_inverse))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.on_inverse)
+                                    .child(tr!("friends.trust")),
+                            )
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.trust_transfer_session(session_id, cx);
+                            }))
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, _window, cx| {
+                                    if !event.keystroke.modifiers.modified()
+                                        && matches!(
+                                            event.keystroke.key.as_str(),
+                                            "enter" | "space"
+                                        )
+                                    {
+                                        this.trust_transfer_session(session_id, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            )),
+                    ),
+            )
+    }
+
     pub(super) fn render_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let session = self.composer_session();
+        // A received-file session stays quarantined until the user trusts
+        // it — the prompt field is replaced by a trust card so Enter can't
+        // start the agent on untrusted files. The daemon refuses anyway;
+        // this is the legible boundary.
+        if let Some(session) =
+            session.filter(|session| session.quarantined && session.detail_loaded)
+        {
+            return self.render_quarantine_card(session.id, cx);
+        }
         let session_id = session.map(|session| session.id);
         let preparing = session.is_some_and(|session| {
             self.submission_preparations.contains(&session.id)

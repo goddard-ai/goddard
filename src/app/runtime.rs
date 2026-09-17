@@ -4422,6 +4422,12 @@ impl Waku {
         else {
             return;
         };
+        // Quarantined transfer sessions can't start turns — the trust card
+        // replaces the composer, so reaching this means a path bypassed the
+        // UI. The daemon refuses too; drop the submission here as well.
+        if session.quarantined {
+            return;
+        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);

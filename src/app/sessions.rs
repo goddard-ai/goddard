@@ -1297,6 +1297,22 @@ impl Waku {
         cx.notify();
     }
 
+    /// Lift a received-file session out of quarantine: from here the daemon
+    /// accepts prompts for it and the agent may touch the transfer's files.
+    /// Same mutation-then-save shape as pin/archive.
+    pub(super) fn trust_transfer_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let now = unix_time();
+        if let Some(session) = self.state.session_mut(session_id) {
+            if !session.quarantined {
+                return;
+            }
+            session.quarantined = false;
+            session.updated_at = now;
+        }
+        self.save();
+        cx.notify();
+    }
+
     pub(super) fn toggle_session_pin_action(
         &mut self,
         _: &ToggleSessionPin,

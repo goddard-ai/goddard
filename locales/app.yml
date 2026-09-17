@@ -3395,3 +3395,9 @@ friends.show_in_finder:
   en: Show in Finder
 friends.transfers_active:
   en: "{count} transfer(s) in progress — open Friends"
+friends.quarantined_title:
+  en: Quarantined files
+friends.quarantined_hint:
+  en: "This session holds files received from a friend. The agent can't open or run them until you trust the transfer."
+friends.trust:
+  en: Trust files

@@ -427,6 +427,7 @@ fn create_transfer_session(
         turn.completed_at = Some(now);
     }
     session.status = SessionStatus::Idle;
+    session.quarantined = true;
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
@@ -1152,6 +1153,15 @@ impl Backend for WakuBackend {
                 )
             }
             command => {
+                // Quarantined transfer sessions hold received files that the
+                // user hasn't trusted yet — the composer shows a trust card
+                // instead of a prompt field, and the daemon refuses anything
+                // that could start the agent on them.
+                if matches!(command, Command::Prompt { .. } | Command::Steer { .. })
+                    && self.session_quarantined(session_id)
+                {
+                    bail!("received files are quarantined until trusted");
+                }
                 let driver = {
                     let sessions = self.sessions.lock();
                     let (active_runtime_id, driver) = sessions
@@ -2354,6 +2364,17 @@ impl WakuBackend {
         Ok(ResponsePayload::AgentSessionCreated { session_id })
     }
 
+    /// Persisted quarantine flag — set on received-file sessions until the
+    /// user trusts the transfer. Checked against `task_state`, not the
+    /// running-driver map, so it holds for sessions that aren't running.
+    fn session_quarantined(&self, session_id: Uuid) -> bool {
+        self.task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.quarantined)
+    }
+
     /// `agent prompt`: deliver a message to an existing task, by Waku task
     /// id or provider-native thread id. Queue mode holds the prompt in a
     /// daemon-side per-session queue until the target is idle; steer mode
@@ -2373,6 +2394,9 @@ impl WakuBackend {
             bail!("agent prompts require a prompt");
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        if self.session_quarantined(target) {
+            bail!("received files are quarantined until trusted");
+        }
         match delivery {
             AgentPromptDelivery::Steer => {
                 let driver = self
