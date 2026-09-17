@@ -11,10 +11,10 @@
 //! and republishes, so they flow through the same handlers as live requests.
 //!
 //! Turn lifecycle is command-then-event: `turn/start` is admission only, and
-//! the outcome arrives as `turn/completed`. Prompts therefore emit
-//! `TurnStarted` eagerly and let `turn/completed` settle.
+//! the outcome arrives as `turn/completed`. `TurnStarted` follows the ack's
+//! `disposition` — a queued submission starts when `turn/started` arrives.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::thread;
 use std::time::Duration;
 
@@ -90,6 +90,8 @@ struct WorkerState {
     /// terminal, so the list lines up with Goddard's provider-turn count.
     /// Only `completed` entries are legal `session/fork` boundaries.
     finished_turns: Vec<FinishedTurn>,
+    /// Turns with an open retry card, completed when the turn ends.
+    retried_turns: HashSet<String>,
     items: HashMap<String, ItemState>,
     approvals: HashMap<String, PendingApproval>,
     user_inputs: HashMap<String, PendingUserInput>,
@@ -213,6 +215,7 @@ impl MuseDriver {
             } else {
                 Vec::new()
             },
+            retried_turns: HashSet::new(),
             items: HashMap::new(),
             approvals: HashMap::new(),
             user_inputs: HashMap::new(),
@@ -326,6 +329,18 @@ fn approval_mode(mode: RuntimeMode) -> &'static str {
     }
 }
 
+/// The reverse of [`approval_mode`]: the host's effective mode back onto
+/// Goddard's vocabulary. `denyUnmatched` has no analogue — it lands on the
+/// closest restrictive rung.
+fn runtime_mode(mode: &str) -> Option<RuntimeMode> {
+    match mode {
+        "promptUnmatched" | "denyUnmatched" => Some(RuntimeMode::Ask),
+        "onRequest" => Some(RuntimeMode::Auto),
+        "allowAll" => Some(RuntimeMode::FullAccess),
+        _ => None,
+    }
+}
+
 /// The closed MSP effort vocabulary; anything else is omitted rather than
 /// rejected by the host as invalid params.
 fn reasoning_effort(effort: Option<&str>) -> Option<&str> {
@@ -353,7 +368,6 @@ fn muse_error(context: &str, error: &MuseError) -> anyhow::Error {
 fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerState) -> bool {
     match message {
         DriverCommand::Prompt(text) => {
-            let _ = worker.events.send(DriverEvent::TurnStarted);
             let mut params = json!({
                 "commandId": worker.service.mint_command_id(),
                 "sessionId": state.session_id,
@@ -366,14 +380,31 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
             if let Some(effort) = reasoning_effort(state.reasoning_effort.as_deref()) {
                 params["reasoningEffort"] = json!(effort);
             }
-            if let Err(error) = worker.service.call("turn/start", params) {
-                let _ = worker.events.send(DriverEvent::Error(
-                    muse_error("Muse Code rejected the prompt", &error).to_string(),
-                ));
-                let _ = worker.events.send(DriverEvent::TurnFinished {
-                    success: false,
-                    summary: Some(tr!("errors.provider_start_turn", provider = "Muse Code")),
-                });
+            match worker.service.call("turn/start", params) {
+                Ok(result) => {
+                    // `disposition` is authoritative: a queued submission
+                    // emits no TurnStarted until `turn/started` arrives at
+                    // launch, so the local turn does not count as
+                    // provider-started early.
+                    let started = result.get("disposition").and_then(Value::as_str)
+                        == Some("started")
+                        || result.get("startedNewTurn").and_then(Value::as_bool) == Some(true);
+                    if started {
+                        if let Some(turn_id) = result.get("turnId").and_then(Value::as_str) {
+                            state.active_turn = Some(turn_id.to_owned());
+                        }
+                        let _ = worker.events.send(DriverEvent::TurnStarted);
+                    }
+                }
+                Err(error) => {
+                    let _ = worker.events.send(DriverEvent::Error(
+                        muse_error("Muse Code rejected the prompt", &error).to_string(),
+                    ));
+                    let _ = worker.events.send(DriverEvent::TurnFinished {
+                        success: false,
+                        summary: Some(tr!("errors.provider_start_turn", provider = "Muse Code")),
+                    });
+                }
             }
         }
         DriverCommand::Steer(text) => {
@@ -416,7 +447,10 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
             if let Some(turn_id) = state.active_turn.as_deref() {
                 params["turnId"] = json!(turn_id);
             }
-            if let Err(error) = worker.service.call("turn/cancel", params) {
+            // `turn/interrupt` is the priority-lane stop gesture the schema
+            // defines for "the user pressed stop"; no retract pairing —
+            // Goddard keeps the submission in the transcript.
+            if let Err(error) = worker.service.call("turn/interrupt", params) {
                 let _ = worker.events.send(DriverEvent::Error(tr!(
                     "errors.stop_provider",
                     provider = "Muse Code",
@@ -571,6 +605,7 @@ fn switch_session(
     state.session_id = session_id.clone();
     state.active_turn = None;
     state.finished_turns = finished_turns(&worker.service, &session_id).unwrap_or_default();
+    state.retried_turns.clear();
     state.items.clear();
     state.approvals.clear();
     state.user_inputs.clear();
@@ -669,19 +704,42 @@ fn handle_event(
                     turn_id,
                     params.get("terminal").and_then(Value::as_str) == Some("completed"),
                 );
+                if state.retried_turns.remove(turn_id) {
+                    let _ = events.send(DriverEvent::RichActivity(
+                        ActivityItem::new(
+                            Some(format!("muse-retry:{turn_id}")),
+                            ActivityKind::Tool,
+                            "Model call recovered",
+                            None,
+                            true,
+                        )
+                        .with_tool_name(Some("muse-retry")),
+                    ));
+                }
             }
             let (success, summary) = turn_outcome(params);
             let _ = events.send(DriverEvent::TurnFinished { success, summary });
         }
         // A retracted turn ran, then its output was withdrawn — it still
         // counts toward the provider-turn index but can never be a fork
-        // boundary. `turn/unqueued` names a submission that never started.
-        "turn/retracted" => {
+        // boundary. `turn/unqueued` names a queued submission reclaimed
+        // before launch. Neither emits `turn/completed`, so both settle the
+        // open shell here — otherwise the turn spins forever.
+        "turn/retracted" | "turn/unqueued" => {
             if let Some(turn_id) = params.get("turnId").and_then(Value::as_str) {
-                record_finished_turn(state, turn_id, false);
+                if state.active_turn.as_deref() == Some(turn_id) {
+                    state.active_turn = None;
+                }
+                if method == "turn/retracted" {
+                    record_finished_turn(state, turn_id, false);
+                }
             }
+            let _ = events.send(DriverEvent::TurnFinished {
+                success: false,
+                summary: None,
+            });
         }
-        "turn/unqueued" | "session/branchChanged" => {}
+        "session/branchChanged" => {}
         "turn/retryScheduled" => {
             let turn_id = params.get("turnId").and_then(Value::as_str).unwrap_or("");
             let next = params
@@ -698,6 +756,7 @@ fn handle_event(
             } else {
                 "Model call failed — retrying".to_owned()
             };
+            state.retried_turns.insert(turn_id.to_owned());
             let _ = events.send(DriverEvent::RichActivity(
                 ActivityItem::new(
                     Some(format!("muse-retry:{turn_id}")),
@@ -781,6 +840,9 @@ fn handle_event(
                 .filter_map(user_input_question)
                 .collect::<Vec<_>>();
             if questions.is_empty() {
+                let _ = events.send(DriverEvent::Error(
+                    "Muse Code issued a question request with no usable questions".to_owned(),
+                ));
                 return;
             }
             let _ = events.send(DriverEvent::UserInputRequested {
@@ -815,7 +877,18 @@ fn handle_event(
                 .and_then(Value::as_str)
                 .map(str::to_owned);
         }
-        "session/approvalModeChanged" => {}
+        "session/approvalModeChanged" => {
+            // The mode can change outside ApplyOptions (hotkey, config
+            // reload) — resync so a later ApplyOptions does not skip the
+            // `session/setApprovalMode` the drift actually needs.
+            if let Some(mode) = params
+                .get("mode")
+                .and_then(Value::as_str)
+                .and_then(runtime_mode)
+            {
+                state.mode = mode;
+            }
+        }
         // A dropped delivery hole: durable events between `after` and `next`
         // are re-read through `view/page` and fed back through this handler.
         // `item/delta` never pages, so text lost in a gap is repaired by the
@@ -833,8 +906,9 @@ fn handle_item(events: &DriverEventSender, state: &mut WorkerState, item: &Value
     let kind = item.get("kind").and_then(Value::as_str).unwrap_or("");
     let item_id = item.get("itemId").and_then(Value::as_str).unwrap_or("");
     let status = item.get("status").and_then(Value::as_str).unwrap_or("");
-    let terminal =
-        completed || matches!(status, "completed" | "failed" | "cancelled" | "retracted");
+    // The status vocabulary is open — anything other than `inProgress` is
+    // terminal, so `rejected`/`timedOut`/future statuses settle the card.
+    let terminal = completed || (!status.is_empty() && status != "inProgress");
 
     match kind {
         "userMessage" => {}
@@ -846,8 +920,8 @@ fn handle_item(events: &DriverEventSender, state: &mut WorkerState, item: &Value
             entry.kind = kind.to_owned();
             if let Some(text) = item.get("text").and_then(Value::as_str)
                 && text.len() > entry.streamed
+                && let Some(suffix) = text.get(entry.streamed..)
             {
-                let suffix = &text[entry.streamed.min(text.len())..];
                 entry.streamed = text.len();
                 if !suffix.is_empty() {
                     let _ = events.send(DriverEvent::TextDelta(suffix.to_owned()));
@@ -860,6 +934,9 @@ fn handle_item(events: &DriverEventSender, state: &mut WorkerState, item: &Value
                 streamed: 0,
             });
             entry.kind = kind.to_owned();
+            // Parts join WITHOUT a separator: `summary.n` deltas concatenate
+            // to each part's exact bytes, so `streamed` (a raw delta byte
+            // count) only lines up with the join when nothing is inserted.
             let text = item
                 .get("summary")
                 .and_then(Value::as_array)
@@ -868,12 +945,13 @@ fn handle_item(events: &DriverEventSender, state: &mut WorkerState, item: &Value
                         .iter()
                         .filter_map(Value::as_str)
                         .collect::<Vec<_>>()
-                        .join("\n")
+                        .join("")
                 })
                 .or_else(|| item.get("text").and_then(Value::as_str).map(str::to_owned))
                 .unwrap_or_default();
-            if text.len() > entry.streamed {
-                let suffix = &text[entry.streamed..];
+            if text.len() > entry.streamed
+                && let Some(suffix) = text.get(entry.streamed..)
+            {
                 entry.streamed = text.len();
                 let _ = events.send(DriverEvent::ReasoningDelta(suffix.to_owned()));
             }
@@ -904,7 +982,18 @@ fn item_activity(item: &Value, kind: &str, terminal: bool) -> Option<ActivityIte
         .get("failureReason")
         .and_then(Value::as_str)
         .or_else(|| item.get("visibleOutput").and_then(Value::as_str))
-        .or_else(|| item.get("result").and_then(Value::as_str))
+        .or_else(|| {
+            // `result` is a string for some kinds and a SubagentResult
+            // object for subagents — read its summary/text fields too.
+            item.get("result").and_then(|result| {
+                result.as_str().or_else(|| {
+                    result
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .or_else(|| result.get("text").and_then(Value::as_str))
+                })
+            })
+        })
         .or_else(|| item.get("message").and_then(Value::as_str))
         .map(|text| truncate(text, MAX_DETAIL_CHARS));
     let args = item.get("args").and_then(Value::as_str);
@@ -1081,6 +1170,11 @@ fn emit_permission(events: &DriverEventSender, params: &Value, approval_id: &str
         })
         .unwrap_or_default();
     if options.is_empty() {
+        // The approval stays pending host-side; a silent return would hang
+        // the session on a prompt the user can never see.
+        let _ = events.send(DriverEvent::Error(
+            "Muse Code issued an approval request with no usable choices".to_owned(),
+        ));
         return;
     }
     let _ = events.send(DriverEvent::Permission {
@@ -1179,7 +1273,13 @@ fn user_input_answers(questions: &[Value], answers: &[UserInputAnswer]) -> Value
                 entry["selectedLabel"] = json!(first);
             }
         } else if !answer.answers.is_empty() {
-            entry["freeText"] = json!(answer.answers.join("\n"));
+            // The wire caps freeText at 500 chars.
+            entry["freeText"] = json!(answer
+                .answers
+                .join("\n")
+                .chars()
+                .take(500)
+                .collect::<String>());
         }
         out.push(entry);
     }
@@ -1650,6 +1750,7 @@ mod tests {
             reasoning_effort: None,
             active_turn: None,
             finished_turns: Vec::new(),
+            retried_turns: HashSet::new(),
             items: HashMap::new(),
             approvals: HashMap::new(),
             user_inputs: HashMap::new(),

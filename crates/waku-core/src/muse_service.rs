@@ -8,8 +8,7 @@
 //! last session handle drops.
 //!
 //! Demultiplexing happens here, not in the driver: every view notification
-//! names its `sessionId` (the one exception, the `session/started` broadcast,
-//! nests it under `session.sessionId`), and server-initiated
+//! names its `sessionId`, and server-initiated
 //! `approval/request` / `userInput/request` frames are acknowledged with `{}`
 //! — "a client is handling this" — and republished so the owning session's
 //! driver renders the prompt and later answers through `approval/decide` /
@@ -495,17 +494,12 @@ impl MuseHost {
             }
         }
 
-        let session_id = if method == "session/started" {
-            params
-                .get("session")
-                .and_then(|session| session.get("sessionId"))
-                .and_then(Value::as_str)
-        } else {
-            params.get("sessionId").and_then(Value::as_str)
-        };
-        let Some(session_id) = session_id.map(str::to_owned) else {
+        // Every published notification names its `sessionId` directly; a
+        // frame without one has no subscriber to route to.
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
             return;
         };
+        let session_id = session_id.to_owned();
         self.publish(
             &session_id,
             MuseFrame::Event {
