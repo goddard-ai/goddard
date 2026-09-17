@@ -82,18 +82,16 @@ impl ShortcutHint {
                     // not hold during a window's first render. The `_in`
                     // lookup returns `None` there instead; fall back to an
                     // empty stack so context-free bindings still resolve.
-                    None => window
-                        .focused(cx)
-                        .and_then(|focus| {
-                            window.highest_precedence_binding_for_action_in(
-                                action.as_ref(),
-                                &focus,
-                            )
-                        })
-                        .or_else(|| {
-                            highest_precedence_binding(action.as_ref(), &[], shadowed_by, cx)
-                        }),
-                }?;
+                    None => window.focused(cx).and_then(|focus| {
+                        window.highest_precedence_binding_for_action_in(
+                            action.as_ref(),
+                            &focus,
+                        )
+                    }),
+                }
+                .or_else(|| {
+                    highest_precedence_binding(action.as_ref(), &[], shadowed_by, cx)
+                })?;
                 Some(binding_label(&binding))
             }
         }
