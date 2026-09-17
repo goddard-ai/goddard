@@ -168,6 +168,15 @@ const downloadUrlPrefix =
 const historyCount = Number(process.env.WAKU_HISTORY_COUNT ?? "15");
 const skipHistory = process.env.WAKU_NO_HISTORY === "1";
 
+// Publishing uploads straight to the release bucket and updates the feeds —
+// that only ever happens from CI. Local runs must pass --local (or one of
+// the flags that imply it); WAKU_ALLOW_LOCAL_PUBLISH=1 is the escape hatch.
+if (publishing && !process.env.GITHUB_ACTIONS && process.env.WAKU_ALLOW_LOCAL_PUBLISH !== "1") {
+  throw new Error(
+    "Publishing is CI-only. Rerun with --local for a local build, " +
+      "or set WAKU_ALLOW_LOCAL_PUBLISH=1 to override.",
+  );
+}
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
 }
