@@ -12,18 +12,12 @@ fragment per change (one bullet per file) so parallel work never conflicts
 here. The required prefix picks the release-notes section: `highlight-` for
 headline features, `feat-` for other features, `fix-` for bugs that existed
 in a released version. At release time `bun run changelog` folds every
-fragment plus any `## [unreleased]` bullets into a `## [<version>]` section
-for the version in `Cargo.toml`, grouped under `### Highlights`,
-`### Features`, and `### Fixed`.
+fragment into a `## [<version>]` section for the version in `Cargo.toml`,
+grouped under `### Highlights`, `### Features`, and `### Fixed`.
 
 Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
-
-## [unreleased]
-
-- Fix right-panel surface chooser cards clipping their descriptions when the UI font size is increased
-- Hide the app with Cmd+H on macOS
 
 ## [0.1.19]
 

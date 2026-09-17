@@ -2,8 +2,8 @@
 //
 // Release notes are written as fragments — one Markdown file per change under
 // `.changelog/` — so parallel work never conflicts on CHANGELOG.md itself.
-// `bun run changelog` folds every fragment plus any `## [unreleased]` bullets
-// into a `## [<version>]` section for the version in Cargo.toml.
+// `bun run changelog` folds every fragment into a `## [<version>]` section
+// for the version in Cargo.toml, grouped by the filename's category prefix.
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -67,9 +67,8 @@ const CATEGORIES = [
   { prefix: "fix-", heading: "Fixed" },
 ] as const;
 
-/** Fold `.changelog/*.md` fragments (and any `## [unreleased]` bullets) into a
- *  `## [<version>]` section grouped by category, then delete the consumed
- *  fragments. */
+/** Fold `.changelog/*.md` fragments into a `## [<version>]` section grouped
+ *  by category, then delete the consumed fragments. */
 export async function collectChangelog(): Promise<void> {
   const version = cargoVersion();
   const changelog = await Bun.file(changelogPath).text();
@@ -101,54 +100,26 @@ export async function collectChangelog(): Promise<void> {
     ).trim();
     if (body) groups.get(category.heading)!.push(body);
   }
-  const unreleased = extractReleaseNotes(changelog, "unreleased");
 
   const parts: string[] = [];
-  if (unreleased) parts.push(unreleased);
   for (const { heading } of CATEGORIES) {
     const items = groups.get(heading)!;
     if (items.length > 0) parts.push(`### ${heading}\n\n${items.join("\n")}`);
   }
   if (parts.length === 0) {
-    throw new Error(
-      "Nothing to release: .changelog/ has no fragments and " +
-        "## [unreleased] is empty.",
-    );
+    throw new Error("Nothing to release: .changelog/ has no fragments.");
   }
 
   const section = `## [${version}]\n\n${parts.join("\n\n")}\n`;
   const lines = changelog.split("\n");
-  const unreleasedIdx = lines.findIndex((line) =>
-    /^##\s+\[?unreleased\]?/i.test(line),
-  );
-  const afterUnreleased =
-    unreleasedIdx === -1
-      ? -1
-      : lines.findIndex(
-          (line, index) => index > unreleasedIdx && /^##\s+/.test(line),
-        );
-  const cut = afterUnreleased === -1 ? lines.length : afterUnreleased;
-
-  let out: string;
-  if (unreleasedIdx === -1) {
-    // No staging section: insert before the first version heading.
-    const firstHeading = lines.findIndex((line) => /^##\s+/.test(line));
-    const at = firstHeading === -1 ? lines.length : firstHeading;
-    out = [
-      ...lines.slice(0, at),
-      section.trimEnd(),
-      "",
-      ...lines.slice(at),
-    ].join("\n");
-  } else {
-    out = [
-      ...lines.slice(0, unreleasedIdx + 1),
-      "",
-      section.trimEnd(),
-      "",
-      ...lines.slice(cut),
-    ].join("\n");
-  }
+  const firstHeading = lines.findIndex((line) => /^##\s+/.test(line));
+  const at = firstHeading === -1 ? lines.length : firstHeading;
+  const out = [
+    ...lines.slice(0, at),
+    section.trimEnd(),
+    "",
+    ...lines.slice(at),
+  ].join("\n");
   await Bun.write(
     changelogPath,
     `${out.replace(/\n{3,}/g, "\n\n").trimEnd()}\n`,

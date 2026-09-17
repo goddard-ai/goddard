@@ -1,1 +1,1 @@
-- Add UI and code font family pickers and a separate terminal font size to Appearance settings
+- Add UI and code font family pickers and a separate terminal font size to Appearance settings; right-panel cards adapt cleanly when the UI font size is increased

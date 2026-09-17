@@ -1,0 +1,1 @@
+- Hide the app with Cmd+H on macOS
