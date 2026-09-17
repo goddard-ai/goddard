@@ -2342,6 +2342,10 @@ impl Waku {
         if old_count == 0 {
             self.sidebar_list_state
                 .reset_with_uniform_height(rows.len(), px(SIDEBAR_SESSION_ROW_HEIGHT));
+            // The offset persisted at quit can only land once rows exist.
+            if let Some(offset) = self.pending_sidebar_scroll.take() {
+                self.sidebar_list_state.scroll_to(offset);
+            }
         } else {
             self.sidebar_list_state
                 .splice(prefix..old_count, rows.len() - prefix);

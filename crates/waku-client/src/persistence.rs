@@ -396,6 +396,107 @@ pub struct PersistedWindowState {
     pub display: Option<Uuid>,
 }
 
+/// A spot in the main column's back/forward history that survives relaunch.
+/// Terminals never appear: their PTYs die with the process, so a stored
+/// entry could only point at a dead surface.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedNavigationLocation {
+    Task(Uuid),
+    ProjectsPage(Uuid),
+}
+
+/// A virtualized list's logical scroll position — row index plus the pixel
+/// offset inside that row. Mirrors `gpui::ListOffset` without the gpui type.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PersistedListOffset {
+    pub item_ix: usize,
+    pub offset_in_item: f32,
+}
+
+/// A right-panel tab that can be reopened without runtime objects. Terminal,
+/// browser, and background-work surfaces are omitted: their PTYs, webviews,
+/// and output buffers die with the app.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedRightPanelSurface {
+    Files,
+    Diff,
+    File(String),
+    PullRequest { number: u64 },
+    GitHub(Uuid),
+}
+
+/// A right-panel surface maximized over the window, if one was.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PersistedFullscreenSurface {
+    pub surface: PersistedRightPanelSurface,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// The Settings page left open across a relaunch, if any. Mirrors
+/// `app::SettingsPage`.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedSettingsPage {
+    General,
+    Providers,
+    Skills,
+    Archived,
+    Usage,
+    Daemon,
+    ComputerUse,
+    Commands,
+    Appearance,
+    Experiments,
+}
+
+/// The Review surface's chosen diff source — mirrors `review_diff::Source`
+/// so the app crate can keep its own enum.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedDiffSource {
+    LastTurn {
+        session_id: Uuid,
+        turn_id: Uuid,
+        turn_count: usize,
+    },
+    Uncommitted,
+    Unstaged,
+    Staged,
+    Committed,
+    Branch,
+    Commit,
+}
+
+/// The right panel's per-session state that survives relaunch: which tabs
+/// were open and the file-tree/diff browsing state around them. Editor
+/// contents and diff snapshots reload from disk on demand.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PersistedRightPanelState {
+    pub visible: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surfaces: Vec<PersistedRightPanelSurface>,
+    /// Index into `surfaces` — already remapped past dropped runtime tabs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_surface: Option<usize>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub expanded_paths: HashSet<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_selected_path: Option<String>,
+    /// `None` keeps the default width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_tree_width: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_selected_file: Option<usize>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub diff_expanded_paths: HashSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_source: Option<PersistedDiffSource>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -614,6 +715,27 @@ struct AppState {
     markdown_preview: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window_state: Option<PersistedWindowState>,
+    /// Main-column back/forward history. `Terminal` entries are dropped on
+    /// save — see [`PersistedNavigationLocation`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    navigation_back: Vec<PersistedNavigationLocation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    navigation_forward: Vec<PersistedNavigationLocation>,
+    /// Reading position each task's transcript held when last on screen.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    transcript_scroll_positions: HashMap<Uuid, PersistedListOffset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sidebar_scroll: Option<PersistedListOffset>,
+    /// The Projects page claiming the main column, if it was on screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    projects_page: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    settings_page: Option<PersistedSettingsPage>,
+    /// Parked right-panel state per task, plus the selected task's live one.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fullscreen_surface: Option<PersistedFullscreenSurface>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -749,6 +871,26 @@ pub struct PersistedState {
     pub markdown_preview: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_state: Option<PersistedWindowState>,
+    /// Main-column back/forward history, sans terminal entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation_back: Vec<PersistedNavigationLocation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation_forward: Vec<PersistedNavigationLocation>,
+    /// Reading position each task's transcript held when last on screen.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub transcript_scroll_positions: HashMap<Uuid, PersistedListOffset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_scroll: Option<PersistedListOffset>,
+    /// The Projects page claiming the main column, if it was on screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projects_page: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_page: Option<PersistedSettingsPage>,
+    /// Parked right-panel state per task, plus the selected task's live one.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fullscreen_surface: Option<PersistedFullscreenSurface>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
     #[serde(default)]
@@ -852,6 +994,14 @@ impl PersistedState {
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
             window_state: None,
+            navigation_back: Vec::new(),
+            navigation_forward: Vec::new(),
+            transcript_scroll_positions: HashMap::new(),
+            sidebar_scroll: None,
+            projects_page: None,
+            settings_page: None,
+            right_panel_sessions: HashMap::new(),
+            fullscreen_surface: None,
             computer_use_enabled: false,
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
@@ -1093,6 +1243,14 @@ impl PersistedState {
             right_panel_width: self.right_panel_width,
             markdown_preview: self.markdown_preview,
             window_state: self.window_state,
+            navigation_back: self.navigation_back.clone(),
+            navigation_forward: self.navigation_forward.clone(),
+            transcript_scroll_positions: self.transcript_scroll_positions.clone(),
+            sidebar_scroll: self.sidebar_scroll,
+            projects_page: self.projects_page,
+            settings_page: self.settings_page,
+            right_panel_sessions: self.right_panel_sessions.clone(),
+            fullscreen_surface: self.fullscreen_surface.clone(),
         }
     }
 
@@ -1156,6 +1314,14 @@ impl PersistedState {
         self.right_panel_width = app_state.right_panel_width;
         self.markdown_preview = app_state.markdown_preview;
         self.window_state = app_state.window_state;
+        self.navigation_back = app_state.navigation_back;
+        self.navigation_forward = app_state.navigation_forward;
+        self.transcript_scroll_positions = app_state.transcript_scroll_positions;
+        self.sidebar_scroll = app_state.sidebar_scroll;
+        self.projects_page = app_state.projects_page;
+        self.settings_page = app_state.settings_page;
+        self.right_panel_sessions = app_state.right_panel_sessions;
+        self.fullscreen_surface = app_state.fullscreen_surface;
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {
@@ -1682,9 +1848,7 @@ impl StateStore {
                 .sessions
                 .iter()
                 .filter(|session| {
-                    dirty_ids.contains(&session.id)
-                        && session.has_started()
-                        && owned(&session.id)
+                    dirty_ids.contains(&session.id) && session.has_started() && owned(&session.id)
                 })
                 .cloned()
                 .collect();

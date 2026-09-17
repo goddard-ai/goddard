@@ -2598,6 +2598,7 @@ impl Waku {
     }
 
     pub(super) fn save(&mut self) {
+        self.capture_ui_state();
         self.last_stream_save = Instant::now();
         let daemon_error = self
             .daemon

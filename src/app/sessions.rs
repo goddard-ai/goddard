@@ -403,6 +403,169 @@ impl Waku {
         cx.notify();
     }
 
+    /// Mirror runtime-only UI state — back/forward history, scroll positions,
+    /// open panels — into `self.state` so the next `save` carries it to disk.
+    /// The dev watcher's relaunch can SIGTERM the app past its quit hooks, so
+    /// state survives only when a routine save already holds it.
+    pub(super) fn capture_ui_state(&mut self) {
+        self.store_transcript_scroll_position();
+        self.state.navigation_back = self
+            .session_navigation
+            .back
+            .iter()
+            .filter_map(|location| persisted_location(*location))
+            .collect();
+        self.state.navigation_forward = self
+            .session_navigation
+            .forward
+            .iter()
+            .filter_map(|location| persisted_location(*location))
+            .collect();
+        self.state.transcript_scroll_positions = self
+            .transcript_scroll_positions
+            .iter()
+            .map(|(session_id, offset)| (*session_id, persisted_list_offset(*offset)))
+            .collect();
+        let sidebar_top = self.sidebar_list_state.logical_scroll_top();
+        self.state.sidebar_scroll = (sidebar_top.item_ix > 0
+            || sidebar_top.offset_in_item > Pixels::ZERO)
+            .then(|| persisted_list_offset(sidebar_top));
+        self.state.projects_page = self.projects_page;
+        self.state.settings_page = self.settings_page.map(persisted_settings_page);
+        self.state.fullscreen_surface =
+            self.fullscreen_surface
+                .clone()
+                .and_then(|(surface, detail)| {
+                    persisted_panel_surface(&surface)
+                        .map(|surface| PersistedFullscreenSurface { surface, detail })
+                });
+        let mut panels: HashMap<Uuid, PersistedRightPanelState> = self
+            .right_panel_session_states
+            .iter()
+            .map(|(session_id, state)| {
+                (
+                    *session_id,
+                    persist_right_panel_state(
+                        state.visible,
+                        &state.surfaces,
+                        state.active_surface,
+                        &state.expanded_paths,
+                        &state.files_selected_path,
+                        state.file_tree_width,
+                        state.diff_selected_file,
+                        &state.diff_expanded_paths,
+                        state.diff_source,
+                    ),
+                )
+            })
+            .collect();
+        if let Some(session_id) = self.state.selected_session {
+            panels.insert(
+                session_id,
+                persist_right_panel_state(
+                    self.right_panel_visible,
+                    &self.right_panel_surfaces,
+                    self.right_panel_active_surface,
+                    &self.right_panel_expanded_paths,
+                    &self.right_panel_files_selected_path,
+                    self.right_panel_file_tree_width,
+                    self.right_panel_diff_selected_file,
+                    &self.right_panel_diff_expanded_paths,
+                    self.right_panel_diff_source,
+                ),
+            );
+        }
+        self.state.right_panel_sessions = panels;
+    }
+
+    /// Rehydrate the UI state persisted across the last quit — history,
+    /// scroll positions, panel tabs — once the entity exists. Entries naming
+    /// sessions or projects that vanished while the app was down are dropped.
+    pub(super) fn restore_ui_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let task_exists = |id: &Uuid| {
+            self.state
+                .sessions
+                .iter()
+                .any(|session| session.id == *id && session.has_started())
+        };
+        let project_exists = |id: &Uuid| {
+            self.state
+                .projects
+                .iter()
+                .any(|project| project.id == *id && !project.is_projectless())
+        };
+        let location = |entry: &PersistedNavigationLocation| match *entry {
+            PersistedNavigationLocation::Task(id) => {
+                task_exists(&id).then_some(NavigationLocation::Task(id))
+            }
+            PersistedNavigationLocation::ProjectsPage(id) => {
+                project_exists(&id).then_some(NavigationLocation::ProjectsPage(id))
+            }
+        };
+        self.session_navigation.back = self
+            .state
+            .navigation_back
+            .iter()
+            .filter_map(|entry| location(entry))
+            .collect();
+        self.session_navigation.forward = self
+            .state
+            .navigation_forward
+            .iter()
+            .filter_map(|entry| location(entry))
+            .collect();
+        // Resolved while the read-only closures are still in scope; the
+        // mutable work below happens after their borrows end.
+        let projects_page = self.state.projects_page.filter(|id| project_exists(id));
+        self.transcript_scroll_positions = self
+            .state
+            .transcript_scroll_positions
+            .iter()
+            .filter(|(id, _)| task_exists(id))
+            .map(|(id, offset)| (*id, list_offset_from_persisted(*offset)))
+            .collect();
+        self.startup_scroll_restores = self.transcript_scroll_positions.keys().copied().collect();
+        self.pending_sidebar_scroll
+            .set(self.state.sidebar_scroll.map(list_offset_from_persisted));
+        self.right_panel_session_states = self
+            .state
+            .right_panel_sessions
+            .iter()
+            .filter(|(id, _)| task_exists(id))
+            .map(|(id, state)| (*id, right_panel_state_from_persisted(state)))
+            .collect();
+        if let Some(session_id) = self.state.selected_session {
+            self.restore_right_panel_state(session_id, cx);
+            if let Some(offset) = self.transcript_scroll_positions.get(&session_id).copied() {
+                let landing = TranscriptLanding::Position(offset);
+                // The runtime attach that lands after this resets the rows
+                // again — `transcript_landing` re-applies the position there.
+                self.transcript_landing = Some((session_id, landing));
+                self.scroll_to_transcript_landing(landing, cx);
+            }
+        }
+        // After `restore_right_panel_state`, which clears any fullscreen — a
+        // surface swap starts docked — so a persisted one is reinstated here.
+        self.fullscreen_surface = self.state.fullscreen_surface.clone().map(|surface| {
+            (
+                panel_surface_from_persisted(&surface.surface),
+                surface.detail,
+            )
+        });
+        if let Some(project_id) = projects_page {
+            self.show_projects_page(project_id, window, cx);
+        }
+        if let Some(page) = self.state.settings_page {
+            // The open path, so Usage's scan and the Skills catalog kick off
+            // the same way a click on their page would.
+            self.open_settings_page(settings_page_from_persisted(page), cx);
+            self.automatic_updates_enabled = cx
+                .try_global::<crate::updater::UpdaterState>()
+                .and_then(|updater| updater.0.as_ref())
+                .is_some_and(|updater| updater.automatically_checks_for_updates());
+        }
+    }
+
     /// Park the departing session's scroll position for back/forward history.
     /// Runs while `selected_session` still points at the session being left.
     pub(super) fn store_transcript_scroll_position(&mut self) {

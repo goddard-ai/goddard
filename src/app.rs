@@ -59,8 +59,10 @@ use crate::ui::tooltip::Tooltip;
 use crate::browser::BrowserView;
 use crate::persistence::{
     CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, CustomCommandIcon,
-    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, PersistedState, PersistedWindowState,
-    SidebarGrouping, SidebarOrdering, StateStore,
+    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, PersistedDiffSource,
+    PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
+    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
+    PersistedWindowState, SidebarGrouping, SidebarOrdering, StateStore,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -1262,6 +1264,215 @@ enum SessionActivationTransition {
     Forward { from: NavigationLocation },
 }
 
+/// The watcher-facing dev flag file's `auto_restart` value — `false` when
+/// the file is absent or unreadable.
+fn read_auto_restart(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.get("auto_restart")?.as_bool())
+        .unwrap_or(false)
+}
+
+/// Flip `auto_restart` in the dev-state file, keeping any other keys a future
+/// writer added.
+fn write_auto_restart(path: &Path, enabled: bool) -> std::io::Result<()> {
+    let mut document = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    document.insert("auto_restart".to_owned(), enabled.into());
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_vec(&document)?)
+}
+
+/// Bridges between live navigation/panel enums and the persisted mirrors in
+/// `waku_client::persistence`. Terminal and browser surfaces have no
+/// persisted form — their processes die with the app — so they drop out of
+/// history and tab strips rather than restore to a dead surface.
+fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigationLocation> {
+    match location {
+        NavigationLocation::Task(id) => Some(PersistedNavigationLocation::Task(id)),
+        NavigationLocation::ProjectsPage(id) => Some(PersistedNavigationLocation::ProjectsPage(id)),
+        NavigationLocation::Terminal(_) => None,
+    }
+}
+
+fn persisted_list_offset(offset: ListOffset) -> PersistedListOffset {
+    PersistedListOffset {
+        item_ix: offset.item_ix,
+        offset_in_item: f32::from(offset.offset_in_item),
+    }
+}
+
+fn list_offset_from_persisted(offset: PersistedListOffset) -> ListOffset {
+    ListOffset {
+        item_ix: offset.item_ix,
+        offset_in_item: px(offset.offset_in_item),
+    }
+}
+
+fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRightPanelSurface> {
+    match surface {
+        RightPanelSurface::Files => Some(PersistedRightPanelSurface::Files),
+        RightPanelSurface::Diff => Some(PersistedRightPanelSurface::Diff),
+        RightPanelSurface::File(path) => Some(PersistedRightPanelSurface::File(path.clone())),
+        RightPanelSurface::PullRequest { number } => {
+            Some(PersistedRightPanelSurface::PullRequest { number: *number })
+        }
+        RightPanelSurface::GitHub(project_id) => {
+            Some(PersistedRightPanelSurface::GitHub(*project_id))
+        }
+        RightPanelSurface::Browser(_)
+        | RightPanelSurface::Terminal(_)
+        | RightPanelSurface::BackgroundWork { .. } => None,
+    }
+}
+
+fn panel_surface_from_persisted(surface: &PersistedRightPanelSurface) -> RightPanelSurface {
+    match surface {
+        PersistedRightPanelSurface::Files => RightPanelSurface::Files,
+        PersistedRightPanelSurface::Diff => RightPanelSurface::Diff,
+        PersistedRightPanelSurface::File(path) => RightPanelSurface::File(path.clone()),
+        PersistedRightPanelSurface::PullRequest { number } => {
+            RightPanelSurface::PullRequest { number: *number }
+        }
+        PersistedRightPanelSurface::GitHub(project_id) => RightPanelSurface::GitHub(*project_id),
+    }
+}
+
+fn persisted_diff_source(source: ReviewDiffSource) -> PersistedDiffSource {
+    match source {
+        ReviewDiffSource::LastTurn {
+            session_id,
+            turn_id,
+            turn_count,
+        } => PersistedDiffSource::LastTurn {
+            session_id,
+            turn_id,
+            turn_count,
+        },
+        ReviewDiffSource::Uncommitted => PersistedDiffSource::Uncommitted,
+        ReviewDiffSource::Unstaged => PersistedDiffSource::Unstaged,
+        ReviewDiffSource::Staged => PersistedDiffSource::Staged,
+        ReviewDiffSource::Committed => PersistedDiffSource::Committed,
+        ReviewDiffSource::Branch => PersistedDiffSource::Branch,
+        ReviewDiffSource::Commit => PersistedDiffSource::Commit,
+    }
+}
+
+fn diff_source_from_persisted(source: PersistedDiffSource) -> ReviewDiffSource {
+    match source {
+        PersistedDiffSource::LastTurn {
+            session_id,
+            turn_id,
+            turn_count,
+        } => ReviewDiffSource::LastTurn {
+            session_id,
+            turn_id,
+            turn_count,
+        },
+        PersistedDiffSource::Uncommitted => ReviewDiffSource::Uncommitted,
+        PersistedDiffSource::Unstaged => ReviewDiffSource::Unstaged,
+        PersistedDiffSource::Staged => ReviewDiffSource::Staged,
+        PersistedDiffSource::Committed => ReviewDiffSource::Committed,
+        PersistedDiffSource::Branch => ReviewDiffSource::Branch,
+        PersistedDiffSource::Commit => ReviewDiffSource::Commit,
+    }
+}
+
+fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
+    match page {
+        SettingsPage::General => PersistedSettingsPage::General,
+        SettingsPage::Providers => PersistedSettingsPage::Providers,
+        SettingsPage::Skills => PersistedSettingsPage::Skills,
+        SettingsPage::Archived => PersistedSettingsPage::Archived,
+        SettingsPage::Usage => PersistedSettingsPage::Usage,
+        SettingsPage::Daemon => PersistedSettingsPage::Daemon,
+        SettingsPage::ComputerUse => PersistedSettingsPage::ComputerUse,
+        SettingsPage::Commands => PersistedSettingsPage::Commands,
+        SettingsPage::Appearance => PersistedSettingsPage::Appearance,
+        SettingsPage::Experiments => PersistedSettingsPage::Experiments,
+    }
+}
+
+fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
+    match page {
+        PersistedSettingsPage::General => SettingsPage::General,
+        PersistedSettingsPage::Providers => SettingsPage::Providers,
+        PersistedSettingsPage::Skills => SettingsPage::Skills,
+        PersistedSettingsPage::Archived => SettingsPage::Archived,
+        PersistedSettingsPage::Usage => SettingsPage::Usage,
+        PersistedSettingsPage::Daemon => SettingsPage::Daemon,
+        PersistedSettingsPage::ComputerUse => SettingsPage::ComputerUse,
+        PersistedSettingsPage::Commands => SettingsPage::Commands,
+        PersistedSettingsPage::Appearance => SettingsPage::Appearance,
+        PersistedSettingsPage::Experiments => SettingsPage::Experiments,
+    }
+}
+
+/// Project a session's right-panel state — parked or live — into its
+/// persisted form. The active-tab index is remapped past the runtime-only
+/// tabs that `persisted_panel_surface` drops; when the active tab itself
+/// drops, the strip reopens on its first remaining surface.
+fn persist_right_panel_state(
+    visible: bool,
+    surfaces: &[RightPanelSurface],
+    active_surface: Option<usize>,
+    expanded_paths: &HashSet<PathBuf>,
+    files_selected_path: &Option<String>,
+    file_tree_width: f32,
+    diff_selected_file: Option<usize>,
+    diff_expanded_paths: &HashSet<String>,
+    diff_source: ReviewDiffSource,
+) -> PersistedRightPanelState {
+    let mut kept = Vec::new();
+    let mut remap = vec![None; surfaces.len()];
+    for (index, surface) in surfaces.iter().enumerate() {
+        if let Some(persisted) = persisted_panel_surface(surface) {
+            remap[index] = Some(kept.len());
+            kept.push(persisted);
+        }
+    }
+    PersistedRightPanelState {
+        visible,
+        active_surface: active_surface.and_then(|index| remap[index]),
+        surfaces: kept,
+        expanded_paths: expanded_paths.clone(),
+        files_selected_path: files_selected_path.clone(),
+        file_tree_width: Some(file_tree_width),
+        diff_selected_file,
+        diff_expanded_paths: diff_expanded_paths.clone(),
+        diff_source: Some(persisted_diff_source(diff_source)),
+    }
+}
+
+fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPanelSessionState {
+    let mut restored = RightPanelSessionState::empty(state.visible);
+    restored.surfaces = state
+        .surfaces
+        .iter()
+        .map(panel_surface_from_persisted)
+        .collect();
+    restored.active_surface = state
+        .active_surface
+        .filter(|index| *index < state.surfaces.len());
+    restored.expanded_paths = state.expanded_paths.clone();
+    restored.files_selected_path = state.files_selected_path.clone();
+    if let Some(width) = state.file_tree_width {
+        restored.file_tree_width = width;
+    }
+    restored.diff_selected_file = state.diff_selected_file;
+    restored.diff_expanded_paths = state.diff_expanded_paths.clone();
+    if let Some(source) = state.diff_source {
+        restored.diff_source = diff_source_from_persisted(source);
+    }
+    restored
+}
+
 /// Where a session activation parks the transcript.
 #[derive(Clone, Copy)]
 enum TranscriptLanding {
@@ -1915,6 +2126,13 @@ pub struct Waku {
     /// swapping in frozen page pixels while an overlay is open.
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
+    /// `GODDARD_DEV_STATE` — set only when the dev watcher launched this app.
+    /// The command palette's auto-restart toggle writes to this file, which
+    /// the watcher reads after each rebuild.
+    dev_state_path: Option<PathBuf>,
+    /// The toggle's current value, mirrored from `dev_state_path` at launch
+    /// and on each palette flip.
+    auto_restart_enabled: bool,
     /// The Commands settings page's open editor; `None` shows the list.
     custom_command_editor: Option<settings::CustomCommandEditor>,
     /// The Daemon page's open remote-host editor; `None` shows the list.
@@ -2132,6 +2350,12 @@ pub struct Waku {
     /// that lands after activation resets the rows again, so the same landing
     /// is re-applied there rather than snapping the transcript to its tail.
     transcript_landing: Option<(Uuid, TranscriptLanding)>,
+    /// Sessions whose persisted scroll position still claims the first
+    /// post-launch activation; consumed by `apply_transcript_landing` so a
+    /// later plain visit lands at the last prompt like usual.
+    startup_scroll_restores: HashSet<Uuid>,
+    /// The sidebar scroll offset waiting for the list's first rows.
+    pending_sidebar_scroll: Cell<Option<ListOffset>>,
     /// Last decided visibility of the scroll-to-tail affordance. The tail's
     /// position is unknowable on the frames a stream commit remeasures it, and
     /// those arrive at commit cadence — deciding "show" from that silence
@@ -2851,6 +3075,15 @@ impl Waku {
         daemon: waku_client::DaemonSupervisor,
     ) -> Entity<Self> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        // Set only when `scripts/dev.ts` launched this app — the file it names
+        // is the auto-restart toggle the watcher reads after each build.
+        let dev_state_path = std::env::var_os("GODDARD_DEV_STATE")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty());
+        let auto_restart_enabled = dev_state_path
+            .as_deref()
+            .map(read_auto_restart)
+            .unwrap_or(false);
         let store = StateStore::remote(daemon.clone());
         let daemons = store.daemons();
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
@@ -4185,6 +4418,8 @@ impl Waku {
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
+                dev_state_path,
+                auto_restart_enabled,
                 custom_command_editor: None,
                 remote_host_editor: None,
                 skills_catalog: None,
@@ -4284,6 +4519,8 @@ impl Waku {
                 transcript_last_wheel_scroll,
                 transcript_scroll_positions: HashMap::new(),
                 transcript_landing: None,
+                startup_scroll_restores: HashSet::new(),
+                pending_sidebar_scroll: Cell::new(None),
                 transcript_scroll_to_bottom_visible: Cell::new(false),
                 transcript_scrollbar_dragging: Cell::new(false),
                 transcript_layout_width: Cell::new(Pixels::ZERO),
@@ -4346,6 +4583,10 @@ impl Waku {
         // that there is an entity to notify and deliberately not before the
         // first frame.
         entity.update(cx, |this, cx| {
+            // First, before anything else can save over the persisted copy:
+            // the UI state carried across the last quit — history, scroll
+            // positions, open panels.
+            this.restore_ui_state(window, cx);
             this.start_task_state_sync(waku_client::DaemonKey::Local, this.daemon.clone());
             this.connect_remote_hosts(cx);
             for session_id in startup_live_session_ids {

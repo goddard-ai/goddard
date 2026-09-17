@@ -85,6 +85,11 @@ command_palette.show_right_panel: 右パネルを表示
 command_palette.hide_right_panel: 右パネルを隠す
 command_palette.inspect_elements: "Goddard: 要素を調査"
 command_palette.inspect_colors: "Goddard: 色を調査"
+command_palette.enable_auto_restart: "Goddard: ビルド後の自動再起動を有効にする"
+command_palette.disable_auto_restart: "Goddard: ビルド後の自動再起動を無効にする"
+command_palette.auto_restart_enabled: "自動再起動を有効にしました — ビルドが成功するたびにアプリを再起動します。"
+command_palette.auto_restart_disabled: "自動再起動を無効にしました。"
+command_palette.auto_restart_failed: "開発用ステートファイルを更新できませんでした: %{error}"
 element_inspector.copied: 要素ラベルをコピーしました
 element_inspector.colors_copied: 要素の色をコピーしました
 command_palette.current: 現在
