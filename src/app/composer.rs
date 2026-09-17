@@ -6,16 +6,20 @@ use crate::ui::ActivationExt;
 
 use anyhow::Context as _;
 use base64::Engine as _;
+use gpui::AnyView;
 
 /// Group on the session column's hitbox: the composer card reads it through
 /// `group_drag_over` so it lights up wherever over the column an OS file drag
 /// is held, and the column itself accepts the drop for the same staging.
 pub(super) const SESSION_DROP_GROUP: &str = "session-file-drop";
 
-/// A collapsed text paste past this size stops being a composer card and is
+/// A collapsed text paste past this size stops being a composer chip and is
 /// stored as a durable `.txt` blob instead — a real file attachment the agent
 /// opens itself, rather than a block of bytes folded into every draft sync.
 const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
+
+/// How much of a paste its chip's hover preview shows.
+const PASTED_TEXT_PREVIEW_CHARS: usize = 200;
 
 const COMPUTER_USE_PREVIEW_WIDTH: f32 = 304.0;
 const COMPUTER_USE_PREVIEW_HEIGHT: f32 = 172.0;
@@ -94,6 +98,33 @@ impl gpui::Render for FavoriteModelDragView {
             .text_color(theme.text_secondary)
             .child(icon("icons/star-filled.svg", 11.0, theme.favorite))
             .child(self.label.clone())
+    }
+}
+
+/// The hover card behind every "Pasted text" chip: the paste's leading
+/// characters wrapped over the raised surface.
+struct PastedTextPreview {
+    preview: SharedString,
+}
+
+impl Render for PastedTextPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div().pt(px(4.0)).pl(px(2.0)).child(
+            div()
+                .max_w(px(340.0))
+                .px(px(7.0))
+                .py(px(5.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .bg(theme.raised)
+                .shadow_md()
+                .text_size(sp(12.0))
+                .line_height(sp(16.0))
+                .text_color(theme.text_secondary)
+                .child(self.preview.clone()),
+        )
     }
 }
 
@@ -2689,6 +2720,7 @@ impl Waku {
             is_dir: false,
             is_image: false,
             blob_reference: None,
+            pasted_text_preview: None,
             session_id: Some(session_id),
         });
         self.schedule_composer_draft_save(cx);
@@ -2751,6 +2783,7 @@ impl Waku {
                             is_image,
                             attachment.reference,
                             preview_image,
+                            None,
                         );
                     }
                     if changed {
@@ -2776,6 +2809,7 @@ impl Waku {
         is_image: bool,
         reference: String,
         client_preview_image: Option<Arc<gpui::Image>>,
+        pasted_text_preview: Option<String>,
     ) -> bool {
         if self.composer_attachments.iter().any(|attachment| {
             attachment.path == path
@@ -2795,6 +2829,7 @@ impl Waku {
             is_dir,
             is_image,
             blob_reference: Some(reference),
+            pasted_text_preview,
             session_id: None,
         });
         true
@@ -2886,6 +2921,7 @@ impl Waku {
                             true,
                             reference,
                             Some(preview_image),
+                            None,
                         );
                     }
                     if staged {
@@ -2921,6 +2957,7 @@ impl Waku {
             cx.notify();
             return;
         };
+        let preview = pasted_text_preview(&text);
         cx.spawn(async move |waku, cx| {
             let stored = cx
                 .background_executor()
@@ -2955,6 +2992,7 @@ impl Waku {
                         false,
                         reference,
                         None,
+                        Some(preview.clone()),
                     ) {
                         waku.schedule_composer_draft_save(cx);
                         cx.notify();
@@ -2970,7 +3008,7 @@ impl Waku {
     }
 
     /// Splice a collapsed paste back into the field at the caret, as though
-    /// it had never left. The card is consumed.
+    /// it had never left. The chip is consumed.
     fn expand_pasted_block(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if index >= self.composer_pasted_blocks.len() {
             return;
@@ -3332,81 +3370,69 @@ impl Waku {
         cx.notify();
     }
 
-    /// Collapsed paste blocks above the input: one full-width card per block,
-    /// titled by its first line, expanding back into the field on click —
-    /// the same affordance other agent clients give a large paste.
+    /// Collapsed paste blocks above the input: one compact "Pasted text" chip
+    /// per block — hovering shows the paste's leading characters, activating
+    /// splices it back into the field at the caret.
     pub(super) fn render_pasted_blocks(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let mut column = div()
+        let mut row = div()
             .px(px(14.0))
             .pt(px(2.0))
             .pb(px(8.0))
             .flex()
-            .flex_col()
+            .flex_wrap()
             .gap(px(8.0));
         for (index, block) in self.composer_pasted_blocks.iter().enumerate() {
-            let title = block
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| tr!("composer.pasted_block"));
-            let card = div()
+            let preview = SharedString::from(pasted_text_preview(block));
+            let chip = div()
                 .id(SharedString::from(format!("composer-pasted-block-{index}")))
-                .relative()
-                .w_full()
-                .rounded(px(10.0))
-                .border_1()
+                .h(px(24.0))
+                .pl(px(6.0))
+                .pr(px(4.0))
+                .rounded(px(8.0))
+                .border(hairline())
                 .border_color(theme.border_subtle)
                 .bg(theme.inset)
-                .pl(px(8.0))
-                .pr(px(30.0))
-                .py(px(8.0))
                 .flex()
                 .items_center()
-                .gap(px(10.0))
+                .gap(px(4.0))
                 .cursor_default()
                 .tab_index(0)
                 .focus_visible(|style| style.border_color(theme.accent))
+                .when(!preview.is_empty(), |element| {
+                    element.tooltip(pasted_text_tooltip(preview.clone()))
+                })
+                .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
                 .child(
                     div()
-                        .flex_none()
-                        .size(px(34.0))
-                        .rounded(px(8.0))
-                        .border_1()
-                        .border_color(theme.border_subtle)
-                        .bg(theme.canvas)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(icon("icons/file.svg", 15.0, theme.text_tertiary)),
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("composer.pasted_block")),
                 )
                 .child(
                     div()
-                        .flex_1()
-                        .min_w_0()
+                        .id(SharedString::from(format!(
+                            "composer-pasted-block-remove-{index}"
+                        )))
+                        .w(px(16.0))
+                        .h(px(16.0))
+                        .flex_none()
+                        .rounded(px(5.0))
                         .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .child(
-                            div()
-                                .w_full()
-                                .truncate()
-                                .text_size(sp(13.0))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(2.0))
-                                .text_size(sp(12.0))
-                                .text_color(theme.text_secondary)
-                                .child(div().underline().child(tr!("composer.pasted_block_expand")))
-                                .child(icon("icons/chevron-right.svg", 10.0, theme.text_tertiary)),
-                        ),
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .tab_index(0)
+                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                        .hover(|element| element.bg(theme.overlay_strong))
+                        .active(|element| element.opacity(0.8))
+                        .child(icon("icons/x.svg", 9.0, theme.text_secondary))
+                        .tooltip(Tooltip::text(tr!("composer.remove_pasted_block")))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.remove_pasted_block(index, cx);
+                        }),
                 )
                 .on_activation(cx, move |this, window, cx| {
                     this.expand_pasted_block(index, window, cx);
@@ -3417,34 +3443,9 @@ impl Waku {
                         cx.stop_propagation();
                     }
                 }));
-            column = column.child(
-                card.child(
-                    div()
-                        .id(SharedString::from(format!(
-                            "composer-pasted-block-remove-{index}"
-                        )))
-                        .absolute()
-                        .top(px(6.0))
-                        .right(px(6.0))
-                        .size(px(18.0))
-                        .rounded(px(5.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_default()
-                        .tab_index(0)
-                        .focus_visible(|style| style.border_1().border_color(theme.accent))
-                        .hover(|element| element.bg(theme.overlay_strong))
-                        .active(|element| element.opacity(0.8))
-                        .child(icon("icons/x.svg", 9.0, theme.text_secondary))
-                        .tooltip(Tooltip::text(tr!("composer.remove_pasted_block")))
-                        .on_activation(cx, move |this, _, cx| {
-                            this.remove_pasted_block(index, cx);
-                        }),
-                ),
-            );
+            row = row.child(chip);
         }
-        column
+        row
     }
 
     /// The staged-attachment chips above the input: a thumbnail tile per
@@ -3466,6 +3467,11 @@ impl Waku {
                 continue;
             }
             let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
+            if attachment.pasted_text_preview.is_some() {
+                row = row
+                    .child(self.render_pasted_text_attachment_chip(index, attachment, &menu, cx));
+                continue;
+            }
             let icon_path = if attachment.is_dir {
                 "icons/folder.svg"
             } else {
@@ -3628,6 +3634,112 @@ impl Waku {
             ));
         }
         row
+    }
+
+    /// A paste too large to stay inline, stored as a durable `.txt` blob: the
+    /// same compact "Pasted text" chip a collapsed block gets, with the
+    /// paste's leading characters on hover and the reveal menu behind it.
+    fn render_pasted_text_attachment_chip(
+        &self,
+        index: usize,
+        attachment: &ComposerAttachment,
+        menu: &ContextMenuHandle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let preview = attachment
+            .pasted_text_preview
+            .as_ref()
+            .filter(|preview| !preview.is_empty())
+            .map(|preview| SharedString::from(preview.clone()));
+        let key_menu = menu.clone();
+        let chip = div()
+            .id(SharedString::from(format!("composer-attachment-{index}")))
+            .h(px(24.0))
+            .pl(px(6.0))
+            .pr(px(4.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .track_focus(menu.trigger_focus_handle())
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when_some(preview, |element, preview| {
+                element.tooltip(pasted_text_tooltip(preview))
+            })
+            .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("composer.pasted_block")),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "composer-attachment-remove-{index}"
+                    )))
+                    .w(px(16.0))
+                    .h(px(16.0))
+                    .flex_none()
+                    .rounded(px(5.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .tab_index(0)
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .hover(|element| element.bg(theme.overlay_strong))
+                    .active(|element| element.opacity(0.8))
+                    .child(icon("icons/x.svg", 9.0, theme.text_secondary))
+                    .tooltip(Tooltip::text(tr!("composer.remove_pasted_block")))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if index < this.composer_attachments.len() {
+                            this.composer_attachments.remove(index);
+                            this.schedule_composer_draft_save(cx);
+                            cx.notify();
+                        }
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            if index < this.composer_attachments.len() {
+                                this.composer_attachments.remove(index);
+                                this.schedule_composer_draft_save(cx);
+                                cx.notify();
+                            }
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                if matches!(key, "backspace" | "delete") {
+                    if index < this.composer_attachments.len() {
+                        this.composer_attachments.remove(index);
+                        this.schedule_composer_draft_save(cx);
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                } else if key == "f10" && event.keystroke.modifiers.shift {
+                    key_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        let reveal_path = attachment.path.clone();
+        let can_reveal = !self.is_remote_path(&attachment.path);
+        context_menu(
+            chip,
+            SharedString::from(format!("composer-attachment-{index}-context-menu")),
+            menu,
+            move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
+        )
     }
 
     /// The chip a dragged-in task gets: a chat bubble and the session title,
@@ -5798,6 +5910,33 @@ fn is_image_attachment_path(path: &Path) -> bool {
                     | "ppm"
             )
         })
+}
+
+/// The snippet a "Pasted text" chip shows on hover: the paste's leading
+/// characters, trimmed, with an ellipsis when there is more.
+pub(super) fn pasted_text_preview(text: &str) -> String {
+    let text = text.trim();
+    let mut chars = text.chars();
+    let preview: String = chars.by_ref().take(PASTED_TEXT_PREVIEW_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{preview}…")
+    } else {
+        preview
+    }
+}
+
+/// The hover card both pasted-text surfaces share — the collapsed-block chip
+/// and the stored `.txt` attachment. `.tooltip(..)` takes a view builder, so
+/// the preview rides GPUI's usual hover timing and placement.
+pub(super) fn pasted_text_tooltip(
+    preview: SharedString,
+) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    move |_, cx| {
+        cx.new(|_| PastedTextPreview {
+            preview: preview.clone(),
+        })
+        .into()
+    }
 }
 
 /// Typed text first, then each collapsed paste block in paste order, split

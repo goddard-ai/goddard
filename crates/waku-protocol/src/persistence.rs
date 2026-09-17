@@ -17,6 +17,11 @@ pub struct ComposerDraftAttachment {
     pub is_image: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blob_reference: Option<String>,
+    /// Leading characters of a pasted-text attachment, kept so a restored
+    /// draft's chip can still offer its hover preview. `Some` doubles as the
+    /// pasted-text marker; see [`crate::model::MessageAttachment::pasted_text_preview`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pasted_text_preview: Option<String>,
     /// Task the attachment references instead of a file; see
     /// [`crate::model::MessageAttachment::session_id`].
     #[serde(default, skip_serializing_if = "Option::is_none")]

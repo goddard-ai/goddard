@@ -21,6 +21,12 @@ mention: string, name: string, is_dir: boolean, is_image: boolean,
  */
 blob_reference?: string | null,
 /**
+ * Leading characters of a pasted-text attachment for the chip's hover
+ * preview. `Some` doubles as the pasted-text marker — clients render a
+ * "Pasted text" chip rather than a file tile.
+ */
+pasted_text_preview?: string | null,
+/**
  * When set, the attachment references another Goddard task rather than a
  * file: `name` holds its title and `mention` its provider-facing token.
  * `path`, `is_dir`, `is_image`, and `blob_reference` carry no file

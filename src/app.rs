@@ -466,6 +466,10 @@ struct ComposerAttachment {
     is_image: bool,
     /// Daemon-issued durable reference retained by task persistence.
     blob_reference: Option<String>,
+    /// When set, the attachment is a large paste stored as a `.txt` blob and
+    /// this holds its leading characters for the chip's hover preview. `Some`
+    /// doubles as the pasted-text marker — the chip reads "Pasted text".
+    pasted_text_preview: Option<String>,
     /// When set, the chip references another task rather than a file: `name`
     /// holds its title and `mention` its provider-facing token.
     session_id: Option<Uuid>,
@@ -4231,7 +4235,7 @@ impl Waku {
             )
             .detach();
 
-            // A text paste too large for the field collapses into a card;
+            // A text paste too large for the field collapses into a chip;
             // the composer's text stays the user's own typing.
             cx.subscribe(
                 &composer,

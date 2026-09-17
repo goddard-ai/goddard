@@ -2339,6 +2339,7 @@ mod tests {
                 is_dir: false,
                 is_image: true,
                 blob_reference: None,
+                pasted_text_preview: None,
                 session_id: None,
             }],
             annotations: Vec::new(),
@@ -2622,6 +2623,7 @@ mod tests {
             is_dir: false,
             is_image: true,
             blob_reference: Some("waku-blob:abcdef.png".to_owned()),
+            pasted_text_preview: None,
             session_id: None,
         };
         state.sessions[0].begin_turn_with_presentation(
@@ -2822,6 +2824,7 @@ mod tests {
                     is_dir: false,
                     is_image: true,
                     blob_reference: Some(reference),
+                    pasted_text_preview: None,
                     session_id: None,
                 }],
                 annotations: Vec::new(),

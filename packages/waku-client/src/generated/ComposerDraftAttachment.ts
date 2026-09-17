@@ -2,6 +2,12 @@
 
 export type ComposerDraftAttachment = { path: string, mention: string, name: string, is_dir: boolean, is_image: boolean, blob_reference?: string | null,
 /**
+ * Leading characters of a pasted-text attachment, kept so a restored
+ * draft's chip can still offer its hover preview. `Some` doubles as the
+ * pasted-text marker; see [`crate::model::MessageAttachment::pasted_text_preview`].
+ */
+pasted_text_preview?: string | null,
+/**
  * Task the attachment references instead of a file; see
  * [`crate::model::MessageAttachment::session_id`].
  */
