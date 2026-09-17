@@ -2296,9 +2296,14 @@ fn render_table(
         .flex_col();
 
     if !header.is_empty() {
+        // `overflow_hidden` clips to a rectangle, so the header's background
+        // needs its own radii to follow the parent's rounded corners.
+        let inner_radius = px(10.0) - hairline();
         table = table.child(
-            table_row(header, &widths, align, ctx, FontWeight::SEMIBOLD, true)
-                .bg(ctx.palette.overlay),
+            table_row(header, &widths, align, ctx, FontWeight::SEMIBOLD, !rows.is_empty())
+                .bg(ctx.palette.overlay)
+                .rounded_t(inner_radius)
+                .when(rows.is_empty(), |row| row.rounded_b(inner_radius)),
         );
     }
     for (index, row) in rows.iter().enumerate() {
