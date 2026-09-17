@@ -71,7 +71,7 @@ impl RenderOnce for TextField {
             .border_color(if ring {
                 theme.accent
             } else {
-                theme.border_strong
+                theme.border_subtle
             })
             .bg(theme.inset)
             .flex()
