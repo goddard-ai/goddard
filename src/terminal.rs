@@ -161,11 +161,12 @@ enum TerminalUiEvent {
 /// not just the foreground job.
 pub enum TerminalViewEvent {
     Exited,
-    /// A custom-command script finished, carrying its exit code when one
-    /// was reported. Raised by the launch line's sentinel, by the child's
-    /// own exit status as a fallback for scripts that exit the shell
-    /// themselves, and with `None` when the PTY ended — or never started —
-    /// without a status, so a pending run always resolves.
+    /// A command finished, carrying its exit code when one was reported.
+    /// Raised by a custom command's launch-line sentinel, by shell
+    /// integration's command-end report for interactive runs, by the
+    /// child's own exit status as a fallback for scripts that exit the
+    /// shell themselves, and with `None` when the PTY ended — or never
+    /// started — without a status, so a pending run always resolves.
     CommandFinished(Option<i32>),
     /// A localhost URL appeared in freshly printed output — a dev server
     /// announcing its port. Carries the normalized, openable URL.
@@ -1118,6 +1119,7 @@ impl TerminalView {
                         self.command_running = false;
                         self.last_command_exit = Some(code);
                         cx.emit(TerminalViewEvent::ActivityChanged);
+                        cx.emit(TerminalViewEvent::CommandFinished(Some(code)));
                     }
                 }
                 TerminalUiEvent::Cwd(path) => {

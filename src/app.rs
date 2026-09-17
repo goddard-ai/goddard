@@ -2100,6 +2100,10 @@ pub struct Waku {
     /// `terminal_order` carries the flat list's creation order.
     terminal_records: HashMap<Uuid, TerminalRecord>,
     terminal_order: Vec<Uuid>,
+    /// Terminals whose last command finished successfully while the
+    /// surface was off-screen — the sidebar row's unread dot until the
+    /// terminal next takes focus.
+    unseen_terminal_completions: HashSet<Uuid>,
     /// The terminal filling the main area. Set only while no session is
     /// selected; activating a chat clears it and folds the group.
     selected_terminal: Option<Uuid>,
@@ -4431,6 +4435,7 @@ impl Waku {
                 right_panel_terminals: HashMap::new(),
                 terminal_records: HashMap::new(),
                 terminal_order: Vec::new(),
+                unseen_terminal_completions: HashSet::new(),
                 selected_terminal: None,
                 last_visible_terminal: None,
                 right_panel_terminal_commands: HashMap::new(),
