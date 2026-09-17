@@ -3120,7 +3120,9 @@ impl Waku {
 
         self.window_drag_region(
             header
-                .child(self.render_git_panel_toggle(cx))
+                .when(self.state.git_panel_enabled, |element| {
+                    element.child(self.render_git_panel_toggle(cx))
+                })
                 .child(self.render_right_panel_toggle(cx))
                 .children(self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,

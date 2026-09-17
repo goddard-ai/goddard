@@ -259,6 +259,7 @@ enum SettingsPage {
     ComputerUse,
     Commands,
     Appearance,
+    Experiments,
 }
 
 impl SettingsPage {

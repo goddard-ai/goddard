@@ -341,7 +341,7 @@ impl Waku {
     ) {
         if self.big_picture.open {
             self.close_big_picture(window, cx);
-        } else {
+        } else if self.state.big_picture_enabled {
             self.open_big_picture(window, cx);
         }
     }
@@ -472,6 +472,31 @@ impl Waku {
             window.focus(&previous_focus, cx);
         }
         cx.notify();
+    }
+
+    /// The window-free half of `close_big_picture` — used by the Experiments
+    /// opt-out, where a toggle callback has no window to hand focus back to.
+    pub(super) fn dismiss_big_picture(&mut self, cx: &mut Context<Self>) {
+        if !self.big_picture.open {
+            return;
+        }
+        if let Some(key) = self.big_picture.draft_key.take() {
+            let draft = self.current_composer_draft(Some(key), cx);
+            if self.composer_drafts.set(key, draft) {
+                self.schedule_composer_draft_save(cx);
+            }
+        }
+        self.big_picture.open = false;
+        self.big_picture.slots.clear();
+        self.big_picture.highlighted = None;
+        self.big_picture.target = None;
+        self.big_picture.pending_submission = None;
+        self.big_picture.backdrop = None;
+        self.big_picture.previous_focus = None;
+        self.composer.update(cx, |composer, cx| {
+            composer.set_placeholder(tr!("input.do_anything"), cx);
+        });
+        self.restore_selected_composer_draft(cx);
     }
 
     /// Keep the composer hint honest about where Enter sends: a follow-up on

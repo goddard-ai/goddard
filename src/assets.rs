@@ -20,6 +20,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "appearance",
     "archive",
     "asterisk",
+    "beaker",
     "arrow-down",
     "arrow-left",
     "arrow-right",

@@ -373,6 +373,14 @@ pub struct AppSettings {
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
+    /// Experimental: ⌘0 full-window grid of session cards with live
+    /// transcripts.
+    pub big_picture_enabled: bool,
+    /// Experimental: the Git panel (⌘⌥G) commit graph and diffs.
+    pub git_panel_enabled: bool,
+    /// Experimental: GitHub issues and pull requests on the Projects page,
+    /// sidebar rows, and the right panel.
+    pub github_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -402,6 +410,9 @@ impl Default for AppSettings {
             completion_sound: CompletionSound::default(),
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             custom_commands: Vec::new(),
+            big_picture_enabled: false,
+            git_panel_enabled: false,
+            github_enabled: false,
         }
     }
 }
@@ -602,6 +613,13 @@ pub struct PersistedState {
     pub completion_sound_volume: f32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
+    /// Experimental feature opt-ins from the Experiments settings page.
+    #[serde(default)]
+    pub big_picture_enabled: bool,
+    #[serde(default)]
+    pub git_panel_enabled: bool,
+    #[serde(default)]
+    pub github_enabled: bool,
     #[serde(default = "default_sidebar_visibility")]
     pub sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
@@ -635,6 +653,10 @@ pub struct PersistedState {
     pub agent_tools_enabled: bool,
     #[serde(default = "default_agent_settings_enabled")]
     pub agent_settings_enabled: bool,
+    /// Experimental: whether sessions get named subagents injected. Daemon-
+    /// owned; mirrored here so clients can render the toggle.
+    #[serde(default)]
+    pub subagents_enabled: bool,
     /// Named subagent tiers injected into every session's harness. Daemon-
     /// owned; mirrored here so clients can render what will be injected.
     #[serde(default)]
@@ -708,6 +730,9 @@ impl PersistedState {
             completion_sound: CompletionSound::default(),
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             custom_commands: Vec::new(),
+            big_picture_enabled: false,
+            git_panel_enabled: false,
+            github_enabled: false,
             sidebar_visible: true,
             right_panel_visible: false,
             git_panel_visible: false,
@@ -723,6 +748,7 @@ impl PersistedState {
             provider_binary_overrides: HashMap::new(),
             agent_tools_enabled: false,
             agent_settings_enabled: true,
+            subagents_enabled: false,
             subagent_tiers: BTreeMap::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
@@ -870,6 +896,7 @@ impl PersistedState {
             provider_binary_overrides: self.provider_binary_overrides.clone(),
             agent_tools_enabled: self.agent_tools_enabled,
             agent_settings_enabled: self.agent_settings_enabled,
+            subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
             custom_commands: self.custom_commands.clone(),
             extra: self.daemon_settings_extra.clone(),
@@ -891,6 +918,7 @@ impl PersistedState {
         self.provider_binary_overrides = settings.provider_binary_overrides;
         self.agent_tools_enabled = settings.agent_tools_enabled;
         self.agent_settings_enabled = settings.agent_settings_enabled;
+        self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
         self.custom_commands = settings.custom_commands;
         self.daemon_settings_extra = settings.extra;
@@ -922,6 +950,9 @@ impl PersistedState {
             completion_sound: self.completion_sound,
             completion_sound_volume: self.completion_sound_volume,
             custom_commands: self.custom_commands.clone(),
+            big_picture_enabled: self.big_picture_enabled,
+            git_panel_enabled: self.git_panel_enabled,
+            github_enabled: self.github_enabled,
         }
     }
 
@@ -983,6 +1014,9 @@ impl PersistedState {
         self.completion_sound_volume =
             sanitized_completion_sound_volume(settings.completion_sound_volume);
         self.custom_commands = settings.custom_commands;
+        self.big_picture_enabled = settings.big_picture_enabled;
+        self.git_panel_enabled = settings.git_panel_enabled;
+        self.github_enabled = settings.github_enabled;
     }
 
     fn apply_app_state(&mut self, app_state: AppState) {

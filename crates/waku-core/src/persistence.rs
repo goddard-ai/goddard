@@ -303,6 +303,10 @@ pub struct PersistedState {
     /// Daemon-owned custom commands mirrored from the settings document.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
+    /// Experimental: whether sessions get named subagents injected, mirrored
+    /// from the settings document.
+    #[serde(default)]
+    pub subagents_enabled: bool,
     /// Named subagent tiers injected into every session's harness, mirrored
     /// from the settings document.
     #[serde(default)]
@@ -414,6 +418,7 @@ impl PersistedState {
             agent_tools_enabled: false,
             agent_settings_enabled: true,
             custom_commands: Vec::new(),
+            subagents_enabled: false,
             subagent_tiers: BTreeMap::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
@@ -515,6 +520,7 @@ impl PersistedState {
             agent_tools_enabled: self.agent_tools_enabled,
             agent_settings_enabled: self.agent_settings_enabled,
             custom_commands: self.custom_commands.clone(),
+            subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
@@ -554,6 +560,7 @@ impl PersistedState {
         self.agent_tools_enabled = settings.agent_tools_enabled;
         self.agent_settings_enabled = settings.agent_settings_enabled;
         self.custom_commands = settings.custom_commands;
+        self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
         self.daemon_settings_extra = settings.extra;
     }

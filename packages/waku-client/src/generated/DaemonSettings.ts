@@ -28,8 +28,14 @@ agent_settings_enabled: boolean,
  */
 custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
 /**
+ * Experimental: inject named subagents into every session's harness.
+ * Off by default; toggling affects only sessions started afterwards.
+ */
+subagents_enabled: boolean,
+/**
  * Named subagent tiers injected into every session's harness, keyed by
  * tier name ("explore", "fast", "medium", "heavy"). Empty → only the
- * built-in read-only `goddard-explore` agent is injected.
+ * built-in read-only `goddard-explore` agent is injected. Ignored while
+ * `subagents_enabled` is off.
  */
 subagent_tiers?: { [key in string]: SubagentTier }, provider_binary_overrides: { [key in ProviderKind]?: string }, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

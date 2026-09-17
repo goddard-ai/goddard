@@ -1933,12 +1933,15 @@ impl WakuBackend {
         // Named subagents ride the launch with the runtime: the built-in
         // explorer plus the configured tiers, priced from the cached rate
         // table (disk only — a session start never waits on the network).
-        // Drivers without an injection channel simply ignore it.
-        options.subagents = Some(crate::subagents::spec_for(
-            provider,
-            &self.settings.get().subagent_tiers,
-            &crate::usage_history::load_cached_rate_table(&self.usage_rates_dir),
-        ));
+        // Drivers without an injection channel simply ignore it. Still
+        // experimental — injected only when the opt-in is on.
+        if daemon_settings.subagents_enabled {
+            options.subagents = Some(crate::subagents::spec_for(
+                provider,
+                &daemon_settings.subagent_tiers,
+                &crate::usage_history::load_cached_rate_table(&self.usage_rates_dir),
+            ));
+        }
         // A launch that never came up keeps no credential.
         let handle = match driver::start_local(provider, options, event_sender) {
             Ok(handle) => handle,

@@ -112,10 +112,12 @@
 - Record changes as `.changelog/<prefix>-<slug>.md` fragments — one bullet
   per file — never by editing `CHANGELOG.md` directly; `bun run changelog`
   folds them into the released version's section, grouped under
-  `### Highlights`, `### Features`, and `### Fixed`.
+  `### Highlights`, `### Features`, `### Experiments`, and `### Fixed`.
 - The filename prefix is required and picks the section: `highlight-` for
-  headline features, `feat-` for other user-facing features, `fix-` for bugs
-  that existed in a previously released version.
+  headline features, `feat-` for other user-facing features, `exp-` for
+  experimental opt-ins (emitted with a bold `[Experimental]` marker —
+  experiments are never highlights), `fix-` for bugs that existed in a
+  previously released version.
 - Every `highlight-` fragment must embed a screenshot or recording —
   `![](media/<slug>.{png,gif,mp4,mov})` with the asset committed at
   `.changelog/media/<slug>.<ext>`; collect moves it to

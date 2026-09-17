@@ -1270,7 +1270,8 @@ impl Waku {
     /// unresolved or `gh` itself is the problem — those hint states are how
     /// a user fixes it — and disable once `gh` answers "not a GitHub repo".
     fn projects_github_enabled(&self, project_id: Uuid) -> bool {
-        !matches!(
+        self.state.github_enabled
+            && !matches!(
             self.github_browsers
                 .get(&project_id)
                 .and_then(|browser| browser.repo.as_ref()),

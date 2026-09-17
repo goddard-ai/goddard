@@ -51,9 +51,13 @@ pub struct DaemonSettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     pub disabled_providers: Vec<ProviderKind>,
+    /// Experimental: inject named subagents into every session's harness.
+    /// Off by default; toggling affects only sessions started afterwards.
+    pub subagents_enabled: bool,
     /// Named subagent tiers injected into every session's harness, keyed by
     /// tier name ("explore", "fast", "medium", "heavy"). Empty → only the
-    /// built-in read-only `goddard-explore` agent is injected.
+    /// built-in read-only `goddard-explore` agent is injected. Ignored while
+    /// `subagents_enabled` is off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub subagent_tiers: BTreeMap<String, SubagentTier>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -71,6 +75,7 @@ impl Default for DaemonSettings {
             agent_settings_enabled: true,
             custom_commands: Vec::new(),
             disabled_providers: Vec::new(),
+            subagents_enabled: false,
             subagent_tiers: BTreeMap::new(),
             provider_binary_overrides: HashMap::new(),
             extra: BTreeMap::new(),

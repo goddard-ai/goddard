@@ -1655,6 +1655,11 @@ impl Waku {
     fn ensure_sidebar_pull_requests(&self, cx: &mut Context<Self>) {
         const RESCAN_BUCKET_SECONDS: u64 = 300;
 
+        // Experimental — no scan, and no PR badges, while the opt-in is off.
+        if !self.state.github_enabled {
+            return;
+        }
+
         let mut fingerprint = 0xf1f9_9d5e_c7a3_b21d;
         let mut targets: Vec<(Uuid, PathBuf, Option<String>)> = Vec::new();
         for session in &self.state.sessions {
@@ -3673,7 +3678,9 @@ impl Waku {
                     .when(self.fps_counter_visible, |element| {
                         element.child(self.render_fps_counter(cx))
                     })
-                    .child(self.render_git_panel_toggle(cx))
+                    .when(self.state.git_panel_enabled, |element| {
+                        element.child(self.render_git_panel_toggle(cx))
+                    })
                     .child(self.render_right_panel_toggle(cx))
             })
             .children(right_window_controls)

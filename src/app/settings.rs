@@ -32,7 +32,7 @@ actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -86,6 +86,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
         "settings.computer_use",
         "icons/cursor-spark.svg",
         "settings.computer_use_keywords",
+    ),
+    (
+        SettingsPage::Experiments,
+        "settings.experiments",
+        "icons/beaker.svg",
+        "settings.experiments_keywords",
     ),
 ];
 
@@ -444,6 +450,7 @@ impl Waku {
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
                         SettingsPage::Commands => tr!("settings.commands"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
+                        SettingsPage::Experiments => tr!("settings.experiments"),
                     }),
             )
             .child(match page {
@@ -456,6 +463,7 @@ impl Waku {
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
                 SettingsPage::Commands => self.render_commands_settings(cx),
                 SettingsPage::Appearance => self.render_appearance_settings(cx),
+                SettingsPage::Experiments => self.render_experiments_settings(cx),
             });
 
         div()
@@ -2384,6 +2392,152 @@ impl Waku {
 
     fn set_agent_settings_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.agent_settings_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The Experiments page: one opt-in card per unfinished feature, each
+    /// defaulting off. Subagents is daemon-owned — its flag travels with the
+    /// daemon settings `save()` already syncs.
+    fn render_experiments_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        div()
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .px(px(20.0))
+                    .py(px(14.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.experiments_description")),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(self.experiment_card(
+                        "big-picture-experiment-toggle",
+                        "experiments.big_picture_title",
+                        "experiments.big_picture_description",
+                        self.state.big_picture_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_big_picture_enabled(enabled, cx),
+                    ))
+                    .child(self.experiment_card(
+                        "git-panel-experiment-toggle",
+                        "experiments.git_panel_title",
+                        "experiments.git_panel_description",
+                        self.state.git_panel_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_git_panel_enabled(enabled, cx),
+                    ))
+                    .child(self.experiment_card(
+                        "github-experiment-toggle",
+                        "experiments.github_title",
+                        "experiments.github_description",
+                        self.state.github_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_github_enabled(enabled, cx),
+                    ))
+                    .child(self.experiment_card(
+                        "subagents-experiment-toggle",
+                        "experiments.subagents_title",
+                        "experiments.subagents_description",
+                        self.state.subagents_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_subagents_enabled(enabled, cx),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn experiment_card(
+        &self,
+        id: &'static str,
+        title_key: &'static str,
+        description_key: &'static str,
+        enabled: bool,
+        theme: Theme,
+        cx: &mut Context<Self>,
+        set: impl Fn(&mut Self, bool, &mut Context<Self>) + 'static,
+    ) -> AnyElement {
+        let toggle = toggle_switch(id, enabled, false, theme, cx, move |this, _, cx| {
+            set(this, !enabled, cx)
+        });
+        div()
+            .min_h(px(66.0))
+            .px(px(20.0))
+            .py(px(13.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!(title_key)),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!(description_key)),
+                    ),
+            )
+            .child(toggle)
+            .into_any_element()
+    }
+
+    fn set_big_picture_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.dismiss_big_picture(cx);
+        }
+        self.state.big_picture_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_git_panel_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.close_git_panel_state();
+        }
+        self.state.git_panel_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_github_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.github_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_subagents_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.subagents_enabled = enabled;
         self.save();
         cx.notify();
     }

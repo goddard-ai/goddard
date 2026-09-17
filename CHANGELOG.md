@@ -10,14 +10,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Don't edit this
 file directly for pending changes — add a `.changelog/<prefix>-<slug>.md`
 fragment per change (one bullet per file) so parallel work never conflicts
 here. The required prefix picks the release-notes section: `highlight-` for
-headline features, `feat-` for other features, `fix-` for bugs that existed
-in a released version. Every `highlight-` fragment must embed a screenshot or
+headline features, `feat-` for other features, `exp-` for experimental
+opt-ins (emitted under `### Experiments` with a bold `[Experimental]` marker;
+experiments are never highlights), `fix-` for bugs that existed in a released
+version. Every `highlight-` fragment must embed a screenshot or
 recording — `![](media/<slug>.{png,gif,mp4,mov})` with the asset at
 `.changelog/media/<slug>.<ext>` — which collect moves to
 `assets/release-notes/<version>/` and rewrites in the emitted section. At
 release time `bun run changelog` folds every fragment into a `## [<version>]`
 section for the version in `Cargo.toml`, grouped under `### Highlights`,
-`### Features`, and `### Fixed`.
+`### Features`, `### Experiments`, and `### Fixed`.
 
 Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into

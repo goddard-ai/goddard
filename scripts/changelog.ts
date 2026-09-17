@@ -71,6 +71,7 @@ function cargoVersion(): string {
 const CATEGORIES = [
   { prefix: "highlight-", heading: "Highlights" },
   { prefix: "feat-", heading: "Features" },
+  { prefix: "exp-", heading: "Experiments" },
   { prefix: "fix-", heading: "Fixed" },
 ] as const;
 
@@ -136,6 +137,10 @@ export async function collectChangelog(): Promise<void> {
         join(fragmentsDir, "media", media),
         join(projectRoot, releaseMedia),
       ]);
+    }
+
+    if (category.heading === "Experiments") {
+      body = body.replace(/^- /, "- **[Experimental]** ");
     }
 
     if (body) groups.get(category.heading)!.push(body);

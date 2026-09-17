@@ -408,6 +408,10 @@ impl Waku {
         if self.git_panel_visible == visible {
             return;
         }
+        // Experimental — the Git panel only opens while its opt-in is on.
+        if visible && !self.state.git_panel_enabled {
+            return;
+        }
         if visible {
             // The slot is exclusive — dismiss the right panel without its
             // own close semantics so the swap does not slide out and back.
@@ -2082,7 +2086,9 @@ impl Waku {
             .child(div().flex_1());
         self.window_drag_region(
             header
-                .child(self.render_git_panel_toggle(cx))
+                .when(self.state.git_panel_enabled, |element| {
+                    element.child(self.render_git_panel_toggle(cx))
+                })
                 .child(self.render_right_panel_toggle(cx))
                 .children(self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,

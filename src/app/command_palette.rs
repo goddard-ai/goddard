@@ -1239,6 +1239,12 @@ impl Waku {
                 "icons/cursor-spark.svg",
                 "settings preferences computer use accessibility screen recording",
             ),
+            (
+                SettingsPage::Experiments,
+                "settings.experiments",
+                "icons/beaker.svg",
+                "settings preferences experiments experimental beta opt in unfinished preview",
+            ),
         ] {
             if !page.is_visible_in_navigation() {
                 continue;

@@ -269,6 +269,12 @@ settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
 settings.commands_keywords:
   en: commands custom command terminal shell script shortcut palette run
+settings.experiments:
+  en: Experiments
+settings.experiments_keywords:
+  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents
+settings.experiments_description:
+  en: Unfinished features you can try early. Each is off by default, may change or disappear, and can be turned off at any time.
 settings.archived:
   en: Archived chats
 settings.archived_keywords:
@@ -413,6 +419,22 @@ daemon.agent_settings_title:
   en: Agent settings
 daemon.agent_settings_description:
   en: Let agents create and edit custom commands for you. On by default; commands an agent adds are marked, and the daemon records which task made each change.
+experiments.big_picture_title:
+  en: Big Picture
+experiments.big_picture_description:
+  en: Press ⌘0 for a full-window grid of session cards with live transcripts, per-card composers, and ⌘1–9 arming.
+experiments.git_panel_title:
+  en: Git panel
+experiments.git_panel_description:
+  en: A ⌘⌥G panel beside the session with the commit graph, expandable diffs, upstream tracking, and a /land command to land a worktree on its base.
+experiments.github_title:
+  en: GitHub integration
+experiments.github_description:
+  en: Browse a project's GitHub issues and pull requests, start tasks from them, and see check and review status on sidebar rows and in the right panel.
+experiments.subagents_title:
+  en: Subagents
+experiments.subagents_description:
+  en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Applies to sessions started after turning it on.
 daemon.not_configured:
   en: Not configured
 daemon.status:

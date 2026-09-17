@@ -583,6 +583,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.github_enabled {
+            return;
+        }
         self.github_ensure_detail(project_id, detail, cx);
         let Some(browser) = self.github_browsers.get_mut(&project_id) else {
             return;
