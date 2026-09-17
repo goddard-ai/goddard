@@ -97,6 +97,9 @@ pub enum FriendsMessage {
     /// Download finished (hash verified). Sent on a second connection after
     /// the blobs fetch completes.
     TransferDone { ticket: String },
+    /// Generic acknowledgement for one-way messages; needed because closing
+    /// the connection right after `finish()` can drop unflushed stream data.
+    Ack,
 }
 
 /// What the local user decided about an incoming request.
@@ -212,6 +215,9 @@ impl ProtocolHandler for FriendsProtocol {
             }
             FriendsMessage::TransferDone { ticket } => {
                 (self.on_done)(remote, ticket);
+                write_message(&mut send, &FriendsMessage::Ack)
+                    .await
+                    .map_err(accept_err)?;
                 send.finish()?;
             }
             _ => send.finish()?,
@@ -298,15 +304,15 @@ pub async fn send_offer(
     }
 }
 
-/// Tell the original sender the download finished and verified.
-/// One-way: no reply expected.
+/// Tell the original sender the download finished and verified. Waits for
+/// the ack — closing right after `finish()` can drop the unflushed write.
 pub async fn notify_transfer_done(
     endpoint: &Endpoint,
     addr: impl Into<EndpointAddr>,
     ticket: &str,
 ) -> anyhow::Result<()> {
     let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
-    let (mut send, _recv) = conn.open_bi().await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
     write_message(
         &mut send,
         &FriendsMessage::TransferDone {
@@ -315,8 +321,12 @@ pub async fn notify_transfer_done(
     )
     .await?;
     send.finish()?;
+    let reply = read_message(&mut recv).await;
     conn.close(0u32.into(), b"done");
-    Ok(())
+    match reply? {
+        FriendsMessage::Ack => Ok(()),
+        _ => bail!("unexpected reply to TransferDone"),
+    }
 }
 
 async fn write_message(
