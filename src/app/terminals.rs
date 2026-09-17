@@ -456,8 +456,10 @@ impl Waku {
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
         }
         if record_visit {
-            self.session_navigation
-                .visit(self.navigation_target(), NavigationTarget::Terminal(terminal_id));
+            self.session_navigation.visit(
+                self.navigation_location(),
+                NavigationLocation::Terminal(terminal_id),
+            );
         }
         if self.state.selected_session.is_some() {
             self.capture_and_save_current_composer_draft(cx);

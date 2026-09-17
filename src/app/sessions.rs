@@ -174,16 +174,6 @@ impl Waku {
         self.finish_session_activation(session_id, transition, cx);
     }
 
-    /// The surface the back/forward history records as "current": the
-    /// selected task's transcript, or the full-width terminal that parked it.
-    pub(super) fn navigation_target(&self) -> Option<NavigationTarget> {
-        if let Some(session_id) = self.state.selected_session {
-            Some(NavigationTarget::Session(session_id))
-        } else {
-            self.selected_terminal.map(NavigationTarget::Terminal)
-        }
-    }
-
     fn finish_session_activation(
         &mut self,
         session_id: Uuid,
@@ -191,22 +181,23 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         match transition {
-            SessionActivationTransition::Visit => self
-                .session_navigation
-                .visit(self.navigation_target(), NavigationTarget::Session(session_id)),
+            SessionActivationTransition::Visit => self.session_navigation.visit(
+                self.navigation_location(),
+                NavigationLocation::Task(session_id),
+            ),
             SessionActivationTransition::Back { from } => {
-                if self.navigation_target() != Some(from)
+                if self.navigation_location() != Some(from)
                     || self.session_navigation.back_target()
-                        != Some(NavigationTarget::Session(session_id))
+                        != Some(NavigationLocation::Task(session_id))
                 {
                     return;
                 }
                 let _ = self.session_navigation.go_back(from);
             }
             SessionActivationTransition::Forward { from } => {
-                if self.navigation_target() != Some(from)
+                if self.navigation_location() != Some(from)
                     || self.session_navigation.forward_target()
-                        != Some(NavigationTarget::Session(session_id))
+                        != Some(NavigationLocation::Task(session_id))
                 {
                     return;
                 }
@@ -1314,6 +1305,33 @@ impl Waku {
         }
     }
 
+    /// Where the main column's back/forward history currently sits — the
+    /// Projects page while it claims the column, then the selected task's
+    /// transcript, then the full-width terminal that parked it.
+    pub(super) fn navigation_location(&self) -> Option<NavigationLocation> {
+        if let Some(project_id) = self.projects_page {
+            Some(NavigationLocation::ProjectsPage(project_id))
+        } else if let Some(session_id) = self.state.selected_session {
+            Some(NavigationLocation::Task(session_id))
+        } else {
+            self.selected_terminal.map(NavigationLocation::Terminal)
+        }
+    }
+
+    /// Drop page targets whose project is gone; a stale entry would leave a
+    /// live-looking button that does nothing.
+    fn prune_navigation_stack(projects: &[Project], stack: &mut Vec<NavigationLocation>) {
+        while let Some(NavigationLocation::ProjectsPage(project_id)) = stack.last() {
+            if projects
+                .iter()
+                .any(|project| project.id == *project_id && !project.is_projectless())
+            {
+                break;
+            }
+            stack.pop();
+        }
+    }
+
     pub(super) fn navigate_back_action(
         &mut self,
         _: &NavigateBack,
@@ -1330,22 +1348,25 @@ impl Waku {
             return;
         }
 
-        let Some(current) = self.navigation_target() else {
+        Self::prune_navigation_stack(&self.state.projects, &mut self.session_navigation.back);
+        let Some(current) = self.navigation_location() else {
             return;
         };
         match self.session_navigation.back_target() {
-            Some(NavigationTarget::Session(target)) => {
-                self.settings_page = None;
+            Some(NavigationLocation::Task(target)) => {
                 self.request_session_activation(
                     target,
                     SessionActivationTransition::Back { from: current },
                     cx,
                 );
             }
-            Some(NavigationTarget::Terminal(target)) => {
-                self.settings_page = None;
+            Some(NavigationLocation::Terminal(target)) => {
                 let _ = self.session_navigation.go_back(current);
                 self.activate_terminal(target, false, window, cx);
+            }
+            Some(NavigationLocation::ProjectsPage(project_id)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_projects_page(project_id, window, cx);
             }
             None => {}
         }
@@ -1364,22 +1385,28 @@ impl Waku {
             return;
         }
 
-        let Some(current) = self.navigation_target() else {
+        Self::prune_navigation_stack(
+            &self.state.projects,
+            &mut self.session_navigation.forward,
+        );
+        let Some(current) = self.navigation_location() else {
             return;
         };
         match self.session_navigation.forward_target() {
-            Some(NavigationTarget::Session(target)) => {
-                self.settings_page = None;
+            Some(NavigationLocation::Task(target)) => {
                 self.request_session_activation(
                     target,
                     SessionActivationTransition::Forward { from: current },
                     cx,
                 );
             }
-            Some(NavigationTarget::Terminal(target)) => {
-                self.settings_page = None;
+            Some(NavigationLocation::Terminal(target)) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.activate_terminal(target, false, window, cx);
+            }
+            Some(NavigationLocation::ProjectsPage(project_id)) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_projects_page(project_id, window, cx);
             }
             None => {}
         }
@@ -2723,8 +2750,8 @@ mod tests {
 
         navigation.remember_new_task(draft.id);
         navigation.visit(
-            Some(NavigationTarget::Session(draft.id)),
-            NavigationTarget::Session(started.id),
+            Some(NavigationLocation::Task(draft.id)),
+            NavigationLocation::Task(started.id),
         );
 
         assert_eq!(

@@ -360,27 +360,25 @@ impl ProjectsPageState {
 }
 
 impl Waku {
-    /// Open the page on `tab` (or the remembered tab), scoped to the most
-    /// recently used project — the recency the ⌘⇧P switcher cycles.
+    /// Open the page on `tab` (or the remembered tab), scoped to the project
+    /// the page last showed — then the recency the ⌘⇧P switcher cycles.
     pub(super) fn open_projects_page(
         &mut self,
         tab: Option<ProjectsTab>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
-        // The page claims the main area — a selected terminal gives way and
-        // the Terminals group folds, same as picking a chat does.
-        self.selected_terminal = None;
-        if self
-            .sidebar_collapsed_groups
-            .insert(SidebarGroup::Terminals)
-        {
-            self.sidebar_rows_fingerprint.set(None);
-        }
         let current = self
             .projects_page
             .filter(|id| self.state.projects.iter().any(|project| project.id == *id));
+        let last = || {
+            self.last_projects_page_project.filter(|id| {
+                self.state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == *id && !project.is_projectless())
+            })
+        };
         let recent = || {
             self.task_switcher
                 .recent_project_ids(&self.state.sessions)
@@ -407,11 +405,19 @@ impl Waku {
                 .find(|project| !project.is_projectless())
                 .map(|project| project.id)
         };
-        let Some(project_id) = current.or_else(recent).or_else(selected).or_else(first) else {
+        let Some(project_id) = current
+            .or_else(last)
+            .or_else(recent)
+            .or_else(selected)
+            .or_else(first)
+        else {
             return;
         };
-        self.projects_page = Some(project_id);
-        self.projects_ensure_state(project_id, window, cx);
+        self.session_navigation.visit(
+            self.navigation_location(),
+            NavigationLocation::ProjectsPage(project_id),
+        );
+        self.show_projects_page(project_id, window, cx);
         if let Some(tab) = tab {
             let set_tab = self
                 .projects_page_states
@@ -419,18 +425,67 @@ impl Waku {
                 .is_some_and(|state| state.tab != tab);
             if set_tab {
                 self.set_projects_tab(project_id, tab, window, cx);
-                return;
             }
         }
+    }
+
+    /// Put the page on screen scoped to `project_id` — shared by open,
+    /// back/forward restores, and in-page project switches. Recording the
+    /// move is the caller's job: open and switch `visit`, restores
+    /// `go_back`/`go_forward`.
+    pub(super) fn show_projects_page(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        // The page claims the main area — a selected terminal gives way and
+        // the Terminals group folds, same as picking a chat does.
+        self.selected_terminal = None;
+        if self
+            .sidebar_collapsed_groups
+            .insert(SidebarGroup::Terminals)
+        {
+            self.sidebar_rows_fingerprint.set(None);
+        }
+        self.projects_page = Some(project_id);
+        self.last_projects_page_project = Some(project_id);
+        self.projects_ensure_state(project_id, window, cx);
         self.projects_refresh(project_id, cx);
         self.focus_projects_filter(window, cx);
         cx.notify();
     }
 
-    pub(super) fn close_projects_page(&mut self, cx: &mut Context<Self>) {
-        if self.projects_page.take().is_some() {
-            cx.notify();
+    /// Point the open page at another project — recorded like a task switch,
+    /// so back returns to the project the page just left.
+    pub(super) fn switch_projects_page_project(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.projects_page == Some(project_id) {
+            return;
         }
+        self.session_navigation.visit(
+            self.navigation_location(),
+            NavigationLocation::ProjectsPage(project_id),
+        );
+        self.show_projects_page(project_id, window, cx);
+    }
+
+    pub(super) fn close_projects_page(&mut self, cx: &mut Context<Self>) {
+        let Some(project_id) = self.projects_page.take() else {
+            return;
+        };
+        // Closing the page is a location change too: the transcript it was
+        // covering comes back, and back returns to the page.
+        if let Some(location) = self.navigation_location() {
+            self.session_navigation
+                .visit(Some(NavigationLocation::ProjectsPage(project_id)), location);
+        }
+        cx.notify();
     }
 
     /// ⌘⇧P: closed → open the page; open → start (or advance) the
@@ -1287,7 +1342,9 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .max_w(px(PROJECTS_CONTENT_MAX_WIDTH + PROJECTS_CONTENT_MARGIN * 2.0))
+                    .max_w(px(
+                        PROJECTS_CONTENT_MAX_WIDTH + PROJECTS_CONTENT_MARGIN * 2.0
+                    ))
                     .mx_auto()
                     .px(px(PROJECTS_CONTENT_MARGIN))
                     .flex()
@@ -1433,10 +1490,9 @@ impl Waku {
                     .into_iter()
                     .map(|(id, label)| {
                         let weak = weak.clone();
-                        MenuItem::new(label, move |_, cx| {
+                        MenuItem::new(label, move |window, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.projects_page = Some(id);
-                                this.projects_refresh(id, cx);
+                                this.switch_projects_page_project(id, window, cx);
                             });
                         })
                         .selected(id == project_id)

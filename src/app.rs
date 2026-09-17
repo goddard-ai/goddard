@@ -1131,56 +1131,59 @@ struct ComputerUsePreview {
     decode_task: Option<gpui::Task<()>>,
 }
 
-/// A main-area surface the back/forward history can land on: a task's
-/// transcript or a full-width terminal.
+/// One spot back/forward history can point at. A task transcript, a
+/// full-width terminal, and the Projects page share the main column, so
+/// they share the one history; the page entry remembers which project it
+/// was scoped to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NavigationTarget {
-    Session(Uuid),
+enum NavigationLocation {
+    Task(Uuid),
     Terminal(Uuid),
+    ProjectsPage(Uuid),
 }
 
 #[derive(Debug, Default)]
 struct SessionNavigation {
-    back: Vec<NavigationTarget>,
-    forward: Vec<NavigationTarget>,
+    back: Vec<NavigationLocation>,
+    forward: Vec<NavigationLocation>,
     /// The most recently selected unstarted task. The global New Task entry
     /// may reuse it only when it belongs to the currently selected project.
     new_task: Option<Uuid>,
 }
 
 impl SessionNavigation {
-    fn visit(&mut self, current: Option<NavigationTarget>, next: NavigationTarget) {
+    fn visit(&mut self, current: Option<NavigationLocation>, next: NavigationLocation) {
         if let Some(current) = current.filter(|current| *current != next) {
             self.back.push(current);
             self.forward.clear();
         }
     }
 
-    fn go_back(&mut self, current: NavigationTarget) -> Option<NavigationTarget> {
+    fn go_back(&mut self, current: NavigationLocation) -> Option<NavigationLocation> {
         let target = self.back.pop()?;
         self.forward.push(current);
         Some(target)
     }
 
-    fn back_target(&self) -> Option<NavigationTarget> {
+    fn back_target(&self) -> Option<NavigationLocation> {
         self.back.last().copied()
     }
 
-    fn go_forward(&mut self, current: NavigationTarget) -> Option<NavigationTarget> {
+    fn go_forward(&mut self, current: NavigationLocation) -> Option<NavigationLocation> {
         let target = self.forward.pop()?;
         self.back.push(current);
         Some(target)
     }
 
-    fn forward_target(&self) -> Option<NavigationTarget> {
+    fn forward_target(&self) -> Option<NavigationLocation> {
         self.forward.last().copied()
     }
 
     fn remove(&mut self, session_id: Uuid) {
         self.back
-            .retain(|entry| *entry != NavigationTarget::Session(session_id));
+            .retain(|entry| *entry != NavigationLocation::Task(session_id));
         self.forward
-            .retain(|entry| *entry != NavigationTarget::Session(session_id));
+            .retain(|entry| *entry != NavigationLocation::Task(session_id));
         if self.new_task == Some(session_id) {
             self.new_task = None;
         }
@@ -1188,9 +1191,9 @@ impl SessionNavigation {
 
     fn remove_terminal(&mut self, terminal_id: Uuid) {
         self.back
-            .retain(|entry| *entry != NavigationTarget::Terminal(terminal_id));
+            .retain(|entry| *entry != NavigationLocation::Terminal(terminal_id));
         self.forward
-            .retain(|entry| *entry != NavigationTarget::Terminal(terminal_id));
+            .retain(|entry| *entry != NavigationLocation::Terminal(terminal_id));
     }
 
     fn remember_new_task(&mut self, session_id: Uuid) {
@@ -1215,8 +1218,8 @@ impl SessionNavigation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionActivationTransition {
     Visit,
-    Back { from: NavigationTarget },
-    Forward { from: NavigationTarget },
+    Back { from: NavigationLocation },
+    Forward { from: NavigationLocation },
 }
 
 /// Where a session activation parks the transcript.
@@ -1940,6 +1943,9 @@ pub struct Waku {
     /// The Projects page's own project selection — `Some` while the page
     /// claims the main column — independent of `state.selected_project`.
     projects_page: Option<Uuid>,
+    /// The project the page last showed, so reopening lands where the user
+    /// left it instead of falling back to task recency.
+    last_projects_page_project: Option<Uuid>,
     /// Per-project page state kept across page toggles.
     projects_page_states: HashMap<Uuid, projects::ProjectsPageState>,
     /// Projects whose stored path the last `refresh_project_locations` pass
@@ -4098,6 +4104,7 @@ impl Waku {
                 sidebar_pull_request_scan_generation: Cell::new(0),
                 github_browsers: HashMap::new(),
                 projects_page: None,
+                last_projects_page_project: None,
                 projects_page_states: HashMap::new(),
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),

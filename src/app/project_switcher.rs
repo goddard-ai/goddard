@@ -463,9 +463,7 @@ impl Waku {
                     .iter()
                     .any(|project| project.id == project_id)
             {
-                self.projects_page = Some(project_id);
-                self.projects_ensure_state(project_id, window, cx);
-                self.projects_refresh(project_id, cx);
+                self.switch_projects_page_project(project_id, window, cx);
             }
             if let Some(previous_focus) = previous_focus {
                 window.focus(&previous_focus, cx);

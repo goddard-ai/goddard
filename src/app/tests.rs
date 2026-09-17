@@ -10,10 +10,9 @@ use super::sidebar::SidebarRow;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
-    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationTarget, PendingUserInput,
-    SessionNavigation,
-    StreamDeltaKind, TranscriptRowKind::*, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
-    active_navigation_turn_index, activity_group_is_live,
+    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation, PendingUserInput,
+    SessionNavigation, StreamDeltaKind, TranscriptRowKind::*, WORKING_INDICATOR_FADE_OUT,
+    WorkingIndicatorFade, active_navigation_turn_index, activity_group_is_live,
     activity_header_title, append_text_delta_to_session, assistant_response_footer,
     assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
     disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
@@ -23,13 +22,13 @@ use super::{
     navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
     previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
     response_footer_message_index, response_row_turn_id, retain_fading_working_indicator,
-    row_starts_followup_turn,
-    session_accepts_turn_output, session_is_reapable, session_opens_at_last_prompt,
-    settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
-    should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
-    transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
-    transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
-    widened_panel_width_for_file_editor, widened_panel_width_for_review,
+    row_starts_followup_turn, session_accepts_turn_output, session_is_reapable,
+    session_opens_at_last_prompt, settle_stream_segment, should_refresh_branch_after_activity,
+    should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
+    task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
+    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
+    transcript_rows_fingerprint, widened_panel_width_for_file_editor,
+    widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -500,10 +499,10 @@ fn driver_errors_are_bounded_before_rendering() {
 
 #[test]
 fn session_navigation_tracks_back_forward_and_new_branches() {
-    let first = NavigationTarget::Session(Uuid::new_v4());
-    let second = NavigationTarget::Session(Uuid::new_v4());
-    let third = NavigationTarget::Session(Uuid::new_v4());
-    let branch = NavigationTarget::Terminal(Uuid::new_v4());
+    let first = NavigationLocation::Task(Uuid::new_v4());
+    let second = NavigationLocation::Task(Uuid::new_v4());
+    let third = NavigationLocation::Task(Uuid::new_v4());
+    let branch = NavigationLocation::Terminal(Uuid::new_v4());
     let mut navigation = SessionNavigation::default();
 
     navigation.visit(Some(first), second);
@@ -518,6 +517,23 @@ fn session_navigation_tracks_back_forward_and_new_branches() {
 }
 
 #[test]
+fn session_navigation_interleaves_tasks_and_the_projects_page() {
+    let task = NavigationLocation::Task(Uuid::new_v4());
+    let project_a = NavigationLocation::ProjectsPage(Uuid::new_v4());
+    let project_b = NavigationLocation::ProjectsPage(Uuid::new_v4());
+    let mut navigation = SessionNavigation::default();
+
+    // Task -> Projects A -> Projects B: back walks the page's own project
+    // hops first, then the task the page was opened on.
+    navigation.visit(Some(task), project_a);
+    navigation.visit(Some(project_a), project_b);
+    assert_eq!(navigation.go_back(project_b), Some(project_a));
+    assert_eq!(navigation.go_back(project_a), Some(task));
+    assert_eq!(navigation.go_forward(task), Some(project_a));
+    assert_eq!(navigation.back_target(), Some(task));
+}
+
+#[test]
 fn session_navigation_prunes_deleted_tasks() {
     let first = Uuid::new_v4();
     let second = Uuid::new_v4();
@@ -526,27 +542,30 @@ fn session_navigation_prunes_deleted_tasks() {
     let mut navigation = SessionNavigation::default();
 
     navigation.visit(
-        Some(NavigationTarget::Session(first)),
-        NavigationTarget::Terminal(terminal),
+        Some(NavigationLocation::Task(first)),
+        NavigationLocation::Terminal(terminal),
     );
     navigation.visit(
-        Some(NavigationTarget::Terminal(terminal)),
-        NavigationTarget::Session(second),
+        Some(NavigationLocation::Terminal(terminal)),
+        NavigationLocation::Task(second),
     );
     navigation.visit(
-        Some(NavigationTarget::Session(second)),
-        NavigationTarget::Session(third),
+        Some(NavigationLocation::Task(second)),
+        NavigationLocation::Task(third),
     );
     assert_eq!(
-        navigation.go_back(NavigationTarget::Session(third)),
-        Some(NavigationTarget::Session(second))
+        navigation.go_back(NavigationLocation::Task(third)),
+        Some(NavigationLocation::Task(second))
     );
 
     navigation.remove(first);
     navigation.remove(third);
     navigation.remove_terminal(terminal);
-    assert_eq!(navigation.go_back(NavigationTarget::Session(second)), None);
-    assert_eq!(navigation.go_forward(NavigationTarget::Session(second)), None);
+    assert_eq!(navigation.go_back(NavigationLocation::Task(second)), None);
+    assert_eq!(
+        navigation.go_forward(NavigationLocation::Task(second)),
+        None
+    );
 }
 
 #[test]
