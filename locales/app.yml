@@ -3393,3 +3393,5 @@ friends.open_chat:
   en: Open chat
 friends.show_in_finder:
   en: Show in Finder
+friends.transfers_active:
+  en: "{count} transfer(s) in progress — open Friends"

@@ -18,6 +18,80 @@ use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::shortcut::ShortcutHint;
 
+/// A small circular gauge: a ring whose arc fills clockwise from 12
+/// o'clock over `percent`, over a faint full track ring. `None` draws the
+/// track alone (unknown fraction). `PathBuilder::stroke` arcs — lyon
+/// tessellates them correctly where a hand-built annulus fill does not
+/// survive GPUI's fill rule.
+pub fn progress_ring(percent: Option<f64>, track: Hsla, fill: Hsla) -> impl IntoElement {
+    const SIZE: f32 = 13.0;
+    const STROKE: f32 = 2.5;
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let center = bounds.center();
+            let radius = px((SIZE - STROKE) / 2.0);
+
+            // A full circle is two 180° arcs; lyon rejects a single
+            // zero-length one.
+            let full_circle = |builder: &mut PathBuilder| {
+                builder.move_to(point(center.x + radius, center.y));
+                builder.arc_to(
+                    point(radius, radius),
+                    px(0.0),
+                    false,
+                    true,
+                    point(center.x - radius, center.y),
+                );
+                builder.arc_to(
+                    point(radius, radius),
+                    px(0.0),
+                    false,
+                    true,
+                    point(center.x + radius, center.y),
+                );
+                builder.close();
+            };
+
+            let mut track_builder = PathBuilder::stroke(px(STROKE));
+            full_circle(&mut track_builder);
+            if let Ok(path) = track_builder.build() {
+                window.paint_path(path, track);
+            }
+
+            let Some(percent) = percent else {
+                return;
+            };
+            // Keep a visible sliver for a nearly-empty reading.
+            let fraction = ((percent / 100.0) as f32).clamp(0.0, 1.0).max(0.05);
+            let mut arc_builder = PathBuilder::stroke(px(STROKE));
+            if fraction >= 0.999 {
+                full_circle(&mut arc_builder);
+            } else {
+                let start = -std::f32::consts::FRAC_PI_2;
+                let angle = start + fraction * std::f32::consts::TAU;
+                arc_builder.move_to(point(center.x, center.y - radius));
+                arc_builder.arc_to(
+                    point(radius, radius),
+                    px(0.0),
+                    fraction > 0.5,
+                    true,
+                    point(
+                        center.x + radius * angle.cos(),
+                        center.y + radius * angle.sin(),
+                    ),
+                );
+            }
+            if let Ok(path) = arc_builder.build() {
+                window.paint_path(path, fill);
+            }
+        },
+    )
+    .w(px(SIZE))
+    .h(px(SIZE))
+    .flex_none()
+}
+
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI
 /// font size setting moves.

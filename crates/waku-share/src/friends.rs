@@ -102,6 +102,8 @@ pub enum FriendsMessage {
         name: String,
         /// File or folder name being offered.
         file_name: String,
+        /// Declared byte size — the receiver renders progress against it.
+        size: u64,
         note: Option<String>,
         ticket: String,
     },
@@ -139,6 +141,7 @@ pub struct OfferInfo {
     pub from: EndpointId,
     pub name: String,
     pub file_name: String,
+    pub size: u64,
     pub note: Option<String>,
     pub ticket: String,
 }
@@ -229,7 +232,7 @@ impl ProtocolHandler for FriendsProtocol {
                 write_message(&mut send, &reply).await.map_err(accept_err)?;
                 send.finish()?;
             }
-            FriendsMessage::Offer { name, file_name, note, ticket } => {
+            FriendsMessage::Offer { name, file_name, size, note, ticket } => {
                 let is_friend = {
                     let mut store = self.store.lock();
                     let is_friend = store.is_friend(&remote);
@@ -244,6 +247,7 @@ impl ProtocolHandler for FriendsProtocol {
                         from: remote,
                         name,
                         file_name,
+                        size,
                         note,
                         ticket,
                     });
@@ -337,6 +341,7 @@ pub async fn send_offer(
     addr: impl Into<EndpointAddr>,
     our_name: &str,
     file_name: &str,
+    size: u64,
     note: Option<String>,
     ticket: &str,
 ) -> anyhow::Result<()> {
@@ -347,6 +352,7 @@ pub async fn send_offer(
         &FriendsMessage::Offer {
             name: our_name.to_string(),
             file_name: file_name.to_string(),
+            size,
             note,
             ticket: ticket.to_string(),
         },

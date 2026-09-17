@@ -109,7 +109,12 @@ impl ShareNode {
 
     /// Fetch `ticket`'s content into this node's store. Verified chunks;
     /// returns the hash. Resumable — a second call picks up missing ranges.
-    pub async fn fetch(&self, ticket: &Ticket) -> anyhow::Result<Hash> {
+    /// `on_progress` receives payload bytes downloaded so far.
+    pub async fn fetch(
+        &self,
+        ticket: &Ticket,
+        mut on_progress: impl FnMut(u64),
+    ) -> anyhow::Result<Hash> {
         let hash_and_format = ticket.hash_and_format();
         let connection = self
             .endpoint()
@@ -121,8 +126,11 @@ impl ShareNode {
         let mut stream = get.stream();
         while let Some(item) = stream.next().await {
             match item {
-                GetProgressItem::Progress(_) => {}
-                GetProgressItem::Done(_) => break,
+                GetProgressItem::Progress(done) => on_progress(done),
+                GetProgressItem::Done(stats) => {
+                    on_progress(stats.payload_bytes_read);
+                    break;
+                }
                 GetProgressItem::Error(cause) => bail!("download failed: {cause}"),
             }
         }

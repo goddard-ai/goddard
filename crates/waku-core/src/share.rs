@@ -382,16 +382,38 @@ fn run_runtime(
                                 note: offer.note.clone(),
                                 status: TransferStatus::Transferring,
                                 bytes_done: 0,
-                                bytes_total: 0,
+                                bytes_total: offer.size,
                                 dest_dir: None,
                                 session_id: None,
                             });
                         }
                         publish(&state, &sink);
                         let node = node.lock().await.clone().expect("share node up");
+                        let progress = {
+                            let state = state.clone();
+                            let sink = sink.clone();
+                            let mut last_publish = std::time::Instant::now();
+                            move |done: u64| {
+                                {
+                                    let mut s = state.lock();
+                                    if let Some(t) =
+                                        s.transfers.iter_mut().find(|t| t.id == id)
+                                    {
+                                        t.bytes_done = done;
+                                    }
+                                }
+                                // Chunks can land faster than frames; cap the
+                                // broadcast at ~4 Hz. Completion publishes
+                                // unconditionally below.
+                                if last_publish.elapsed() >= Duration::from_millis(250) {
+                                    last_publish = std::time::Instant::now();
+                                    publish(&state, &sink);
+                                }
+                            }
+                        };
                         let result = async {
                             let ticket: waku_share::Ticket = offer.ticket.parse()?;
-                            let hash = node.fetch(&ticket).await?;
+                            let hash = node.fetch(&ticket, progress).await?;
                             let dest_dir = dir.join("transfers").join(id.to_string());
                             std::fs::create_dir_all(&dest_dir)?;
                             let dest = dest_dir.join(&offer.file_name);
@@ -455,6 +477,7 @@ fn run_runtime(
                             && let Some(t) = s.transfers.iter_mut().find(|t| t.id == id)
                         {
                             t.status = TransferStatus::Done;
+                            t.bytes_done = t.bytes_total;
                         }
                     }
                     publish(&state, &sink);
@@ -572,6 +595,7 @@ fn run_runtime(
                     let result = async {
                         let id: EndpointId = node_id.parse()?;
                         let (ticket, _tag) = share_node.provide(&path).await?;
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         let title = path
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
@@ -597,7 +621,7 @@ fn run_runtime(
                                 note: note.clone(),
                                 status: TransferStatus::Transferring,
                                 bytes_done: 0,
-                                bytes_total: 0,
+                                bytes_total: size,
                                 dest_dir: None,
                                 session_id: None,
                             });
@@ -608,6 +632,7 @@ fn run_runtime(
                             id,
                             &our_name,
                             &title,
+                            size,
                             note,
                             &ticket_str,
                         )

@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
                             let bob = bob_ep_holder.lock().clone().unwrap();
                             let ticket: Ticket = offer.ticket.parse().expect("bad ticket");
                             eprintln!("bob: fetching {}", ticket.hash());
-                            let hash = match bob.fetch(&ticket).await {
+                            let hash = match bob.fetch(&ticket, |_| {}).await {
                                 Ok(h) => h,
                                 Err(e) => {
                                     eprintln!("bob: fetch failed: {e:?}");
@@ -142,6 +142,7 @@ async fn main() -> anyhow::Result<()> {
         bob.addr(),
         "alice",
         "hello.txt",
+        payload.len() as u64,
         Some("here's the new mockups".into()),
         &ticket.to_string(),
     )

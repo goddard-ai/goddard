@@ -6,7 +6,7 @@
 //! OpenCode Go's usage endpoint, and Codex's own rate-limit
 //! notifications. Frames read only snapshots stored on the entity.
 
-use gpui::{PathBuilder, relative};
+use gpui::relative;
 
 use super::*;
 use crate::usage::{PlanUsage, format_tokens, reset_label};
@@ -265,7 +265,7 @@ impl Waku {
             .hover(|element| element.bg(theme.overlay))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tooltip))
-            .child(context_gauge(percent, theme.border_strong, fill));
+            .child(crate::ui::progress_ring(percent, theme.border_strong, fill));
 
         Some(popover(
             trigger,
@@ -295,80 +295,6 @@ fn context_percent(usage: ContextUsage) -> Option<f64> {
         .window
         .filter(|window| *window > 0)
         .map(|window| (usage.tokens as f64 * 100.0 / window as f64).min(100.0))
-}
-
-/// The trigger glyph: a ring whose arc fills clockwise from 12 o'clock as the
-/// context window does, over a faint full ring. An unknown fraction draws the
-/// track alone. This is Zed's `CircularProgress` drawing sized for the footer
-/// — `PathBuilder::stroke` arcs, which lyon tessellates correctly where a
-/// hand-built annulus fill does not survive GPUI's fill rule.
-fn context_gauge(percent: Option<f64>, track: Hsla, fill: Hsla) -> impl IntoElement {
-    const SIZE: f32 = 13.0;
-    const STROKE: f32 = 2.5;
-    canvas(
-        |_, _, _| (),
-        move |bounds, _, window, _| {
-            let center = bounds.center();
-            let radius = px((SIZE - STROKE) / 2.0);
-
-            // A full circle is two 180° arcs; lyon rejects a single
-            // zero-length one.
-            let full_circle = |builder: &mut PathBuilder| {
-                builder.move_to(point(center.x + radius, center.y));
-                builder.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center.x - radius, center.y),
-                );
-                builder.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    false,
-                    true,
-                    point(center.x + radius, center.y),
-                );
-                builder.close();
-            };
-
-            let mut track_builder = PathBuilder::stroke(px(STROKE));
-            full_circle(&mut track_builder);
-            if let Ok(path) = track_builder.build() {
-                window.paint_path(path, track);
-            }
-
-            let Some(percent) = percent else {
-                return;
-            };
-            // Keep a visible sliver for a nearly-empty context.
-            let fraction = ((percent / 100.0) as f32).clamp(0.0, 1.0).max(0.05);
-            let mut arc_builder = PathBuilder::stroke(px(STROKE));
-            if fraction >= 0.999 {
-                full_circle(&mut arc_builder);
-            } else {
-                let start = -std::f32::consts::FRAC_PI_2;
-                let angle = start + fraction * std::f32::consts::TAU;
-                arc_builder.move_to(point(center.x, center.y - radius));
-                arc_builder.arc_to(
-                    point(radius, radius),
-                    px(0.0),
-                    fraction > 0.5,
-                    true,
-                    point(
-                        center.x + radius * angle.cos(),
-                        center.y + radius * angle.sin(),
-                    ),
-                );
-            }
-            if let Ok(path) = arc_builder.build() {
-                window.paint_path(path, fill);
-            }
-        },
-    )
-    .w(px(SIZE))
-    .h(px(SIZE))
-    .flex_none()
 }
 
 fn usage_panel(

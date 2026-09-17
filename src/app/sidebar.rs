@@ -3,6 +3,7 @@ use gpui::{KeyBinding, actions};
 
 use super::*;
 use crate::ui::shortcut::ShortcutHint;
+use waku_client::friends::TransferStatus;
 
 actions!(waku_sidebar, [CancelSessionRename]);
 
@@ -1458,10 +1459,76 @@ impl Waku {
                         }
                     })),
             )
+            .when_some(self.render_transfer_indicator(cx), |footer, ring| {
+                footer.child(ring)
+            })
             .child(div().flex_1())
             .when_some(self.render_updater_button(cx), |footer, button| {
                 footer.child(button)
             })
+    }
+
+    /// Aggregate in-flight friend transfers into one footer ring beside the
+    /// shortcuts button — hidden when idle. The arc tracks summed bytes when
+    /// offers declared a size; until then a spinning loader carries the
+    /// state. Activating it lands on Settings → Friends.
+    fn render_transfer_indicator(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let active = self
+            .friends_state
+            .transfers
+            .iter()
+            .filter(|t| {
+                matches!(
+                    t.status,
+                    TransferStatus::Pending | TransferStatus::Transferring
+                )
+            })
+            .collect::<Vec<_>>();
+        if active.is_empty() {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        let total: u64 = active.iter().map(|t| t.bytes_total).sum();
+        let done: u64 = active.iter().map(|t| t.bytes_done).sum();
+        let percent = (total > 0).then_some(done as f64 * 100.0 / total as f64);
+        let glyph: AnyElement = match percent {
+            Some(percent) => {
+                progress_ring(Some(percent), theme.border_strong, theme.accent)
+                    .into_any_element()
+            }
+            None => motion::spin_slow(icon("icons/loader-circle.svg", 13.0, theme.accent)),
+        };
+        let count = active.len();
+        Some(
+            div()
+                .id("transfer-progress")
+                .tab_index(0)
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .w(px(26.0))
+                .h(px(26.0))
+                .flex_none()
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .tooltip(Tooltip::text(tr!("friends.transfers_active", count = count)))
+                .child(glyph)
+                .on_click(cx.listener(|this, _, _window, cx| {
+                    this.open_settings_page(SettingsPage::Friends, cx);
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        this.open_settings_page(SettingsPage::Friends, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .into_any_element(),
+        )
     }
 
     /// Resolve every ordinary local project's branch in one background pass.
