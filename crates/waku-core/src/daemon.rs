@@ -3485,6 +3485,88 @@ mod tests {
     }
 
     #[test]
+    fn incoming_transfer_materializes_a_quarantined_session() {
+        let root = std::env::temp_dir().join(format!("waku-transfer-{}", Uuid::new_v4()));
+        let share_dir = root.join("share");
+        let store = Arc::new(StateStore::daemon(root.join("app.db")));
+        let task_state = Arc::new(Mutex::new(PersistedState::fresh(root.join("repo"))));
+        let transfer = waku_protocol::friends::TransferInfo {
+            id: Uuid::new_v4(),
+            direction: waku_protocol::friends::TransferDirection::Incoming,
+            peer_id: "peer".into(),
+            peer_name: "maya".into(),
+            title: "design.pdf".into(),
+            note: Some("here's the new mockups".into()),
+            status: waku_protocol::friends::TransferStatus::Done,
+            bytes_done: 12,
+            bytes_total: 12,
+            dest_dir: Some(share_dir.join("transfers/x")),
+            session_id: None,
+        };
+
+        let session_id =
+            create_transfer_session(&task_state, &store, &share_dir, &transfer).unwrap();
+
+        {
+            let state = task_state.lock();
+            let project = state
+                .projects
+                .iter()
+                .find(|project| project.path == share_dir)
+                .expect("a Friends project at the share dir");
+            assert_eq!(project.name, "Friends");
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .expect("the transfer's session");
+            assert!(session.quarantined, "received files start untrusted");
+            assert_eq!(session.status, SessionStatus::Idle);
+            assert_eq!(session.project_id, project.id);
+            assert_eq!(session.title, "design.pdf from maya");
+            let receipt = &session.turns[0];
+            assert_eq!(receipt.status, crate::model::TurnStatus::Completed);
+            let receipt_text = session
+                .messages
+                .iter()
+                .map(|message| message.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(receipt_text.contains("here's the new mockups"));
+            assert!(receipt_text.contains("transfers/x"));
+        }
+
+        // A second transfer reuses the same Friends project.
+        let second = waku_protocol::friends::TransferInfo {
+            id: Uuid::new_v4(),
+            dest_dir: Some(share_dir.join("transfers/y")),
+            ..transfer.clone()
+        };
+        create_transfer_session(&task_state, &store, &share_dir, &second).unwrap();
+        assert_eq!(
+            task_state
+                .lock()
+                .projects
+                .iter()
+                .filter(|project| project.path == share_dir)
+                .count(),
+            1
+        );
+
+        // The flag survives a reload — quarantine isn't a runtime accident.
+        let reloaded = StateStore::daemon(root.join("app.db")).load().unwrap();
+        assert!(
+            reloaded
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| session.quarantined)
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn response_fork_titles_follow_one_numbered_sequence() {
         assert_eq!(
             next_response_fork_title("Fix the bug", ["Fix the bug"]),
