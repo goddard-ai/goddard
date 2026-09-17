@@ -1254,7 +1254,7 @@ impl Waku {
         let row = self
             .render_sidebar_action_row(
                 "sidebar-projects",
-                "icons/package.svg",
+                "icons/projects.svg",
                 tr!("sidebar.projects"),
                 &ToggleProjectsPage,
                 window,

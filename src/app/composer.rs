@@ -4302,7 +4302,7 @@ impl Waku {
             SessionWorkspace::Worktree { name, .. } => SharedString::from(name.clone()),
         };
         let workspace_icon = if workspace.is_local() {
-            "icons/laptop.svg"
+            "icons/local.svg"
         } else {
             "icons/fork.svg"
         };
@@ -4435,7 +4435,7 @@ impl Waku {
                                     ("icons/fork.svg", name.clone(), true)
                                 }
                                 worktrees::WorktreePickerAction::Local => (
-                                    "icons/laptop.svg",
+                                    "icons/local.svg",
                                     tr!("workspace.local"),
                                     workspace.is_local(),
                                 ),

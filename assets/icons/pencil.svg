@@ -1,1 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="14px" height="14px" viewBox="0 0 14 14" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>pencil</title>
+    <g id="pencil" stroke="none" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-width="1">
+        <g id="Group" transform="translate(1.7999, 1.7996)" stroke="#666666">
+            <path d="M9.97067244,2.50249341 C10.5431945,1.93011496 10.5433109,1.00198974 9.97093243,0.4294677 C9.39855399,-0.14305434 8.47042877,-0.143170755 7.89790672,0.429207679 L0.957833635,7.3708408 C0.837097052,7.49122357 0.747808099,7.63944323 0.6978279,7.80245032 L0.010892747,10.0655402 C-0.0164882603,10.1571638 0.00863515559,10.2564227 0.0763082152,10.3239872 C0.143981275,10.3915516 0.243280439,10.4165155 0.334859893,10.3889874 L2.59846982,9.70257223 C2.76132138,9.65304179 2.90952676,9.56429712 3.03007935,9.44412653 L9.97067244,2.50249341 Z" id="Path" stroke-width="1.2"></path>
+            <line x1="6.76012162" y1="1.56023263" x2="8.84016751" y2="3.64027851" id="Path" stroke-width="1.2"></line>
+        </g>
+    </g>
+</svg>

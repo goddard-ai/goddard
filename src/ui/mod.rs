@@ -719,7 +719,7 @@ mod tests {
             "icons/chevrons-up-down.svg",
             "icons/folder.svg",
             "icons/folder-new.svg",
-            "icons/laptop.svg",
+            "icons/local.svg",
             "icons/file-diff.svg",
             "icons/globe.svg",
             "icons/hourglass.svg",

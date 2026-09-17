@@ -1,1 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="m4.206 7.5 15.588 9"/><path d="m19.794 7.5-15.588 9"/></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="14px" height="14px" viewBox="0 0 14 14" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>sparkle</title>
+    <g id="sparkle" stroke="none" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2">
+        <path d="M6.95792,2.2344 C6.9672,2.18848 7.0328,2.18848 7.04208,2.2344 C7.52832,4.61296 9.38704,6.47168 11.7656,6.95792 C11.81152,6.9672 11.81152,7.0328 11.7656,7.04208 C9.38704,7.52832 7.52832,9.38704 7.04208,11.7656 C7.0328,11.81152 6.9672,11.81152 6.95792,11.7656 C6.47168,9.38704 4.61296,7.52832 2.2344,7.04208 C2.18848,7.0328 2.18848,6.9672 2.2344,6.95792 C4.61296,6.47168 6.47168,4.61296 6.95792,2.2344 Z" id="Path" stroke="#666666"></path>
+    </g>
+</svg>
