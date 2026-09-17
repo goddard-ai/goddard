@@ -256,6 +256,7 @@ enum SettingsPage {
     General,
     Providers,
     Skills,
+    Friends,
     Archived,
     Usage,
     Daemon,
@@ -1865,6 +1866,14 @@ pub struct Waku {
     /// agent — rewrites it.
     daemon_settings_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonSettings)>,
     daemon_settings_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonSettings)>,
+    /// `friendsChanged` broadcasts forwarded by the task-state sync worker:
+    /// the authoritative daemon document each time a friend request, offer,
+    /// or transfer update lands.
+    friends_state: waku_client::friends::FriendsState,
+    friends_tx: Sender<waku_client::friends::FriendsState>,
+    friends_events: Receiver<waku_client::friends::FriendsState>,
+    /// The Settings → Friends "add friend" code field.
+    friend_code_input: Entity<TextInput>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -2517,6 +2526,7 @@ mod drafts;
 mod element_inspector;
 mod file_finder;
 mod file_search;
+mod friends;
 mod git_panel;
 mod github;
 mod github_media;
@@ -3242,6 +3252,12 @@ impl Waku {
                 .accessibility_label(tr!("settings.search"))
                 .placeholder(tr!("settings.search"))
         });
+        let friend_code_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("friends.code_placeholder"))
+                .placeholder(tr!("friends.code_placeholder"))
+        });
         let archived_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -3483,6 +3499,7 @@ impl Waku {
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
+        let (friends_tx, friends_events) = unbounded();
         #[cfg(target_os = "macos")]
         if crate::computer_use::is_available() {
             let computer_permission_tx = computer_permission_tx.clone();
@@ -4186,6 +4203,7 @@ impl Waku {
                 worktree_creation_pending: false,
                 worktree_move_pending: HashSet::new(),
                 settings_search,
+                friend_code_input,
                 ui_font_selector,
                 code_font_selector,
                 daemon_port_input,
@@ -4300,6 +4318,9 @@ impl Waku {
                 task_state_sync_events,
                 daemon_settings_tx,
                 daemon_settings_events,
+                friends_state: waku_client::friends::FriendsState::default(),
+                friends_tx,
+                friends_events,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),

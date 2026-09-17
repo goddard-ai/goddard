@@ -3334,3 +3334,58 @@ shortcuts.cancel_rename:
   en: Cancel Rename
 shortcuts.close_preview:
   en: Close Preview
+
+settings.friends:
+  en: Friends
+settings.friends_keywords:
+  en: friends friend share send receive file transfer peer online presence
+friends.your_code:
+  en: Your friend code
+friends.code_hint:
+  en: Share this code with someone running Goddard. Once they add you and you accept, either of you can send files.
+friends.add_friend:
+  en: Add a friend
+friends.add_hint:
+  en: Paste their friend code. They'll see a request and can accept or decline.
+friends.code_placeholder:
+  en: gfr-…
+friends.send_request:
+  en: Send request
+friends.requests:
+  en: Requests
+friends.wants_to_add:
+  en: wants to add you as a friend
+friends.pending:
+  en: pending
+friends.accept:
+  en: Accept
+friends.decline:
+  en: Decline
+friends.list:
+  en: Friends
+friends.empty:
+  en: No friends yet — share your code to get started.
+friends.online:
+  en: Online
+friends.unreachable:
+  en: Unreachable
+friends.last_seen:
+  en: "last seen %{ago} ago"
+friends.send_file:
+  en: Send file…
+friends.send_file_prompt:
+  en: Choose a file or folder to send
+friends.remove:
+  en: Remove
+friends.transfers:
+  en: Transfers
+friends.status_pending:
+  en: Pending
+friends.status_transferring:
+  en: Transferring…
+friends.status_done:
+  en: Done
+friends.status_failed:
+  en: Failed
+friends.status_cancelled:
+  en: Cancelled

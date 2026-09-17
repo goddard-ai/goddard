@@ -1209,6 +1209,7 @@ impl Waku {
         let clients = supervisor.subscribe_clients();
         let results = self.task_state_sync_tx.clone();
         let settings_updates = self.daemon_settings_tx.clone();
+        let friends_updates = self.friends_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
@@ -1222,6 +1223,19 @@ impl Waku {
                     }
                     let revisions = client.subscribe_task_state();
                     let settings = client.subscribe_settings();
+                    let friends = client.subscribe_friends();
+                    // Seed the document before broadcasts arrive — a client
+                    // connecting after the last change sees no event until
+                    // something mutates friends state again.
+                    if let Ok(waku_client::ResponsePayload::Friends { state }) = client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::GetFriends,
+                    ) {
+                        if friends_updates.send(state).is_err() {
+                            return;
+                        }
+                    }
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
                     if results.send((key, result)).is_err() {
                         return;
@@ -1272,6 +1286,18 @@ impl Waku {
                                 }
                                 signal_event_pump(&event_wake);
                             }
+                            recv(friends) -> friends => {
+                                let Ok(state) = friends else {
+                                    let Ok(replacement) = clients.recv() else {
+                                        return;
+                                    };
+                                    break replacement;
+                                };
+                                if friends_updates.send(state).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
                         }
                     };
                 }
@@ -1314,6 +1340,65 @@ impl Waku {
             self.apply_remote_daemon_settings(key, settings, cx);
         }
         true
+    }
+
+    fn drain_friends_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut latest = None;
+        while let Ok(state) = self.friends_events.try_recv() {
+            latest = Some(state);
+        }
+        let Some(state) = latest else {
+            return false;
+        };
+        self.friends_state = state;
+        // Presence is lazy — a fresh document is the cheapest place to
+        // refresh probe verdicts for the open page.
+        if self.settings_page == Some(SettingsPage::Friends) {
+            self.probe_friends(cx);
+        }
+        cx.notify();
+        true
+    }
+
+    /// Fire a lazy presence probe at every known friend. The daemon no-ops
+    /// probes that are still fresh, so this is safe to call on every
+    /// `friendsChanged` delivery while the page is open.
+    pub(super) fn probe_friends(&self, cx: &mut Context<Self>) {
+        let client = self.daemon.client();
+        let node_ids: Vec<String> = self
+            .friends_state
+            .friends
+            .iter()
+            .map(|friend| friend.node_id.clone())
+            .collect();
+        cx.background_executor()
+            .spawn(async move {
+                for node_id in node_ids {
+                    let _ = client.notify(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::ProbeFriend { node_id },
+                    );
+                }
+            })
+            .detach();
+    }
+
+    /// Send one friends command off the UI thread; results arrive through
+    /// the `friendsChanged` broadcast.
+    pub(super) fn friends_command(
+        &self,
+        command: waku_client::Command,
+        cx: &mut Context<Self>,
+    ) {
+        let client = self.daemon.client();
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = client.request(Uuid::nil(), Uuid::nil(), command) {
+                    eprintln!("friends command failed: {error}");
+                }
+            })
+            .detach();
     }
 
     /// Fold a `settingsChanged` broadcast into the local mirrors. The
@@ -4759,6 +4844,7 @@ impl Waku {
             | self.drain_plan_usage_events()
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
+            | self.drain_friends_events(cx)
         {
             cx.notify();
         }

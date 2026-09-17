@@ -61,6 +61,9 @@ impl Waku {
         if page == SettingsPage::Git {
             self.git_page_refresh_pending = true;
         }
+        if page == SettingsPage::Friends {
+            self.probe_friends(cx);
+        }
         cx.notify();
     }
 

@@ -62,6 +62,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
         "settings.skills_keywords",
     ),
     (
+        SettingsPage::Friends,
+        "settings.friends",
+        "icons/send.svg",
+        "settings.friends_keywords",
+    ),
+    (
         SettingsPage::Archived,
         "settings.archived",
         "icons/archive.svg",
@@ -481,6 +487,7 @@ impl Waku {
                         SettingsPage::General => tr!("settings.general"),
                         SettingsPage::Providers => tr!("settings.providers"),
                         SettingsPage::Skills => tr!("settings.skills"),
+                        SettingsPage::Friends => tr!("settings.friends"),
                         SettingsPage::Archived => tr!("settings.archived"),
                         SettingsPage::Usage => tr!("settings.usage"),
                         SettingsPage::Daemon => tr!("settings.daemon"),
@@ -495,6 +502,7 @@ impl Waku {
                 SettingsPage::General => self.render_general_settings(cx),
                 SettingsPage::Providers => self.render_providers_settings(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
+                SettingsPage::Friends => self.render_friends_settings(cx),
                 SettingsPage::Archived => self.render_archived_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
