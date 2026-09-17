@@ -326,6 +326,16 @@ fn assemble_slash_commands(
                 scan_skill_files(provider, &home.join(".config/agents/skills"), &mut commands);
             }
         }
+        ProviderKind::Copilot => {
+            scan_skill_files(
+                provider,
+                &project_root.join(".github/skills"),
+                &mut commands,
+            );
+            if let Some(home) = home.as_deref() {
+                scan_skill_files(provider, &home.join(".copilot/skills"), &mut commands);
+            }
+        }
         // Harness commands are session-scoped and reported live by the Host,
         // and Kimi Code and Droid likewise publish their whole command set
         // over ACP rather than from files Goddard could scan.

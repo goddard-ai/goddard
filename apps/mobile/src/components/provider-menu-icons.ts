@@ -7,6 +7,7 @@ export const PROVIDER_MENU_ICONS: Record<ProviderKind, ImageSourcePropType> = {
   amp: require('@/assets/images/providers/amp.png'),
   claude: require('@/assets/images/providers/claude.png'),
   codex: require('@/assets/images/providers/codex.png'),
+  copilot: require('@/assets/images/providers/copilot.png'),
   cursor: require('@/assets/images/providers/cursor.png'),
   deepSeek: require('@/assets/images/providers/deepSeek.png'),
   devin: require('@/assets/images/providers/devin.png'),

@@ -72,6 +72,10 @@ pub fn user_skill_locations() -> Vec<SkillLocation> {
         home_join(".codex/skills"),
     );
     push(
+        SkillSource::Provider(ProviderKind::Copilot),
+        home_join(".copilot/skills"),
+    );
+    push(
         SkillSource::Provider(ProviderKind::OpenCode),
         home_join(".config/opencode/skills"),
     );
@@ -115,6 +119,10 @@ pub fn project_skill_locations(project_root: &Path, project_name: &str) -> Vec<S
             ".claude/skills",
         ),
         (SkillSource::Provider(ProviderKind::Codex), ".codex/skills"),
+        (
+            SkillSource::Provider(ProviderKind::Copilot),
+            ".github/skills",
+        ),
         (
             SkillSource::Provider(ProviderKind::OpenCode),
             ".opencode/skills",

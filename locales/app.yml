@@ -1551,6 +1551,8 @@ permission.allow_for_session:
   en: Allow for session
 permission.always_allow:
   en: Always allow
+permission.exit_plan_mode:
+  en: The agent wants to exit plan mode
 permission.a_tool:
   en: a tool
 permission.run_a_tool:

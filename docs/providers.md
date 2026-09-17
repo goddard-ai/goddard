@@ -158,20 +158,20 @@ OpenCode server itself, whose driver kills it explicitly on drop.
 
 ## At a glance
 
-| | Codex CLI | Pi | Oh My Pi | Claude Code | Amp | Cursor CLI | Fx | OpenCode | Grok Build | Kimi Code | Devin CLI | Droid |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Binary | `codex` | `pi` | `omp` | `claude` | `amp` | `cursor-agent` | `fx` | `opencode` | `grok` | `kimi` | `devin` | `droid` |
-| Wire protocol | JSON-RPC over stdio | NDJSON RPC over stdio | NDJSON RPC over stdio | stream-json over stdio | stream-json over stdio | ACP over stdio | ACP over stdio | HTTP + SSE | ACP over stdio | ACP over stdio | ACP over stdio | ACP over stdio |
-| Process spans the whole session | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Process spawned per turn | no | no | no | no | no | no | no | no | no | no | no | no |
-| Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approvals | yes | no | no (has them; Goddard runs `--yolo`) | yes | no | yes | yes | yes | yes | yes | yes | yes |
-| Mid-turn steering | yes | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) | yes (transport) | **no** |
-| Model discovery | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes | yes | yes |
-| Computer Use | yes | yes | no (ships its own) | no | no | no | no | yes | yes | no | no | no |
-| Restricted to Full access | no | yes | yes | no | yes | no | no | no | no | no | no | no |
-| Rewind and branch at a turn | yes | yes | yes | yes | yes | yes | **no** | yes | yes | **no** | **no** | **no** |
+| | Codex CLI | Pi | Oh My Pi | Claude Code | Amp | Cursor CLI | Fx | OpenCode | Grok Build | Kimi Code | Devin CLI | Droid | GitHub Copilot |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Binary | `codex` | `pi` | `omp` | `claude` | `amp` | `cursor-agent` | `fx` | `opencode` | `grok` | `kimi` | `devin` | `droid` | `copilot` |
+| Wire protocol | JSON-RPC over stdio | NDJSON RPC over stdio | NDJSON RPC over stdio | stream-json over stdio | stream-json over stdio | ACP over stdio | ACP over stdio | HTTP + SSE | ACP over stdio | ACP over stdio | ACP over stdio | ACP over stdio | JSON-RPC over stdio (SDK) |
+| Process spans the whole session | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Process spawned per turn | no | no | no | no | no | no | no | no | no | no | no | no | no |
+| Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approvals | yes | no | no (has them; Goddard runs `--yolo`) | yes | no | yes | yes | yes | yes | yes | yes | yes | yes |
+| Mid-turn steering | yes | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) | yes (transport) | **no** | **no** |
+| Model discovery | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes | yes | yes | yes |
+| Computer Use | yes | yes | no (ships its own) | no | no | no | no | yes | yes | no | no | no | no |
+| Restricted to Full access | no | yes | yes | no | yes | no | no | no | no | no | no | no | no |
+| Rewind and branch at a turn | yes | yes | yes | yes | yes | yes | **no** | yes | yes | **no** | **no** | **no** | **no** |
 
 Kimi Code's and Devin CLI's steering is the transport's, not a probed policy:
 the ACP driver sends the second `session/prompt` for every agent it drives, but
@@ -845,17 +845,91 @@ which its `--print` transport did not emit at all.
 
 ---
 
+## GitHub Copilot
+
+Copilot is the one driver that does not speak its provider's protocol directly:
+the official `github-copilot-sdk` crate owns the `copilot` server-mode process
+and the JSON-RPC wire entirely, and
+[driver/copilot.rs](../crates/waku-core/src/driver/copilot.rs) translates
+between its API and `DriverEvent`. The SDK is Tokio-native where every other
+driver is a plain blocking thread, so the driver thread owns a current-thread
+runtime and `DriverControl`'s synchronous face feeds a `tokio::mpsc` command
+channel the runtime task selects against `session.subscribe()`.
+
+**Launch** — `Client::start` spawns `copilot` itself from the probed path; the
+SDK brings the process up, handshakes, and runs its RPC dispatch on sibling
+tasks of the same runtime. One client and one session per task — the SDK can
+multiplex sessions on a process, but keeping it 1:1 means the driver's `Drop`
+still reads as "this task's runtime is gone" like every other transport's.
+
+**Per turn** — `session.send(MessageOptions::new(prompt))`. The turn boundary
+is not the send reply but the event stream: `assistant.turn_start` opens the
+turn and `session.idle` settles it (`aborted` marks a cancelled turn).
+
+**Inbound stream** — `session.subscribe()` yields `SessionEvent`s whose
+`data` payloads deserialize into generated `session_events` types:
+
+| Event | Becomes |
+| --- | --- |
+| `assistant.turn_start` | `TurnStarted` |
+| `assistant.message_delta` | `TextDelta` (the settled `assistant.message` is skipped for already-streamed ids) |
+| `assistant.reasoning_delta` | `ReasoningDelta` |
+| `tool.execution_start`, `tool.execution_complete` | `RichActivity`, paired by `tool_call_id` |
+| `session.idle` | `TurnFinished` |
+| `session.title_changed` | `AutoTitleUpdated` |
+| `session.usage_info` | `UsageUpdated` |
+| `session.error` | `Error` (transient `model_call` errors are suppressed — the CLI retries them internally) |
+| sub-agent events (`agent_id` set) | tool executions stay visible; the sub-agent's text stays out of the root transcript |
+
+**Approvals and user input** — the SDK dispatches `PermissionHandler`,
+`UserInputHandler`, and `ExitPlanModeHandler` callbacks on the runtime, and
+each parks a `tokio::oneshot` in shared state that `respond` /
+`respond_user_input` resolve from the synchronous `DriverControl` side — the
+answer path never enters the command channel, so a parked prompt cannot stall
+the command that answers it. In Supervised the handler emits a real
+`Permission` event; other modes answer `approve_once` locally, except
+`managed_approval_required` requests, which always ask. "Allow for session"
+maps onto the CLI's session-scoped `ApproveForSession` decisions — command
+identifiers for shell, path class for read/write, domain for URL — and is
+offered only where the CLI can express one.
+
+**Cancel** — `session.abort()`. **Model changes** — `session.set_model`, which
+carries reasoning effort and context tier in one call; a session started
+without an explicit model asks for a restart when one is picked later, since
+there is nothing to retarget.
+
+**Resume and history** — `client.resume_session` with the persisted
+`ProviderResumeCursor::Copilot { session_id }`. The picker never starts a
+`copilot` process: `copilot_session.rs` reads `~/.copilot/session-state/<id>/`
+directly — `events.jsonl` is the same event log the SDK broadcasts live, so
+titles, workspace, and the user/assistant transcript replay straight out of
+it. Event ids double as `provider_resume_at` values (they are exactly the
+boundaries `session.fork`'s `to_event_id` accepts, should branching land later).
+
+**Rewind and branch** — not wired. The SDK does expose `session.fork` with a
+`to_event_id` truncation point, so a turn-aware branch is possible; until it is
+implemented the capability flags stay false rather than offering a control
+that would silently keep history.
+
+**Models** — `client.list_models` on a throwaway client is the account-specific
+catalog: subscription tier, BYOK routes, per-model reasoning efforts and
+context tiers. `auto` stays first — it names the runtime's own routing and is
+valid on every account
+([model_catalog.rs](../crates/waku-core/src/model_catalog.rs)).
+
+---
+
 ## Access modes across providers
 
 Goddard's `RuntimeMode` (Supervised / Auto-accept edits / Auto / Full access)
 maps into each CLI's own vocabulary.
 
-| Goddard | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Cursor | Devin | Fx | OpenCode | Grok | Kimi Code | Droid |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `normal` |
-| Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered | `session/set_mode` → `auto-low` |
-| Auto | `on-request` / `workspace-write` / `auto_review` | `auto` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered | `session/set_mode` → `auto-medium` |
-| Full access | `never` / `danger-full-access` / `user` | `bypassPermissions` + `--dangerously-skip-permissions` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered | `session/set_mode` → `auto-high` |
+| Goddard | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Cursor | Devin | Fx | OpenCode | Grok | Kimi Code | Droid | GitHub Copilot |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `normal` | `PermissionHandler` reaches the user |
+| Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered | `session/set_mode` → `auto-low` | auto-answered |
+| Auto | `on-request` / `workspace-write` / `auto_review` | `auto` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered | `session/set_mode` → `auto-medium` | auto-answered |
+| Full access | `never` / `danger-full-access` / `user` | `bypassPermissions` + `--dangerously-skip-permissions` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered | `session/set_mode` → `auto-high` | auto-answered |
 
 Amp, Pi, and Oh My Pi accept Full access only and always run wide open
 (`--dangerously-allow-all`, `--approve`, `--yolo`).
@@ -887,6 +961,7 @@ persisted with the session and is what makes a Goddard task outlive its process:
 | Grok | `session_id` | `--resume` / ACP fork |
 | Kimi Code | `session_id` | `session/resume`; no fork, see above |
 | Droid | `session_id` | `session/resume` (no replay) or `session/load`; no fork, see above |
+| GitHub Copilot | `session_id` | SDK `client.resume_session`; catalog read off `~/.copilot/session-state` |
 
 A cursor from the wrong provider is rejected at driver start rather than
 silently ignored.

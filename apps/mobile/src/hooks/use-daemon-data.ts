@@ -23,6 +23,7 @@ const PROVIDERS: ProviderKind[] = [
   'claude',
   'cursor',
   'amp',
+  'copilot',
   'openCode',
   'openCode2',
   'grok',

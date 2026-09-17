@@ -287,6 +287,35 @@ pub(crate) fn opencode2_hint(available_subagents: &[String]) -> String {
     )
 }
 
+/// Copilot's `custom_agents` session config: one `CustomAgentConfig` per spec
+/// entry. Per-agent model/effort map straight through. `read_only` is not
+/// expressed — the tool allowlist takes exact CLI tool names, and an
+/// unverifiable guess would strip the agent of working tools entirely.
+pub(crate) fn copilot_custom_agents(
+    spec: &SubagentSpec,
+) -> Option<Vec<github_copilot_sdk::types::CustomAgentConfig>> {
+    if spec.agents.is_empty() {
+        return None;
+    }
+    Some(
+        spec.agents
+            .iter()
+            .map(|agent| {
+                let mut config = github_copilot_sdk::types::CustomAgentConfig::new(
+                    agent.name.clone(),
+                    agent.prompt.clone(),
+                );
+                config.display_name = Some(agent.name.clone());
+                config.description = Some(agent.description.clone());
+                config.infer = Some(true);
+                config.model = agent.model.clone();
+                config.reasoning_effort = agent.effort.clone();
+                config
+            })
+            .collect(),
+    )
+}
+
 /// Codex registers no agent definitions — its hint names the built-in
 /// `spawn_agent` roles instead.
 pub(crate) const CODEX_HINT: &str = "This session can delegate focused, \

@@ -752,12 +752,14 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
-            Err(anyhow::anyhow!(tr!(
-                "errors.provider_turn_branching_unsupported",
-                provider = provider.display_name()
-            )))
-        }
+        ProviderKind::Copilot
+        | ProviderKind::Devin
+        | ProviderKind::Droid
+        | ProviderKind::Fx
+        | ProviderKind::Kimi => Err(anyhow::anyhow!(tr!(
+            "errors.provider_turn_branching_unsupported",
+            provider = provider.display_name()
+        ))),
     }
 }
 
@@ -1077,7 +1079,11 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Copilot
+            | ProviderKind::Devin
+            | ProviderKind::Droid
+            | ProviderKind::Fx
+            | ProviderKind::Kimi => {
                 anyhow::bail!(tr!(
                     "errors.provider_turn_branching_unsupported",
                     provider = provider.display_name()

@@ -45,6 +45,7 @@ const WINDOWS_DOCS_URL =
 const PROVIDERS = [
   { slug: 'amp', label: 'Amp' },
   { slug: 'claude', label: 'Claude Code' },
+  { slug: 'copilot', label: 'GitHub Copilot' },
   { slug: 'openai', label: 'Codex' },
   { slug: 'cursor', label: 'Cursor' },
   { slug: 'devin', label: 'Devin' },
@@ -94,7 +95,7 @@ const FAQ = [
   },
   {
     q: 'Do I need new API keys?',
-    a: 'No. Goddard detects amp, claude, codex, cursor-agent, opencode, grok, pi, kimi, and devin on your machine and drives them directly — your existing logins, plans, and rate limits apply unchanged.',
+    a: 'No. Goddard detects amp, claude, copilot, codex, cursor-agent, opencode, grok, pi, kimi, and devin on your machine and drives them directly — your existing logins, plans, and rate limits apply unchanged.',
   },
   {
     q: 'Where does my data live?',
