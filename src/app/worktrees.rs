@@ -46,6 +46,21 @@ pub(super) fn worktree_picker_create_actions(
     actions
 }
 
+/// Whether the branch picker chooses a base ref rather than a checkout: a
+/// planned worktree, or an unstarted draft's eagerly created one. A draft
+/// worktree's HEAD is detached, so no branch is ever taken — picking one
+/// re-points it in place, and branches other worktrees own stay selectable.
+pub(super) fn workspace_picks_base(
+    workspace: &SessionWorkspace,
+    session: Option<&AgentSession>,
+) -> bool {
+    match workspace {
+        SessionWorkspace::NewWorktree { .. } => true,
+        SessionWorkspace::Worktree { .. } => session.is_some_and(|session| !session.has_started()),
+        SessionWorkspace::Local => false,
+    }
+}
+
 impl Waku {
     /// Create the draft's worktree now — at selection time rather than first
     /// submit — named by the user and detached at `base_ref`. The daemon call
@@ -880,5 +895,33 @@ mod tests {
                 WorktreePickerAction::Create { base_ref: None }
             ]
         );
+    }
+
+    #[test]
+    fn a_worktree_picks_a_base_until_its_draft_starts() {
+        let worktree = SessionWorkspace::Worktree {
+            path: PathBuf::from("/tmp/draft-worktree"),
+            name: "draft".to_owned(),
+            branch: None,
+            base_branch: Some("main".to_owned()),
+        };
+        let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(workspace_picks_base(&worktree, Some(&draft)));
+
+        // Once the session has started the picker is an ordinary checkout
+        // selector again.
+        let mut started = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        started.detail_loaded = false;
+        assert!(!workspace_picks_base(&worktree, Some(&started)));
+
+        assert!(workspace_picks_base(
+            &SessionWorkspace::NewWorktree { base_branch: None },
+            Some(&started)
+        ));
+        assert!(!workspace_picks_base(
+            &SessionWorkspace::Local,
+            Some(&draft)
+        ));
+        assert!(!workspace_picks_base(&worktree, None));
     }
 }

@@ -332,6 +332,27 @@ pub fn create_and_checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSna
     inspect(cwd)?.ok_or_else(|| anyhow!("the workspace is no longer a Git repository"))
 }
 
+/// Re-point a worktree's detached HEAD at `base`, discarding working-tree
+/// changes — an unstarted draft re-picking its base branch. Detaching
+/// first keeps a worktree that acquired a branch from moving that branch's
+/// ref. Nothing is checked out, so branches owned by other worktrees are
+/// valid targets. Returns the refreshed snapshot like [`checkout`].
+pub fn reset_to_base(cwd: &Path, base: &str) -> anyhow::Result<BranchSnapshot> {
+    if !crate::worktree::is_linked_worktree(cwd) {
+        bail!("{} is not a linked worktree", cwd.display());
+    }
+    let detach = crate::command_env::plain_command("git")
+        .args(["switch", "--detach", "HEAD"])
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git switch")?;
+    if !detach.status.success() {
+        bail!("{}", command_error(&detach));
+    }
+    git_stdout(cwd, &["reset", "--quiet", "--hard", base])?;
+    inspect(cwd)?.ok_or_else(|| anyhow!("the workspace is no longer a Git repository"))
+}
+
 fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = crate::command_env::plain_command("git")
         .args(args)
@@ -464,6 +485,119 @@ mod tests {
                 .branches
                 .iter()
                 .any(|branch| branch.name == "topic/new-picker")
+        );
+    }
+
+    /// Put `feature` one commit ahead of `main` so a reset's target is
+    /// distinguishable from its starting point.
+    fn diverge_feature(repository: &Path) {
+        run_git(repository, &["checkout", "feature"]);
+        fs::write(repository.join("FEATURE.md"), "feature\n").unwrap();
+        run_git(repository, &["add", "FEATURE.md"]);
+        run_git(
+            repository,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "feature",
+            ],
+        );
+        run_git(repository, &["checkout", "main"]);
+    }
+
+    #[test]
+    fn resets_a_detached_worktree_to_a_new_base() {
+        let repository = repository();
+        diverge_feature(&repository);
+        let worktree = repository.with_extension("draft-worktree");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        fs::write(worktree.join("README.md"), "scratch\n").unwrap();
+
+        let snapshot = reset_to_base(&worktree, "feature").unwrap();
+        assert_eq!(snapshot.current, None);
+        assert_eq!(
+            git_stdout(&worktree, &["rev-parse", "HEAD"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "feature"]).unwrap()
+        );
+        // The dirty tracked file is discarded, not carried.
+        assert_eq!(
+            fs::read_to_string(worktree.join("README.md")).unwrap(),
+            "main\n"
+        );
+    }
+
+    #[test]
+    fn a_reset_detaches_instead_of_moving_an_attached_branch() {
+        let repository = repository();
+        diverge_feature(&repository);
+        let worktree = repository.with_extension("attached-worktree");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "attached",
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+
+        reset_to_base(&worktree, "feature").unwrap();
+        assert_eq!(inspect(&worktree).unwrap().unwrap().current, None);
+        // `attached` kept its commit — only the worktree's HEAD moved.
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "attached"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_reset_targets_a_branch_another_worktree_owns() {
+        let repository = repository();
+        let occupied = repository.with_extension("occupied-worktree");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "occupied",
+                occupied.to_str().unwrap(),
+            ],
+        );
+        let draft = repository.with_extension("draft-worktree");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                draft.to_str().unwrap(),
+                "main",
+            ],
+        );
+
+        // `git switch` would refuse the owned branch; the reset detaches at
+        // its commit instead.
+        let snapshot = reset_to_base(&draft, "occupied").unwrap();
+        assert_eq!(snapshot.current, None);
+        assert_eq!(
+            git_stdout(&draft, &["rev-parse", "HEAD"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "occupied"]).unwrap()
         );
     }
 

@@ -3,6 +3,8 @@ use super::*;
 enum BranchOperation {
     Checkout(String),
     Create(String),
+    /// Re-point an unstarted draft worktree's detached HEAD at a new base.
+    Reset(String),
 }
 
 /// `https://github.com/<owner>/<repo>` for a GitHub remote URL, `None` for any
@@ -288,6 +290,37 @@ impl Waku {
             return true;
         }
 
+        // An unstarted draft's worktree is still picking its base: its HEAD
+        // is detached, so no branch is ever taken. Re-point it in place
+        // rather than checking out, keeping branches other worktrees own
+        // selectable.
+        if let Some(SessionWorkspace::Worktree { base_branch, .. }) = &workspace
+            && session.is_some_and(|session| !session.has_started())
+        {
+            let Some(path) = self.workspace_subject_path() else {
+                return false;
+            };
+            let current = self
+                .visible_branch_snapshot
+                .as_ref()
+                .filter(|(snapshot_path, _)| snapshot_path == &path)
+                .and_then(|(_, snapshot)| snapshot.current.as_deref());
+            // Re-picking the effective base changes nothing: the ref the
+            // worktree detached at, or a branch it was switched onto by hand.
+            if current == Some(branch.as_str())
+                || (current.is_none() && base_branch.as_deref() == Some(branch.as_str()))
+            {
+                return true;
+            }
+            self.start_branch_operation(
+                subject_session_id,
+                path,
+                BranchOperation::Reset(branch),
+                cx,
+            );
+            return true;
+        }
+
         let Some(path) = self.workspace_subject_path() else {
             return false;
         };
@@ -453,22 +486,35 @@ impl Waku {
         self.branch_operation_pending = true;
         cx.notify();
         cx.spawn(async move |waku, cx| {
+            let reset_base = match &operation {
+                BranchOperation::Reset(base) => Some(base.clone()),
+                _ => None,
+            };
             let result = cx
                 .background_executor()
                 .spawn({
                     let path = path.clone();
                     async move {
-                        let (branch, create) = match operation {
-                            BranchOperation::Checkout(branch) => (branch, false),
-                            BranchOperation::Create(branch) => (branch, true),
+                        let request = match operation {
+                            BranchOperation::Checkout(branch) => {
+                                waku_client::WorkspaceOperation::CheckoutBranch {
+                                    cwd: path,
+                                    branch,
+                                    create: false,
+                                }
+                            }
+                            BranchOperation::Create(branch) => {
+                                waku_client::WorkspaceOperation::CheckoutBranch {
+                                    cwd: path,
+                                    branch,
+                                    create: true,
+                                }
+                            }
+                            BranchOperation::Reset(base_ref) => {
+                                waku_client::WorkspaceOperation::ResetWorktree { path, base_ref }
+                            }
                         };
-                        match workspace.request(
-                            waku_client::WorkspaceOperation::CheckoutBranch {
-                                cwd: path,
-                                branch,
-                                create,
-                            },
-                        )? {
+                        match workspace.request(request)? {
                             waku_client::WorkspaceResult::BranchChanged { snapshot } => {
                                 Ok(snapshot)
                             }
@@ -508,6 +554,43 @@ impl Waku {
                                 }
                             }
                             if persisted_branch_changed {
+                                waku.save();
+                            }
+                        }
+                        // A draft's base pick re-pointed the worktree's
+                        // detached HEAD: record the new base and drop any
+                        // branch the worktree had been switched onto.
+                        if let Some(base) = reset_base {
+                            let mut base_changed = false;
+                            let mut project_id = None;
+                            for session_id in [waku.state.selected_session, subject_session_id]
+                                .into_iter()
+                                .flatten()
+                            {
+                                if let Some(session) = waku.state.session_mut(session_id)
+                                    && let SessionWorkspace::Worktree {
+                                        branch,
+                                        base_branch,
+                                        path: worktree_path,
+                                        ..
+                                    } = &mut session.workspace
+                                    && worktree_path == &path
+                                {
+                                    project_id = Some(session.project_id);
+                                    *branch = None;
+                                    *base_branch = Some(base.clone());
+                                    base_changed = true;
+                                }
+                            }
+                            if base_changed {
+                                if let Some(project_id) = project_id {
+                                    waku.state.remember_workspace(
+                                        project_id,
+                                        &SessionWorkspace::NewWorktree {
+                                            base_branch: Some(base),
+                                        },
+                                    );
+                                }
                                 waku.save();
                             }
                         }
