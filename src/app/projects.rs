@@ -346,6 +346,10 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Experimental — the page only opens while its opt-in is on.
+        if !self.state.projects_page_enabled {
+            return;
+        }
         let current = self
             .projects_page
             .filter(|id| self.state.projects.iter().any(|project| project.id == *id));
@@ -417,6 +421,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Experimental — a back/forward entry recorded while the opt-in was
+        // on must not reopen the page after it is turned off.
+        if !self.state.projects_page_enabled {
+            return;
+        }
         self.settings_page = None;
         // The page claims the main area — a selected terminal gives way and
         // the Terminals group folds, same as picking a chat does. A selected

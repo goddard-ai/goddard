@@ -2112,6 +2112,7 @@ impl Waku {
                 SidebarOrdering::LastCreated => 2,
             },
         );
+        fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
         for session in &self.state.sessions {
             if !session.has_started() || session.archived_at.is_some() {
                 continue;
@@ -2188,7 +2189,12 @@ impl Waku {
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
-        let mut rows = vec![SidebarRow::Search, SidebarRow::Projects];
+        // The Projects row is experimental chrome — absent while its opt-in
+        // is off.
+        let mut rows = vec![SidebarRow::Search];
+        if self.state.projects_page_enabled {
+            rows.push(SidebarRow::Projects);
+        }
 
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an

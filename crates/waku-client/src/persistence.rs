@@ -476,6 +476,9 @@ pub struct AppSettings {
     /// Experimental: GitHub issues and pull requests on the Projects page,
     /// sidebar rows, and the right panel.
     pub github_enabled: bool,
+    /// Experimental: the Projects page (⌘⇧P) — a project's worktrees,
+    /// branches, issues, and pull requests in one place.
+    pub projects_page_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -512,6 +515,7 @@ impl Default for AppSettings {
             big_picture_enabled: false,
             git_panel_enabled: false,
             github_enabled: false,
+            projects_page_enabled: false,
             remote_hosts: Vec::new(),
         }
     }
@@ -730,6 +734,8 @@ pub struct PersistedState {
     pub git_panel_enabled: bool,
     #[serde(default)]
     pub github_enabled: bool,
+    #[serde(default)]
+    pub projects_page_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -849,6 +855,7 @@ impl PersistedState {
             big_picture_enabled: false,
             git_panel_enabled: false,
             github_enabled: false,
+            projects_page_enabled: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1072,6 +1079,7 @@ impl PersistedState {
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
             github_enabled: self.github_enabled,
+            projects_page_enabled: self.projects_page_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1139,6 +1147,7 @@ impl PersistedState {
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
         self.github_enabled = settings.github_enabled;
+        self.projects_page_enabled = settings.projects_page_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 

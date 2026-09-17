@@ -272,7 +272,7 @@ settings.commands_keywords:
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:
-  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents
+  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page
 settings.experiments_description:
   en: Unfinished features you can try early. Each is off by default, may change or disappear, and can be turned off at any time.
 settings.archived:
@@ -431,6 +431,10 @@ experiments.github_title:
   en: GitHub integration
 experiments.github_description:
   en: Browse a project's GitHub issues and pull requests, start tasks from them, and see check and review status on sidebar rows and in the right panel.
+experiments.projects_page_title:
+  en: Projects page
+experiments.projects_page_description:
+  en: Press ⌘⇧P for a per-project page listing its worktrees, branches, issues, and pull requests, with ⌘⌥1–4 jumping straight to a tab.
 experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:

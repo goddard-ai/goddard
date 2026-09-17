@@ -1465,13 +1465,18 @@ impl Waku {
         }
     }
 
-    /// Drop page targets whose project is gone; a stale entry would leave a
-    /// live-looking button that does nothing.
-    fn prune_navigation_stack(projects: &[Project], stack: &mut Vec<NavigationLocation>) {
+    /// Drop page targets whose project is gone — or whose experiment is off;
+    /// a stale entry would leave a live-looking button that does nothing.
+    fn prune_navigation_stack(
+        projects: &[Project],
+        projects_page_enabled: bool,
+        stack: &mut Vec<NavigationLocation>,
+    ) {
         while let Some(NavigationLocation::ProjectsPage(project_id)) = stack.last() {
-            if projects
-                .iter()
-                .any(|project| project.id == *project_id && !project.is_projectless())
+            if projects_page_enabled
+                && projects
+                    .iter()
+                    .any(|project| project.id == *project_id && !project.is_projectless())
             {
                 break;
             }
@@ -1495,7 +1500,11 @@ impl Waku {
             return;
         }
 
-        Self::prune_navigation_stack(&self.state.projects, &mut self.session_navigation.back);
+        Self::prune_navigation_stack(
+            &self.state.projects,
+            self.state.projects_page_enabled,
+            &mut self.session_navigation.back,
+        );
         let Some(current) = self.navigation_location() else {
             return;
         };
@@ -1532,7 +1541,11 @@ impl Waku {
             return;
         }
 
-        Self::prune_navigation_stack(&self.state.projects, &mut self.session_navigation.forward);
+        Self::prune_navigation_stack(
+            &self.state.projects,
+            self.state.projects_page_enabled,
+            &mut self.session_navigation.forward,
+        );
         let Some(current) = self.navigation_location() else {
             return;
         };

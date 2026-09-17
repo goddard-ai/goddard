@@ -2949,6 +2949,15 @@ impl Waku {
                         |this, enabled, cx| this.set_github_enabled(enabled, cx),
                     ))
                     .child(self.experiment_card(
+                        "projects-page-experiment-toggle",
+                        "experiments.projects_page_title",
+                        "experiments.projects_page_description",
+                        self.state.projects_page_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_projects_page_enabled(enabled, cx),
+                    ))
+                    .child(self.experiment_card(
                         "subagents-experiment-toggle",
                         "experiments.subagents_title",
                         "experiments.subagents_description",
@@ -3029,6 +3038,15 @@ impl Waku {
 
     fn set_github_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.github_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_projects_page_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.close_projects_page(cx);
+        }
+        self.state.projects_page_enabled = enabled;
         self.save();
         cx.notify();
     }
