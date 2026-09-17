@@ -3075,7 +3075,7 @@ impl Waku {
                         .child(
                             div()
                                 .h_full()
-                                .pr(px(10.0))
+                                .pr(px(8.0))
                                 .rounded_tr(px(9.0))
                                 .rounded_br(px(9.0))
                                 .bg(fade)
@@ -3401,6 +3401,11 @@ impl Waku {
                             div()
                                 .flex_none()
                                 .size(px(12.0))
+                                // The zero-width pin/archive pair still
+                                // claims its two flex gaps; pulling the slot
+                                // right by that amount keeps the indicator's
+                                // right edge flush with the timestamp below.
+                                .mr(px(-12.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
