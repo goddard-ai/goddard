@@ -10805,6 +10805,7 @@ dependencies = [
  "iroh-blobs",
  "n0-future",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

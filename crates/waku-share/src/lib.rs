@@ -5,6 +5,9 @@
 //! streams a verified copy out. Both follow sendme's wire protocol, so
 //! transfers are interoperable with `sendme send`/`receive`.
 
+pub mod friends;
+pub mod identity;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
