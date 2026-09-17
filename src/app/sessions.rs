@@ -13,6 +13,12 @@ fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode
         .unwrap_or(remembered)
 }
 
+fn new_task_sandboxed(current: Option<&AgentSession>, remembered: bool) -> bool {
+    current
+        .map(|session| session.sandboxed)
+        .unwrap_or(remembered)
+}
+
 /// The text an unclaimed keystroke should send to the composer, if any:
 /// printable characters typed without command-level modifiers. `key_char`
 /// carries the layout-resolved character, so Option digraphs and shifted
@@ -310,6 +316,7 @@ impl Waku {
             project_id,
             provider,
             runtime_mode,
+            sandboxed,
             model,
             reasoning_effort,
             service_tier,
@@ -319,6 +326,7 @@ impl Waku {
                 session.project_id,
                 session.provider,
                 session.runtime_mode,
+                session.sandboxed,
                 session.model.clone(),
                 session.reasoning_effort.clone(),
                 session.service_tier.clone(),
@@ -328,6 +336,7 @@ impl Waku {
             self.state.selected_project = Some(project_id);
             self.state.last_provider = provider;
             self.state.last_runtime_mode = runtime_mode;
+            self.state.last_sandboxed = sandboxed;
             self.state.last_model = model;
             self.state.last_reasoning_effort = reasoning_effort;
             self.state.last_service_tier = service_tier;
@@ -432,8 +441,10 @@ impl Waku {
         // a selected source task.
         let runtime_mode =
             new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        let sandboxed = new_task_sandboxed(self.selected_session(), self.state.last_sandboxed);
         let mut session = self.state.new_session(project_id, provider);
         session.runtime_mode = runtime_mode;
+        session.sandboxed = sandboxed;
         let id = session.id;
         self.state.push_session(session);
         self.select_session(id, cx);
@@ -2105,6 +2116,29 @@ impl Waku {
         }
     }
 
+    /// The environment is fixed when the session boots; once a task has
+    /// started it can only report where it runs, not move.
+    pub(super) fn set_sandboxed(&mut self, sandboxed: bool, cx: &mut Context<Self>) {
+        let Some(session_changed) = self
+            .composer_session()
+            .filter(|session| !session.has_started())
+            .map(|session| session.sandboxed != sandboxed)
+        else {
+            return;
+        };
+        let remembered_changed = self.state.last_sandboxed != sandboxed;
+        if session_changed {
+            self.composer_session_mut()
+                .expect("composer session still exists")
+                .sandboxed = sandboxed;
+        }
+        if session_changed || remembered_changed {
+            self.state.last_sandboxed = sandboxed;
+            self.save();
+            cx.notify();
+        }
+    }
+
     pub(super) fn set_reasoning_effort(&mut self, effort: String, cx: &mut Context<Self>) {
         if let Some(session) = self.composer_session_mut()
             && session.reasoning_effort.as_deref() != Some(effort.as_str())
@@ -2735,6 +2769,16 @@ mod tests {
             new_task_runtime_mode(None, RuntimeMode::AutoAcceptEdits),
             RuntimeMode::AutoAcceptEdits
         );
+    }
+
+    #[test]
+    fn new_task_carries_the_current_tasks_environment() {
+        let mut current = AgentSession::new(Uuid::new_v4(), ProviderKind::OpenCode);
+        current.sandboxed = true;
+
+        assert!(new_task_sandboxed(Some(&current), false));
+        assert!(!new_task_sandboxed(None, false));
+        assert!(new_task_sandboxed(None, true));
     }
 
     #[test]

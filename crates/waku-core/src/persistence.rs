@@ -1597,6 +1597,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         model,
         // Hydration replaces these; the list never reads them.
         runtime_mode: RuntimeMode::default(),
+        sandboxed: false,
         reasoning_effort: None,
         service_tier: None,
         context_window: None,

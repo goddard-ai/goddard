@@ -34,7 +34,13 @@ workspace?: SessionWorkspace,
  * working directory changed — the resumed thread's context still names
  * the old checkout's paths.
  */
-workspace_moved_from?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode, reasoning_effort?: string | null, service_tier?: string | null,
+workspace_moved_from?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode,
+/**
+ * The task's commands run inside the sandbox VM rather than on the
+ * host. Fixed when the session boots — a started task can report where
+ * it runs, not move.
+ */
+sandboxed?: boolean, reasoning_effort?: string | null, service_tier?: string | null,
 /**
  * Selected context window, when the provider exposes more than one.
  */

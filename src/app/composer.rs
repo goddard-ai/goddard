@@ -1820,15 +1820,82 @@ impl Waku {
 
     pub(super) fn render_access_control(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let selected_mode = self
-            .composer_session()
+        let session = self.composer_session();
+        let selected_mode = session
             .map(|session| session.runtime_mode)
             .unwrap_or_default();
+        let sandboxed = session.is_some_and(|session| session.sandboxed);
+        // The environment is provisioned when the session boots — a started
+        // task's section still shows where it runs, but no longer changes it.
+        let started = session.is_some_and(AgentSession::has_started);
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle(RUNTIME_MODE_MENU_ID, cx);
+        // One row shape for both sections: leading icon, label over a
+        // description, a trailing check on the live choice. `enabled` dims a
+        // row that can only be read, not picked.
+        let choice_row = Rc::new(
+            move |icon_path: &'static str,
+                  label: String,
+                  description: String,
+                  selected: bool,
+                  enabled: bool| {
+                div()
+                    .w(px(288.0))
+                    .py(px(4.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icon(icon_path, 14.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .truncate()
+                                    .text_size(sp(12.5))
+                                    .font_weight(if selected {
+                                        FontWeight::SEMIBOLD
+                                    } else {
+                                        FontWeight::MEDIUM
+                                    })
+                                    .text_color(if enabled {
+                                        theme.text
+                                    } else {
+                                        theme.text_tertiary
+                                    })
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .mt(px(2.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(14.0))
+                                    .whitespace_normal()
+                                    .text_color(theme.text_tertiary)
+                                    .child(description),
+                            ),
+                    )
+                    .when(selected, |element| {
+                        element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                    })
+                    .into_any_element()
+            },
+        );
         dropdown_menu(
             MenuChip::new("runtime-mode")
-                .icon(selected_mode.icon(), theme.text_tertiary)
+                // Sandboxed sessions trade the mode glyph for the container —
+                // the same icon the badge wears while the task runs.
+                .icon(
+                    if sandboxed {
+                        "icons/container.svg"
+                    } else {
+                        selected_mode.icon()
+                    },
+                    theme.text_tertiary,
+                )
                 .label(selected_mode.label())
                 .caret(false)
                 .selected(handle.is_open())
@@ -1838,61 +1905,65 @@ impl Waku {
             &handle,
             MenuAlign::AboveLeft,
             move |_| {
-                RuntimeMode::ACCESS_OPTIONS
+                let mut items: Vec<MenuItem> = RuntimeMode::ACCESS_OPTIONS
                     .into_iter()
                     .map(|option| {
                         let weak = weak.clone();
+                        let choice_row = choice_row.clone();
                         let selected = option == selected_mode;
                         MenuItem::custom(move |_, _| {
-                            div()
-                                .w(px(288.0))
-                                .py(px(4.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(icon(option.icon(), 14.0, theme.text_tertiary))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .truncate()
-                                                .text_size(sp(12.5))
-                                                .font_weight(if selected {
-                                                    FontWeight::SEMIBOLD
-                                                } else {
-                                                    FontWeight::MEDIUM
-                                                })
-                                                .text_color(theme.text)
-                                                .child(option.label()),
-                                        )
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .mt(px(2.0))
-                                                .text_size(sp(12.5))
-                                                .line_height(sp(14.0))
-                                                .whitespace_normal()
-                                                .text_color(theme.text_tertiary)
-                                                .child(option.description()),
-                                        ),
-                                )
-                                .when(selected, |element| {
-                                    element.child(icon(
-                                        "icons/check.svg",
-                                        11.0,
-                                        theme.text_tertiary,
-                                    ))
-                                })
-                                .into_any_element()
+                            choice_row(
+                                option.icon(),
+                                option.label(),
+                                option.description(),
+                                selected,
+                                true,
+                            )
                         })
                         .on_click(move |_, cx| {
                             let _ = weak.update(cx, |this, cx| this.set_runtime_mode(option, cx));
                         })
                     })
-                    .collect()
+                    .collect();
+                items.push(MenuItem::Separator);
+                items.push(MenuItem::Header(tr!("sandbox.environment").into()));
+                for (icon_path, label, description, value) in [
+                    (
+                        "icons/laptop.svg",
+                        tr!("sandbox.this_mac"),
+                        tr!("sandbox.this_mac_description"),
+                        false,
+                    ),
+                    (
+                        "icons/container.svg",
+                        tr!("sandbox.sandbox_vm"),
+                        tr!("sandbox.sandbox_vm_description"),
+                        true,
+                    ),
+                ] {
+                    let selected = value == sandboxed;
+                    let weak = weak.clone();
+                    let choice_row = choice_row.clone();
+                    let row = MenuItem::custom(move |_, _| {
+                        choice_row(
+                            icon_path,
+                            label.clone(),
+                            description.clone(),
+                            selected,
+                            !started,
+                        )
+                    });
+                    // No `on_click` once the session exists — the row reports
+                    // the environment rather than choosing it.
+                    items.push(if started {
+                        row
+                    } else {
+                        row.on_click(move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| this.set_sandboxed(value, cx));
+                        })
+                    });
+                }
+                items
             },
         )
     }

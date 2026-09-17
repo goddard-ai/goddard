@@ -684,6 +684,12 @@ mode.auto_accept_edits_description: 自动批准文件修改，执行其他操�
 mode.auto_description: 由 AI 审核并批准常规操作；高风险操作仍会询问
 mode.full_access_description: 无需确认即可执行命令和修改文件
 mode.choose: 选择模式
+sandbox.environment: 环境
+sandbox.this_mac: 这台 Mac
+sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
+sandbox.sandbox_vm: 沙箱 VM
+sandbox.sandbox_vm_description: 在隔离的 Linux 虚拟机中运行
+sandbox.badge: 沙箱中
 agent_preset.standard: 标准模式
 agent_preset.code: 代码模式
 agent_preset.minimal: 极简模式

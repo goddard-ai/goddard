@@ -1178,6 +1178,11 @@ pub struct AgentSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     pub runtime_mode: RuntimeMode,
+    /// The task's commands run inside the sandbox VM rather than on the
+    /// host. Fixed when the session boots — a started task can report where
+    /// it runs, not move.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub sandboxed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1260,7 +1265,7 @@ fn detail_loaded_default() -> bool {
 
 /// `skip_serializing_if` predicate for flags that omit themselves when off —
 /// keeps old payloads legible to older readers.
-pub(crate) fn is_false(value: &bool) -> bool {
+pub fn is_false(value: &bool) -> bool {
     !*value
 }
 
@@ -1284,6 +1289,7 @@ impl AgentSession {
             provider,
             model: None,
             runtime_mode: RuntimeMode::FullAccess,
+            sandboxed: false,
             reasoning_effort: None,
             service_tier: None,
             context_window: None,
@@ -1324,6 +1330,7 @@ impl AgentSession {
             provider: self.provider,
             model: self.model.clone(),
             runtime_mode: RuntimeMode::default(),
+            sandboxed: self.sandboxed,
             reasoning_effort: None,
             service_tier: None,
             context_window: None,

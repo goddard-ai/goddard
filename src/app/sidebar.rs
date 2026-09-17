@@ -3549,6 +3549,7 @@ impl Waku {
         let agent_preset_label = session
             .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
             .and_then(|session| self.agent_preset_label_for_session(session));
+        let sandboxed = session.is_some_and(|session| session.sandboxed);
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(
@@ -3662,7 +3663,25 @@ impl Waku {
                                 .text_color(theme.text_secondary)
                                 .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
                                 .child(div().min_w_0().truncate().child(SharedString::from(label)))
-                        })),
+                        }))
+                        // The container glyph only — the same icon the access
+                        // menu and its chip use, with the word on the tooltip.
+                        .when(sandboxed, |element| {
+                            element.child(
+                                div()
+                                    .id("sandboxed-badge")
+                                    .h(px(22.0))
+                                    .w(px(22.0))
+                                    .rounded(px(8.0))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(theme.overlay)
+                                    .child(icon("icons/container.svg", 11.0, theme.text_secondary))
+                                    .tooltip(Tooltip::text(tr!("sandbox.badge"))),
+                            )
+                        }),
                     cx,
                 ),
             )

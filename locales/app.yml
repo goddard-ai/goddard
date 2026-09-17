@@ -1432,6 +1432,18 @@ mode.full_access_description:
   en: Allow commands and edits without prompts
 mode.choose:
   en: Choose a mode
+sandbox.environment:
+  en: Environment
+sandbox.this_mac:
+  en: This Mac
+sandbox.this_mac_description:
+  en: Run commands and edits on this Mac
+sandbox.sandbox_vm:
+  en: Sandbox VM
+sandbox.sandbox_vm_description:
+  en: Run in an isolated Linux VM
+sandbox.badge:
+  en: Sandboxed
 agent_preset.standard:
   en: Standard mode
 agent_preset.code:

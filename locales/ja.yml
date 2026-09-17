@@ -694,6 +694,12 @@ mode.auto_accept_edits_description: 編集は自動承認し、その他の操�
 mode.auto_description: 通常の操作は AI レビュアーが承認し、リスクのある操作は事前に確認します
 mode.full_access_description: 確認なしでコマンドの実行と編集を許可します
 mode.choose: モードを選択
+sandbox.environment: 環境
+sandbox.this_mac: この Mac
+sandbox.this_mac_description: この Mac でコマンドと編集を実行
+sandbox.sandbox_vm: サンドボックス VM
+sandbox.sandbox_vm_description: 分離された Linux VM で実行
+sandbox.badge: サンドボックス環境
 
 agent_preset.standard: 標準モード
 agent_preset.code: コードモード
