@@ -700,6 +700,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("ArchiveDialog"),
                 ),
                 bound(
+                    tr!("shortcuts.confirm_dialog"),
+                    git_panel::ConfirmGitPanelModal,
+                    Some("GitPanelModal"),
+                ),
+                bound(
                     tr!("shortcuts.dismiss_dialog"),
                     commit_dialog::DismissCommitDialog,
                     Some("CommitDialog"),

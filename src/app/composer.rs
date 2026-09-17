@@ -170,20 +170,40 @@ impl Waku {
         let permission = self.selected_runtime()?.pending_permission.as_ref()?;
         let theme = Theme::current(cx);
         let request_id = permission.request_id.clone();
+        // Escape answers the request with the first deny option — a real
+        // response, not a hide, so the waiting turn settles instead of
+        // hanging on a card that is no longer visible.
+        let deny_option = permission
+            .options
+            .iter()
+            .find(|option| !option.allow)
+            .map(|option| option.id.clone());
         let mut buttons = div().flex().items_center().gap(px(8.0)).mt(px(10.0));
         for option in &permission.options {
             let request_id = request_id.clone();
             let option_id = option.id.clone();
             let allow = option.allow;
+            let focus = self.transcript_control_focus(
+                format!("permission-{}-{}", permission.request_id, option.id),
+                cx,
+            );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
                         "permission-{}-{}",
                         permission.request_id, option.id
                     )))
+                    .track_focus(&focus)
+                    .tab_index(0)
                     .h(px(28.0))
                     .px(px(13.0))
                     .rounded(px(9.0))
+                    .border(hairline())
+                    .border_color(if allow {
+                        theme.inverse
+                    } else {
+                        theme.border_strong
+                    })
                     .flex()
                     .items_center()
                     .cursor_default()
@@ -197,18 +217,18 @@ impl Waku {
                     })
                     .when(!allow, |element| {
                         element
-                            .border(hairline())
-                            .border_color(theme.border_strong)
                             .text_color(theme.text_secondary)
                             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
                     })
                     .active(|element| element.opacity(0.8))
+                    .focus_visible(|style| style.border_color(theme.accent))
                     .child(SharedString::from(option.label.clone()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.respond_permission(request_id.clone(), option_id.clone(), cx);
-                    })),
+                    }),
             );
         }
+        let deny_request_id = request_id.clone();
         Some(
             div().px(px(20.0)).pb(px(8.0)).child(
                 div()
@@ -221,6 +241,14 @@ impl Waku {
                     .border_color(theme.border_strong)
                     .bg(theme.raised)
                     .shadow_md()
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "escape"
+                            && let Some(option_id) = deny_option.clone()
+                        {
+                            this.respond_permission(deny_request_id.clone(), option_id, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
                     .child(
                         div()
                             .flex()
@@ -556,15 +584,30 @@ impl Waku {
             options.insert(1, ("always", tr!("computer_use.always_allow_app"), false));
         }
         for (decision, label, primary) in options {
+            let focus = self.transcript_control_focus(
+                format!(
+                    "computer-permission-{}-{decision}",
+                    permission.request.call_id
+                ),
+                cx,
+            );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
                         "computer-permission-{}-{decision}",
                         permission.request.call_id
                     )))
+                    .track_focus(&focus)
+                    .tab_index(0)
                     .h(px(29.0))
                     .px(px(13.0))
                     .rounded(px(9.0))
+                    .border(hairline())
+                    .border_color(if primary {
+                        theme.inverse
+                    } else {
+                        theme.border_strong
+                    })
                     .flex()
                     .items_center()
                     .cursor_default()
@@ -578,16 +621,15 @@ impl Waku {
                     })
                     .when(!primary, |element| {
                         element
-                            .border(hairline())
-                            .border_color(theme.border_strong)
                             .text_color(theme.text_secondary)
                             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
                     })
                     .active(|element| element.opacity(0.8))
+                    .focus_visible(|style| style.border_color(theme.accent))
                     .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.respond_computer_permission(decision, cx);
-                    })),
+                    }),
             );
         }
 
@@ -602,6 +644,14 @@ impl Waku {
                 .border_color(theme.warning.opacity(0.5))
                 .bg(theme.raised)
                 .shadow_md()
+                // Escape answers "deny" — a real rejection, not a hide, so
+                // the waiting tool call settles instead of hanging.
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "escape" {
+                        this.respond_computer_permission("deny", cx);
+                        cx.stop_propagation();
+                    }
+                }))
                 .child(
                     div()
                         .flex()

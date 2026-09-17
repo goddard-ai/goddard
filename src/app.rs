@@ -1773,6 +1773,13 @@ pub struct Waku {
     git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
     /// Focus target the Git panel's modals share — only one is ever open.
     git_panel_modal_focus: FocusHandle,
+    /// Focus targets for the modal buttons so each is tabbable; distinct
+    /// handles per modal keep a stacked pair from fighting over one.
+    git_panel_unstaged_cancel_focus: FocusHandle,
+    git_panel_unstaged_confirm_focus: FocusHandle,
+    git_panel_conflict_abort_focus: FocusHandle,
+    git_panel_conflict_merge_focus: FocusHandle,
+    git_panel_conflict_resolve_focus: FocusHandle,
     /// A Git panel file row sent to the Review surface; applied to the
     /// surface's next snapshot landing.
     right_panel_pending_diff_file: Option<String>,
@@ -4094,6 +4101,11 @@ impl Waku {
                 git_panel_unstaged_prompt: false,
                 git_panel_commit_diff: None,
                 git_panel_modal_focus: cx.focus_handle(),
+                git_panel_unstaged_cancel_focus: cx.focus_handle(),
+                git_panel_unstaged_confirm_focus: cx.focus_handle(),
+                git_panel_conflict_abort_focus: cx.focus_handle(),
+                git_panel_conflict_merge_focus: cx.focus_handle(),
+                git_panel_conflict_resolve_focus: cx.focus_handle(),
                 right_panel_pending_diff_file: None,
                 sidebar_slide: None,
                 right_panel_slide: None,

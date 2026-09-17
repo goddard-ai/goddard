@@ -19,11 +19,17 @@ use waku_client::git::{
 };
 use waku_client::workspace::{WorkspaceOperation, WorkspaceResult};
 
+use crate::ui::ActivationExt;
+
 use super::*;
 
 actions!(
     waku_git_panel,
-    [GitPanelPrimaryAction, DismissGitPanelModal]
+    [
+        GitPanelPrimaryAction,
+        ConfirmGitPanelModal,
+        DismissGitPanelModal
+    ]
 );
 
 const PANEL_CONTEXT: &str = "GitPanel";
@@ -46,6 +52,9 @@ pub fn init(cx: &mut App) {
         // panel, so Escape still reaches it while the input holds focus.
         KeyBinding::new("escape", DismissGitPanelModal, Some(PANEL_CONTEXT)),
         KeyBinding::new("escape", DismissGitPanelModal, Some(MODAL_CONTEXT)),
+        // Enter on the card runs the modal's primary action; a focused
+        // button consumes its own Enter before this sees it.
+        KeyBinding::new("enter", ConfirmGitPanelModal, Some(MODAL_CONTEXT)),
     ]);
 }
 
@@ -3622,9 +3631,13 @@ impl Waku {
     ) -> Vec<AnyElement> {
         // An open modal holds focus so Escape reaches its context no matter
         // where the pointer was last; the scrim keeps the panel unclickable
-        // in the meantime.
+        // in the meantime. Once focus is anywhere inside the card — a button
+        // tabbed to it — leave it alone instead of re-grabbing each frame.
         if self.git_panel_sync_conflict.is_some() || self.git_panel_unstaged_prompt {
-            window.focus(&self.git_panel_modal_focus, cx);
+            let modal_focus = &self.git_panel_modal_focus;
+            if !modal_focus.contains_focused(window, cx) {
+                window.focus(modal_focus, cx);
+            }
         }
         let mut overlays = Vec::new();
         overlays.extend(self.render_git_panel_unstaged_modal(window, cx));
@@ -3669,6 +3682,22 @@ impl Waku {
         .into_any_element()
     }
 
+    /// Enter on the modal card runs its primary action — Commit all for the
+    /// nothing-staged prompt, Resolve in chat for the conflicted sync — the
+    /// same primary the archive dialog's bare Enter confirms. The commit-diff
+    /// modal has no primary, so Enter there is a no-op.
+    fn confirm_git_panel_modal(&mut self, cx: &mut Context<Self>) {
+        if self.git_panel_commit_diff.is_some() {
+            return;
+        }
+        if self.git_panel_sync_conflict.is_some() {
+            self.git_panel_resolve_in_chat(cx);
+        } else if self.git_panel_unstaged_prompt {
+            self.git_panel_unstaged_prompt = false;
+            self.run_git_panel_commit(true, cx);
+        }
+    }
+
     fn dismiss_git_panel_modal(&mut self, cx: &mut Context<Self>) {
         if self.git_panel_commit_diff.is_some() {
             self.git_panel_commit_diff = None;
@@ -3708,20 +3737,24 @@ impl Waku {
             "git-panel-commit-all",
             confirm_label,
             true,
+            &self.git_panel_unstaged_confirm_focus,
             theme,
-            cx.listener(|this, _, _, cx| {
+            cx,
+            |this, _, cx| {
                 this.git_panel_unstaged_prompt = false;
                 this.run_git_panel_commit(true, cx);
-            }),
+            },
         );
         let cancel = modal_button(
             "git-panel-commit-all-cancel",
             tr!("common.cancel"),
             false,
+            &self.git_panel_unstaged_cancel_focus,
             theme,
-            cx.listener(|this, _, _, cx| {
+            cx,
+            |this, _, cx| {
                 this.dismiss_git_panel_modal(cx);
-            }),
+            },
         );
         let card = self.git_panel_modal_card(cx).child(
             div()
@@ -3786,15 +3819,19 @@ impl Waku {
             "git-panel-resolve-in-chat",
             tr!("git_panel.resolve_in_chat"),
             true,
+            &self.git_panel_conflict_resolve_focus,
             theme,
-            cx.listener(|this, _, _, cx| this.git_panel_resolve_in_chat(cx)),
+            cx,
+            |this, _, cx| this.git_panel_resolve_in_chat(cx),
         );
         let abort = modal_button(
             "git-panel-abort-sync",
             abort_label,
             false,
+            &self.git_panel_conflict_abort_focus,
             theme,
-            cx.listener(|this, _, _, cx| this.git_panel_abort_sync(cx)),
+            cx,
+            |this, _, cx| this.git_panel_abort_sync(cx),
         );
         let mut buttons = div().flex().items_center().gap(px(6.0)).child(abort);
         if rebase {
@@ -3802,8 +3839,10 @@ impl Waku {
                 "git-panel-merge-instead",
                 tr!("git_panel.merge_instead"),
                 false,
+                &self.git_panel_conflict_merge_focus,
                 theme,
-                cx.listener(|this, _, _, cx| this.git_panel_merge_instead(cx)),
+                cx,
+                |this, _, cx| this.git_panel_merge_instead(cx),
             ));
         } else {
             buttons = buttons.child(div().flex_1());
@@ -3883,6 +3922,10 @@ impl Waku {
             .track_focus(&self.git_panel_modal_focus)
             .tab_index(0)
             .key_context(MODAL_CONTEXT)
+            .tab_group()
+            .on_action(cx.listener(|this, _: &ConfirmGitPanelModal, _, cx| {
+                this.confirm_git_panel_modal(cx);
+            }))
             .on_action(cx.listener(|this, _: &DismissGitPanelModal, _, cx| {
                 this.dismiss_git_panel_modal(cx);
             }))
@@ -4478,14 +4521,20 @@ fn modal_button(
     id: &'static str,
     label: String,
     primary: bool,
+    focus: &FocusHandle,
     theme: Theme,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut Context<Waku>,
+    activate: impl Fn(&mut Waku, &mut Window, &mut Context<Waku>) + 'static,
 ) -> Stateful<Div> {
     div()
         .id(id)
+        .track_focus(focus)
+        .tab_index(0)
         .h(px(28.0))
         .px(px(12.0))
         .rounded(px(8.0))
+        .border(hairline())
+        .border_color(theme.border.opacity(0.0))
         .flex()
         .items_center()
         .justify_center()
@@ -4508,6 +4557,7 @@ fn modal_button(
         })
         .hover(|style| style.bg(theme.selection))
         .active(|style| style.opacity(0.8))
+        .focus_visible(|style| style.border_color(theme.accent))
         .child(label)
-        .on_click(on_click)
+        .on_activation(cx, activate)
 }
