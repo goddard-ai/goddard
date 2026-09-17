@@ -934,6 +934,17 @@ struct RightPanelFileEditor {
     disk_content: String,
     writable: bool,
     dirty: bool,
+    /// A text read has landed at least once. SVGs open in preview mode, so
+    /// this separates "empty file" from "never read" when the source toggle
+    /// asks for the editor.
+    text_loaded: bool,
+    /// Decoded image preview from `ReadBinaryFile`: `None` until the read
+    /// lands, `Some(Err)` on failure so the pane shows a fallback instead of
+    /// re-requesting every frame.
+    image: Option<Result<Arc<gpui::Image>, String>>,
+    /// SVG only: edit the source instead of viewing the rendered preview.
+    /// Other image formats have no meaningful text view.
+    show_source: bool,
     /// A read is in flight on the background executor. Set from the moment the
     /// editor is created, because `render` may not touch the filesystem: until
     /// the first read lands the editor is empty and locked, and that means

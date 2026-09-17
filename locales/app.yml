@@ -2402,6 +2402,8 @@ files.could_not_save:
   en: "Could not save %{path}: %{error}"
 files.preview_markdown:
   en: Preview markdown
+files.preview_image:
+  en: Preview image
 files.edit_markdown_source:
   en: Edit source
 files.open_on_github:

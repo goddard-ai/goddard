@@ -11,6 +11,9 @@ use std::process::Output;
 use anyhow::{Context as _, anyhow, bail};
 
 const MAX_HYDRATED_PATCH_BYTES: usize = 32 * 1024 * 1024;
+/// Binary reads base64-encode on the wire; 32 MiB stays well under
+/// `MAX_WIRE_MESSAGE_BYTES` (48 MiB) once encoded.
+const MAX_BINARY_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 pub use waku_protocol::workspace::{
@@ -55,6 +58,23 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         } => WorkspaceResult::TextFile {
             content: fs::read_to_string(resolve_workspace_path(&root, &relative_path)?)?,
         },
+        WorkspaceOperation::ReadBinaryFile {
+            root,
+            relative_path,
+        } => {
+            let path = resolve_workspace_path(&root, &relative_path)?;
+            let size = fs::metadata(&path)?.len();
+            if size > MAX_BINARY_FILE_BYTES {
+                bail!(
+                    "file is too large to preview ({size} bytes, limit {MAX_BINARY_FILE_BYTES})"
+                );
+            }
+            let data = fs::read(&path)?;
+            if data.len() as u64 > MAX_BINARY_FILE_BYTES {
+                bail!("file grew past the preview size limit while reading");
+            }
+            WorkspaceResult::File { data }
+        }
         WorkspaceOperation::WriteTextFile {
             root,
             relative_path,

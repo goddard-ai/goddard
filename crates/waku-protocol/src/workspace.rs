@@ -370,6 +370,14 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         relative_path: PathBuf,
     },
+    /// Raw bytes of a workspace file, for content a text read cannot carry
+    /// (images). The daemon caps the size and returns `File`.
+    ReadBinaryFile {
+        #[ts(type = "string")]
+        root: PathBuf,
+        #[ts(type = "string")]
+        relative_path: PathBuf,
+    },
     WriteTextFile {
         #[ts(type = "string")]
         root: PathBuf,
@@ -810,6 +818,13 @@ pub enum WorkspaceResult {
     },
     TextFile {
         content: String,
+    },
+    /// Raw file bytes, base64-encoded on the wire — the binary counterpart
+    /// of `TextFile`.
+    File {
+        #[serde(with = "crate::protocol::base64_bytes")]
+        #[ts(type = "string")]
+        data: Vec<u8>,
     },
     ProjectFiles {
         entries: Vec<FileEntry>,

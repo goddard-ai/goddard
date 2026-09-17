@@ -929,6 +929,37 @@ fn read_right_panel_file(
     }
 }
 
+/// Reads a file's raw bytes for the image preview. Same daemon round-trip
+/// as `read_right_panel_file`; the caller keeps it off the UI thread.
+fn read_right_panel_binary_file(
+    workspace: &waku_client::WorkspaceClient,
+    project_path: &Path,
+    relative_path: &str,
+) -> Result<Vec<u8>, String> {
+    match workspace.request(waku_client::WorkspaceOperation::ReadBinaryFile {
+        root: project_path.to_path_buf(),
+        relative_path: PathBuf::from(relative_path),
+    }) {
+        Ok(waku_client::WorkspaceResult::File { data }) => Ok(data),
+        Ok(_) => Err("the daemon returned an invalid file response".to_owned()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// One background read's payload: text for the editor, or decoded bytes
+/// wrapped as a GPUI image for the preview pane.
+enum RightPanelFileRead {
+    Text(String, bool),
+    Image(Result<Arc<gpui::Image>, String>),
+}
+
+/// Whether the pane renders this file as an image rather than text: every
+/// extension `image_format_for_name` knows, except an SVG the user has
+/// flipped into source editing.
+fn file_shows_image(editor: &RightPanelFileEditor, relative_path: &str) -> bool {
+    !editor.show_source && image_preview::image_format_for_name(relative_path).is_some()
+}
+
 impl RightPanelSurface {
     fn new_browser() -> Self {
         Self::Browser(Uuid::new_v4())
@@ -3672,10 +3703,20 @@ impl Waku {
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
 
         // Markdown files carry the global source/preview toggle; every other
-        // language always shows source.
+        // language always shows source. Image files render pixels instead of
+        // text — SVGs alone keep a source view behind the toggle, since
+        // their text stays editable.
         let is_markdown = file_highlighter_language(&relative_path) == "markdown";
-        let preview = is_markdown && self.state.markdown_preview;
-        let body = if preview {
+        let is_svg = image_preview::image_format_for_name(&relative_path)
+            == Some(gpui::ImageFormat::Svg);
+        let image_mode = self
+            .right_panel_file_editors
+            .get(&relative_path)
+            .is_some_and(|editor| file_shows_image(editor, &relative_path));
+        let preview = !image_mode && is_markdown && self.state.markdown_preview;
+        let body = if image_mode {
+            self.render_file_image_preview(&relative_path, cx)
+        } else if preview {
             self.render_file_markdown_preview(&relative_path, &editor_state, cx)
         } else {
             self.render_file_editor_body(
@@ -3720,15 +3761,17 @@ impl Waku {
                     }
                 })
         });
-        let preview_toggle = is_markdown.then(|| {
-            let focus = self.transcript_control_focus("file-markdown-preview-toggle", cx);
-            let (icon_path, label) = if preview {
+        let preview_toggle = (is_markdown || is_svg).then(|| {
+            let focus = self.transcript_control_focus("file-preview-toggle", cx);
+            let (icon_path, label) = if preview || image_mode {
                 ("icons/pencil.svg", tr!("files.edit_markdown_source"))
+            } else if is_svg {
+                ("icons/eye.svg", tr!("files.preview_image"))
             } else {
                 ("icons/eye.svg", tr!("files.preview_markdown"))
             };
             div()
-                .id("file-markdown-preview-toggle")
+                .id("file-preview-toggle")
                 .track_focus(&focus)
                 .tab_index(0)
                 .size(px(26.0))
@@ -3742,11 +3785,27 @@ impl Waku {
                 .hover(|style| style.bg(theme.overlay))
                 .child(icon(icon_path, 12.0, theme.text_tertiary))
                 .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_markdown_preview(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.toggle_markdown_preview(cx);
-                        cx.stop_propagation();
+                .on_click(cx.listener({
+                    let relative_path = relative_path.clone();
+                    move |this, _, _, cx| {
+                        if is_svg {
+                            this.toggle_file_source_view(&relative_path, cx);
+                        } else {
+                            this.toggle_markdown_preview(cx);
+                        }
+                    }
+                }))
+                .on_key_down(cx.listener({
+                    let relative_path = relative_path.clone();
+                    move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            if is_svg {
+                                this.toggle_file_source_view(&relative_path, cx);
+                            } else {
+                                this.toggle_markdown_preview(cx);
+                            }
+                            cx.stop_propagation();
+                        }
                     }
                 }))
         });
@@ -3837,7 +3896,9 @@ impl Waku {
             if let Some(position) = position_pending {
                 editor.pending_position = Some(position);
             }
-            if focus_pending {
+            // An image preview has no editor to focus — the TextInput is not
+            // rendered while the pane shows pixels.
+            if focus_pending && !file_shows_image(editor, relative_path) {
                 let focus = editor.state.read(cx).focus();
                 window.on_next_frame(move |window, cx| window.focus(&focus, cx));
             }
@@ -3875,6 +3936,9 @@ impl Waku {
                 disk_content: String::new(),
                 writable: false,
                 dirty: false,
+                text_loaded: false,
+                image: None,
+                show_source: false,
                 reading: false,
                 read_epoch: 0,
                 pending_position: position_pending,
@@ -3920,7 +3984,7 @@ impl Waku {
 
         self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
         self.apply_pending_file_position(relative_path, window, cx);
-        if focus_pending {
+        if focus_pending && image_preview::image_format_for_name(relative_path).is_none() {
             let focus = state.read(cx).focus();
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         }
@@ -3976,11 +4040,16 @@ impl Waku {
             // looking like an empty file.
             if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
                 editor.reading = false;
-                editor.disk_content = tr!("files.no_project_is_open");
-                editor.writable = false;
-                let state = editor.state.clone();
-                let content = editor.disk_content.clone();
-                state.update(cx, |state, cx| state.set_content(content, cx));
+                if file_shows_image(editor, &relative_path) {
+                    editor.image = Some(Err(tr!("files.no_project_is_open")));
+                } else {
+                    editor.disk_content = tr!("files.no_project_is_open");
+                    editor.writable = false;
+                    editor.text_loaded = true;
+                    let state = editor.state.clone();
+                    let content = editor.disk_content.clone();
+                    state.update(cx, |state, cx| state.set_content(content, cx));
+                }
             }
             return;
         };
@@ -3997,6 +4066,11 @@ impl Waku {
         editor.reading = true;
         editor.read_epoch += 1;
         let epoch = editor.read_epoch;
+        let image_format = if file_shows_image(editor, &relative_path) {
+            image_preview::image_format_for_name(&relative_path)
+        } else {
+            None
+        };
 
         cx.spawn(async move |waku, cx| {
             let read = cx
@@ -4004,7 +4078,26 @@ impl Waku {
                 .spawn({
                     let project_path = project_path.clone();
                     let relative_path = relative_path.clone();
-                    async move { read_right_panel_file(&workspace, &project_path, &relative_path) }
+                    async move {
+                        match image_format {
+                            Some(format) => RightPanelFileRead::Image(
+                                read_right_panel_binary_file(
+                                    &workspace,
+                                    &project_path,
+                                    &relative_path,
+                                )
+                                .map(|bytes| Arc::new(gpui::Image::from_bytes(format, bytes))),
+                            ),
+                            None => {
+                                let (content, writable) = read_right_panel_file(
+                                    &workspace,
+                                    &project_path,
+                                    &relative_path,
+                                );
+                                RightPanelFileRead::Text(content, writable)
+                            }
+                        }
+                    }
                 })
                 .await;
             waku.update(cx, |waku, cx| {
@@ -4021,7 +4114,6 @@ impl Waku {
                     }
                     return;
                 }
-                let (content, writable) = read;
                 let Some(editor) = waku.right_panel_file_editors.get_mut(&relative_path) else {
                     return;
                 };
@@ -4031,23 +4123,47 @@ impl Waku {
                     return;
                 }
                 editor.reading = false;
-                // An edit landed while the read was in flight; the user's text
-                // wins over the copy on disk.
-                if editor.dirty {
-                    return;
+                match read {
+                    RightPanelFileRead::Image(result) => {
+                        editor.image = Some(result);
+                    }
+                    RightPanelFileRead::Text(content, writable) => {
+                        // An edit landed while the read was in flight; the
+                        // user's text wins over the copy on disk.
+                        if editor.dirty {
+                            return;
+                        }
+                        if editor.text_loaded
+                            && editor.disk_content == content
+                            && editor.writable == writable
+                        {
+                            return;
+                        }
+                        editor.disk_content = content.clone();
+                        editor.writable = writable;
+                        editor.dirty = false;
+                        editor.text_loaded = true;
+                        let state = editor.state.clone();
+                        state.update(cx, |state, cx| {
+                            state.set_read_only(!writable);
+                            state.set_content(content, cx);
+                        });
+                    }
                 }
-                if editor.disk_content == content && editor.writable == writable {
-                    return;
-                }
-                editor.disk_content = content.clone();
-                editor.writable = writable;
-                editor.dirty = false;
-                let state = editor.state.clone();
-                state.update(cx, |state, cx| {
-                    state.set_read_only(!writable);
-                    state.set_content(content, cx);
-                });
                 cx.notify();
+                // Toggling an SVG's source/preview mid-read leaves the other
+                // payload missing; queue its read so the new view fills in.
+                let needs_read = waku
+                    .right_panel_file_editors
+                    .get(&relative_path)
+                    .is_some_and(|editor| {
+                        (editor.show_source && !editor.text_loaded)
+                            || (file_shows_image(editor, &relative_path)
+                                && editor.image.is_none())
+                    });
+                if needs_read {
+                    waku.read_right_panel_file_into_editor(relative_path.clone(), cx);
+                }
             })
             .ok();
         })
@@ -4224,6 +4340,78 @@ impl Waku {
     /// choice follows the user across files and sessions.
     fn toggle_markdown_preview(&mut self, cx: &mut Context<Self>) {
         self.set_markdown_preview(!self.state.markdown_preview, cx);
+    }
+
+    /// Flips one SVG between rendered preview and editable source — per file,
+    /// unlike markdown's global toggle, because an image's bytes are only
+    /// loaded as text once the source view asks for them.
+    fn toggle_file_source_view(&mut self, relative_path: &str, cx: &mut Context<Self>) {
+        let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) else {
+            return;
+        };
+        editor.show_source = !editor.show_source;
+        cx.notify();
+        self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
+    }
+
+    /// The image alternative to the editor body: bytes read through
+    /// `ReadBinaryFile` and wrapped as a `gpui::Image` off the UI thread. The
+    /// frame path reads only the editor entry — `None` is "still loading"
+    /// and a stored error is the fallback, never a reason to re-request.
+    fn render_file_image_preview(&mut self, relative_path: &str, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let image = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .and_then(|editor| editor.image.clone());
+
+        let message = |text: String| {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(24.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(text)
+        };
+
+        let body: AnyElement = match image {
+            Some(Ok(image)) => div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(16.0))
+                .child(
+                    img(image)
+                        .size_full()
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(move || {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(px(8.0))
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(icon("icons/alert.svg", 18.0, theme.text_tertiary))
+                                .child(tr_cow!("attachments.preview_unavailable"))
+                                .into_any_element()
+                        }),
+                )
+                .into_any_element(),
+            Some(Err(error)) => message(error).into_any_element(),
+            None => message(tr!("files.loading_file")).into_any_element(),
+        };
+
+        div()
+            .key_context("FileEditorPane")
+            .flex_1()
+            .min_h_0()
+            .bg(theme.surface)
+            .child(body)
     }
 
     /// The maximized panel layer is on screen this frame — the mode is
