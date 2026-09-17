@@ -981,7 +981,7 @@ impl Waku {
                 .mt(px(6.0))
                 .pt(px(6.0))
                 .border_t(hairline())
-                .border_color(theme.border)
+                .border_color(theme.separator)
                 .flex()
                 .flex_col()
                 .font_family(crate::fonts::current(cx).code)

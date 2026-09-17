@@ -1678,7 +1678,7 @@ impl Waku {
             .items_center()
             .gap(px(12.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(selector)
             .child(
                 div()
@@ -1835,7 +1835,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(
                 TextField::new("projects-filter", filter)
                     .icon("icons/search.svg", 12.0)
@@ -2063,7 +2063,7 @@ impl Waku {
             .gap(px(6.0))
             .cursor_default()
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .bg(theme.inset)
             .hover(|style| style.bg(theme.overlay))
             .child(icon(
@@ -2163,7 +2163,7 @@ impl Waku {
             .gap(px(8.0))
             .cursor_default()
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .when(selected, |element| element.bg(theme.overlay_strong))
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.overlay))
@@ -2805,7 +2805,7 @@ impl Waku {
                 .items_center()
                 .gap(px(10.0))
                 .border_t(hairline())
-                .border_color(theme.border)
+                .border_color(theme.separator)
                 .bg(theme.raised)
                 .child(
                     div()
@@ -3197,7 +3197,7 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
         .items_center()
         .gap(px(8.0))
         .border_b(hairline())
-        .border_color(theme.border)
+        .border_color(theme.separator)
         // Covers the rows' leading icon so labels align with cell text.
         .child(div().flex_none().w(px(13.0)));
     match tab {

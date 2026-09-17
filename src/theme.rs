@@ -53,7 +53,7 @@ fn wash(color: u32, alpha: f32) -> Hsla {
 /// `border_strong` — the outline on interactive controls — is held a step
 /// above so the two tiers never collapse into each other.
 const BORDER_CONTRAST: f32 = 3.0;
-const BORDER_STRONG_CONTRAST: f32 = 4.5;
+const BORDER_STRONG_CONTRAST: f32 = 4.0;
 /// Decorative rules — fold dividers, menu separators, guide rails — are
 /// exempt from §1.4.11, but "exempt" is no license to be invisible: held to
 /// 1.5:1, roughly GitHub's border-muted weight.
@@ -1441,7 +1441,7 @@ mod tests {
             for (token, line, target) in [
                 ("separator", theme.separator, SEPARATOR_CONTRAST),
                 ("border", theme.border, BORDER_CONTRAST),
-                ("border_strong", theme.border_strong, BORDER_CONTRAST),
+                ("border_strong", theme.border_strong, BORDER_STRONG_CONTRAST),
             ] {
                 let floor = target - 0.01;
                 let line_rgb = line.to_rgb();

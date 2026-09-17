@@ -563,7 +563,7 @@ impl Waku {
                     .justify_end()
                     .children(right_window_controls)
                     .when(content_scrolled, |element| {
-                        element.border_b(hairline()).border_color(theme.border)
+                        element.border_b(hairline()).border_color(theme.separator)
                     }),
             )
             .child(
@@ -2431,7 +2431,7 @@ impl Waku {
                             div()
                                 .py(px(8.0))
                                 .border_t(hairline())
-                                .border_color(theme.border)
+                                .border_color(theme.separator)
                                 .flex()
                                 .items_center()
                                 .gap(px(10.0))
@@ -2572,7 +2572,7 @@ impl Waku {
             rows = rows.child(
                 div()
                     .when(index > 0, |element| {
-                        element.border_t(hairline()).border_color(theme.border)
+                        element.border_t(hairline()).border_color(theme.separator)
                     })
                     .py(px(9.0))
                     .flex()
@@ -2740,7 +2740,7 @@ impl Waku {
             .mt(px(12.0))
             .pt(px(4.0))
             .border_t(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(
                 div()
                     .mt(px(8.0))
@@ -4968,7 +4968,7 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .when(index + 1 != provider_count, |element| {
-                        element.border_b(hairline()).border_color(theme.border)
+                        element.border_b(hairline()).border_color(theme.separator)
                     })
                     .child(header)
                     .when(expanded, |element| {
@@ -5597,7 +5597,7 @@ impl Waku {
                         .items_center()
                         .gap(px(10.0))
                         .when(!is_last, |element| {
-                            element.border_b(hairline()).border_color(theme.border)
+                            element.border_b(hairline()).border_color(theme.separator)
                         })
                         .child(
                             div()
@@ -6392,7 +6392,7 @@ fn permission_status_row(
         .mt(px(10.0))
         .pt(px(10.0))
         .border_t(hairline())
-        .border_color(theme.border)
+        .border_color(theme.separator)
         .flex()
         .items_center()
         .gap(px(10.0))

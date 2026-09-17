@@ -2814,7 +2814,7 @@ impl Waku {
                     .border_l(hairline())
                     .border_b(hairline())
                     .rounded_bl(px(4.0))
-                    .border_color(theme.border),
+                    .border_color(theme.separator),
             )
     }
 

@@ -2116,7 +2116,7 @@ impl Render for TerminalView {
                     .items_center()
                     .gap(px(7.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .bg(theme.surface)
                     .child(
                         div()

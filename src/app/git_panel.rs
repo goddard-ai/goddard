@@ -2213,14 +2213,14 @@ impl Waku {
             .flex()
             .min_w_0()
             .border_l(hairline())
-            .border_color(theme.border_strong)
+            .border_color(theme.separator)
             .bg(theme.surface)
             .relative()
             .when(commit_open, |element| {
                 element.child(self.render_git_panel_commit_view(cx))
             })
             .child(column.when(commit_open, |column| {
-                column.border_l(hairline()).border_color(theme.border)
+                column.border_l(hairline()).border_color(theme.separator)
             }))
     }
 
@@ -2236,7 +2236,7 @@ impl Waku {
             .items_center()
             .gap(px(6.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(icon("icons/git-branch.svg", 13.0, theme.text_tertiary))
             .child(
                 div()
@@ -2294,7 +2294,7 @@ impl Waku {
             .flex_col()
             .gap(px(8.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(message_box)
             .child(self.render_git_panel_action_button(cx))
             .when_some(
@@ -2666,7 +2666,7 @@ impl Waku {
             .flex()
             .flex_col()
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .relative()
             .child(
                 div()
@@ -2744,7 +2744,7 @@ impl Waku {
             .flex()
             .flex_col()
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .relative()
             .child(Self::git_panel_section_label(
                 tr!("git_panel.files"),
@@ -3204,7 +3204,7 @@ impl Waku {
                     .items_center()
                     .gap(px(6.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .child(file_icon(right_panel::file_icon_for_path(&path), 13.0))
                     .child(
                         div()
@@ -4034,7 +4034,7 @@ impl Waku {
                     .items_center()
                     .gap(px(8.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     // The hash and subject share one baseline so different
                     // faces and sizes still sit on the same line; the buttons
                     // stay centered on the row itself.
@@ -4099,7 +4099,7 @@ impl Waku {
                         .relative()
                         .max_h(px(84.0))
                         .border_b(hairline())
-                        .border_color(theme.border)
+                        .border_color(theme.separator)
                         .child(
                             div()
                                 .id("git-panel-commit-modal-body")
@@ -4160,7 +4160,7 @@ impl Waku {
                     .gap(px(8.0))
                     .bg(theme.overlay)
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .child(file_icon(right_panel::file_icon_for_path(&file.path), 13.0))
                     .child(
                         div()
@@ -4329,7 +4329,7 @@ fn git_panel_commit_card(entry: &CommitEntry, theme: &Theme) -> AnyElement {
         .items_center()
         .gap(px(6.0))
         .border_t(hairline())
-        .border_color(theme.border)
+        .border_color(theme.separator)
         .text_size(sp(11.0))
         .text_color(theme.text_tertiary)
         .when_some(commit_author_avatar(&entry.author_email), |meta, source| {
