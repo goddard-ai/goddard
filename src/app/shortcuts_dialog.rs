@@ -115,7 +115,6 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
             ToggleRuntimeModePicker,
             None,
         ),
-        bound(tr!("menu.toggle_workspace"), ToggleWorkspace, None),
         bound(tr!("shortcuts.usage_panel"), ToggleUsagePanel, None),
         bound(tr!("menu.run_project_script"), RunProjectScript, None),
         bound(tr!("shortcuts.save_file"), SaveFile, None),
