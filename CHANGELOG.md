@@ -112,11 +112,14 @@ the original feature bullet instead of adding separate entries for them.
 - Prefer exact matches in the branch selector's filter
 - Fix Cursor model discovery and model options
 - Fix the IME candidate popup appearing in the wrong position
+- Fix Waku→Goddard migration staging a full copy of `~/.waku` on every launch: workspaces, worktrees, and archives are now linked item-by-item instead of copied, the state database is cloned only when its schema is known, and abandoned `.migrating-*` staging directories are swept on launch
 - Apply OpenCode model and effort changes to the live session instead of the next one
 - Stop rendering blank reasoning-only lines in the transcript
 - Fix remote images failing to load in transcripts
 - Fix the transcript segment left behind when steering an in-flight reply
 - Stop a quick ⌃⇥ chord from flashing the task switcher
+- Stop warning about unpushed commits that are already merged into a branch
+- Fix interrupted session saves erasing stored workspace details
 - Fix startup on Macs without Xcode installed
 
 ## [0.1.19]
