@@ -382,7 +382,9 @@ jobs:
       ]
     if: needs.version.outputs.published != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Per-asset retries can serialize a few minutes of backoff behind a
+    # single hanging transfer.
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
@@ -440,7 +442,8 @@ jobs:
             );
           '
 
-      - uses: softprops/action-gh-release@v3
+      - name: Draft the release
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           # Prereleases (-beta.1 etc.) publish to GitHub only; sync-release
@@ -452,15 +455,62 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ needs.version.outputs.tag }}
           body_path: release-notes.md
-          fail_on_unmatched_files: true
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.dmg
-            artifacts/*.md
-            artifacts/*.zip
-            artifacts/*.exe
-            artifacts/appcast.xml
-            artifacts/appcast-linux-*.xml
-            artifacts/appcast-windows-*.xml
-            artifacts/latest-linux.txt
-            artifacts/latest-windows.txt
+
+      # The action uploads every asset at once and never retries, so one
+      # dropped connection or GitHub 500 fails the job with the other fifteen
+      # assets already in place. `gh release upload` per file keeps the same
+      # overwrite semantics via --clobber but retries only the transfer that
+      # died.
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=()
+          for pattern in \
+            'artifacts/*.tar.gz' \
+            'artifacts/*.dmg' \
+            'artifacts/*.md' \
+            'artifacts/*.zip' \
+            'artifacts/*.exe' \
+            'artifacts/appcast.xml' \
+            'artifacts/appcast-linux-*.xml' \
+            'artifacts/appcast-windows-*.xml' \
+            'artifacts/latest-linux.txt' \
+            'artifacts/latest-windows.txt'
+          do
+            # Intentionally unquoted: expand the glob like the action's
+            # `files` list did, so an empty expansion can fail the job the
+            # way `fail_on_unmatched_files` did.
+            # shellcheck disable=SC2206
+            matches=( $pattern )
+            if (( ${#matches[@]} == 0 )); then
+              echo "::error::No files matched: $pattern"
+              exit 1
+            fi
+            files+=("${matches[@]}")
+          done
+
+          upload() {
+            local file=$1
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --clobber; then
+                return 0
+              fi
+              echo "::warning::Upload of $file failed (attempt $attempt/3)"
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
+
+          pids=()
+          for file in "${files[@]}"; do
+            upload "$file" &
+            pids+=($!)
+          done
+          failed=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || failed=1
+          done
+          exit $failed
