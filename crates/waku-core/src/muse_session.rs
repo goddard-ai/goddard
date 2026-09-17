@@ -129,6 +129,9 @@ pub fn provider_session_history(
             "session/read",
             json!({
                 "sessionId": session_id,
+                // The default serves no items; ask for them inline before
+                // falling back to `view/page`.
+                "excludeItems": false,
             }),
         )
         .map_err(|error| anyhow!("could not read the Muse Code session: {}", error.message()))?;
@@ -143,17 +146,19 @@ pub fn provider_session_history(
 /// Replays `item/*` view events into their `item` payloads, in view order.
 fn page_items(service: &MuseService, session_id: &str) -> Vec<Value> {
     let mut items = Vec::new();
-    let mut cursor = Value::Null;
+    let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
-        let Ok(result) = service.call(
-            "view/page",
-            json!({
-                "sessionId": session_id,
-                "cursor": cursor,
-                "direction": "forward",
-                "limit": 1000,
-            }),
-        ) else {
+        let mut params = json!({
+            "sessionId": session_id,
+            "direction": "forward",
+            "limit": 1000,
+        });
+        // `ViewPageParams.cursor` is a plain string — absent means the
+        // first page; an explicit null is invalid params here.
+        if let Some(cursor) = cursor.as_deref() {
+            params["cursor"] = json!(cursor);
+        }
+        let Ok(result) = service.call("view/page", params) else {
             break;
         };
         let events = result
@@ -172,7 +177,7 @@ fn page_items(service: &MuseService, session_id: &str) -> Vec<Value> {
             }
         }
         match result.get("nextCursor").and_then(Value::as_str) {
-            Some(next) => cursor = json!(next),
+            Some(next) => cursor = Some(next.to_owned()),
             None => break,
         }
     }
@@ -303,24 +308,22 @@ pub fn fork_session_at_turn(
 /// Completed turn ids in order, read from `turn/completed` view events.
 fn completed_turn_ids(service: &MuseService, session_id: &str) -> anyhow::Result<Vec<String>> {
     let mut ids = Vec::new();
-    let mut cursor = Value::Null;
+    let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
-        let result = service
-            .call(
-                "view/page",
-                json!({
-                    "sessionId": session_id,
-                    "cursor": cursor,
-                    "direction": "forward",
-                    "limit": 1000,
-                }),
+        let mut params = json!({
+            "sessionId": session_id,
+            "direction": "forward",
+            "limit": 1000,
+        });
+        if let Some(cursor) = cursor.as_deref() {
+            params["cursor"] = json!(cursor);
+        }
+        let result = service.call("view/page", params).map_err(|error| {
+            anyhow!(
+                "could not read the Muse Code session view: {}",
+                error.message()
             )
-            .map_err(|error| {
-                anyhow!(
-                    "could not read the Muse Code session view: {}",
-                    error.message()
-                )
-            })?;
+        })?;
         for event in result
             .get("events")
             .and_then(Value::as_array)
@@ -335,7 +338,7 @@ fn completed_turn_ids(service: &MuseService, session_id: &str) -> anyhow::Result
             }
         }
         match result.get("nextCursor").and_then(Value::as_str) {
-            Some(next) => cursor = json!(next),
+            Some(next) => cursor = Some(next.to_owned()),
             None => break,
         }
     }
@@ -386,4 +389,35 @@ fn catalog_model(entry: &Value) -> Option<ProviderModel> {
         .map(|id| ProviderModelOption::new(id, id))
         .collect();
     Some(model)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::muse_service::test_support::fake_muse;
+
+    /// `session/read` may refuse inline items; the fallback then pages the
+    /// view — whose `cursor` param must be absent, not null, on page one.
+    #[test]
+    fn history_falls_back_to_paging_the_view() {
+        let directory =
+            std::env::temp_dir().join(format!("waku-muse-session-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let binary = fake_muse(&directory);
+
+        let history = provider_session_history(&binary, "s1", 50).unwrap();
+
+        let texts: Vec<&str> = history
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect();
+        assert!(texts.contains(&"first prompt"));
+        assert!(texts.contains(&"first answer"));
+        assert!(!directory.join("violations.log").exists());
+    }
 }

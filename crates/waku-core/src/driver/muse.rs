@@ -159,7 +159,7 @@ impl MuseDriver {
                 // A known cursor resumes suffix-only; without one ask for the
                 // folded snapshot so usage/mode state survives the reattach
                 // without replaying items the daemon already stored.
-                params["history"] = json!({"mode": "snapshot"});
+                params["history"] = json!("snapshot");
             }
             service.call("session/resume", params)
         } else {
@@ -531,16 +531,18 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
 }
 
 fn switch_session(worker: &Worker, state: &mut WorkerState, session_id: String) {
+    // `view/unsubscribe` is a request, not a notification — the reply is
+    // the empty object and is deliberately ignored.
     let _ = worker
         .service
-        .notify("view/unsubscribe", json!({ "sessionId": state.session_id }));
+        .call("view/unsubscribe", json!({ "sessionId": state.session_id }));
     state.subscription = worker.service.subscribe(&session_id);
     let result = worker.service.call(
         "session/resume",
         json!({
             "commandId": worker.service.mint_command_id(),
             "sessionId": session_id,
-            "history": {"mode": "snapshot"},
+            "history": "snapshot",
         }),
     );
     match result {
@@ -1246,15 +1248,17 @@ fn gap_fill(
         .and_then(Value::as_str)
         .map(str::to_owned);
     for _ in 0..32 {
-        let result = service.call(
-            "view/page",
-            json!({
-                "sessionId": state.session_id,
-                "cursor": after,
-                "direction": "forward",
-                "limit": 500,
-            }),
-        );
+        let mut page_params = json!({
+            "sessionId": state.session_id,
+            "direction": "forward",
+            "limit": 500,
+        });
+        // `ViewPageParams.cursor` is a plain string; absent pages from the
+        // start, an explicit null is invalid params.
+        if let Some(cursor) = after.as_deref() {
+            page_params["cursor"] = json!(cursor);
+        }
+        let result = service.call("view/page", page_params);
         let Ok(result) = result else { return };
         let page = result
             .get("events")
@@ -1379,7 +1383,6 @@ impl Drop for MuseDriver {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -1388,6 +1391,7 @@ mod tests {
 
     use super::*;
     use crate::driver::test_event_channel;
+    use crate::muse_service::test_support::fake_muse;
 
     fn options(cwd: &Path) -> DriverStartOptions {
         DriverStartOptions {
@@ -1404,48 +1408,6 @@ mod tests {
             subagents: None,
             provider_cursor: None,
         }
-    }
-
-    /// A `muse` binary that answers `initialize`/`session/start`, then serves
-    /// one streamed turn per `turn/start`.
-    fn fake_muse(directory: &Path) -> PathBuf {
-        let binary = directory.join("muse");
-        fs::write(
-            &binary,
-            r#"#!/bin/bash
-if [ "$1" = "serve" ]; then
-  while IFS= read -r line; do
-    case "$line" in
-      *'"initialize"'*)
-        echo '{"jsonrpc":"2.0","id":0,"result":{"serverInfo":{"name":"muse","version":"0.0.0-test"},"schema":{"version":1,"fingerprint":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},"sessionDurability":"durable"}}'
-        ;;
-      *'"session/start"'*)
-        sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
-        echo "{\"jsonrpc\":\"2.0\",\"id\":$(echo "$line" | sed -n 's/.*\"id\":\([0-9]*\).*/\1/p'),\"result\":{\"session\":{\"sessionId\":\"$sid\",\"status\":\"idle\",\"turnCount\":0,\"path\":\"p\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"},\"viewCursor\":\"c0\"}}"
-        ;;
-      *'"turn/start"'*)
-        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"turnId\":\"t1\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c1\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/started\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c2\",\"item\":{\"itemId\":\"m1\",\"kind\":\"agentMessage\",\"status\":\"inProgress\",\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m1\",\"delta\":\"hello \",\"viewCursor\":\"c3\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m1\",\"delta\":\"world\",\"viewCursor\":\"c4\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c5\",\"sourceRange\":{},\"item\":{\"itemId\":\"m1\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"hello world\",\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c5\",\"revision\":1,\"recordedAt\":0}}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"session/contextUsage\",\"params\":{\"sessionId\":\"$sid\",\"usedTokens\":42,\"windowTokens\":1000,\"pressure\":\"normal\",\"viewCursor\":\"c6\",\"sourceRange\":{}}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"terminal\":\"completed\",\"viewCursor\":\"c7\",\"sourceRange\":{}}}"
-        ;;
-      *)
-        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-        [ -n "$id" ] && echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{}}"
-        ;;
-    esac
-  done
-fi
-"#,
-        )
-        .unwrap();
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
-        binary
     }
 
     fn collect_until(
@@ -1510,6 +1472,40 @@ fi
                 .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. }))
         );
         drop(driver);
+        assert!(!directory.join("violations.log").exists());
+    }
+
+    /// A resume with no stored view cursor asks for the folded snapshot;
+    /// `HistoryPreference` is a bare string on the wire, so the fake host
+    /// logs a violation if the driver ever sends it as an object.
+    #[test]
+    fn muse_resume_requests_snapshot_history_as_a_string() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut start = options(&directory);
+        start.binary = fake_muse(&directory);
+        start.provider_cursor = Some(ProviderResumeCursor::Muse {
+            session_id: "s-resume".to_owned(),
+            view_cursor: None,
+        });
+
+        let (events, rx) = test_event_channel();
+        let driver = MuseDriver::start(start, events).unwrap();
+        let seen = collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::Connected { .. })
+        });
+
+        assert!(seen.iter().any(|event| matches!(
+            event,
+            DriverEvent::Connected {
+                provider_cursor: Some(ProviderResumeCursor::Muse {
+                    session_id,
+                    view_cursor,
+                })
+            } if session_id == "s-resume" && view_cursor.as_deref() == Some("c9")
+        )));
+        drop(driver);
+        assert!(!directory.join("violations.log").exists());
     }
 
     #[test]

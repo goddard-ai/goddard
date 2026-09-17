@@ -377,7 +377,7 @@ impl MuseHost {
             "muse serve ready: version={server_version} fingerprint={} durability={durability}",
             fingerprint.as_deref().unwrap_or("absent"),
         ));
-        host.send(&json!({"jsonrpc": "2.0", "method": "initialized"}))?;
+        host.notify("initialized", json!({}))?;
 
         // The reader holds only a Weak: a host whose last session dropped
         // must die, and a strong handle here would keep it alive forever.
@@ -639,4 +639,90 @@ fn reader_loop(host: Weak<MuseHost>, mut lines: BufReader<impl std::io::Read>) {
 
 fn log(message: &str) {
     eprintln!("waku-muse: {message}");
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::{Path, PathBuf};
+
+    /// A `muse` binary that answers the MSP lifecycle and view requests this
+    /// client makes, then streams one canned turn per `turn/start`.
+    ///
+    /// MSP types some params exactly, so requests that drift — a `history`
+    /// object, `view/page` with `"cursor": null`, `view/unsubscribe` with no
+    /// request id, `session/read` without `excludeItems: false` — are
+    /// appended to `<dir>/violations.log`; tests assert it never appears.
+    pub(crate) fn fake_muse(directory: &Path) -> PathBuf {
+        let binary = directory.join("muse");
+        fs::write(
+            &binary,
+            r#"#!/bin/bash
+if [ "$1" = "serve" ]; then
+  VIOLATIONS="$(dirname "$0")/violations.log"
+  while IFS= read -r line; do
+    # Wire-shape assertions before dispatch: these params are typed exactly
+    # in the schema, and the driver must send them that way.
+    case "$line" in
+      *'"view/page"'*'"cursor":null'*)
+        echo 'view/page sent cursor:null' >> "$VIOLATIONS" ;;
+      *'"history"'*)
+        case "$line" in
+          *'"history":"'*) ;;
+          *) echo 'history preference is not a string' >> "$VIOLATIONS" ;;
+        esac ;;
+      *'"view/unsubscribe"'*)
+        case "$line" in
+          *'"id"'*) ;;
+          *) echo 'view/unsubscribe sent without a request id' >> "$VIOLATIONS" ;;
+        esac ;;
+      *'"session/read"'*)
+        case "$line" in
+          *'"excludeItems":false'*) ;;
+          *) echo 'session/read without excludeItems:false' >> "$VIOLATIONS" ;;
+        esac ;;
+    esac
+    case "$line" in
+      *'"initialize"'*)
+        echo '{"jsonrpc":"2.0","id":0,"result":{"serverInfo":{"name":"muse","version":"0.0.0-test"},"schema":{"version":1,"fingerprint":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},"sessionDurability":"durable"}}'
+        ;;
+      *'"session/start"'*|*'"session/resume"'*|*'"session/read"'*)
+        sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        history='"mode":"none","items":null,"snapshot":null,"noneReason":"cursorSuffix"'
+        case "$line" in
+          *'"session/read"'*) history='"mode":"snapshot","items":null,"snapshot":{"state":{}},"noneReason":null' ;;
+        esac
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"session\":{\"sessionId\":\"$sid\",\"status\":\"idle\",\"turnCount\":0,\"path\":\"p\",\"providerId\":\"muse\",\"modelId\":\"muse-1\",\"forkedFrom\":null,\"activeTurnId\":null,\"workspaceRoot\":\"/tmp\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"},\"history\":{$history},\"pendingRequests\":[],\"viewCursor\":\"c9\"}}"
+        ;;
+      *'"view/page"'*)
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"events\":[{\"method\":\"item/completed\",\"params\":{\"sessionId\":\"s1\",\"viewCursor\":\"c1\",\"sourceRange\":{},\"item\":{\"itemId\":\"m1\",\"kind\":\"userMessage\",\"status\":\"completed\",\"text\":\"first prompt\",\"sessionId\":\"s1\",\"turnId\":\"t1\",\"viewCursor\":\"c1\",\"revision\":0,\"recordedAt\":0}}},{\"method\":\"item/completed\",\"params\":{\"sessionId\":\"s1\",\"viewCursor\":\"c2\",\"sourceRange\":{},\"item\":{\"itemId\":\"m2\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"first answer\",\"sessionId\":\"s1\",\"turnId\":\"t1\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}},{\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"s1\",\"turnId\":\"t1\",\"terminal\":\"completed\",\"viewCursor\":\"c3\",\"sourceRange\":{}}}],\"nextCursor\":null}}"
+        ;;
+      *'"turn/start"'*)
+        sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"disposition\":\"started\",\"startedNewTurn\":true,\"turnId\":\"t1\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c1\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/started\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c2\",\"item\":{\"itemId\":\"m1\",\"kind\":\"agentMessage\",\"status\":\"inProgress\",\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m1\",\"delta\":\"hello \",\"viewCursor\":\"c3\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m1\",\"delta\":\"world\",\"viewCursor\":\"c4\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c5\",\"sourceRange\":{},\"item\":{\"itemId\":\"m1\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"hello world\",\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c5\",\"revision\":1,\"recordedAt\":0}}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"session/contextUsage\",\"params\":{\"sessionId\":\"$sid\",\"usedTokens\":42,\"windowTokens\":1000,\"pressure\":\"normal\",\"viewCursor\":\"c6\",\"sourceRange\":{}}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"terminal\":\"completed\",\"viewCursor\":\"c7\",\"sourceRange\":{}}}"
+        ;;
+      *)
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        [ -n "$id" ] && echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{}}"
+        ;;
+    esac
+  done
+fi
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        binary
+    }
 }
