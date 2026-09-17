@@ -10,7 +10,7 @@ name = "goddard"
 path = "src/main.rs"
 
 [workspace]
-members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent"]
+members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share"]
 default-members = [
   ".",
   "crates/waku-client",
