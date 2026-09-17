@@ -128,6 +128,9 @@
   the unreleased feature's own fragment instead.
 - When fixing an unreleased feature, update its existing fragment rather than
   adding a new one.
+- A version bump includes the notes: when asked to bump `version` in
+  `Cargo.toml`, run `bun run changelog` first and commit the folded
+  `CHANGELOG.md` and consumed fragments in the same commit as the bump.
 
 <!-- graft:start -->
 ## Graft — repo context graph
