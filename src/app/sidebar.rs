@@ -1163,7 +1163,7 @@ impl Waku {
             .rounded(px(9.0))
             .flex()
             .items_center()
-            .gap(px(6.0))
+            .gap(px(8.0))
             .cursor_default()
             .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|element| element.bg(theme.sidebar_item_background))
@@ -2502,7 +2502,7 @@ impl Waku {
                 .h(px(22.0))
                 .flex()
                 .items_center()
-                .gap(px(if action_row { 6.0 } else { 5.0 }))
+                .gap(px(if action_row { 8.0 } else { 5.0 }))
                 .when(show_group_icon, |element| {
                     if action_row {
                         element.child(
