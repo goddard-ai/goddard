@@ -5477,7 +5477,7 @@ fn open_provider_settings_from_picker(
     popover.close(window, cx);
     let _ = waku.update(cx, |this, cx| {
         this.open_settings_action(&OpenSettings, window, cx);
-        this.open_settings_page(SettingsPage::Providers, cx);
+        this.open_settings_page(SettingsPage::Providers, window, cx);
     });
 }
 

@@ -291,19 +291,19 @@ impl Waku {
                         },
                     ))
                     .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_settings_page(page, cx);
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_settings_page(page, window, cx);
                     })),
             );
         }
 
         div()
             .key_context(SETTINGS_SIDEBAR_CONTEXT)
-            .on_action(cx.listener(|this, _: &SelectNextEntry, _, cx| {
-                this.cycle_settings_page("down", cx);
+            .on_action(cx.listener(|this, _: &SelectNextEntry, window, cx| {
+                this.cycle_settings_page("down", window, cx);
             }))
-            .on_action(cx.listener(|this, _: &SelectPreviousEntry, _, cx| {
-                this.cycle_settings_page("up", cx);
+            .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
+                this.cycle_settings_page("up", window, cx);
             }))
             .w(px(DEFAULT_SIDEBAR_WIDTH))
             .h_full()
@@ -361,7 +361,7 @@ impl Waku {
     /// the list; the landing page renders immediately, so there is no separate
     /// confirm step. A selection filtered out by the query re-enters the list
     /// from whichever end matches the key.
-    fn cycle_settings_page(&mut self, key: &str, cx: &mut Context<Self>) {
+    fn cycle_settings_page(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.settings_search_query(cx);
         let pages = visible_settings_pages(&query)
             .map(|(page, ..)| page)
@@ -371,7 +371,7 @@ impl Waku {
         let Some(next) = next_picker_highlight(current, pages.len(), key) else {
             return;
         };
-        self.open_settings_page(pages[next], cx);
+        self.open_settings_page(pages[next], window, cx);
     }
 
     fn render_settings_sidebar_titlebar(

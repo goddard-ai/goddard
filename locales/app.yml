@@ -3449,6 +3449,8 @@ keybind.capture.waiting:
   en: Press keys…
 keybind.capture.hint:
   en: Esc cancels · Backspace removes a stroke · Enter saves now
+keybind.reset:
+  en: reset
 keybind.keywords:
   en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:

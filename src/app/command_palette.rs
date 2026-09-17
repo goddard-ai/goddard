@@ -1256,6 +1256,12 @@ impl Waku {
                 "settings preferences git worktrees branches repository checkout",
             ),
             (
+                SettingsPage::Keybindings,
+                "keybind.title",
+                "icons/keyboard.svg",
+                "keybindings keyboard shortcuts hotkeys keys remap manager",
+            ),
+            (
                 SettingsPage::Commands,
                 "settings.commands",
                 "icons/terminal.svg",
@@ -2225,11 +2231,11 @@ impl Waku {
             }
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
-                self.open_settings_page(page, cx);
+                self.open_settings_page(page, window, cx);
             }
             PaletteAction::NewCustomCommand => {
                 self.open_settings_action(&OpenSettings, window, cx);
-                self.open_settings_page(SettingsPage::Commands, cx);
+                self.open_settings_page(SettingsPage::Commands, window, cx);
                 self.open_custom_command_editor(None, window, cx);
                 if let Some(editor) = self.custom_command_editor.as_mut() {
                     editor.exit_settings_on_save = true;

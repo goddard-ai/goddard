@@ -994,20 +994,51 @@ fn render_row(
                             // editable binding records a replacement chord.
                             if editable {
                                 let this = this.clone();
-                                chip.cursor_pointer()
-                                    .hover(|element| {
-                                        element.border_color(theme.border_strong)
-                                    })
-                                    .on_click(move |_, window, app| {
-                                        let _ = this.update(app, |this, cx| {
-                                            this.keybindings_begin_capture(
-                                                command,
-                                                Some(binding_index),
-                                                window,
-                                                cx,
-                                            );
-                                        });
-                                    })
+                                let remove_this = this.clone();
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        chip.cursor_pointer()
+                                            .hover(|element| {
+                                                element.border_color(theme.border_strong)
+                                            })
+                                            .on_click(move |_, window, app| {
+                                                let _ = this.update(app, |this, cx| {
+                                                    this.keybindings_begin_capture(
+                                                        command,
+                                                        Some(binding_index),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                });
+                                            }),
+                                    )
+                                    .child(
+                                        // Remove just this binding slot.
+                                        div()
+                                            .id(SharedString::from(format!(
+                                                "{}:{binding_index}:rm",
+                                                row.descriptor.id
+                                            )))
+                                            .px(px(3.0))
+                                            .text_size(sp(10.0))
+                                            .text_color(theme.text_tertiary)
+                                            .cursor_pointer()
+                                            .hover(|element| {
+                                                element.text_color(theme.danger)
+                                            })
+                                            .child("×")
+                                            .on_click(move |_, _window, app| {
+                                                let _ = remove_this.update(app, |this, cx| {
+                                                    this.keybindings_unbind(
+                                                        command,
+                                                        binding_index,
+                                                        cx,
+                                                    );
+                                                });
+                                            }),
+                                    )
                                     .into_any_element()
                             } else {
                                 chip.into_any_element()
@@ -1039,6 +1070,34 @@ fn render_row(
                                 .into_any_element()
                         })
                         .into_iter(),
+                )
+                .children(
+                    // Restore-defaults affordance once the command carries a
+                    // user override.
+                    (row.bindings
+                        .iter()
+                        .any(|binding| binding.source == BindingSource::User))
+                    .then(|| {
+                        let command = row.descriptor.id;
+                        let this = this.clone();
+                        div()
+                            .id(SharedString::from(format!("{}:reset", row.descriptor.id)))
+                            .px(px(5.0))
+                            .py(px(2.0))
+                            .rounded(px(4.0))
+                            .text_size(sp(10.0))
+                            .text_color(theme.text_tertiary)
+                            .cursor_pointer()
+                            .hover(|element| element.text_color(theme.text))
+                            .child(tr!("keybind.reset"))
+                            .on_click(move |_, _window, app| {
+                                let _ = this.update(app, |this, cx| {
+                                    this.keybindings_reset(command, cx);
+                                });
+                            })
+                            .into_any_element()
+                    })
+                    .into_iter(),
                 )
                 .children(row.descriptor.builtin_label.iter().map(|label| {
                     div()
