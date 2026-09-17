@@ -8,6 +8,11 @@
 //! unlike a legitimately closing `` `path\` `` — the span is rewritten with
 //! a longer delimiter run so the backticks land as literal content.
 //!
+//! A single backtick glued to a keyboard shortcut — `Ctrl+``, `⌘`` — is
+//! the same genre of miss: the model means a literal keycap, but CommonMark
+//! opens a span that swallows prose up to the next backtick on the line.
+//! The repair escapes the backtick so it renders literally.
+//!
 //! The rewrite runs on the raw source, guided by a first parse's event
 //! ranges: regions where a backtick is already literal (code blocks, raw
 //! HTML, math) stay byte-exact. The caller reparses the repaired source and
@@ -30,8 +35,11 @@ pub fn repair_code_spans(
     source: &str,
     events: &[(Event<'_>, Range<usize>)],
 ) -> Option<(String, Vec<Repair>)> {
-    // The signature cannot exist without both bytes.
-    if !source.contains("\\`") {
+    // Neither signature can exist without its bytes.
+    if !(source.contains("\\`")
+        || source.contains("+`")
+        || source.contains(['⌘', '⌃', '⌥', '⇧']))
+    {
         return None;
     }
 
@@ -73,6 +81,13 @@ pub fn repair_code_spans(
         let run = run_length(bytes, pos);
         if run != 1 {
             pos = skip_multi_backtick_span(source, pos, run);
+            continue;
+        }
+        if is_shortcut_key(source, pos) {
+            // Escaping the backtick renders it literally and stops it
+            // opening a span that swallows prose up to the next backtick.
+            repairs.push((pos..pos + 1, "\\`".to_owned()));
+            pos += 1;
             continue;
         }
         match scan_single_backtick_span(source, pos) {
@@ -194,6 +209,23 @@ fn skip_multi_backtick_span(source: &str, open: usize, run: usize) -> usize {
     open + run
 }
 
+/// True when the single backtick at byte `pos` is glued to a keyboard-
+/// shortcut token — `Ctrl+``, `⌘`` — making it a literal keycap rather
+/// than a code-span opener. Requiring a letter before `+` matches
+/// `Ctrl+`` and `Cmd+Shift+`` while sparing `x + `y`` (a real span) and
+/// `` `a`+`b` `` (the `+` follows a backtick); the modifier symbols are
+/// unambiguous on their own.
+pub(super) fn is_shortcut_key(source: &str, pos: usize) -> bool {
+    let mut before = source[..pos].chars();
+    match before.next_back() {
+        Some('+') => before
+            .next_back()
+            .is_some_and(|ch| ch.is_ascii_alphabetic()),
+        Some(ch) => matches!(ch, '⌘' | '⌃' | '⌥' | '⇧'),
+        None => false,
+    }
+}
+
 fn run_length(bytes: &[u8], pos: usize) -> usize {
     bytes[pos..]
         .iter()
@@ -243,6 +275,34 @@ mod tests {
             repair("the `the \\`ls\\` command` ran").as_deref(),
             Some("the `` the `ls` command `` ran")
         );
+    }
+
+    #[test]
+    fn escapes_shortcut_backticks() {
+        assert_eq!(
+            repair("press Ctrl+` to open `terminal`").as_deref(),
+            Some("press Ctrl+\\` to open `terminal`")
+        );
+        assert_eq!(
+            repair("press ⌘` to focus").as_deref(),
+            Some("press ⌘\\` to focus")
+        );
+        assert_eq!(
+            repair("Ctrl+Shift+` cycles panes").as_deref(),
+            Some("Ctrl+Shift+\\` cycles panes")
+        );
+    }
+
+    #[test]
+    fn leaves_non_shortcut_backticks_alone() {
+        for source in [
+            "x + `y` is code",
+            "the `a`+`b` pair",
+            "`x+`",
+            "2+`x`",
+        ] {
+            assert_eq!(repair(source), None, "unexpected repair for {source:?}");
+        }
     }
 
     #[test]

@@ -74,6 +74,13 @@ pub fn close_hanging(text: &str) -> Option<String> {
                     last_content = Some(index + run - 1);
                 }
                 Some(_) => last_content = Some(index + run - 1),
+                // `Ctrl+`` is a keycap, not an opener: count it as content
+                // so whatever streams in next cannot become a code span.
+                None if run == 1
+                    && super::escape::is_shortcut_key(text, chars[index].0) =>
+                {
+                    last_content = Some(index);
+                }
                 None => code = Some((run, index + run)),
             }
             index += run;
@@ -386,6 +393,20 @@ mod tests {
         assert_eq!(close_hanging("call ``a`b").as_deref(), Some("call ``a`b``"));
         // A bare opener has no content to style yet.
         assert_eq!(close_hanging("call `"), None);
+    }
+
+    #[test]
+    fn shortcut_backticks_stay_literal() {
+        // `Ctrl+`` is a keycap: content follows it without becoming code.
+        assert_eq!(close_hanging("press Ctrl+` to open"), None);
+        assert_eq!(close_hanging("press ⌘` to focus"), None);
+        // A real span opener after a spaced `+` still mends, and a later
+        // opener is unaffected by the keycap before it.
+        assert_eq!(close_hanging("x + `y").as_deref(), Some("x + `y`"));
+        assert_eq!(
+            close_hanging("Ctrl+` then `code").as_deref(),
+            Some("Ctrl+` then `code`")
+        );
     }
 
     #[test]
