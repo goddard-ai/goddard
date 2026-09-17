@@ -138,6 +138,10 @@ pub(super) struct GitPanelOperation {
     pub id: Uuid,
     pub workspace: PathBuf,
     pub pending: GitPanelPending,
+    /// The spinner toast a `/land` raised on the operation's behalf — the
+    /// composer has no pending indicator of its own. `finish_git_panel_op`
+    /// settles it to the outcome, or retires it when a modal takes over.
+    pub toast_id: Option<u64>,
 }
 
 /// Everything the panel needs, created when the panel opens and rebuilt when
@@ -981,6 +985,7 @@ impl Waku {
             id,
             workspace: workspace.clone(),
             pending,
+            toast_id: None,
         });
         cx.notify();
         Some((id, workspace))
@@ -1126,7 +1131,8 @@ impl Waku {
     }
 
     /// `/land` in the composer: land the session the composer answers to —
-    /// the big-picture target while that overlay is open.
+    /// the big-picture target while that overlay is open. With no button to
+    /// show the pending label, the run reports through a spinner toast.
     pub(super) fn land_composer_session(&mut self, strategy: PullStrategy, cx: &mut Context<Self>) {
         let Some(session) = self.composer_session() else {
             self.show_toast(tr!("git_panel.no_task"));
@@ -1143,7 +1149,7 @@ impl Waku {
             self.show_toast(tr!("git_panel.no_task"));
             return;
         };
-        self.start_git_panel_land(workspace, base, strategy, cx);
+        self.start_git_panel_land(workspace, base, strategy, true, cx);
     }
 
     /// The panel's land button lands the panel's own workspace and base —
@@ -1154,17 +1160,23 @@ impl Waku {
         };
         let workspace = panel.workspace.clone();
         let base = panel.base.clone();
-        self.start_git_panel_land(workspace, base, strategy, cx);
+        self.start_git_panel_land(workspace, base, strategy, false, cx);
     }
 
     /// Rebase `workspace` onto its base — or merge the base in — then
     /// fast-forward the base to the result. A conflict raises the same modal
     /// a conflicted pull does.
+    ///
+    /// `progress_toast` raises a spinner toast that resolves to the outcome —
+    /// how `/land` reports from the composer, where no button shows the
+    /// pending label. The panel's land button renders it inline and passes
+    /// `false`.
     fn start_git_panel_land(
         &mut self,
         workspace: PathBuf,
         base: Option<String>,
         strategy: PullStrategy,
+        progress_toast: bool,
         cx: &mut Context<Self>,
     ) {
         let Some((op_id, workspace)) =
@@ -1180,6 +1192,17 @@ impl Waku {
             );
             return;
         };
+        if progress_toast {
+            let message = match &base {
+                Some(base) => tr!("git_panel.landing_onto", base = base.clone()),
+                None => tr!("git_panel.landing"),
+            };
+            let toast_id = self.show_progress_toast(message, PROGRESS_TOAST_DURATION);
+            if let Some(operation) = self.git_panel_operation.as_mut() {
+                operation.toast_id = Some(toast_id);
+            }
+            cx.notify();
+        }
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1367,6 +1390,9 @@ impl Waku {
                     in_progress,
                     files,
                 } => {
+                    // The conflict modal carries the stopped state — retire
+                    // the run's spinner rather than leave it behind the scrim.
+                    self.dismiss_operation_toast(op.toast_id);
                     self.git_panel_conflict_files_scroll
                         .set_offset(gpui::Point::default());
                     self.git_panel_sync_conflict = Some(SyncConflict::Land {
@@ -1379,13 +1405,21 @@ impl Waku {
                     cx.notify();
                 }
                 LandOutcome::Landed { base } => {
-                    self.show_success_toast(tr!("git_panel.landed", base = base));
+                    self.settle_operation_toast(
+                        op.toast_id,
+                        tr!("git_panel.landed", base = base),
+                        ToastTone::Success,
+                    );
                     self.invalidate_workspace_queries(cx);
                     self.refresh_git_panel(cx);
                     self.refresh_git_panel_commits(cx);
                 }
                 LandOutcome::AlreadyLanded { base } => {
-                    self.show_notice_toast(tr!("git_panel.already_landed", base = base));
+                    self.settle_operation_toast(
+                        op.toast_id,
+                        tr!("git_panel.already_landed", base = base),
+                        ToastTone::Notice,
+                    );
                     self.invalidate_workspace_queries(cx);
                 }
             },
@@ -1404,15 +1438,44 @@ impl Waku {
             }
             Err(error) => {
                 // A composer-started land can fail with the panel closed;
-                // its errors need a surface the panel doesn't provide.
+                // its errors need a surface the panel doesn't provide. When
+                // the panel shows the failed workspace it carries the error
+                // inline — a run that raised a toast still resolves it.
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = Some(error.to_string());
-                } else {
-                    self.show_toast(error.to_string());
+                }
+                if op.toast_id.is_some() || !same_panel {
+                    self.settle_operation_toast(op.toast_id, error.to_string(), ToastTone::Alert);
                 }
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
             }
+        }
+    }
+
+    /// Settle an operation's spinner toast to its result: resolve it in
+    /// place while it is still the visible toast, or raise a fresh toast
+    /// when something else took the slot. Operations that never raised one
+    /// get the fresh toast unconditionally.
+    fn settle_operation_toast(
+        &mut self,
+        toast_id: Option<u64>,
+        message: impl Into<String>,
+        tone: ToastTone,
+    ) {
+        if toast_id.is_some_and(|id| self.toast.as_ref().is_some_and(|toast| toast.id == id)) {
+            self.update_toast(message, tone);
+        } else {
+            self.show_toast_with_tone(message, tone, None);
+        }
+    }
+
+    /// Retire an operation's spinner toast with no result to show — a
+    /// conflict modal took over. Only fires while that toast is still the
+    /// visible one.
+    fn dismiss_operation_toast(&mut self, toast_id: Option<u64>) {
+        if toast_id.is_some_and(|id| self.toast.as_ref().is_some_and(|toast| toast.id == id)) {
+            self.hide_toast();
         }
     }
 

@@ -2653,7 +2653,7 @@ impl Waku {
         if let Some(terminal_id) = terminal_id {
             let toast_id = self.show_progress_toast(
                 tr!("commands.running", name = command.display_name()),
-                COMMAND_PROGRESS_TOAST_DURATION,
+                PROGRESS_TOAST_DURATION,
             );
             self.custom_command_runs.insert(
                 terminal_id,

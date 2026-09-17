@@ -158,11 +158,11 @@ const STREAM_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Zed keeps status toasts on screen for ten seconds, pausing the countdown
 /// while the pointer is over the toast so a long message remains readable.
 const DEFAULT_TOAST_DURATION: Duration = Duration::from_secs(5);
-/// Residual lifetime of a command's spinner toast. While the run is
-/// pending the dismiss clock never arms — the toast mirrors the command's
-/// output tail — so this only applies when a run's surface disappears
-/// without ever reporting a result.
-const COMMAND_PROGRESS_TOAST_DURATION: Duration = Duration::from_millis(2_500);
+/// Residual lifetime of an operation's spinner toast. While its owner is in
+/// flight — a command run mirroring its output tail, a `/land` waiting on
+/// the daemon — the dismiss clock never arms, so this only applies when the
+/// owner disappears without ever reporting a result.
+const PROGRESS_TOAST_DURATION: Duration = Duration::from_millis(2_500);
 /// How much of a running command's screen its toast mirrors.
 const COMMAND_RUN_TAIL_LINES: usize = 3;
 /// Tail publishes ride the stream-commit cadence — a PTY burst dirties the
@@ -2471,12 +2471,6 @@ impl Waku {
         self.show_toast_with_tone(message, ToastTone::Success, None);
     }
 
-    /// A neutral toast for a command that found nothing to do — the accent
-    /// Notice tone rather than Success or an alert.
-    pub(super) fn show_notice_toast(&mut self, message: impl Into<String>) {
-        self.show_toast_with_tone(message, ToastTone::Notice, None);
-    }
-
     /// Confirms an unarchive with a "View now" jump to the restored task.
     pub(super) fn show_unarchived_toast(&mut self, session_id: Uuid) {
         self.show_toast_with_tone(
@@ -2784,11 +2778,15 @@ impl Waku {
         }
         // A pending command run owns its toast until the result lands —
         // the output tail it mirrors would be cut short by the dismiss
-        // clock.
+        // clock. A `/land` in flight owns its spinner the same way.
         if self
             .custom_command_runs
             .values()
             .any(|run| run.toast_id == toast.id)
+            || self
+                .git_panel_operation
+                .as_ref()
+                .is_some_and(|operation| operation.toast_id == Some(toast.id))
         {
             return;
         }

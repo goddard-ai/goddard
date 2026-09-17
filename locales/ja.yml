@@ -1467,6 +1467,7 @@ git_panel.open_file_in: "%{app} で開く"
 git_panel.open_file: エディタでファイルを開く
 git_panel.land_onto: "%{base} に取り込む"
 git_panel.landing: 取り込み中…
+git_panel.landing_onto: "%{base} に取り込み中…"
 git_panel.landed: "%{base} に取り込みました"
 git_panel.already_landed: "%{base} にはすでにすべてのコミットが含まれています"
 git_panel.land_conflict_description: "%{base} への取り込みが途中で停止しました — 競合は作業ツリーに残っています。"

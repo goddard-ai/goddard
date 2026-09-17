@@ -2628,6 +2628,8 @@ git_panel.land_onto:
   en: Land onto %{base}
 git_panel.landing:
   en: Landing…
+git_panel.landing_onto:
+  en: "Landing onto %{base}…"
 git_panel.landed:
   en: Landed on %{base}
 git_panel.already_landed:

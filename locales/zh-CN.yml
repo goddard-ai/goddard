@@ -1425,6 +1425,7 @@ git_panel.open_file_in: "在 %{app} 中打开"
 git_panel.open_file: 在编辑器中打开文件
 git_panel.land_onto: 合入 %{base}
 git_panel.landing: 正在合入…
+git_panel.landing_onto: "正在合入 %{base}…"
 git_panel.landed: 已合入 %{base}
 git_panel.already_landed: "%{base} 已包含此处的所有提交"
 git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
