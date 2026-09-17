@@ -320,10 +320,7 @@ mod tests {
         );
         // A pre-Goddard block strips the same way.
         let legacy = "export EDITOR=vim\n# >>> waku shell integration >>>\n[[ -n \"$WAKU\" ]] && source '/a/b.zsh'\n# <<< waku shell integration <<<\nalias ll='ls -l'\n";
-        assert_eq!(
-            strip_block(legacy),
-            "export EDITOR=vim\nalias ll='ls -l'\n"
-        );
+        assert_eq!(strip_block(legacy), "export EDITOR=vim\nalias ll='ls -l'\n");
         // An unterminated block eats to EOF; a file without one is untouched.
         assert_eq!(
             strip_block("a\n# >>> goddard shell integration >>>\nb\n"),

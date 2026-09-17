@@ -585,9 +585,7 @@ impl Waku {
             .projects
             .iter()
             .find(|project| project.id == project_id)?;
-        if !project.is_projectless()
-            || crate::projectless::is_legacy_root_path(&project.path)
-        {
+        if !project.is_projectless() || crate::projectless::is_legacy_root_path(&project.path) {
             return None;
         }
         let all_retired = self
@@ -626,8 +624,7 @@ impl Waku {
                     .find(|project| project.id == session.project_id)
             })
             .filter(|project| {
-                project.is_projectless()
-                    && !crate::projectless::is_legacy_root_path(&project.path)
+                project.is_projectless() && !crate::projectless::is_legacy_root_path(&project.path)
             })
             .map(|project| project.path.clone())
         else {
@@ -640,9 +637,7 @@ impl Waku {
                 .spawn(async move {
                     workspace
                         .request(
-                            waku_client::WorkspaceOperation::RestoreProjectlessWorkspace {
-                                path,
-                            },
+                            waku_client::WorkspaceOperation::RestoreProjectlessWorkspace { path },
                         )
                         .is_ok_and(|result| {
                             matches!(result, waku_client::WorkspaceResult::Bool { value: true })

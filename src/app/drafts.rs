@@ -167,21 +167,11 @@ impl Waku {
     /// every file editor's pins, and restored file annotations still waiting
     /// on their editor — merged in creation order like `drain_annotations`.
     fn composer_draft_annotations(&self) -> Vec<ComposerDraftAnnotation> {
-        let mut annotations = self
-            .transcript_selection
-            .annotations
-            .borrow()
-            .items
-            .clone();
+        let mut annotations = self.transcript_selection.annotations.borrow().items.clone();
         for editor in self.right_panel_file_editors.values() {
             annotations.extend(editor.annotations.borrow().items.iter().cloned());
         }
-        annotations.extend(
-            self.pending_file_annotations
-                .values()
-                .flatten()
-                .cloned(),
-        );
+        annotations.extend(self.pending_file_annotations.values().flatten().cloned());
         annotations.sort_by_key(|annotation| annotation.id);
         annotations.iter().map(Into::into).collect()
     }
@@ -347,12 +337,13 @@ impl Waku {
         let mut items = Vec::new();
         let mut pending: HashMap<String, Vec<TranscriptAnnotation>> = HashMap::new();
         for annotation in draft_annotations {
-            self.annotation_next_id = self
-                .annotation_next_id
-                .max(annotation.id.saturating_add(1));
+            self.annotation_next_id = self.annotation_next_id.max(annotation.id.saturating_add(1));
             let annotation = TranscriptAnnotation::from(annotation);
             if let Some(file) = &annotation.file {
-                pending.entry(file.path.clone()).or_default().push(annotation);
+                pending
+                    .entry(file.path.clone())
+                    .or_default()
+                    .push(annotation);
             } else {
                 items.push(annotation);
             }

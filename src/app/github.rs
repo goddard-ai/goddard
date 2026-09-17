@@ -640,9 +640,9 @@ impl Waku {
         };
         if let Some(GitHubFetch::Loaded(Some(content))) = browser.details.get(&detail) {
             return match content.as_ref() {
-                GitHubItemDetail::PullRequest(pr) => sidebar::sidebar_pull_request_icon(
-                    sidebar::pull_request_class(&pr.summary),
-                ),
+                GitHubItemDetail::PullRequest(pr) => {
+                    sidebar::sidebar_pull_request_icon(sidebar::pull_request_class(&pr.summary))
+                }
                 GitHubItemDetail::Issue(issue) => match issue.summary.state {
                     IssueState::Open => "icons/info.svg",
                     IssueState::Closed => "icons/check.svg",
@@ -659,13 +659,9 @@ impl Waku {
         if let Some(browser) = self.github_browsers.get_mut(&project_id) {
             browser.detail = None;
         }
-        if let Some(index) = self
-            .right_panel_surfaces
-            .iter()
-            .position(|surface| {
-                matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id)
-            })
-        {
+        if let Some(index) = self.right_panel_surfaces.iter().position(
+            |surface| matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id),
+        ) {
             self.close_right_panel_surface(index, cx);
         }
         self.remove_parked_github_surfaces(project_id);

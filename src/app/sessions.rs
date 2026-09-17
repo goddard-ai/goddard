@@ -1385,10 +1385,7 @@ impl Waku {
             return;
         }
 
-        Self::prune_navigation_stack(
-            &self.state.projects,
-            &mut self.session_navigation.forward,
-        );
+        Self::prune_navigation_stack(&self.state.projects, &mut self.session_navigation.forward);
         let Some(current) = self.navigation_location() else {
             return;
         };

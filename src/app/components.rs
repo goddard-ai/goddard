@@ -1030,9 +1030,12 @@ fn message_menu_items(
             })
             .shortcut_action(&CopySelection),
         );
-        items.push(MenuItem::new(tr!("common.search_with_google"), move |_, cx| {
-            cx.open_url(&crate::browser::search_url(&selected));
-        }));
+        items.push(MenuItem::new(
+            tr!("common.search_with_google"),
+            move |_, cx| {
+                cx.open_url(&crate::browser::search_url(&selected));
+            },
+        ));
     }
 
     let copy_content = content.to_owned();

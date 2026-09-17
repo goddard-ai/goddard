@@ -681,7 +681,9 @@ enum RightPanelSurface {
     /// A pull request the session's branch links to, opened from the
     /// header's pull-request chip. The session supplies the project; the
     /// number names the detail.
-    PullRequest { number: u64 },
+    PullRequest {
+        number: u64,
+    },
     Files,
     Diff,
     File(String),
@@ -3079,8 +3081,7 @@ impl Waku {
             let mut items = Vec::new();
             for annotation in initial_composer_annotations {
                 let annotation = TranscriptAnnotation::from(annotation);
-                annotation_next_id =
-                    annotation_next_id.max(annotation.id.saturating_add(1));
+                annotation_next_id = annotation_next_id.max(annotation.id.saturating_add(1));
                 if let Some(file) = &annotation.file {
                     pending_file_annotations
                         .entry(file.path.clone())

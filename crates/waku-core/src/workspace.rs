@@ -246,11 +246,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::ListCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::commits(&cwd, skip, limit)?,
         },
-        WorkspaceOperation::ListUpstreamCommits { cwd, skip, limit } => {
-            WorkspaceResult::Commits {
-                entries: crate::git_panel::upstream_commits(&cwd, skip, limit)?,
-            }
-        }
+        WorkspaceOperation::ListUpstreamCommits { cwd, skip, limit } => WorkspaceResult::Commits {
+            entries: crate::git_panel::upstream_commits(&cwd, skip, limit)?,
+        },
         WorkspaceOperation::FileDiff { cwd, path, staged } => WorkspaceResult::ReviewDiff {
             data: file_diff(&cwd, &path, staged)?,
         },

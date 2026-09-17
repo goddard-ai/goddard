@@ -446,11 +446,7 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
 /// `git log <upstream> --not HEAD`: the commits the tracking branch has that
 /// the checkout lacks — what a pull would bring in. Empty when the branch
 /// has no upstream.
-pub fn upstream_commits(
-    cwd: &Path,
-    skip: usize,
-    limit: usize,
-) -> anyhow::Result<Vec<CommitEntry>> {
+pub fn upstream_commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<CommitEntry>> {
     ensure_repository(cwd)?;
     let Some(upstream) = upstream(cwd)? else {
         return Ok(Vec::new());

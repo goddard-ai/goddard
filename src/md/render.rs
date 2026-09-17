@@ -2795,7 +2795,10 @@ mod tests {
         flat.code_ranges.push(4..13);
         assert_eq!(
             commit_references(&flat),
-            vec![(5..12, "0123456".to_owned()), (19..26, "abcdef1".to_owned())]
+            vec![
+                (5..12, "0123456".to_owned()),
+                (19..26, "abcdef1".to_owned())
+            ]
         );
         flat.code_ranges.clear();
         flat.links.push((4..13, "https://example.com".to_owned()));

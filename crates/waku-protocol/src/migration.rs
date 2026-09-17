@@ -251,7 +251,11 @@ pub fn link_tree_entries(source: &Path, destination: &Path, report: &mut Migrati
                 let sub_entry = match sub_entry {
                     Ok(sub_entry) => sub_entry,
                     Err(error) => {
-                        report.record_failure(source_entry.clone(), destination_entry.clone(), error);
+                        report.record_failure(
+                            source_entry.clone(),
+                            destination_entry.clone(),
+                            error,
+                        );
                         continue;
                     }
                 };
@@ -405,51 +409,57 @@ mod tests {
         assert!(report.failures.is_empty(), "{:?}", report.failures.len());
 
         // Small app files are copied; their content crosses over.
-        assert_eq!(
-            fs::read(destination.join("settings.json")).unwrap(),
-            b"{}"
-        );
+        assert_eq!(fs::read(destination.join("settings.json")).unwrap(), b"{}");
         assert_eq!(
             fs::read(destination.join("app.json")).unwrap(),
             b"{\"a\":1}"
         );
-        assert!(!fs::symlink_metadata(destination.join("settings.json"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            !fs::symlink_metadata(destination.join("settings.json"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
 
         // Tree contents are linked per item, leaving real directories behind.
         let project = destination.join("projects/2026-08-08/chat");
-        assert!(fs::symlink_metadata(&project)
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            fs::symlink_metadata(&project)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         assert_eq!(fs::read(project.join("notes")).unwrap(), b"hi");
-        assert!(!fs::symlink_metadata(destination.join("projects/2026-08-08"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(fs::symlink_metadata(destination.join("worktrees/abc123/wt"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(fs::symlink_metadata(destination.join("archives/2026-08-08/chat.zip"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(fs::symlink_metadata(destination.join("archives/loose.zip"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            !fs::symlink_metadata(destination.join("projects/2026-08-08"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(destination.join("worktrees/abc123/wt"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(destination.join("archives/2026-08-08/chat.zip"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(destination.join("archives/loose.zip"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
 
         // The whitelist leaves everything else alone.
         assert!(!destination.join("app.db").exists());
         assert!(!destination.join(".DS_Store").exists());
         assert!(!destination.join("unrelated").exists());
-        assert!(report
-            .skipped
-            .iter()
-            .any(|path| path.ends_with("app.db")));
+        assert!(report.skipped.iter().any(|path| path.ends_with("app.db")));
 
         // A second run is a no-op.
         let mut second = MigrationReport::default();
@@ -479,7 +489,9 @@ mod tests {
         let link = destination.join("projects/2026-08-08/chat");
         assert_eq!(
             fs::read_link(&link).unwrap(),
-            fs::canonicalize(&real).unwrap().join("projects/2026-08-08/chat")
+            fs::canonicalize(&real)
+                .unwrap()
+                .join("projects/2026-08-08/chat")
         );
         fs::remove_file(&legacy).unwrap();
         assert!(link.is_dir());
@@ -504,10 +516,12 @@ mod tests {
             fs::read(destination.join("settings.json")).unwrap(),
             b"current"
         );
-        assert!(!fs::symlink_metadata(destination.join("projects/2026-08-08/chat"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            !fs::symlink_metadata(destination.join("projects/2026-08-08/chat"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         assert!(report.migrated.is_empty());
 
         fs::remove_dir_all(&root).unwrap();
@@ -540,9 +554,11 @@ mod tests {
 
         assert!(!dead.exists());
         assert!(live.exists());
-        assert!(!destination
-            .join(format!(".settings.json.migrating-{dead_pid}"))
-            .exists());
+        assert!(
+            !destination
+                .join(format!(".settings.json.migrating-{dead_pid}"))
+                .exists()
+        );
         assert!(!destination.join(".goddard-migration-incomplete").exists());
 
         fs::remove_dir_all(&root).unwrap();

@@ -95,10 +95,7 @@ pub struct RemScale {
 
 /// Wrap `child`'s subtree in a [`RemScale`] of `scale`.
 pub fn rem_scale(scale: f32) -> RemScale {
-    RemScale {
-        div: div(),
-        scale,
-    }
+    RemScale { div: div(), scale }
 }
 
 impl Styled for RemScale {
@@ -166,8 +163,15 @@ impl Element for RemScale {
     ) {
         let rem_size = window.rem_size() * self.scale;
         window.with_rem_size(Some(rem_size), |window| {
-            self.div
-                .paint(id, inspector_id, bounds, request_layout, prepaint, window, cx)
+            self.div.paint(
+                id,
+                inspector_id,
+                bounds,
+                request_layout,
+                prepaint,
+                window,
+                cx,
+            )
         })
     }
 }

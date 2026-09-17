@@ -257,9 +257,7 @@ fn prepare_submission(
             // as the existence check on the daemon host — the role
             // `EnsureWorktree` plays above. Archive cleanup may have zipped
             // a projectless workspace away; restore brings it back.
-            if project.is_projectless()
-                && !crate::projectless::is_legacy_root_path(&project.path)
-            {
+            if project.is_projectless() && !crate::projectless::is_legacy_root_path(&project.path) {
                 match workspace_client.request(
                     waku_client::WorkspaceOperation::RestoreProjectlessWorkspace {
                         path: project.path.clone(),

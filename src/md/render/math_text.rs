@@ -544,9 +544,7 @@ impl Element for MathText {
             for (range, _) in &self.flat.commit_refs {
                 let emphasised = hovered
                     .as_ref()
-                    .is_some_and(|(key, hover_range)| {
-                        *key == self.key && *hover_range == *range
-                    });
+                    .is_some_and(|(key, hover_range)| *key == self.key && *hover_range == *range);
                 let color = if emphasised {
                     self.palette.secondary
                 } else {

@@ -1704,10 +1704,7 @@ mod tests {
             Some(5)
         );
         assert_eq!(
-            reusable_surface_index(
-                &surfaces,
-                &RightPanelSurface::GitHub(Uuid::new_v4()),
-            ),
+            reusable_surface_index(&surfaces, &RightPanelSurface::GitHub(Uuid::new_v4()),),
             None
         );
     }
@@ -1987,9 +1984,9 @@ impl Waku {
     /// copy — if any — is the caller's to handle.
     pub(super) fn remove_parked_github_surfaces(&mut self, project_id: Uuid) {
         for state in self.right_panel_session_states.values_mut() {
-            let Some(index) = state.surfaces.iter().position(|surface| {
-                matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id)
-            }) else {
+            let Some(index) = state.surfaces.iter().position(
+                |surface| matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id),
+            ) else {
                 continue;
             };
             state.surfaces.remove(index);
@@ -2868,9 +2865,7 @@ impl Waku {
                     .and_then(|browser| browser.read(cx).tab_label())
                     .unwrap_or_else(|| surface.label()),
                 // Work-item tabs name the open item: "#123".
-                RightPanelSurface::GitHub(project_id) => {
-                    self.github_surface_label(*project_id)
-                }
+                RightPanelSurface::GitHub(project_id) => self.github_surface_label(*project_id),
                 _ => {
                     right_panel_tab_label(&surface, self.right_panel_files_selected_path.as_deref())
                 }
@@ -2889,9 +2884,7 @@ impl Waku {
                         )
                     }),
                 // Work-item tabs wear the open item's state glyph.
-                RightPanelSurface::GitHub(project_id) => {
-                    self.github_surface_icon(*project_id)
-                }
+                RightPanelSurface::GitHub(project_id) => self.github_surface_icon(*project_id),
                 _ => {
                     right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref())
                 }

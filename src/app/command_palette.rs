@@ -1009,15 +1009,15 @@ impl Waku {
                 "land changes commits onto base branch rebase merge integrate fast-forward worktree git",
                 next(),
             );
-            item.detail = self.composer_session().and_then(|session| {
-                match &session.workspace {
+            item.detail = self
+                .composer_session()
+                .and_then(|session| match &session.workspace {
                     SessionWorkspace::Worktree {
                         base_branch: Some(base),
                         ..
                     } => Some(format!("→ {base}")),
                     _ => None,
-                }
-            });
+                });
             commands.push(item);
         }
 

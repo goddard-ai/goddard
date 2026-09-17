@@ -218,22 +218,26 @@ mod tests {
         // The cloned database is already at the latest schema.
         let connection = Connection::open(destination.join("app.db")).unwrap();
         assert_eq!(apply_migrations(&connection).unwrap(), 0);
-        assert_eq!(
-            fs::read(destination.join("settings.json")).unwrap(),
-            b"{}"
-        );
+        assert_eq!(fs::read(destination.join("settings.json")).unwrap(), b"{}");
         assert_eq!(fs::read(destination.join("state.json")).unwrap(), b"{}");
         assert_eq!(
             fs::read(destination.join("blobs/sha/blob")).unwrap(),
             b"blobby"
         );
         #[cfg(unix)]
-        assert!(fs::symlink_metadata(destination.join("blobs/sha/blob"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            fs::symlink_metadata(destination.join("blobs/sha/blob"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         assert!(!destination.join("Computer Use").exists());
-        assert!(report.skipped.iter().any(|path| path.ends_with("Computer Use")));
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|path| path.ends_with("Computer Use"))
+        );
 
         // A second run is a no-op.
         let mut second = MigrationReport::default();

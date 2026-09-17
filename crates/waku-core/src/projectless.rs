@@ -270,7 +270,10 @@ fn remove_workspace_in(root: &Path, path: &Path) -> io::Result<()> {
     }
     match validate_real_directory(path) {
         Ok(()) => trash::delete(path).map_err(|error| {
-            io::Error::new(io::ErrorKind::Other, format!("could not trash workspace: {error}"))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("could not trash workspace: {error}"),
+            )
         }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
@@ -296,9 +299,7 @@ fn write_workspace_zip(root: &Path, destination: &Path) -> io::Result<()> {
             let name = relative.to_string_lossy().into_owned();
             let file_type = entry.file_type()?;
             if file_type.is_dir() {
-                writer
-                    .add_directory(name, options)
-                    .map_err(zip_io_error)?;
+                writer.add_directory(name, options).map_err(zip_io_error)?;
                 pending.push(relative);
             } else if file_type.is_symlink() {
                 let target = fs::read_link(entry.path())?;

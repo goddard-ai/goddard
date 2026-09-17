@@ -322,7 +322,11 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
             // The worktree lane descends to mid-row, jogs right, and hands
             // off to the base lane that continues downward.
             cell = cell
-                .child(vertical(COMMIT_LANE_WORKTREE, 0.0, GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0))
+                .child(vertical(
+                    COMMIT_LANE_WORKTREE,
+                    0.0,
+                    GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0,
+                ))
                 .child(
                     div()
                         .absolute()
@@ -1273,11 +1277,7 @@ impl Waku {
                 cx.notify();
             }
             Ok(WorkspaceResult::Pull {
-                outcome:
-                    PullOutcome::Conflict {
-                        in_progress,
-                        files,
-                    },
+                outcome: PullOutcome::Conflict { in_progress, files },
             }) => {
                 self.git_panel_conflict_files_scroll
                     .set_offset(gpui::Point::default());
@@ -2053,11 +2053,9 @@ impl Waku {
             .when(commit_open, |element| {
                 element.child(self.render_git_panel_commit_view(cx))
             })
-            .child(
-                column.when(commit_open, |column| {
-                    column.border_l(hairline()).border_color(theme.border)
-                }),
-            )
+            .child(column.when(commit_open, |column| {
+                column.border_l(hairline()).border_color(theme.border)
+            }))
     }
 
     fn render_git_panel_header(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -2612,8 +2610,7 @@ impl Waku {
             } => {
                 let path = path.clone();
                 let path_for_key = path.clone();
-                let focus =
-                    self.transcript_control_focus(format!("git-panel-tree-dir-{path}"), cx);
+                let focus = self.transcript_control_focus(format!("git-panel-tree-dir-{path}"), cx);
                 div()
                     .id(SharedString::from(format!("git-panel-tree-dir-{path}")))
                     .track_focus(&focus)
@@ -2678,10 +2675,8 @@ impl Waku {
                     crate::review_diff::FileStatus::Binary => ("B", theme.text_tertiary),
                 };
                 let file_index = *file_index;
-                let focus = self.transcript_control_focus(
-                    format!("git-panel-tree-file-{path}"),
-                    cx,
-                );
+                let focus =
+                    self.transcript_control_focus(format!("git-panel-tree-file-{path}"), cx);
                 div()
                     .id(SharedString::from(format!("git-panel-tree-file-{path}")))
                     .track_focus(&focus)

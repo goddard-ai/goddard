@@ -383,10 +383,7 @@ impl Waku {
         }
         // Parsed card bodies are bounded like the lane's `message_markdown`.
         let mut card_markdown = self.big_picture.card_markdown.borrow_mut();
-        let cached_bytes: usize = card_markdown
-            .values()
-            .map(MarkdownView::source_len)
-            .sum();
+        let cached_bytes: usize = card_markdown.values().map(MarkdownView::source_len).sum();
         if cached_bytes > MAX_CACHED_MESSAGE_SOURCE_BYTES {
             card_markdown.clear();
         }
@@ -394,10 +391,13 @@ impl Waku {
         self.big_picture.focus_generation = self.big_picture.focus_generation.wrapping_add(1);
         self.big_picture.open_seq = self.big_picture.open_seq.wrapping_add(1);
         self.big_picture.last_row_count = 0;
-        self.big_picture.highlighted =
-            big_picture_order(&self.state.sessions, &self.state.unseen_completions, MAX_CARDS)
-                .first()
-                .copied();
+        self.big_picture.highlighted = big_picture_order(
+            &self.state.sessions,
+            &self.state.unseen_completions,
+            MAX_CARDS,
+        )
+        .first()
+        .copied();
         self.big_picture.new_task_project = self.big_picture_new_task_project();
         // The overlay's draft machinery starts unloaded so the first sync
         // restores the new-task draft rather than leaving the background
@@ -594,11 +594,7 @@ impl Waku {
         self.apply_composer_draft(next, draft, cx);
     }
 
-    pub(super) fn set_big_picture_target(
-        &mut self,
-        target: Option<Uuid>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn set_big_picture_target(&mut self, target: Option<Uuid>, cx: &mut Context<Self>) {
         if self.big_picture.target == target {
             return;
         }
@@ -1151,8 +1147,7 @@ impl Waku {
                 folded.retain(|kind| {
                     !matches!(
                         kind,
-                        TranscriptRowKind::ResponseFooter(..)
-                            | TranscriptRowKind::ChangedFiles(_)
+                        TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_)
                     )
                 });
                 *entry = (fingerprint, Rc::new(folded));
@@ -1189,7 +1184,8 @@ impl Waku {
         // last few rows while the session works so fresh text is not clipped
         // — the same tail the lane re-measures on every commit.
         if session.status.is_busy() {
-            card.rows.remeasure_items(count.saturating_sub(STREAM_REMEASURE_TAIL_ROWS)..count);
+            card.rows
+                .remeasure_items(count.saturating_sub(STREAM_REMEASURE_TAIL_ROWS)..count);
         }
         let entity = cx.entity().downgrade();
         let rows = card.rows.clone();
@@ -1235,11 +1231,16 @@ impl Waku {
         animate_streaming: bool,
         cx: &App,
     ) -> MarkdownCtx<'a> {
-        MarkdownCtx::new(row, palette, metrics, self.big_picture.card_selection.clone())
-            .with_families(crate::fonts::current(cx))
-            .with_math_enabled(self.state.render_math)
-            .with_link_handler(self.big_picture.card_link_handler.clone())
-            .with_streaming_animation(animate_streaming)
+        MarkdownCtx::new(
+            row,
+            palette,
+            metrics,
+            self.big_picture.card_selection.clone(),
+        )
+        .with_families(crate::fonts::current(cx))
+        .with_math_enabled(self.state.render_math)
+        .with_link_handler(self.big_picture.card_link_handler.clone())
+        .with_streaming_animation(animate_streaming)
     }
 
     /// Metrics rescaled to the card's text scale on top of the user's font
@@ -1292,8 +1293,7 @@ impl Waku {
                 .cloned()
                 .map(|message| {
                     let copied = self.copied_message_feedback.contains_key(&message.id);
-                    let menu =
-                        self.menu_handle(format!("big-picture-message-{}", message.id), cx);
+                    let menu = self.menu_handle(format!("big-picture-message-{}", message.id), cx);
                     let attachment_menus = (0..message.attachments.len())
                         .map(|index| {
                             self.menu_handle(
@@ -1320,13 +1320,12 @@ impl Waku {
                             )
                         })
                         .collect();
-                    let metrics = self.card_markdown_metrics(
-                        if message.role == MessageRole::User {
+                    let metrics =
+                        self.card_markdown_metrics(if message.role == MessageRole::User {
                             MarkdownMetrics::USER_MESSAGE
                         } else {
                             MarkdownMetrics::BODY
-                        },
-                    );
+                        });
                     let animate_streaming = message.streaming && !cx.reduce_motion();
                     let ctx = self.card_markdown_ctx(
                         format!("big-picture-message-{}", message.id),
@@ -1652,7 +1651,10 @@ impl Waku {
         // lane's last measured height stands in for the overlay's docked one —
         // the same card renders in both places.
         let row_width = (f32::from(viewport.width) - EDGE_MARGIN * 2.0).max(0.0);
-        let composer_height = self.composer_lane_height.get().max(COMPOSER_HEIGHT_FALLBACK);
+        let composer_height = self
+            .composer_lane_height
+            .get()
+            .max(COMPOSER_HEIGHT_FALLBACK);
         let grid_height = (f32::from(viewport.height)
             - TOP_MARGIN
             - CARD_COMPOSER_GAP
@@ -1674,13 +1676,8 @@ impl Waku {
         let card_width =
             ((row_width - CARD_GAP * (columns - 1) as f32) / columns as f32).max(CARD_MIN_WIDTH);
         let card_height = (grid_height - CARD_GAP * (rows - 1) as f32) / rows as f32;
-        let geometry = big_picture_card_geometry(
-            desired.len(),
-            rows,
-            row_width,
-            card_width,
-            card_height,
-        );
+        let geometry =
+            big_picture_card_geometry(desired.len(), rows, row_width, card_width, card_height);
         self.reconcile_big_picture_slots(&desired, &geometry, cx);
         let slots = self.big_picture.slots.clone();
         let cards = slots
@@ -1741,18 +1738,12 @@ impl Waku {
             .on_action(cx.listener(|_, _: &ToggleRightPanel, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleGitPanel, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleTerminals, _, cx| cx.stop_propagation()))
-            .on_action(cx.listener(|_, _: &ToggleUsagePanel, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &ToggleProjectsPage, _, cx| {
-                cx.stop_propagation()
-            }))
+            .on_action(cx.listener(|_, _: &ToggleUsagePanel, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleProjectsPage, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &SelectProjectsTab, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &NewProject, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &OpenSettings, _, cx| cx.stop_propagation()))
-            .on_action(cx.listener(|_, _: &ToggleCommandPalette, _, cx| {
-                cx.stop_propagation()
-            }))
+            .on_action(cx.listener(|_, _: &ToggleCommandPalette, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleFileFinder, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &OpenResumePicker, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &RunProjectScript, _, cx| cx.stop_propagation()))
@@ -1763,44 +1754,22 @@ impl Waku {
             .on_action(cx.listener(|_, _: &FindNext, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &FindPrevious, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &CloseFind, _, cx| cx.stop_propagation()))
-            .on_action(cx.listener(|_, _: &ToggleFindCaseSensitive, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &ToggleFindWholeWord, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &ToggleFindRegex, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &ReplaceAllMatches, _, cx| {
-                cx.stop_propagation()
-            }))
+            .on_action(cx.listener(|_, _: &ToggleFindCaseSensitive, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleFindWholeWord, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ToggleFindRegex, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &ReplaceAllMatches, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &CopySelection, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &AddToChat, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &NavigateBack, _, cx| cx.stop_propagation()))
-            .on_action(cx.listener(|_, _: &NavigateForward, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &SwitchTaskForward, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &SwitchTaskBackward, _, cx| {
-                cx.stop_propagation()
-            }))
+            .on_action(cx.listener(|_, _: &NavigateForward, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &SwitchTaskForward, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &SwitchTaskBackward, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &SelectFirstTask, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &SelectLastTask, _, cx| cx.stop_propagation()))
-            .on_action(cx.listener(|_, _: &ConfirmTaskSwitch, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &CancelTaskSwitch, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &SelectSidebarSession, _, cx| {
-                cx.stop_propagation()
-            }))
-            .on_action(cx.listener(|_, _: &GoToPreviousTurn, _, cx| {
-                cx.stop_propagation()
-            }))
+            .on_action(cx.listener(|_, _: &ConfirmTaskSwitch, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &CancelTaskSwitch, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &SelectSidebarSession, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &GoToPreviousTurn, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &GoToNextTurn, _, cx| cx.stop_propagation()))
             .on_mouse_down(
                 MouseButton::Left,

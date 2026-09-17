@@ -146,7 +146,8 @@ impl Waku {
         // surface: the slot stretches to the sidebar so the diff column gets
         // everything the transcript had. The pane reads the unexpanded width
         // back out of `effective_panel_widths` for its own column.
-        let right_panel_content = if self.git_panel_visible && self.git_panel_commit_diff.is_some() {
+        let right_panel_content = if self.git_panel_visible && self.git_panel_commit_diff.is_some()
+        {
             (f32::from(window.viewport_size().width) - sidebar_content).max(right_panel_fitted)
         } else {
             right_panel_fitted
@@ -331,7 +332,10 @@ impl Waku {
                 if progress < 1.0 {
                     window.request_animation_frame();
                 }
-                Some((-SIDEBAR_PEEK_NUDGE * (1.0 - ease_out_quint()(progress)), 1.0))
+                Some((
+                    -SIDEBAR_PEEK_NUDGE * (1.0 - ease_out_quint()(progress)),
+                    1.0,
+                ))
             }
             SidebarPeek::Exiting { started } => {
                 let progress = started.elapsed().as_secs_f32() / SIDEBAR_PEEK_SLIDE.as_secs_f32();

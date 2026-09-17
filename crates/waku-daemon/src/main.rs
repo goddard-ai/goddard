@@ -22,10 +22,7 @@ fn main() -> anyhow::Result<()> {
         );
     }
     for skipped in &migration.skipped {
-        eprintln!(
-            "Goddard: left legacy item {} unmigrated",
-            skipped.display()
-        );
+        eprintln!("Goddard: left legacy item {} unmigrated", skipped.display());
     }
     let arguments = Arguments::parse(std::env::args().skip(1))?;
     let token = std::env::var(DAEMON_TOKEN_ENV)
