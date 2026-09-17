@@ -54,9 +54,18 @@ impl ShortcutHint {
                     Some(focus) => {
                         window.highest_precedence_binding_for_action_in(action.as_ref(), focus)
                     }
-                    None => {
-                        highest_precedence_binding(action.as_ref(), &window.context_stack(), cx)
-                    }
+                    // The focused node's real dispatch path, like
+                    // `Window::context_stack` — but that accessor asserts the
+                    // rendered frame's dispatch tree is non-empty, which does
+                    // not hold during a window's first render. The `_in`
+                    // lookup returns `None` there instead; fall back to an
+                    // empty stack so context-free bindings still resolve.
+                    None => window
+                        .focused(cx)
+                        .and_then(|focus| {
+                            window.highest_precedence_binding_for_action_in(action.as_ref(), &focus)
+                        })
+                        .or_else(|| highest_precedence_binding(action.as_ref(), &[], cx)),
                 }?;
                 Some(binding_label(&binding))
             }
