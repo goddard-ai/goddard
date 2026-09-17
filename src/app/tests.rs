@@ -167,7 +167,7 @@ fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
     stale_remote.workspace = SessionWorkspace::Local;
 
     let mut catalog = vec![skeleton, hydrated];
-    merge_remote_session_catalog(&mut catalog, vec![remote, stale_remote], |_| false);
+    merge_remote_session_catalog(&mut catalog, vec![remote, stale_remote], |_| false, |_| false);
 
     assert_eq!(
         catalog
