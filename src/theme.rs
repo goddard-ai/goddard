@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{
-    App, Global, Hsla, Pixels, Rems, Window, WindowAppearance, hsla, px, rems, rgb,
+    App, Global, Hsla, Pixels, Rems, Rgba, Window, WindowAppearance, hsla, px, rems, rgb,
     transparent_black,
 };
 
@@ -46,6 +46,76 @@ pub fn set_thick_borders(enabled: bool) {
 fn wash(color: u32, alpha: f32) -> Hsla {
     let color: Hsla = rgb(color).into();
     color.opacity(alpha)
+}
+
+/// WCAG 2.2 §1.4.11 floor for non-text contrast: a boundary needed to
+/// identify a component must sit 3:1 against the colors it touches.
+/// `border_strong` — the outline on interactive controls — is held a step
+/// above so the two tiers never collapse into each other.
+const BORDER_CONTRAST: f32 = 3.0;
+const BORDER_STRONG_CONTRAST: f32 = 4.5;
+
+fn luminance(rgb: Rgba) -> f32 {
+    fn linear(channel: f32) -> f32 {
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.2126 * linear(rgb.r) + 0.7152 * linear(rgb.g) + 0.0722 * linear(rgb.b)
+}
+
+fn contrast_ratio(a: Rgba, b: Rgba) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// The weakest opacity at which `color` clears `floor`:1 in every pair —
+/// each pair is (surface the wash composites over, color it must contrast
+/// with). The composite slides linearly toward `color` as alpha grows, so
+/// contrast is monotonic and bisection finds the minimum. `None` when
+/// `color` itself can't reach the floor even opaque.
+fn min_border_opacity(color: Hsla, pairs: &[(Rgba, Rgba)], floor: f32) -> Option<f32> {
+    let rgb = color.to_rgb().alpha(1.0);
+    if pairs
+        .iter()
+        .any(|&(_, neighbor)| contrast_ratio(rgb, neighbor) < floor)
+    {
+        return None;
+    }
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        let wash = rgb.alpha(mid);
+        if pairs
+            .iter()
+            .all(|&(base, neighbor)| contrast_ratio(base.blend(wash), neighbor) >= floor)
+        {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+/// A wash of `color` meeting `floor`:1 in every pair. When the color can't
+/// reach the floor even opaque — a neutral can sit too close to `inset` or
+/// `raised` in luminance — its lightness walks toward the palette's pole
+/// until it can. Runs once per palette build, never per frame.
+fn contrast_wash(mut color: Hsla, is_dark: bool, pairs: &[(Rgba, Rgba)], floor: f32) -> Hsla {
+    let step = if is_dark { 0.01 } else { -0.01 };
+    let mut opacity = min_border_opacity(color, pairs, floor);
+    while opacity.is_none() {
+        let l = color.l + step;
+        if !(0.0..=1.0).contains(&l) {
+            break;
+        }
+        color.l = l;
+        opacity = min_border_opacity(color, pairs, floor);
+    }
+    color.alpha(opacity.unwrap_or(1.0))
 }
 
 fn native_override(settings: ThemeSettings) -> Option<bool> {
@@ -155,6 +225,9 @@ struct ThemeSpec {
     composer: u32,
     inset: u32,
     terminal: u32,
+    /// Sidebar/content divider seed. `from_spec` re-derives its opacity (and
+    /// lightness, when needed) so the painted line clears the contrast floor;
+    /// what the spec fixes is the hue.
     sidebar_border: Hsla,
 
     /// The scheme's mid gray; drives every alpha layer.
@@ -205,13 +278,36 @@ impl Theme {
 
     fn from_spec(spec: ThemeSpec) -> Self {
         let neutral = spec.neutral;
-        // Wash strengths carried over from the graphite palettes — kept as two
-        // polarity sets so light themes darken and dark themes lighten.
-        let (border_a, border_strong_a, code_wash_a) = if spec.is_dark {
-            (0.07, 0.14, 0.08)
-        } else {
-            (0.08, 0.15, 0.07)
-        };
+        // Wash strength carried over from the graphite palettes, kept as two
+        // polarity stops so light themes darken and dark themes lighten.
+        let code_wash_a = if spec.is_dark { 0.08 } else { 0.07 };
+        // Borders are solved rather than fixed: each palette gets the weakest
+        // wash of its own neutral that clears the WCAG floor on every surface
+        // a line can be painted on.
+        let surfaces = [
+            spec.canvas,
+            spec.surface,
+            spec.raised,
+            spec.composer,
+            spec.inset,
+            spec.terminal,
+            spec.sidebar_solid,
+        ]
+        .map(rgb);
+        let border_pairs = surfaces.map(|surface| (surface, surface));
+        let border = contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_CONTRAST);
+        let border_strong =
+            contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_STRONG_CONTRAST);
+        // The sidebar divider is painted on the content column's `surface`
+        // edge and must read against the sidebar fill on the other side too.
+        let surface = rgb(spec.surface);
+        let sidebar_pairs = [(surface, surface), (surface, rgb(spec.sidebar_solid))];
+        let sidebar_border = contrast_wash(
+            spec.sidebar_border,
+            spec.is_dark,
+            &sidebar_pairs,
+            BORDER_CONTRAST,
+        );
         let danger: Hsla = rgb(spec.danger).into();
         Self {
             is_dark: spec.is_dark,
@@ -231,9 +327,9 @@ impl Theme {
             overlay: neutral.opacity(0.05),
             overlay_strong: neutral.opacity(0.09),
 
-            border: neutral.opacity(border_a),
-            border_strong: neutral.opacity(border_strong_a),
-            sidebar_border: spec.sidebar_border,
+            border,
+            border_strong,
+            sidebar_border,
 
             text: rgb(spec.text).into(),
             text_secondary: rgb(spec.text_secondary).into(),
@@ -1304,4 +1400,56 @@ pub fn apply_theme_preference(
         sidebar_transparent,
     );
     window.refresh();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every palette's borders must clear the WCAG non-text floor (3:1) on
+    /// every surface they can be painted on — the check `from_spec` solves
+    /// for, asserted per theme so a new or edited scheme can't regress it.
+    #[test]
+    fn borders_clear_the_contrast_floor() {
+        for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {
+            let theme = theme_named(name);
+            let surfaces = [
+                theme.canvas,
+                theme.surface,
+                theme.raised,
+                theme.composer,
+                theme.inset,
+                theme.terminal,
+                theme.sidebar_drag_background,
+            ]
+            .map(Hsla::to_rgb);
+            // f32 solve noise sits under the floor by ~1e-6; the epsilon keeps
+            // the assert on the intent, not the rounding.
+            let floor = BORDER_CONTRAST - 0.01;
+            for (token, line) in [
+                ("border", theme.border),
+                ("border_strong", theme.border_strong),
+            ] {
+                let line_rgb = line.to_rgb();
+                for surface in surfaces {
+                    let ratio = contrast_ratio(surface.blend(line_rgb), surface);
+                    assert!(
+                        ratio >= floor,
+                        "{name:?} {token} is {ratio:.2}:1 over {surface:?}"
+                    );
+                }
+            }
+            // The sidebar divider is painted on `surface` and must also read
+            // against the sidebar fill it separates.
+            let surface = theme.surface.to_rgb();
+            let line_rgb = theme.sidebar_border.to_rgb();
+            for neighbor in [theme.surface, theme.sidebar_drag_background].map(Hsla::to_rgb) {
+                let ratio = contrast_ratio(surface.blend(line_rgb), neighbor);
+                assert!(
+                    ratio >= floor,
+                    "{name:?} sidebar_border is {ratio:.2}:1 over {neighbor:?}"
+                );
+            }
+        }
+    }
 }
