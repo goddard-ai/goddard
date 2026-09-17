@@ -392,7 +392,8 @@ with check and review status.
 
 A workspace file tree with a reading/editing pane: syntax highlighting,
 Markdown source/preview toggle, save with Cmd/Ctrl+S, find and replace
-(Cmd/Ctrl+F inside the editor, with case/whole-word/regex), and "Open on
+(Cmd/Ctrl+F inside the editor, with case/whole-word/regex), go to line
+(Ctrl+G), and "Open on
 GitHub" for tracked files. **Cmd+P** opens a fuzzy file finder over the same
 index. On macOS, an **Open in…** control opens the project folder in an
 external app and remembers your choice — VS Code, Cursor, Zed, Devin, Finder,
@@ -611,6 +612,7 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | Workspace picker / usage panel | ⌘⇧T / ⌘U |
 | Run project script | ⌘R |
 | Find / find-and-replace | ⌘F / ⌘⌥F, then ⌘G / ⌘⇧G |
+| Go to line (file viewer) | Ctrl+G |
 | Open detected localhost URL | ⌘⌥O (⌘⌥⇧O opens a new browser tab) |
 | Stop turn | Esc, Esc again to confirm; ⌥Esc stops immediately |
 | Archive / pin task | ⌘⇧A / ⌘⌥P |

@@ -78,13 +78,13 @@ use crate::{
     DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
     FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
     MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
-    NewSession, NewTerminal, OpenFind, OpenFindReplace, OpenResumePicker, OpenSettings,
-    ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows, SelectFirstProject,
-    SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
-    SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
-    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleGitPanel, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
+    NewSession, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
+    OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
+    SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab,
+    SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward,
+    SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette,
+    ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
+    ToggleFpsCounter, ToggleGitPanel, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
     ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
     ToggleWorkspace,
 };
@@ -1838,9 +1838,10 @@ pub struct Waku {
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
-    /// A file the `Cmd+P` finder just opened whose editor should take
-    /// keyboard focus on the first frame the entity exists — carrying the
-    /// `path:line[:column]` jump target when the query had one.
+    /// A file the `Cmd+P` finder just opened — or a `file:line` link or
+    /// go-to-line jump aimed at — whose editor should take keyboard focus on
+    /// the first frame the entity exists, carrying the `line[:column]` jump
+    /// target when the requester had one.
     right_panel_pending_file_focus: Option<PendingFileFocus>,
     right_panel_pending_terminal_focus: Option<Uuid>,
     /// Terminal surface that most recently held focus. Swapped in and out with
@@ -1858,6 +1859,9 @@ pub struct Waku {
     /// the primary find shortcut and kept for the window's lifetime so the
     /// query and toggles survive closing the bar; `open` says whether it shows.
     file_search: Option<file_search::FileSearch>,
+    /// The ctrl-g "go to line" bar over the visible file editor — same
+    /// lifecycle as `file_search`.
+    go_to_line: Option<go_to_line::GoToLine>,
     right_panel_diff_source: ReviewDiffSource,
     right_panel_diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     right_panel_diff_loading: bool,
@@ -2272,6 +2276,7 @@ mod file_search;
 mod git_panel;
 mod github;
 mod github_media;
+mod go_to_line;
 mod goal_dialog;
 mod image_preview;
 mod project_switcher;
@@ -4156,6 +4161,7 @@ impl Waku {
                 right_panel_file_editors: HashMap::new(),
                 right_panel_pr_states: HashMap::new(),
                 file_search: None,
+                go_to_line: None,
                 right_panel_diff_source: ReviewDiffSource::default(),
                 right_panel_diff_snapshot: None,
                 right_panel_diff_loading: false,

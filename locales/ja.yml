@@ -307,6 +307,7 @@ input.filter_projects: プロジェクトを絞り込む
 input.search_or_enter_address: 検索またはアドレスを入力
 input.find: 検索
 input.replace: 置換
+input.go_to_line: 行番号または 行:列
 
 common.checking: 確認中…
 common.refresh: 更新
@@ -1261,6 +1262,9 @@ find.close: 閉じる（Esc）
 find.replace: 置換（Enter）
 find.replace_all: すべて置換（%{shortcut}）
 find.toggle_replace: 置換欄の表示を切り替える
+
+go_to_line.count: "全 %{total} 行"
+go_to_line.range: "1–%{total} 行目"
 
 common.dismiss_notification: 通知を閉じる
 common.reveal_in_finder: ファイルマネージャーで表示

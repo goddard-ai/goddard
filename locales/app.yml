@@ -684,6 +684,8 @@ input.find:
   en: Find
 input.replace:
   en: Replace
+input.go_to_line:
+  en: Line or line:column
 
 a11y.composer:
   en: Composer
@@ -2704,6 +2706,11 @@ find.replace_all:
 find.toggle_replace:
   en: Toggle replace
 
+go_to_line.count:
+  en: "of %{total} lines"
+go_to_line.range:
+  en: "Line 1–%{total}"
+
 common.dismiss_notification:
   en: Dismiss notification
 
@@ -3145,6 +3152,8 @@ shortcuts.find_next:
   en: Next Match
 shortcuts.find_previous:
   en: Previous Match
+shortcuts.go_to_line:
+  en: Go to Line
 shortcuts.submit:
   en: Submit
 shortcuts.newline:

@@ -192,7 +192,7 @@ fn match_before(matches: &[Range<usize>], offset: usize) -> Option<usize> {
 /// (window coordinates from the last paint) to be comfortably visible, or
 /// `None` if it already is. An off-screen match lands about a third of the
 /// way down the viewport, the way editors conventionally reveal a find hit.
-fn revealed_scroll_offset(
+pub(super) fn revealed_scroll_offset(
     current_offset: Pixels,
     max_offset: Pixels,
     match_top: Pixels,
@@ -236,7 +236,11 @@ impl Waku {
             search.open
                 && (search.query.read(cx).focus().is_focused(window)
                     || search.replace.read(cx).focus().is_focused(window))
-        }) {
+        }) || self
+            .go_to_line
+            .as_ref()
+            .is_some_and(|goto| goto.open && goto.input.read(cx).focus().is_focused(window))
+        {
             return true;
         }
         self.visible_right_panel_file_path()
@@ -721,7 +725,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.transcript_search_open() {
+        if self.go_to_line_open() {
+            self.close_go_to_line(true, true, window, cx);
+        } else if self.transcript_search_open() {
             self.close_transcript_search(true, window, cx);
         } else if self.file_search_open() {
             self.close_file_search(window, cx);
@@ -1048,7 +1054,7 @@ impl Waku {
 
     /// One input box of the find bar: a bordered inset field that carries the
     /// focus ring, with optional trailing children (the query's toggles).
-    fn find_input_box(
+    pub(super) fn find_input_box(
         &self,
         id: &'static str,
         input: &Entity<TextInput>,
@@ -1139,7 +1145,7 @@ fn find_toggle(
 }
 
 /// A ghost icon button in the bar; disabled ones dim and ignore clicks.
-fn find_bar_button(
+pub(super) fn find_bar_button(
     id: &'static str,
     icon_path: &'static str,
     tooltip_label: String,

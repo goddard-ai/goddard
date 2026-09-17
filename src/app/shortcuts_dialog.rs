@@ -243,6 +243,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 bound(tr!("shortcuts.find_replace"), OpenFindReplace, Some("Waku")),
                 bound(tr!("shortcuts.find_next"), FindNext, Some("Waku")),
                 bound(tr!("shortcuts.find_previous"), FindPrevious, Some("Waku")),
+                bound(
+                    tr!("shortcuts.go_to_line"),
+                    OpenGoToLine,
+                    Some("Waku && !Terminal"),
+                ),
             ],
         ),
         (
