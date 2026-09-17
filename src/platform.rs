@@ -132,6 +132,21 @@ pub fn init_reduce_motion(cx: &mut gpui::App) {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub fn init_reduce_motion(_: &mut gpui::App) {}
 
+/// With "Reduce transparency" on, macOS drops all vibrancy — the Sidebar
+/// material degrades to a flat tint that fakes a blur, so callers should
+/// treat sidebar transparency as off and paint the solid fill instead.
+#[cfg(target_os = "macos")]
+pub fn reduce_transparency() -> bool {
+    use objc2_app_kit::NSWorkspace;
+
+    NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn reduce_transparency() -> bool {
+    false
+}
+
 #[cfg(target_os = "linux")]
 fn parse_boolean_setting(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
@@ -605,6 +620,7 @@ pub fn configure_sidebar_material(
     };
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
+    let transparent = transparent && !reduce_transparency();
     let Ok(handle) = HasWindowHandle::window_handle(window) else {
         return;
     };
