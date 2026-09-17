@@ -43,6 +43,11 @@ struct Capture {
     /// Guards the timeout task: a superseded generation means a newer
     /// keystroke already replaced it.
     generation: usize,
+    /// Set after the user acknowledged a conflict warning — Enter commits
+    /// without re-checking.
+    confirmed: bool,
+    /// Conflict banner text shown while the capture waits for confirmation.
+    warning: Option<String>,
 }
 
 /// `Keystroke` → the parts vector `UserOverride::sequence` stores, using the
@@ -291,6 +296,8 @@ impl super::Waku {
             binding,
             strokes: Vec::new(),
             generation: 0,
+            confirmed: false,
+            warning: None,
         });
         let this = cx.weak_entity();
         // Interception is scoped to the capture's lifetime: the subscription
@@ -345,6 +352,17 @@ impl super::Waku {
                 return;
             }
             "enter" => {
+                // Enter while a conflict warning is showing confirms the
+                // write; otherwise it finishes early.
+                if let Some(capture) = self
+                    .keybindings
+                    .as_mut()
+                    .and_then(|ui| ui.capture.as_mut())
+                {
+                    if capture.warning.is_some() {
+                        capture.confirmed = true;
+                    }
+                }
                 self.keybindings_finish_capture(cx);
                 return;
             }
@@ -365,6 +383,10 @@ impl super::Waku {
         let Some(capture) = ui.capture.as_mut() else {
             return;
         };
+        // A new stroke after a warning edits the chord — the stale warning
+        // and its confirmation no longer apply.
+        capture.warning = None;
+        capture.confirmed = false;
         capture.strokes.push(stroke);
         if capture.strokes.len() >= MAX_CAPTURE_STROKES {
             self.keybindings_finish_capture(cx);
@@ -393,7 +415,8 @@ impl super::Waku {
     }
 
     /// Commit the captured chord through the service, then swap the live
-    /// keymap so the new binding works immediately.
+    /// keymap so the new binding works immediately. A colliding chord first
+    /// surfaces its conflicts and waits for an explicit Enter.
     fn keybindings_finish_capture(&mut self, cx: &mut Context<Self>) {
         let Some(ui) = self.keybindings.as_mut() else {
             return;
@@ -401,13 +424,13 @@ impl super::Waku {
         let Some(capture) = ui.capture.take() else {
             return;
         };
-        ui.capture_intercept = None;
         ui.capture_timeout = None;
 
         // Empty capture means the user backspaced everything or pressed
         // Enter before typing — close without writing. Unbinding is the
         // row's explicit remove control, not a capture outcome.
         if capture.strokes.is_empty() {
+            ui.capture_intercept = None;
             cx.notify();
             return;
         }
@@ -431,10 +454,50 @@ impl super::Waku {
                 None => BindingOperation::Add,
             },
             semantics: "logical".to_string(),
-            sequence: Some(capture.strokes),
+            sequence: Some(capture.strokes.clone()),
             extra: Default::default(),
         };
 
+        // Conflict gate: preview the write and, if the new chord collides
+        // with another command, warn instead of committing. Enter while the
+        // warning shows confirms; anything else can still edit or cancel.
+        if !capture.confirmed {
+            if let Ok(preview) = ui.service.preview(&[override_record.clone()]) {
+                let facts: Vec<BindingFact> = preview
+                    .iter()
+                    .map(|binding| BindingFact {
+                        command: binding.command,
+                        sequence: &binding.sequence,
+                        context: binding.context.as_deref(),
+                        platform: binding.platform,
+                    })
+                    .collect();
+                let conflicts = analyze_conflicts(&facts, PlatformSet::CURRENT);
+                let names: Vec<String> = conflicts
+                    .iter()
+                    .filter(|(command, _)| *command == capture.command)
+                    .flat_map(|(_, conflicts)| conflicts.iter())
+                    .filter(|conflict| conflict.kind != ConflictKind::Duplicate)
+                    .filter_map(|conflict| {
+                        crate::keybindings::command(&conflict.other)
+                            .map(|descriptor| descriptor.title().to_string())
+                    })
+                    .collect();
+                if !names.is_empty() {
+                    let mut capture = capture;
+                    capture.warning = Some(format!(
+                        "{} · {}",
+                        tr!("keybind.conflict.banner", other = names.join(", ")),
+                        tr!("keybind.conflict.confirm")
+                    ));
+                    ui.capture = Some(capture);
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
+        ui.capture_intercept = None;
         let revision = ui.snapshot.revision;
         match ui.service.commit(revision, vec![override_record]) {
             Ok(_) => {
@@ -745,6 +808,13 @@ impl super::Waku {
                                 chord
                             }),
                     )
+                    .children(capture.warning.iter().map(|warning| {
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.warning)
+                            .child(warning.clone())
+                            .into_any_element()
+                    }))
                     .child(
                         div()
                             .ml_auto()

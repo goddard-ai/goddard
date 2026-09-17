@@ -3451,6 +3451,10 @@ keybind.capture.hint:
   en: Esc cancels · Backspace removes a stroke · Enter saves now
 keybind.reset:
   en: reset
+keybind.conflict.banner:
+  en: Conflicts with %{other}
+keybind.conflict.confirm:
+  en: Enter to save anyway
 keybind.keywords:
   en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:
