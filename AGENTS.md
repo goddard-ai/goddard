@@ -116,6 +116,10 @@
 - The filename prefix is required and picks the section: `highlight-` for
   headline features, `feat-` for other user-facing features, `fix-` for bugs
   that existed in a previously released version.
+- Every `highlight-` fragment must embed a screenshot or recording —
+  `![](media/<slug>.{png,gif,mp4,mov})` with the asset committed at
+  `.changelog/media/<slug>.<ext>`; collect moves it to
+  `assets/release-notes/<version>/` and rewrites the reference.
 - Only features and fixes to released bugs get a fragment. Do not log tweaks
   or polish (sizing, icon swaps, visual refinements), internal/build tooling
   changes, or fixes to features that haven't shipped yet — those fold into

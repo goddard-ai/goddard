@@ -4,8 +4,15 @@
 // `.changelog/` — so parallel work never conflicts on CHANGELOG.md itself.
 // `bun run changelog` folds every fragment into a `## [<version>]` section
 // for the version in Cargo.toml, grouped by the filename's category prefix.
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 /** The version token from a level-2 heading, or null if it isn't one.
  *  Handles `## [0.2.0] - 2026-08-08`, `## 0.2.0`, `## v0.2.0`, etc. */
@@ -67,6 +74,9 @@ const CATEGORIES = [
   { prefix: "fix-", heading: "Fixed" },
 ] as const;
 
+/** Media extensions accepted for a highlight's screenshot or recording. */
+const MEDIA_EXTS = ["png", "gif", "mp4", "mov"];
+
 /** Fold `.changelog/*.md` fragments into a `## [<version>]` section grouped
  *  by category, then delete the consumed fragments. */
 export async function collectChangelog(): Promise<void> {
@@ -85,6 +95,8 @@ export async function collectChangelog(): Promise<void> {
 
   const groups = new Map<string, string[]>();
   for (const { heading } of CATEGORIES) groups.set(heading, []);
+  /** Highlight media to move into assets/release-notes/<version>/ on success. */
+  const mediaMoves: [from: string, to: string][] = [];
   for (const name of fragments) {
     const category = CATEGORIES.find(({ prefix }) =>
       name.startsWith(prefix),
@@ -95,9 +107,37 @@ export async function collectChangelog(): Promise<void> {
           CATEGORIES.map(({ prefix }) => `${prefix}*`).join(", "),
       );
     }
-    const body = (
+    let body = (
       await Bun.file(join(fragmentsDir, name)).text()
     ).trim();
+
+    if (category.heading === "Highlights") {
+      const slug = name.slice(
+        category.prefix.length,
+        -".md".length,
+      );
+      const media = MEDIA_EXTS.map((ext) => `${slug}.${ext}`).find(
+        (file) => existsSync(join(fragmentsDir, "media", file)),
+      );
+      if (!media) {
+        throw new Error(
+          `Fragment ${name} needs a screenshot or recording at ` +
+            `.changelog/media/${slug}.{${MEDIA_EXTS.join(", ")}}`,
+        );
+      }
+      if (!body.includes(`](media/${media})`)) {
+        throw new Error(
+          `Fragment ${name} must embed its media as ![](media/${media})`,
+        );
+      }
+      const releaseMedia = `assets/release-notes/${version}/${media}`;
+      body = body.replace(`](media/${media})`, `](${releaseMedia})`);
+      mediaMoves.push([
+        join(fragmentsDir, "media", media),
+        join(projectRoot, releaseMedia),
+      ]);
+    }
+
     if (body) groups.get(category.heading)!.push(body);
   }
 
@@ -125,6 +165,10 @@ export async function collectChangelog(): Promise<void> {
     `${out.replace(/\n{3,}/g, "\n\n").trimEnd()}\n`,
   );
   for (const name of fragments) rmSync(join(fragmentsDir, name));
+  for (const [from, to] of mediaMoves) {
+    mkdirSync(dirname(to), { recursive: true });
+    renameSync(from, to);
+  }
   console.log(
     `Collected ${fragments.length} fragment(s) into [${version}] in CHANGELOG.md`,
   );

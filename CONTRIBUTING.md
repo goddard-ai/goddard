@@ -140,7 +140,9 @@ your responses in your own words.
 - Add a `.changelog/<prefix>-<slug>.md` fragment (one bullet) for user-visible
   changes — `highlight-` for headline features, `feat-` for other features,
   `fix-` for bugs that existed in a released version. `bun run changelog`
-  folds them into `CHANGELOG.md` at release time.
+  folds them into `CHANGELOG.md` at release time. Highlight fragments must
+  embed a screenshot or recording via `![](media/<slug>.{png,gif,mp4,mov})`
+  with the asset at `.changelog/media/<slug>.<ext>`.
 
 ### AI policy
 

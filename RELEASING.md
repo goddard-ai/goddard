@@ -118,8 +118,9 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    them outright.
 2. **Write the release notes** — changes accumulate as fragments in
    `.changelog/` (one `.md` file per change, one bullet each, named
-   `highlight-`/`feat-`/`fix-<slug>.md` to pick the `###` section). Fold them
-   into `CHANGELOG.md`:
+   `highlight-`/`feat-`/`fix-<slug>.md` to pick the `###` section; highlights
+   must also commit a screenshot or recording at `.changelog/media/<slug>`
+   and embed it via `![](media/<slug>.<ext>)`). Fold them into `CHANGELOG.md`:
    ```sh
    bun run changelog
    ```
