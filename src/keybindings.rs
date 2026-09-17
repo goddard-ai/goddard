@@ -222,6 +222,23 @@ pub fn command_rows() -> Vec<CommandRow> {
     rows
 }
 
+/// Apply `keybindings.json` over the freshly registered catalog map at
+/// startup. No file (or no overrides) leaves the defaults untouched; a
+/// corrupt file is quarantined by `KeybindingService::load`, which still
+/// resolves to defaults.
+pub fn apply_saved_overrides(cx: &mut App) {
+    let Some(path) = default_path() else {
+        return;
+    };
+    let service = KeybindingService::load(path);
+    if service.overrides().is_empty() {
+        return;
+    }
+    let snapshot = service.snapshot();
+    cx.clear_key_bindings();
+    cx.bind_keys(snapshot_key_bindings(&snapshot));
+}
+
 /// Debug-build assertion the spec asks for: duplicate command ids are a
 /// catalog authoring bug, not a runtime condition.
 pub fn validate_catalog() -> Result<(), Vec<CommandId>> {

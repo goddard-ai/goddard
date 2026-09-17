@@ -353,6 +353,9 @@ pub fn run() {
             cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
 
             bind_keys(cx);
+            // Saved remaps layer over the catalog map before the first
+            // window opens, so customized chords work from launch.
+            keybindings::apply_saved_overrides(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
 
             // Unlike AppKit, Linux has no Dock activation path that can
