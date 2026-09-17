@@ -94,7 +94,7 @@ impl Render for Tooltip {
                 .py(px(4.0))
                 .rounded(px(8.0))
                 .border(hairline())
-                .border_color(theme.border_strong)
+                .border_color(theme.border_subtle)
                 .bg(theme.raised)
                 .shadow_md()
                 .flex()

@@ -1660,7 +1660,7 @@ impl TerminalView {
                 .py(px(7.0))
                 .rounded(px(10.0))
                 .border(hairline())
-                .border_color(theme.border_strong)
+                .border_color(theme.border_subtle)
                 .bg(theme.composer)
                 .shadow_lg()
                 // A click on the bar's padding must not refocus the shell.

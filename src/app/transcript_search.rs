@@ -491,7 +491,7 @@ impl Waku {
                 .max_w_full()
                 .rounded(px(10.0))
                 .border(hairline())
-                .border_color(theme.border_strong)
+                .border_color(theme.border_subtle)
                 .bg(theme.raised)
                 .shadow_xs()
                 .px(px(6.0))
