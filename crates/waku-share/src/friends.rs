@@ -90,7 +90,13 @@ pub enum FriendsMessage {
         note: Option<String>,
         ticket: String,
     },
+    /// Receiver started the download. Carries the manifest so the sender's
+    /// UI can show what was accepted.
+    OfferAccept,
     OfferDecline,
+    /// Download finished (hash verified). Sent on a second connection after
+    /// the blobs fetch completes.
+    TransferDone { ticket: String },
 }
 
 /// What the local user decided about an incoming request.
@@ -99,19 +105,34 @@ pub enum RequestDecision {
     Decline,
 }
 
-/// Callback the host app installs to decide friend requests. Returning
-/// `None` means "no decision yet" — the connection is answered with a
-/// pending-style decline for now; v0 keeps this simple and the requester
-/// retries after re-prompting.
+/// Callback the host app installs to decide friend requests.
 pub type RequestHandler =
     Arc<dyn Fn(EndpointId, String) -> RequestDecision + Send + Sync>;
 
-/// Acceptor for [`ALPN_FRIENDS`]: reads one request, applies the decision
-/// callback, replies. Transfer offers get handed to `offer_handler` once the
-/// transfer step lands — until then they're declined.
+/// An incoming transfer offer, already parsed and sender-authenticated.
+pub struct OfferInfo {
+    pub from: EndpointId,
+    pub name: String,
+    pub note: Option<String>,
+    pub ticket: String,
+}
+
+/// Fired when a friend offers a file. The handler owns spawning the actual
+/// blobs download — this callback must return fast.
+pub type OfferHandler = Arc<dyn Fn(OfferInfo) + Send + Sync>;
+
+/// Fired when the receiver reports a finished, verified download.
+pub type DoneHandler = Arc<dyn Fn(EndpointId, String) + Send + Sync>;
+
+/// Acceptor for [`ALPN_FRIENDS`]: reads one message, dispatches to the
+/// installed handler, replies. Offers from non-friends are declined;
+/// offers from friends are auto-accepted (per the product decision) and the
+/// fetch is kicked off by `on_offer`.
 #[derive(Clone)]
 pub struct FriendsProtocol {
     on_request: RequestHandler,
+    on_offer: OfferHandler,
+    on_done: DoneHandler,
     store: Arc<Mutex<FriendStore>>,
 }
 
@@ -126,8 +147,18 @@ fn accept_err(e: anyhow::Error) -> AcceptError {
 }
 
 impl FriendsProtocol {
-    pub fn new(on_request: RequestHandler, store: Arc<Mutex<FriendStore>>) -> Self {
-        Self { on_request, store }
+    pub fn new(
+        on_request: RequestHandler,
+        on_offer: OfferHandler,
+        on_done: DoneHandler,
+        store: Arc<Mutex<FriendStore>>,
+    ) -> Self {
+        Self {
+            on_request,
+            on_offer,
+            on_done,
+            store,
+        }
     }
 }
 
@@ -160,11 +191,27 @@ impl ProtocolHandler for FriendsProtocol {
                 write_message(&mut send, &reply).await.map_err(accept_err)?;
                 send.finish()?;
             }
-            // Offers arrive in the transfer step; refuse politely for now.
-            FriendsMessage::Offer { .. } => {
-                write_message(&mut send, &FriendsMessage::OfferDecline)
-                    .await
-                    .map_err(accept_err)?;
+            FriendsMessage::Offer { name, note, ticket } => {
+                let is_friend = self.store.lock().await.is_friend(&remote);
+                if is_friend {
+                    (self.on_offer)(OfferInfo {
+                        from: remote,
+                        name,
+                        note,
+                        ticket,
+                    });
+                    write_message(&mut send, &FriendsMessage::OfferAccept)
+                        .await
+                        .map_err(accept_err)?;
+                } else {
+                    write_message(&mut send, &FriendsMessage::OfferDecline)
+                        .await
+                        .map_err(accept_err)?;
+                }
+                send.finish()?;
+            }
+            FriendsMessage::TransferDone { ticket } => {
+                (self.on_done)(remote, ticket);
                 send.finish()?;
             }
             _ => send.finish()?,
@@ -219,6 +266,57 @@ pub async fn send_friend_request(
         FriendsMessage::FriendDecline => bail!("friend request declined"),
         _ => bail!("unexpected reply to friend request"),
     }
+}
+
+/// Offer `ticket` to a friend. Returns Ok on OfferAccept — the receiver has
+/// started the fetch; completion arrives back via `TransferDone`.
+pub async fn send_offer(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    our_name: &str,
+    note: Option<String>,
+    ticket: &str,
+) -> anyhow::Result<()> {
+    let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
+    write_message(
+        &mut send,
+        &FriendsMessage::Offer {
+            name: our_name.to_string(),
+            note,
+            ticket: ticket.to_string(),
+        },
+    )
+    .await?;
+    send.finish()?;
+    let reply = read_message(&mut recv).await;
+    conn.close(0u32.into(), b"done");
+    match reply? {
+        FriendsMessage::OfferAccept => Ok(()),
+        FriendsMessage::OfferDecline => bail!("offer declined"),
+        _ => bail!("unexpected reply to offer"),
+    }
+}
+
+/// Tell the original sender the download finished and verified.
+/// One-way: no reply expected.
+pub async fn notify_transfer_done(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    ticket: &str,
+) -> anyhow::Result<()> {
+    let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+    let (mut send, _recv) = conn.open_bi().await?;
+    write_message(
+        &mut send,
+        &FriendsMessage::TransferDone {
+            ticket: ticket.to_string(),
+        },
+    )
+    .await?;
+    send.finish()?;
+    conn.close(0u32.into(), b"done");
+    Ok(())
 }
 
 async fn write_message(

@@ -1,20 +1,22 @@
 //! P2P file sharing between Goddard instances.
 //!
-//! Sender side: [`Provider`] imports a path into an `iroh-blobs` store and
-//! serves it over QUIC. Receiver side: [`fetch`] connects by ticket and
-//! streams a verified copy out. Both follow sendme's wire protocol, so
-//! transfers are interoperable with `sendme send`/`receive`.
+//! One [`ShareNode`] per app: a single iroh endpoint that serves both the
+//! friends control channel ([`friends::ALPN_FRIENDS`]) and the `iroh-blobs`
+//! transfer protocol. `provide()` imports a path into the blob store and
+//! returns a sendme-compatible ticket; `fetch_to()` dials a ticket and
+//! streams a verified copy out.
 
 pub mod friends;
 pub mod identity;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context as _, bail};
-use iroh::{Endpoint, EndpointAddr, RelayMode, endpoint::presets};
+use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
+use iroh::protocol::Router;
 use iroh_blobs::{
     BlobFormat, BlobsProtocol, Hash,
-    api::Store,
+    api::{Store, TempTag},
     api::blobs::{AddPathOptions, AddProgressItem, ExportProgressItem, ImportMode},
     api::remote::GetProgressItem,
     store::fs::FsStore,
@@ -23,80 +25,120 @@ use iroh_blobs::{
 use n0_future::StreamExt;
 
 /// The blake3 hash of the shared content plus the sender's dialable address.
-/// This is what crosses the "friend" channel inside our own offer message;
-/// it also serializes to a sendme-compatible ticket string.
+/// Serializes to a sendme-compatible ticket string.
 pub type Ticket = BlobTicket;
 
-/// A running send: serves the imported blob until dropped/shutdown.
-pub struct Provider {
-    router: iroh::protocol::Router,
+/// One peer: endpoint + blob store + protocol router. In the daemon this is
+/// a singleton; the spike runs two in one process.
+pub struct ShareNode {
+    router: Router,
     store: FsStore,
-    hash: Hash,
-    _dir: PathBuf,
 }
 
-impl Provider {
-    /// Serve `path` (file or directory) to anyone holding the returned ticket.
-    /// `blobs_dir` is where the blob store keeps its data; it must be a
-    /// Goddard-owned directory, never the cwd (sendme's `.sendme-*` wart).
-    ///
-    /// `relay` controls NAT traversal: `RelayMode::Default` uses n0's public
-    /// relays + DNS discovery, `RelayMode::Disabled` restricts to local/LAN
-    /// addressing (used by the spike and tests).
-    pub async fn start(path: &Path, blobs_dir: &Path, relay: RelayMode) -> anyhow::Result<Self> {
-        tokio::fs::create_dir_all(blobs_dir).await?;
+impl ShareNode {
+    /// Bind an endpoint for `secret`, host `friends` on
+    /// [`friends::ALPN_FRIENDS`] and blobs on `iroh_blobs::ALPN`.
+    /// `dir` holds the FsStore. `RelayMode::Default` uses n0's public relays
+    /// and DNS discovery; `Disabled` is LAN-only (tests).
+    pub async fn spawn(
+        dir: &Path,
+        secret: SecretKey,
+        relay: RelayMode,
+        friends: friends::FriendsProtocol,
+    ) -> anyhow::Result<Self> {
+        tokio::fs::create_dir_all(dir.join("blobs")).await?;
         let endpoint = Endpoint::builder(presets::N0)
+            .secret_key(secret)
             .relay_mode(relay)
             .bind()
             .await
             .context("binding iroh endpoint")?;
-        let store = FsStore::load(blobs_dir)
-            .await
-            .context("loading blob store")?;
+        let store = FsStore::load(dir.join("blobs")).await?;
         let blobs = BlobsProtocol::new(&store, None);
+        let router = Router::builder(endpoint)
+            .accept(friends::ALPN_FRIENDS, friends)
+            .accept(iroh_blobs::ALPN, blobs)
+            .spawn();
+        Ok(Self { router, store })
+    }
 
-        let import = store.blobs().add_path_with_opts(AddPathOptions {
+    pub fn endpoint(&self) -> &Endpoint {
+        self.router.endpoint()
+    }
+
+    pub fn addr(&self) -> EndpointAddr {
+        self.router.endpoint().addr()
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// Wait for relay/discovery so tickets carry a reachable address.
+    pub async fn wait_online(&self) {
+        let _ = self.router.endpoint().online().await;
+    }
+
+    /// Import `path` and return the ticket plus the temp tag that keeps it
+    /// pinned against GC. Drop the tag to unpin (e.g. transfer cancelled).
+    pub async fn provide(&self, path: &Path) -> anyhow::Result<(Ticket, TempTag)> {
+        let import = self.store.blobs().add_path_with_opts(AddPathOptions {
             path: path.to_path_buf(),
             mode: ImportMode::TryReference,
             format: BlobFormat::Raw,
         });
         let mut stream = import.stream().await;
-        let mut hash = None;
+        let mut tag = None;
         while let Some(item) = stream.next().await {
             match item {
                 AddProgressItem::Error(cause) => bail!("importing {}: {cause}", path.display()),
-                AddProgressItem::Done(tag) => hash = Some(tag.hash()),
+                AddProgressItem::Done(t) => tag = Some(t),
                 _ => {}
             }
         }
-        let hash = hash.context("import finished without a hash")?;
-
-        let router = iroh::protocol::Router::builder(endpoint)
-            .accept(iroh_blobs::ALPN, blobs)
-            .spawn();
-        Ok(Self {
-            router,
-            store,
-            hash,
-            _dir: blobs_dir.to_path_buf(),
-        })
+        let tag = tag.context("import finished without a hash")?;
+        // Raw blob for the spike; the real protocol builds a HashSeq
+        // collection so folders work too.
+        Ok((
+            BlobTicket::new(self.addr(), tag.hash(), BlobFormat::Raw),
+            tag,
+        ))
     }
 
-    /// Address + hash the receiver needs. Call after [`Self::wait_online`] if
-    /// you want relay/discovery info included.
-    pub fn ticket(&self) -> Ticket {
-        // For the spike we import a single file as a Raw blob; the real
-        // protocol will build a HashSeq collection so folders work too.
-        BlobTicket::new(self.endpoint_addr(), self.hash, BlobFormat::Raw)
+    /// Fetch `ticket`'s content into this node's store. Verified chunks;
+    /// returns the hash. Resumable — a second call picks up missing ranges.
+    pub async fn fetch(&self, ticket: &Ticket) -> anyhow::Result<Hash> {
+        let hash_and_format = ticket.hash_and_format();
+        let connection = self
+            .endpoint()
+            .connect(ticket.addr().clone(), iroh_blobs::protocol::ALPN)
+            .await
+            .context("connecting to sender")?;
+        let local = self.store.remote().local(hash_and_format).await?;
+        let get = self.store.remote().execute_get(connection, local.missing());
+        let mut stream = get.stream();
+        while let Some(item) = stream.next().await {
+            match item {
+                GetProgressItem::Progress(_) => {}
+                GetProgressItem::Done(_) => break,
+                GetProgressItem::Error(cause) => bail!("download failed: {cause}"),
+            }
+        }
+        Ok(hash_and_format.hash)
     }
 
-    pub fn endpoint_addr(&self) -> EndpointAddr {
-        self.router.endpoint().addr()
-    }
-
-    /// Wait for relay/discovery so the ticket contains a reachable address.
-    pub async fn wait_online(&self) {
-        let _ = self.router.endpoint().online().await;
+    /// Write a fetched blob out of the store to `target` (streams,
+    /// sparse-aware).
+    pub async fn export(&self, hash: Hash, target: &Path) -> anyhow::Result<()> {
+        let mut stream = self.store.blobs().export(hash, target).stream().await;
+        while let Some(item) = stream.next().await {
+            match item {
+                ExportProgressItem::Error(cause) => bail!("exporting: {cause}"),
+                ExportProgressItem::Done => break,
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub async fn shutdown(self) -> anyhow::Result<()> {
@@ -107,62 +149,4 @@ impl Provider {
         self.router.shutdown().await?;
         Ok(())
     }
-}
-
-/// Fetch the content behind `ticket` into `dest_dir` under `blobs_dir`'s store.
-/// Streams verified chunks; returns the hash of what landed.
-pub async fn fetch(ticket: &Ticket, blobs_dir: &Path, relay: RelayMode) -> anyhow::Result<Hash> {
-    tokio::fs::create_dir_all(blobs_dir).await?;
-    let endpoint = Endpoint::builder(presets::N0)
-        .relay_mode(relay)
-        .bind()
-        .await
-        .context("binding iroh endpoint")?;
-    let store = FsStore::load(blobs_dir).await?;
-
-    let result = fetch_inner(&endpoint, &store, ticket).await;
-
-    endpoint.close().await;
-    store.shutdown().await?;
-    result
-}
-
-async fn fetch_inner(
-    endpoint: &Endpoint,
-    store: &Store,
-    ticket: &Ticket,
-) -> anyhow::Result<Hash> {
-    let hash_and_format = ticket.hash_and_format();
-    let connection = endpoint
-        .connect(ticket.addr().clone(), iroh_blobs::protocol::ALPN)
-        .await
-        .context("connecting to sender")?;
-    let local = store.remote().local(hash_and_format).await?;
-    let get = store
-        .remote()
-        .execute_get(connection, local.missing());
-    let mut stream = get.stream();
-    while let Some(item) = stream.next().await {
-        match item {
-            GetProgressItem::Progress(_) => {}
-            GetProgressItem::Done(_) => break,
-            GetProgressItem::Error(cause) => bail!("download failed: {cause}"),
-        }
-    }
-    Ok(hash_and_format.hash)
-}
-
-/// Write a fetched blob out of the store to `target` (streams, sparse-aware).
-pub async fn export_blob(store_dir: &Path, hash: Hash, target: &Path) -> anyhow::Result<()> {
-    let store = FsStore::load(store_dir).await?;
-    let mut stream = store.blobs().export(hash, target).stream().await;
-    while let Some(item) = stream.next().await {
-        match item {
-            ExportProgressItem::Error(cause) => bail!("exporting: {cause}"),
-            ExportProgressItem::Done => break,
-            _ => {}
-        }
-    }
-    store.shutdown().await?;
-    Ok(())
 }
