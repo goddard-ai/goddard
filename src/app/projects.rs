@@ -270,8 +270,6 @@ pub(super) struct ProjectsPageState {
     row_focuses: RefCell<HashMap<ProjectsRowKey, FocusHandle>>,
     selector_menu: ContextMenuHandle,
     work_item_state_menu: ContextMenuHandle,
-    /// The page's own composer, docked at the bottom with context chips.
-    composer: Entity<TextInput>,
     /// Sessions bound per worktree path, folded once per frame so row
     /// builders read a map instead of re-scanning the session list.
     session_counts: RefCell<Rc<HashMap<PathBuf, usize>>>,
@@ -295,25 +293,6 @@ impl ProjectsPageState {
                     .clear_on_escape()
             })
         }
-        let composer = cx.new(|cx| {
-            let mut input = TextInput::new(window, cx)
-                .accessibility_label(tr!("a11y.task_description"))
-                .placeholder(tr!("projects.composer_placeholder"))
-                .multi_line()
-                .auto_height()
-                .submit_on_enter()
-                .max_lines(6);
-            // Matches the task composer's card inset — the padding lives in
-            // the field's scroll viewport so rows stay edge-to-edge.
-            input.set_padding_x(px(14.0));
-            input
-        });
-        cx.subscribe(&composer, |this: &mut Waku, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Submit(_)) {
-                this.projects_submit(cx);
-            }
-        })
-        .detach();
         Self {
             tab: ProjectsTab::Worktrees,
             worktree_filter: filter_input(tr!("projects.filter_worktrees"), window, cx),
@@ -333,7 +312,6 @@ impl ProjectsPageState {
             row_focuses: RefCell::new(HashMap::new()),
             selector_menu: ContextMenuHandle::new(cx),
             work_item_state_menu: ContextMenuHandle::new(cx),
-            composer,
             session_counts: RefCell::new(Rc::new(HashMap::new())),
             prs_by_head: RefCell::new(Rc::new(HashMap::new())),
             generation: 0,
@@ -1162,17 +1140,31 @@ impl Waku {
     /// Submit the page's composer: a normal task on the page's project whose
     /// prompt carries the visible context — project, tab, filter, and the
     /// selected rows. One selected worktree pre-binds the task to it.
-    fn projects_submit(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn projects_submit(&mut self, prompt: &str, cx: &mut Context<Self>) {
+        if self.projects_page.is_none() {
+            return;
+        }
+        let Some(submission) = self.submission_with_attachments(prompt, cx) else {
+            return;
+        };
+        // Enter and steer already cleared the field; the send-button path
+        // needs it done here.
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        self.submit_projects_page_submission(submission, prompt, cx);
+    }
+
+    pub(super) fn submit_projects_page_submission(
+        &mut self,
+        mut submission: ComposerSubmission,
+        typed: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(project_id) = self.projects_page else {
             return;
         };
         let Some(state) = self.projects_page_states.get(&project_id) else {
             return;
         };
-        let typed = state.composer.read(cx).content().trim().to_owned();
-        if typed.is_empty() || self.model_picker_has_no_providers() {
-            return;
-        }
         let project = self
             .state
             .projects
@@ -1231,22 +1223,21 @@ impl Waku {
             }
         }
 
-        // The prompt carries the context block; the bubble keeps the user's
-        // own words with the context readable in the same turn.
-        let prompt = format!("Context for this request:\n{context}\n\n{typed}");
-        let display = format!("{context}\n\n{typed}");
-        let submission = ComposerSubmission {
-            prompt,
-            display_content: Some(display),
-            human_content: Some(typed),
-            attachments: Vec::new(),
-            pasted_blocks: Vec::new(),
-            annotations: Vec::new(),
-            hidden: false,
+        // The stored prompt carries the context block; the bubble keeps the
+        // user's own words with the context readable in the same turn.
+        let typed = typed.trim();
+        submission.prompt = format!(
+            "Context for this request:\n{context}\n\n{}",
+            submission.prompt
+        );
+        let display_body = if typed.is_empty() {
+            submission.display_content.clone().unwrap_or_default()
+        } else {
+            typed.to_owned()
         };
+        submission.display_content = Some(format!("{context}\n\n{display_body}"));
 
         if let Some(state) = self.projects_page_states.get_mut(&project_id) {
-            state.composer.update(cx, |input, cx| input.clear(cx));
             state.selection.clear();
             state.anchor = None;
         }
@@ -1354,7 +1345,7 @@ impl Waku {
                     })
                     .child(content)
                     .children(self.render_projects_bulk_bar(project_id, cx))
-                    .child(self.render_projects_composer(project_id, cx)),
+                    .child(self.render_projects_composer(project_id, window, cx)),
             )
             .into_any_element()
     }
@@ -2743,14 +2734,19 @@ impl Waku {
         )
     }
 
-    /// The docked composer: context chips over a multi-line field — the same
-    /// affordances the task's first turn carries, kept visible here.
-    fn render_projects_composer(&mut self, project_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+    /// The docked composer: the page's context chips over the same card the
+    /// chat column mounts — one shared `ComposerInput`, so drafts, paste,
+    /// attachments, and the controls row all behave identically.
+    fn render_projects_composer(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(state) = self.projects_page_states.get(&project_id) else {
             return div().into_any_element();
         };
-        let composer = state.composer.clone();
         let tab = state.tab;
         let filter = state.filter_text(tab, cx).trim().to_owned();
         let selected = state.selection.len();
@@ -2761,7 +2757,6 @@ impl Waku {
             .find(|project| project.id == project_id)
             .map(|project| project.display_name())
             .unwrap_or_default();
-        let has_content = !composer.read(cx).content().trim().is_empty();
 
         let chip = |id: &'static str,
                     label: String,
@@ -2807,9 +2802,6 @@ impl Waku {
                 .into_any_element()
         };
 
-        let no_providers = self.model_picker_has_no_providers();
-        let can_send = has_content && !no_providers;
-
         let mut chips = div()
             .flex_none()
             .w_full()
@@ -2838,77 +2830,19 @@ impl Waku {
             ));
         }
 
-        // The same card the new-task composer docks — chips carry the
-        // page's context where attachments would sit, the field fills the
-        // card, and the footer row pins the send action right.
+        // The same card the chat column docks — chips carry the page's
+        // context above it. Big Picture remounts the one composer entity
+        // inside its own layer; mounting it here too would collide.
         div()
             .flex_none()
             .w_full()
-            .px(px(20.0 - COMPOSER_OVERHANG))
-            .py(px(8.0))
-            .child(
-                div()
-                    .w_full()
-                    .rounded(px(16.0))
-                    .border(hairline())
-                    .border_color(theme.border)
-                    .bg(theme.composer)
-                    .py(px(10.0))
-                    .flex()
-                    .flex_col()
-                    .child(chips)
-                    .child(div().pt(px(2.0)).child(composer))
-                    .child(
-                        div()
-                            .mt(px(8.0))
-                            .px(px(10.0))
-                            .flex()
-                            .items_center()
-                            .child(div().flex_1())
-                            .child(
-                                div()
-                                    .id("projects-send")
-                                    .w(px(26.0))
-                                    .h(px(26.0))
-                                    .flex_none()
-                                    .rounded_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(if can_send {
-                                        theme.inverse
-                                    } else {
-                                        theme.overlay_strong
-                                    })
-                                    .when(can_send, |element| {
-                                        element
-                                            .cursor_default()
-                                            .hover(|style| style.opacity(0.9))
-                                            .active(|style| style.opacity(0.8))
-                                    })
-                                    .focus_visible(|style| {
-                                        style.border(hairline()).border_color(theme.accent)
-                                    })
-                                    .child(icon(
-                                        "icons/arrow-up.svg",
-                                        16.0,
-                                        if can_send {
-                                            theme.on_inverse
-                                        } else {
-                                            theme.text_ghost
-                                        },
-                                    ))
-                                    .tooltip(Tooltip::text(if no_providers {
-                                        tr!("composer.no_providers")
-                                    } else {
-                                        tr!("projects.send")
-                                    }))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.projects_submit(cx);
-                                    })),
-                            ),
-                    ),
-            )
+            .pt(px(4.0))
+            .flex()
+            .flex_col()
+            .child(chips)
+            .when(!self.big_picture.is_open(), |element| {
+                element.child(self.render_composer(window, cx))
+            })
             .into_any_element()
     }
 }

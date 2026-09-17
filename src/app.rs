@@ -3343,6 +3343,10 @@ impl Waku {
                             {
                                 this.submit_big_picture_submission(submission, cx);
                             }
+                        } else if this.projects_page.is_some() {
+                            // The docked composer is the same entity; on the
+                            // page Enter means "new task on this project".
+                            this.projects_submit(prompt, cx);
                         } else if let Some(session_id) =
                             this.selected_session().and_then(|session| {
                                 this.response_fork_preparations
@@ -3376,6 +3380,10 @@ impl Waku {
                             {
                                 this.steer_big_picture_submission(submission, cx);
                             }
+                        } else if this.projects_page.is_some() {
+                            // Nothing on the page can be steered — a steered
+                            // draft is a send there.
+                            this.projects_submit(prompt, cx);
                         } else if let Some(session_id) =
                             this.selected_session().and_then(|session| {
                                 this.response_fork_preparations
@@ -3395,7 +3403,10 @@ impl Waku {
                         // make this a real draft even when the text field is
                         // empty. Preserve the shortcut's previous no-op
                         // behavior until that draft is sent or cleared.
-                        if this.composer_attachments.is_empty()
+                        if this.projects_page.is_some() {
+                            let prompt = this.composer.read(cx).content(cx).to_owned();
+                            this.projects_submit(&prompt, cx);
+                        } else if this.composer_attachments.is_empty()
                             && this.composer_pasted_blocks.is_empty()
                             && !this.has_annotations()
                         {

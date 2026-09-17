@@ -3298,13 +3298,17 @@ impl Waku {
 
     /// The session the composer's submit affordances answer to: the big-
     /// picture target while the overlay is open — `None` there means the next
-    /// prompt starts a fresh task — and the selected session everywhere else.
+    /// prompt starts a fresh task — `None` while the Projects page is up for
+    /// the same reason, and the selected session everywhere else.
     pub(super) fn composer_session(&self) -> Option<&AgentSession> {
         if self.big_picture.is_open() {
             return self
                 .big_picture
                 .target()
                 .and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
+        }
+        if self.projects_page.is_some() {
+            return None;
         }
         self.selected_session()
     }
@@ -3328,7 +3332,8 @@ impl Waku {
     }
 
     /// A submit click goes where Enter would: the overlay's own routing while
-    /// Big Picture is open, the selected session otherwise.
+    /// Big Picture is open, the page's task creation while the Projects page
+    /// is open, the selected session otherwise.
     pub(super) fn route_composer_submission(
         &mut self,
         submission: ComposerSubmission,
@@ -3336,6 +3341,8 @@ impl Waku {
     ) {
         if self.big_picture.is_open() {
             self.submit_big_picture_submission(submission, cx);
+        } else if self.projects_page.is_some() {
+            self.submit_projects_page_submission(submission, "", cx);
         } else {
             self.submit_composer_submission(submission, cx);
         }
@@ -3545,11 +3552,7 @@ impl Waku {
                                             .bg(theme.inverse)
                                             .hover(|element| element.opacity(0.9))
                                             .active(|element| element.opacity(0.8))
-                                            .child(icon(
-                                                "icons/send.svg",
-                                                16.0,
-                                                theme.on_inverse,
-                                            ))
+                                            .child(icon("icons/send.svg", 16.0, theme.on_inverse))
                                             .tooltip(Tooltip::text(tr!("composer.queue_followup")))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 let prompt =
