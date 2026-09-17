@@ -3003,7 +3003,7 @@ impl Waku {
             .active(|element| element.bg(theme.sidebar_item_background))
             .child(self.render_session_row_body(session_id, grouped_by_project, shortcut_hint, cx))
             .when(!renaming, |element| {
-                let drag_title = SharedString::from(session.title.clone());
+                let drag_title = SharedString::from(localized_session_title(session));
                 element
                     .track_focus(&row_focus)
                     .tab_index(0)
