@@ -467,6 +467,7 @@ impl Waku {
             .child(
                 div()
                     .pt(px(2.0))
+                    .pl(px(6.0))
                     .flex_none()
                     .text_size(sp(18.0))
                     .font_weight(FontWeight::MEDIUM)
