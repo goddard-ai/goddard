@@ -489,7 +489,7 @@ impl Waku {
         {
             let was_in_settings = self.settings_page.is_some();
             self.settings_page = None;
-            self.select_project_from_composer(project_id, cx);
+            self.select_project_from_composer(project_id, window, cx);
             if was_in_settings {
                 focus_after = Some(self.composer_focus(cx));
             }

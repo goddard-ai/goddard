@@ -683,6 +683,42 @@ impl Waku {
         Some(session_id)
     }
 
+    /// The Projects page docks the same composer a chat does; its workspace,
+    /// branch, and model controls target the project's draft — the unstarted
+    /// task New Task would reuse. Activation runs without the visit
+    /// `select_session` records: the page itself is the location history
+    /// captured.
+    pub(super) fn bind_projects_page_draft(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let source = self.composer_draft_key();
+        let draft_id = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.project_id == project_id && !session.has_started())
+            .map(|session| session.id)
+            .unwrap_or_else(|| {
+                let runtime_mode =
+                    new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+                let sandboxed =
+                    new_task_sandboxed(self.selected_session(), self.state.last_sandboxed);
+                let mut session = self.state.new_session(project_id, self.state.last_provider);
+                session.runtime_mode = runtime_mode;
+                session.sandboxed = sandboxed;
+                let id = session.id;
+                self.state.push_session(session);
+                id
+            });
+        self.activate_session(draft_id, SessionActivationTransition::Visit, cx);
+        // A draft typed against the page's previous project follows the
+        // switch into the new project's empty slot — the composer's project
+        // picker hands text off the same way.
+        if let Some(crate::persistence::ComposerDraftKey::NewSession(_)) = source {
+            self.move_composer_draft_after_project_change(source, cx);
+        }
+        // A remotely synced draft may still be waiting on its detail fetch.
+        self.ensure_session_loaded(draft_id, cx);
+    }
+
     pub(super) fn select_workspace(&mut self, workspace: SessionWorkspace, cx: &mut Context<Self>) {
         let Some(session_id) = self.state.selected_session else {
             return;

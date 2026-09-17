@@ -451,6 +451,9 @@ impl Waku {
         {
             self.sidebar_rows_fingerprint.set(None);
         }
+        // The docked composer answers to the page's draft — activation
+        // clears `projects_page`, so the page marker lands after the bind.
+        self.bind_projects_page_draft(project_id, cx);
         self.projects_page = Some(project_id);
         self.last_projects_page_project = Some(project_id);
         self.projects_ensure_state(project_id, window, cx);
@@ -3021,7 +3024,9 @@ impl Waku {
             .flex_col()
             .child(chips)
             .when(!self.big_picture.is_open(), |element| {
-                element.child(self.render_composer(window, cx))
+                element
+                    .child(self.render_composer(window, cx))
+                    .child(self.render_workspace_footer(cx))
             })
             .into_any_element()
     }

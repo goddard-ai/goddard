@@ -248,8 +248,15 @@ impl Waku {
     pub(super) fn select_project_from_composer(
         &mut self,
         project_id: Uuid,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.projects_page.is_some() {
+            // On the page the chip re-points the page itself; the draft
+            // hand-off rides the rebind inside `show_projects_page`.
+            self.switch_projects_page_project(project_id, window, cx);
+            return;
+        }
         let source = self.composer_draft_key();
         self.select_project(project_id, cx);
         if self.big_picture.is_open() {

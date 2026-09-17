@@ -3482,9 +3482,8 @@ impl Waku {
                 .target()
                 .and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
         }
-        if self.projects_page.is_some() {
-            return None;
-        }
+        // The Projects page binds the project's draft session, so the
+        // composer answers to it the same way it does on a chat.
         self.selected_session()
     }
 
@@ -4500,6 +4499,9 @@ impl Waku {
         // yet — its new task is configurable by definition.
         let can_configure_workspace =
             subject_configurable || (self.big_picture.is_open() && subject_project_id.is_some());
+        // The Projects page always stands in for a real project — "No
+        // project" has no page to point at, so its picker omits the row.
+        let on_projects_page = self.projects_page.is_some();
         // A started task can't reconfigure its workspace, but a local one
         // can still move into a worktree carrying its state.
         let can_move_to_worktree = subject_movable;
@@ -4546,10 +4548,10 @@ impl Waku {
                         .into_iter()
                         .map(|(project_id, project_name)| {
                             let weak = weak.clone();
-                            MenuItem::new(project_name, move |_, cx| {
+                            MenuItem::new(project_name, move |window, cx| {
                                 if Some(project_id) != subject_project_id {
                                     let _ = weak.update(cx, |this, cx| {
-                                        this.select_project_from_composer(project_id, cx);
+                                        this.select_project_from_composer(project_id, window, cx);
                                     });
                                 }
                             })
@@ -4568,25 +4570,27 @@ impl Waku {
                         .shortcut_action(&NewProject),
                     );
                     let projectless = weak.clone();
-                    items.push(
-                        MenuItem::new(tr!("project.no_project"), move |_, cx| {
-                            let _ = projectless.update(cx, |this, cx| {
-                                let subject_projectless = {
-                                    let (_, project_id) = this.workspace_subject();
-                                    project_id.is_some_and(|project_id| {
-                                        this.state.projects.iter().any(|project| {
-                                            project.id == project_id && project.is_projectless()
+                    if !on_projects_page {
+                        items.push(
+                            MenuItem::new(tr!("project.no_project"), move |_, cx| {
+                                let _ = projectless.update(cx, |this, cx| {
+                                    let subject_projectless = {
+                                        let (_, project_id) = this.workspace_subject();
+                                        project_id.is_some_and(|project_id| {
+                                            this.state.projects.iter().any(|project| {
+                                                project.id == project_id && project.is_projectless()
+                                            })
                                         })
-                                    })
-                                };
-                                if !subject_projectless {
-                                    this.create_projectless_session_from_composer(cx);
-                                }
-                            });
-                        })
-                        .icon("icons/x.svg")
-                        .selected(projectless_selected),
-                    );
+                                    };
+                                    if !subject_projectless {
+                                        this.create_projectless_session_from_composer(cx);
+                                    }
+                                });
+                            })
+                            .icon("icons/x.svg")
+                            .selected(projectless_selected),
+                        );
+                    }
                     items
                 },
             )
