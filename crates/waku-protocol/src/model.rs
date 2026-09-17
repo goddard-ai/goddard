@@ -238,18 +238,20 @@ impl ProviderKind {
         }
     }
 
-    /// Kimi Code, Fx, Devin, Droid, and Copilot are deliberately absent from this
+    /// Kimi Code, Fx, Devin, and Droid are deliberately absent from this
     /// list and from [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork`
-    /// copies a whole session and takes no turn count, Fx, Devin, and Droid expose
-    /// no turn-aware fork or truncation method, and Copilot's `session.fork` is
-    /// not yet wired. None of them can reproduce Goddard's "drop the last N turns"
-    /// semantics without corrupting history.
+    /// copies a whole session and takes no turn count, and Fx, Devin, and Droid expose
+    /// no turn-aware fork or truncation method. None of them can reproduce
+    /// Goddard's "drop the last N turns" semantics without corrupting history.
+    /// Copilot is present: `sessions.fork` truncates at an event boundary, and
+    /// rewinding resumes the task on the truncated fork.
     pub fn supports_conversation_rollback(self) -> bool {
         matches!(
             self,
             Self::Amp
                 | Self::Claude
                 | Self::Codex
+                | Self::Copilot
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
@@ -266,6 +268,7 @@ impl ProviderKind {
             Self::Amp
                 | Self::Claude
                 | Self::Codex
+                | Self::Copilot
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
@@ -4593,11 +4596,7 @@ mod tests {
         for provider in ProviderKind::ALL {
             let supported = !matches!(
                 provider,
-                ProviderKind::Copilot
-                    | ProviderKind::Devin
-                    | ProviderKind::Droid
-                    | ProviderKind::Fx
-                    | ProviderKind::Kimi
+                ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi
             );
             assert_eq!(provider.supports_conversation_fork(), supported);
             assert_eq!(provider.supports_conversation_rollback(), supported);

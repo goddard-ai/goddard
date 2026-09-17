@@ -539,7 +539,10 @@ fn perform_message_rewind(
             && request.retained_turn_count == 0
             && matches!(
                 request.provider,
-                ProviderKind::Claude | ProviderKind::Cursor | ProviderKind::Grok
+                ProviderKind::Claude
+                    | ProviderKind::Copilot
+                    | ProviderKind::Cursor
+                    | ProviderKind::Grok
             ),
         cleanup_error,
     })
@@ -559,7 +562,10 @@ fn perform_provider_rewind(
         && request.retained_turn_count == 0
         && matches!(
             provider,
-            ProviderKind::Claude | ProviderKind::Cursor | ProviderKind::Grok
+            ProviderKind::Claude
+                | ProviderKind::Copilot
+                | ProviderKind::Cursor
+                | ProviderKind::Grok
         );
     if request.rollback_turns == 0 || reset_native_session {
         return Ok((None, None, None));
@@ -750,16 +756,44 @@ fn perform_provider_rewind(
             let cursor = driver.rollback(request.rollback_turns)?;
             Ok((cursor, None, prepared_driver))
         }
+        ProviderKind::Copilot => {
+            let Some(ProviderResumeCursor::Copilot {
+                session_id: native_session_id,
+            }) = request.provider_cursor.as_ref()
+            else {
+                anyhow::bail!(tr!(
+                    "errors.provider_native_cursor_unavailable",
+                    provider = "GitHub Copilot"
+                ));
+            };
+            let binary = request.binary.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(tr!("errors.provider_not_found", provider = "GitHub Copilot"))
+            })?;
+            let cursor = request
+                .workspace_client
+                .fork_provider_session(
+                    waku_client::provider_session::ProviderSessionForkRequest::Copilot {
+                        binary: binary.to_owned(),
+                        cwd: request.project_path.clone(),
+                        session_id: native_session_id.clone(),
+                        turn_count: request.provider_turn_count,
+                        title: tr!(
+                            "session.rewind_title",
+                            title = request.session_title.as_str()
+                        ),
+                    },
+                )?
+                .cursor;
+            Ok((Some(cursor), None, None))
+        }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Copilot
-        | ProviderKind::Devin
-        | ProviderKind::Droid
-        | ProviderKind::Fx
-        | ProviderKind::Kimi => Err(anyhow::anyhow!(tr!(
-            "errors.provider_turn_branching_unsupported",
-            provider = provider.display_name()
-        ))),
+        ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
+            Err(anyhow::anyhow!(tr!(
+                "errors.provider_turn_branching_unsupported",
+                provider = provider.display_name()
+            )))
+        }
     }
 }
 
@@ -1077,13 +1111,39 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                 let (cursor, prepared_driver) = fork_response_with_driver(&mut request)?;
                 Ok((cursor, None, prepared_driver))
             }
+            ProviderKind::Copilot => {
+                let Some(ProviderResumeCursor::Copilot {
+                    session_id: native_session_id,
+                }) = request.source.provider_cursor.as_ref()
+                else {
+                    anyhow::bail!(tr!(
+                        "errors.provider_native_session_unavailable",
+                        provider = "GitHub Copilot"
+                    ));
+                };
+                let binary = request.binary.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!(tr!("errors.provider_not_installed", provider = "GitHub Copilot"))
+                })?;
+                Ok((
+                    request
+                        .workspace_client
+                        .fork_provider_session(
+                            waku_client::provider_session::ProviderSessionForkRequest::Copilot {
+                                binary: binary.to_owned(),
+                                cwd: request.source_workspace_path.clone(),
+                                session_id: native_session_id.clone(),
+                                turn_count: request.provider_turn_count,
+                                title: request.fork_title.clone(),
+                            },
+                        )?
+                        .cursor,
+                    None,
+                    None,
+                ))
+            }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Copilot
-            | ProviderKind::Devin
-            | ProviderKind::Droid
-            | ProviderKind::Fx
-            | ProviderKind::Kimi => {
+            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
                 anyhow::bail!(tr!(
                     "errors.provider_turn_branching_unsupported",
                     provider = provider.display_name()
@@ -1091,7 +1151,6 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             }
         }
     })();
-
     let (provider_cursor, claude_message_ids, prepared_driver) =
         native_fork.map_err(|error| tr!("errors.fork_task", error = error))?;
     let Some(mut forked) =
@@ -2810,6 +2869,7 @@ impl Waku {
             .map(|runtime| runtime.driver.clone());
         let binary_provider = match provider {
             ProviderKind::Amp => Some("Amp"),
+            ProviderKind::Copilot => Some("GitHub Copilot"),
             ProviderKind::OpenCode => Some("OpenCode"),
             ProviderKind::OpenCode2 => Some("OpenCode 2"),
             ProviderKind::Grok => Some("Grok Build"),
@@ -3187,6 +3247,7 @@ impl Waku {
             .map(|runtime| runtime.driver.clone());
         let needs_binary = rollback_turns > 0
             && (matches!(source.provider, ProviderKind::Amp)
+                || (source.provider == ProviderKind::Copilot && retained_turn_count > 0)
                 || (source.provider == ProviderKind::OpenCode && driver.is_none())
                 || (source.provider == ProviderKind::OpenCode2 && driver.is_none())
                 || (source.provider == ProviderKind::Grok && retained_turn_count > 0));

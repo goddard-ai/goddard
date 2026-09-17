@@ -7,8 +7,9 @@
 //! no `copilot` process launches just to enumerate or import sessions.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context as _, anyhow, bail};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -155,6 +156,82 @@ pub fn list_provider_sessions(limit: usize) -> anyhow::Result<Vec<ProviderSessio
     sessions.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
     sessions.truncate(limit);
     Ok(sessions)
+}
+
+/// Forks the native session through `sessions.fork`, keeping only the first
+/// `retained_turns` user turns.
+///
+/// `to_event_id` is an exclusive boundary, so the truncation point is the
+/// `user.message` event that opens the first dropped turn. Counting
+/// root-agent prompts in `events.jsonl` mirrors `provider_turn_started`:
+/// every turn that reached the provider is one submitted `user.message`.
+/// The RPC needs a live `copilot` process, so this spins the same
+/// scratch-runtime-plus-throwaway-client shape model discovery uses — fork
+/// already runs off the UI thread.
+pub fn fork_session_at_turn(
+    binary: &Path,
+    cwd: &Path,
+    session_id: &str,
+    retained_turns: usize,
+    title: &str,
+) -> anyhow::Result<ProviderResumeCursor> {
+    let events = read_events(session_id)
+        .ok_or_else(|| anyhow!("GitHub Copilot's native session is unavailable"))?;
+    let user_turn_ids: Vec<String> = events
+        .iter()
+        .filter(|event| event.get("agentId").is_none())
+        .filter(|event| event_type(event) == Some("user.message"))
+        .filter_map(|event| event.get("id").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    if retained_turns > user_turn_ids.len() {
+        bail!(
+            "GitHub Copilot has only {} native turns, but Goddard needs to retain {retained_turns}",
+            user_turn_ids.len()
+        );
+    }
+    let to_event_id = user_turn_ids.get(retained_turns).cloned();
+
+    let binary = binary.to_path_buf();
+    let cwd = cwd.to_path_buf();
+    let session_id = session_id.to_owned();
+    let title = title.to_owned();
+    // A runtime dropped inside a Tokio async context panics, and this helper
+    // can be reached from the daemon's executor threads — the join handle
+    // keeps the whole client lifecycle on a plain thread.
+    std::thread::spawn(move || -> anyhow::Result<ProviderResumeCursor> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to start the GitHub Copilot runtime")?;
+        runtime.block_on(async move {
+            let mut options = github_copilot_sdk::ClientOptions::default();
+            options.program = github_copilot_sdk::CliProgram::Path(binary.clone());
+            options.working_directory = cwd;
+            options.env = crate::command_env::spawn_environment(&binary, None);
+            options.client_info = Some(
+                github_copilot_sdk::ClientInfo::new()
+                    .with_application_name(crate::identity::APP_NAME)
+                    .with_application_version(env!("CARGO_PKG_VERSION")),
+            );
+            let client = github_copilot_sdk::Client::start(options).await?;
+            let fork = client
+                .rpc()
+                .sessions()
+                .fork(github_copilot_sdk::rpc::SessionsForkRequest {
+                    session_id: github_copilot_sdk::types::SessionId::new(session_id),
+                    to_event_id,
+                    name: Some(title),
+                })
+                .await;
+            let _ = client.stop().await;
+            let fork = fork?;
+            Ok(ProviderResumeCursor::Copilot {
+                session_id: fork.session_id.into_inner(),
+            })
+        })
+    })
+    .join()
+    .map_err(|_| anyhow!("the GitHub Copilot fork thread panicked"))?
 }
 
 /// Replays the user-visible transcript out of `events.jsonl`. A `user.message`

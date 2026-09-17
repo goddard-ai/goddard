@@ -1526,13 +1526,24 @@ impl WakuBackend {
                 })?;
                 Ok((fork.cursor, HashMap::new()))
             }
+            ProviderKind::Copilot => {
+                let Some(ProviderResumeCursor::Copilot { session_id }) =
+                    source.provider_cursor.as_ref()
+                else {
+                    bail!("GitHub Copilot's native session is unavailable");
+                };
+                let fork = fork_provider_session(ProviderSessionForkRequest::Copilot {
+                    binary: self.provider_binary(ProviderKind::Copilot)?,
+                    cwd: cwd.to_owned(),
+                    session_id: session_id.clone(),
+                    turn_count: provider_turn_count,
+                    title: fork_title.to_owned(),
+                })?;
+                Ok((fork.cursor, HashMap::new()))
+            }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Copilot
-            | ProviderKind::Devin
-            | ProviderKind::Droid
-            | ProviderKind::Fx
-            | ProviderKind::Kimi => {
+            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1640,7 +1651,10 @@ impl WakuBackend {
         let reset_native_session = retained_turn_count == 0
             && matches!(
                 source.provider,
-                ProviderKind::Claude | ProviderKind::Cursor | ProviderKind::Grok
+                ProviderKind::Claude
+                    | ProviderKind::Copilot
+                    | ProviderKind::Cursor
+                    | ProviderKind::Grok
             );
         if reset_native_session {
             return Ok((None, HashMap::new(), true));
@@ -1753,6 +1767,22 @@ impl WakuBackend {
                 .cursor;
                 Ok((Some(cursor), HashMap::new(), false))
             }
+            ProviderKind::Copilot => {
+                let Some(ProviderResumeCursor::Copilot { session_id }) =
+                    source.provider_cursor.as_ref()
+                else {
+                    bail!("GitHub Copilot's native session is unavailable");
+                };
+                let cursor = fork_provider_session(ProviderSessionForkRequest::Copilot {
+                    binary: binary.to_owned(),
+                    cwd: cwd.to_owned(),
+                    session_id: session_id.clone(),
+                    turn_count: provider_turn_count,
+                    title: format!("{} (rewind)", source.display_title()),
+                })?
+                .cursor;
+                Ok((Some(cursor), HashMap::new(), false))
+            }
             ProviderKind::Codex
             | ProviderKind::DeepSeek
             | ProviderKind::OhMyPi
@@ -1763,11 +1793,7 @@ impl WakuBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Copilot
-            | ProviderKind::Devin
-            | ProviderKind::Droid
-            | ProviderKind::Fx
-            | ProviderKind::Kimi => {
+            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()
@@ -2510,6 +2536,19 @@ fn fork_provider_session(
             turn_count,
         } => (
             crate::grok_session::fork_session_at_turn(&binary, &cwd, &session_id, turn_count)?,
+            HashMap::new(),
+            None,
+        ),
+        ProviderSessionForkRequest::Copilot {
+            binary,
+            cwd,
+            session_id,
+            turn_count,
+            title,
+        } => (
+            crate::copilot_session::fork_session_at_turn(
+                &binary, &cwd, &session_id, turn_count, &title,
+            )?,
             HashMap::new(),
             None,
         ),
