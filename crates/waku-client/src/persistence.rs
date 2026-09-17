@@ -443,6 +443,9 @@ pub struct AppSettings {
     /// Draw borders and separators a full pixel thick instead of the default
     /// half-pixel hairline.
     pub thick_borders: bool,
+    /// Solve border tiers against wider contrast floors, putting component
+    /// outlines on WCAG's 3:1 non-text floor.
+    pub high_contrast: bool,
     /// macOS-only: move back and forward between tasks with a three-finger
     /// horizontal trackpad swipe.
     pub three_finger_swipe_navigation: bool,
@@ -497,6 +500,7 @@ impl Default for AppSettings {
             new_worktree_default_branch: false,
             sidebar_transparency: true,
             thick_borders: false,
+            high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             daemon_exposure: DaemonExposureSettings::default(),
@@ -695,6 +699,10 @@ pub struct PersistedState {
     /// half-pixel hairline.
     #[serde(default)]
     pub thick_borders: bool,
+    /// Solve border tiers against wider contrast floors, putting component
+    /// outlines on WCAG's 3:1 non-text floor.
+    #[serde(default)]
+    pub high_contrast: bool,
     /// macOS-only, opt-in: move back and forward between tasks with a
     /// three-finger horizontal trackpad swipe.
     #[serde(default)]
@@ -829,6 +837,7 @@ impl PersistedState {
             new_worktree_default_branch: false,
             sidebar_transparency: true,
             thick_borders: false,
+            high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             daemon_exposure: DaemonExposureSettings::default(),
@@ -1051,6 +1060,7 @@ impl PersistedState {
             new_worktree_default_branch: self.new_worktree_default_branch,
             sidebar_transparency: self.sidebar_transparency,
             thick_borders: self.thick_borders,
+            high_contrast: self.high_contrast,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             daemon_exposure: self.daemon_exposure.clone(),
@@ -1116,6 +1126,7 @@ impl PersistedState {
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.thick_borders = settings.thick_borders;
+        self.high_contrast = settings.high_contrast;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.daemon_exposure = settings.daemon_exposure;

@@ -132,6 +132,54 @@ pub fn init_reduce_motion(cx: &mut gpui::App) {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub fn init_reduce_motion(_: &mut gpui::App) {}
 
+/// The OS "increase contrast" accessibility preference. Read when a theme is
+/// built — palette construction is rare, so no caching is needed.
+#[cfg(target_os = "macos")]
+pub fn increase_contrast() -> bool {
+    use objc2_app_kit::NSWorkspace;
+
+    NSWorkspace::sharedWorkspace().accessibilityDisplayShouldIncreaseContrast()
+}
+
+/// GNOME's High Contrast is a theme, not a flag — honor an explicit override
+/// and leave other desktops to their own settings until one is wired up.
+#[cfg(target_os = "linux")]
+pub fn increase_contrast() -> bool {
+    std::env::var("GODDARD_INCREASE_CONTRAST")
+        .ok()
+        .and_then(|value| parse_boolean_setting(&value))
+        .unwrap_or(false)
+}
+
+/// SystemParametersInfo's high-contrast query reflects Ease of Access →
+/// Contrast themes. The call only reads a cached user setting, so it is safe
+/// to ask directly at theme-build time.
+#[cfg(target_os = "windows")]
+pub fn increase_contrast() -> bool {
+    use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETHIGHCONTRAST, SystemParametersInfoW};
+
+    let mut hc = HIGHCONTRASTW {
+        cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32,
+        dwFlags: 0,
+        lpszDefaultScheme: std::ptr::null_mut(),
+    };
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            0,
+            std::ptr::from_mut(&mut hc).cast(),
+            0,
+        )
+    };
+    read != 0 && hc.dwFlags & HCF_HIGHCONTRASTON != 0
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub fn increase_contrast() -> bool {
+    false
+}
+
 #[cfg(target_os = "linux")]
 fn parse_boolean_setting(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {

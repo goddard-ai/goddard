@@ -609,6 +609,10 @@ settings.thick_borders:
   en: Thick borders
 settings.thick_borders_description:
   en: Draw borders and separators a full pixel thick instead of a half-pixel hairline
+settings.high_contrast:
+  en: High contrast borders
+settings.high_contrast_description:
+  en: Increase the contrast of borders and control outlines. On when the system Increase Contrast setting is on.
 settings.render_math:
   en: Render math expressions
 settings.render_math_description:

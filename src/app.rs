@@ -3080,6 +3080,7 @@ impl Waku {
             ));
         }
         crate::theme::set_thick_borders(state.thick_borders);
+        crate::theme::set_high_contrast(state.high_contrast);
         crate::theme::apply_theme_preference(state.theme, state.sidebar_transparency, window, cx);
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         crate::platform::set_trackpad_navigation_swipe_enabled(
