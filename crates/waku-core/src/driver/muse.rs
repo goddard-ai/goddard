@@ -29,6 +29,7 @@ use crate::model::{
     ThreadGoal, ThreadGoalStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 use crate::muse_service::{self, MuseError, MuseFrame, MuseService, MuseSubscription};
+use crate::muse_session::{FinishedTurn, finished_turns, fork_boundary_id};
 
 /// Answer paths for `DriverControl::fork` / `rollback`, which block the
 /// daemon's request thread until the host replies.
@@ -85,8 +86,10 @@ struct WorkerState {
     model: Option<String>,
     reasoning_effort: Option<String>,
     active_turn: Option<String>,
-    /// `turn/completed` ids in order — the `session/fork` boundary vocabulary.
-    completed_turns: Vec<String>,
+    /// Finished turns in order — every `turn/completed`, whatever its
+    /// terminal, so the list lines up with Goddard's provider-turn count.
+    /// Only `completed` entries are legal `session/fork` boundaries.
+    finished_turns: Vec<FinishedTurn>,
     items: HashMap<String, ItemState>,
     approvals: HashMap<String, PendingApproval>,
     user_inputs: HashMap<String, PendingUserInput>,
@@ -201,7 +204,15 @@ impl MuseDriver {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 }),
-            completed_turns: resumed_history_turn_ids(&result),
+            // The resume result carries no finished-turn list — items have
+            // no terminal — so rebuild it from the view. A cursor resume's
+            // suffix replay repopulates it through `turn/completed` events
+            // anyway; this makes snapshot resumes forkable too.
+            finished_turns: if resuming {
+                finished_turns(&service, &session_id).unwrap_or_default()
+            } else {
+                Vec::new()
+            },
             items: HashMap::new(),
             approvals: HashMap::new(),
             user_inputs: HashMap::new(),
@@ -287,22 +298,21 @@ fn restore_snapshot(result: &Value, state: &mut WorkerState, events: &DriverEven
     }
 }
 
-/// Fork boundaries name the last retained `turn/completed`; items carry
-/// `turnId`, so an inline resume can seed the boundary list without another
-/// read.
-fn resumed_history_turn_ids(result: &Value) -> Vec<String> {
-    let mut ids = Vec::new();
-    if let Some(items) = result.pointer("/history/items").and_then(Value::as_array) {
-        for item in items {
-            if let Some(turn_id) = item.get("turnId").and_then(Value::as_str)
-                && ids.last() != Some(&turn_id.to_owned())
-                && !ids.contains(&turn_id.to_owned())
-            {
-                ids.push(turn_id.to_owned());
-            }
-        }
+/// Record a finished turn once, in view order; a later `turn/completed`
+/// upgrades a retracted entry to a real boundary if its terminal allows.
+fn record_finished_turn(state: &mut WorkerState, turn_id: &str, completed: bool) {
+    if let Some(turn) = state
+        .finished_turns
+        .iter_mut()
+        .find(|turn| turn.turn_id == turn_id)
+    {
+        turn.completed |= completed;
+    } else {
+        state.finished_turns.push(FinishedTurn {
+            turn_id: turn_id.to_owned(),
+            completed,
+        });
     }
-    ids
 }
 
 /// Goddard's modes onto the closed MSP vocabulary. Muse cannot split "edit
@@ -512,64 +522,69 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
             let _ = reply.send(fork_session(worker, state, turns));
         }
         DriverCommand::Rollback { turns, reply } => {
-            let result = fork_session(worker, state, turns);
-            let new_session_id = result.as_ref().ok().map(|cursor| match cursor {
-                ProviderResumeCursor::Muse { session_id, .. } => session_id.clone(),
-                _ => unreachable!(),
+            // Rewind moves THIS driver onto the fork, so the reply waits for
+            // the attach: an Ok the daemon acts on must mean the worker
+            // already listens to the new session, and a failed attach leaves
+            // the driver fully on the source session.
+            let result = fork_session(worker, state, turns).and_then(|cursor| {
+                let ProviderResumeCursor::Muse { session_id, .. } = &cursor else {
+                    unreachable!()
+                };
+                switch_session(worker, state, session_id.clone()).map(|()| cursor)
             });
             let _ = reply.send(result);
-            // Rewind moves THIS driver onto the forked session: the daemon
-            // keeps the same runtime, so the worker resubscribes before any
-            // further prompt targets the new id.
-            if let Some(session_id) = new_session_id {
-                switch_session(worker, state, session_id);
-            }
         }
         DriverCommand::Shutdown => return false,
     }
     true
 }
 
-fn switch_session(worker: &Worker, state: &mut WorkerState, session_id: String) {
+/// Move the worker onto a forked session. The local subscription exists
+/// BEFORE `session/resume` (the host auto-subscribes the connection and
+/// can emit the session's first events before the response lands), and
+/// state only commits after the attach succeeds — a failed resume leaves
+/// the driver fully on the source session.
+fn switch_session(
+    worker: &Worker,
+    state: &mut WorkerState,
+    session_id: String,
+) -> anyhow::Result<()> {
+    let subscription = worker.service.subscribe(&session_id);
+    let result = worker
+        .service
+        .call(
+            "session/resume",
+            json!({
+                "commandId": worker.service.mint_command_id(),
+                "sessionId": session_id,
+                "history": "snapshot",
+            }),
+        )
+        .map_err(|error| muse_error("could not attach to the forked Muse session", &error))?;
     // `view/unsubscribe` is a request, not a notification — the reply is
-    // the empty object and is deliberately ignored.
+    // the empty object and is deliberately ignored. Only sent now that the
+    // attach is known to have succeeded.
     let _ = worker
         .service
         .call("view/unsubscribe", json!({ "sessionId": state.session_id }));
-    state.subscription = worker.service.subscribe(&session_id);
-    let result = worker.service.call(
-        "session/resume",
-        json!({
-            "commandId": worker.service.mint_command_id(),
-            "sessionId": session_id,
-            "history": "snapshot",
+    state.subscription = subscription;
+    state.session_id = session_id.clone();
+    state.active_turn = None;
+    state.finished_turns = finished_turns(&worker.service, &session_id).unwrap_or_default();
+    state.items.clear();
+    state.approvals.clear();
+    state.user_inputs.clear();
+    restore_snapshot(&result, state, &worker.events);
+    let _ = worker.events.send(DriverEvent::Connected {
+        provider_cursor: Some(ProviderResumeCursor::Muse {
+            session_id,
+            view_cursor: result
+                .get("viewCursor")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         }),
-    );
-    match result {
-        Ok(result) => {
-            state.session_id = session_id.clone();
-            state.active_turn = None;
-            state.completed_turns = resumed_history_turn_ids(&result);
-            state.items.clear();
-            state.approvals.clear();
-            state.user_inputs.clear();
-            restore_snapshot(&result, state, &worker.events);
-            let _ = worker.events.send(DriverEvent::Connected {
-                provider_cursor: Some(ProviderResumeCursor::Muse {
-                    session_id,
-                    view_cursor: result
-                        .get("viewCursor")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                }),
-            });
-        }
-        Err(error) => {
-            let _ = worker.events.send(DriverEvent::Error(
-                muse_error("could not attach to the forked Muse session", &error).to_string(),
-            ));
-        }
-    }
+    });
+    Ok(())
 }
 
 fn fork_session(
@@ -577,24 +592,28 @@ fn fork_session(
     state: &WorkerState,
     turns_to_remove: usize,
 ) -> anyhow::Result<ProviderResumeCursor> {
-    let retained = state
-        .completed_turns
-        .len()
-        .checked_sub(turns_to_remove)
-        .ok_or_else(|| {
-            anyhow!(
-                "Muse Code has only {} completed turns, but Goddard needs to remove {turns_to_remove}",
-                state.completed_turns.len()
-            )
-        })?;
+    // Boundary math runs in provider-started turns: finished turns plus the
+    // in-flight one, whose `turn/completed` has not arrived yet.
+    let mut turns = state.finished_turns.clone();
+    if let Some(active) = state.active_turn.as_deref()
+        && !turns.iter().any(|turn| turn.turn_id == active)
+    {
+        turns.push(FinishedTurn {
+            turn_id: active.to_owned(),
+            completed: false,
+        });
+    }
+    let retained = turns.len().checked_sub(turns_to_remove).ok_or_else(|| {
+        anyhow!(
+            "Muse Code has only {} provider turns, but Goddard needs to remove {turns_to_remove}",
+            turns.len()
+        )
+    })?;
     // A cut point names the last completed turn to copy, inclusive. Nothing
     // retained means "before the first turn", which MSP cannot express.
-    let Some(last_turn_id) = state.completed_turns.get(retained.wrapping_sub(1)) else {
-        bail!("Muse Code cannot fork to before its first turn");
+    let Some(last_turn_id) = fork_boundary_id(&turns, retained) else {
+        bail!("Muse Code cannot fork to before its first completed turn");
     };
-    if retained == 0 {
-        bail!("Muse Code cannot fork to before its first turn");
-    }
     let params = json!({
         "commandId": worker.service.mint_command_id(),
         "sessionId": state.session_id,
@@ -645,18 +664,24 @@ fn handle_event(
                 if state.active_turn.as_deref() == Some(turn_id) {
                     state.active_turn = None;
                 }
-                if params.get("terminal").and_then(Value::as_str) == Some("completed")
-                    && !state.completed_turns.contains(&turn_id.to_owned())
-                {
-                    state.completed_turns.push(turn_id.to_owned());
-                }
+                record_finished_turn(
+                    state,
+                    turn_id,
+                    params.get("terminal").and_then(Value::as_str) == Some("completed"),
+                );
             }
             let (success, summary) = turn_outcome(params);
             let _ = events.send(DriverEvent::TurnFinished { success, summary });
         }
-        // A queued or retracted turn never produced work; Goddard has no
-        // spinner up because `turn/started` never fired for it.
-        "turn/retracted" | "turn/unqueued" | "session/branchChanged" => {}
+        // A retracted turn ran, then its output was withdrawn — it still
+        // counts toward the provider-turn index but can never be a fork
+        // boundary. `turn/unqueued` names a submission that never started.
+        "turn/retracted" => {
+            if let Some(turn_id) = params.get("turnId").and_then(Value::as_str) {
+                record_finished_turn(state, turn_id, false);
+            }
+        }
+        "turn/unqueued" | "session/branchChanged" => {}
         "turn/retryScheduled" => {
             let turn_id = params.get("turnId").and_then(Value::as_str).unwrap_or("");
             let next = params
@@ -1508,6 +1533,52 @@ mod tests {
         assert!(!directory.join("violations.log").exists());
     }
 
+    /// Rewind forks the session and moves THIS driver onto the fork: the
+    /// reply carries the fork cursor, a second Connected arrives, and a
+    /// prompt after the rewind still runs against the new session.
+    #[test]
+    fn muse_rollback_attaches_the_driver_to_the_fork() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut start = options(&directory);
+        start.binary = fake_muse(&directory);
+
+        let (events, rx) = test_event_channel();
+        let driver = MuseDriver::start(start, events).unwrap();
+        driver.prompt("one".to_owned());
+        driver.prompt("two".to_owned());
+        collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::TurnFinished { success: true, .. })
+        });
+        collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::TurnFinished { success: true, .. })
+        });
+
+        let cursor = driver
+            .rollback(1)
+            .unwrap()
+            .expect("rollback returns the fork cursor");
+        let ProviderResumeCursor::Muse { session_id, .. } = &cursor else {
+            panic!("expected a Muse cursor");
+        };
+        assert_eq!(session_id, "fork-1");
+
+        // The attach already happened when the reply landed — a new prompt
+        // must still stream against the forked session.
+        driver.prompt("after rewind".to_owned());
+        let seen = collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::TurnFinished { .. })
+        });
+        assert!(seen.iter().any(|event| matches!(
+            event,
+            DriverEvent::Connected {
+                provider_cursor: Some(ProviderResumeCursor::Muse { session_id, .. })
+            } if session_id == "fork-1"
+        )));
+        drop(driver);
+        assert!(!directory.join("violations.log").exists());
+    }
+
     #[test]
     fn muse_answers_map_to_the_question_shape() {
         let questions = vec![
@@ -1578,7 +1649,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             active_turn: None,
-            completed_turns: Vec::new(),
+            finished_turns: Vec::new(),
             items: HashMap::new(),
             approvals: HashMap::new(),
             user_inputs: HashMap::new(),
@@ -1652,9 +1723,14 @@ mod tests {
         // approval/resolved cleared the pending map; the completed turn is a
         // known fork boundary.
         assert!(state.approvals.is_empty());
+        let finished: Vec<(&str, bool)> = state
+            .finished_turns
+            .iter()
+            .map(|turn| (turn.turn_id.as_str(), turn.completed))
+            .collect();
         assert_eq!(
-            state.completed_turns,
-            ["018f6a1e-9b3c-7c21-a54a-2f30bd3c9f10"]
+            finished,
+            [("018f6a1e-9b3c-7c21-a54a-2f30bd3c9f10", true)]
         );
     }
 }

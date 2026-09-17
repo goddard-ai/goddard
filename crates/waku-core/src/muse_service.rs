@@ -705,6 +705,11 @@ if [ "$1" = "serve" ]; then
         esac
         echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"session\":{\"sessionId\":\"$sid\",\"status\":\"idle\",\"turnCount\":0,\"path\":\"p\",\"providerId\":\"muse\",\"modelId\":\"muse-1\",\"forkedFrom\":null,\"activeTurnId\":null,\"workspaceRoot\":\"/tmp\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"},\"history\":{$history},\"pendingRequests\":[],\"viewCursor\":\"c9\"}}"
         ;;
+      *'"session/fork"'*)
+        sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"session\":{\"sessionId\":\"fork-1\",\"status\":\"idle\",\"turnCount\":0,\"path\":\"p\",\"providerId\":\"muse\",\"modelId\":\"muse-1\",\"forkedFrom\":\"$sid\",\"activeTurnId\":null,\"workspaceRoot\":\"/tmp\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"},\"history\":{\"mode\":\"none\",\"items\":null,\"snapshot\":null},\"pendingRequests\":[],\"viewCursor\":\"cf\"}}"
+        ;;
       *'"view/page"'*)
         id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
         echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"events\":[{\"method\":\"item/completed\",\"params\":{\"sessionId\":\"s1\",\"viewCursor\":\"c1\",\"sourceRange\":{},\"item\":{\"itemId\":\"m1\",\"kind\":\"userMessage\",\"status\":\"completed\",\"text\":\"first prompt\",\"sessionId\":\"s1\",\"turnId\":\"t1\",\"viewCursor\":\"c1\",\"revision\":0,\"recordedAt\":0}}},{\"method\":\"item/completed\",\"params\":{\"sessionId\":\"s1\",\"viewCursor\":\"c2\",\"sourceRange\":{},\"item\":{\"itemId\":\"m2\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"first answer\",\"sessionId\":\"s1\",\"turnId\":\"t1\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}},{\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"s1\",\"turnId\":\"t1\",\"terminal\":\"completed\",\"viewCursor\":\"c3\",\"sourceRange\":{}}}],\"nextCursor\":null}}"
@@ -712,14 +717,16 @@ if [ "$1" = "serve" ]; then
       *'"turn/start"'*)
         sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
         id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"disposition\":\"started\",\"startedNewTurn\":true,\"turnId\":\"t1\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c1\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/started\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c2\",\"item\":{\"itemId\":\"m1\",\"kind\":\"agentMessage\",\"status\":\"inProgress\",\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m1\",\"delta\":\"hello \",\"viewCursor\":\"c3\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m1\",\"delta\":\"world\",\"viewCursor\":\"c4\"}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c5\",\"sourceRange\":{},\"item\":{\"itemId\":\"m1\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"hello world\",\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"viewCursor\":\"c5\",\"revision\":1,\"recordedAt\":0}}}"
+        TURN=$((TURN + 1))
+        tid="t$TURN"
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"disposition\":\"started\",\"startedNewTurn\":true,\"turnId\":\"$tid\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c1\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/started\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c2\",\"item\":{\"itemId\":\"m$TURN\",\"kind\":\"agentMessage\",\"status\":\"inProgress\",\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m$TURN\",\"delta\":\"hello \",\"viewCursor\":\"c3\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/delta\",\"params\":{\"sessionId\":\"$sid\",\"itemId\":\"m$TURN\",\"delta\":\"world\",\"viewCursor\":\"c4\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c5\",\"sourceRange\":{},\"item\":{\"itemId\":\"m$TURN\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"hello world\",\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c5\",\"revision\":1,\"recordedAt\":0}}}"
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"session/contextUsage\",\"params\":{\"sessionId\":\"$sid\",\"usedTokens\":42,\"windowTokens\":1000,\"pressure\":\"normal\",\"viewCursor\":\"c6\",\"sourceRange\":{}}}"
-        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"t1\",\"terminal\":\"completed\",\"viewCursor\":\"c7\",\"sourceRange\":{}}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"terminal\":\"completed\",\"viewCursor\":\"c7\",\"sourceRange\":{}}}"
         ;;
       *)
         id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')

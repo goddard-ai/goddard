@@ -1600,24 +1600,12 @@ impl WakuBackend {
             }
             ProviderKind::Codex
             | ProviderKind::DeepSeek
+            | ProviderKind::Muse
             | ProviderKind::OhMyPi
             | ProviderKind::Pi => Ok((
                 self.fork_response_with_driver(source, cwd, turns_to_remove)?,
                 HashMap::new(),
             )),
-            ProviderKind::Muse => {
-                let Some(ProviderResumeCursor::Muse { session_id, .. }) =
-                    source.provider_cursor.as_ref()
-                else {
-                    bail!("Muse Code's native session is unavailable");
-                };
-                let fork = fork_provider_session(ProviderSessionForkRequest::Muse {
-                    binary: self.provider_binary(ProviderKind::Muse)?,
-                    session_id: session_id.clone(),
-                    turn_count: provider_turn_count,
-                })?;
-                Ok((fork.cursor, HashMap::new()))
-            }
             ProviderKind::Cursor => {
                 let fork = fork_provider_session(ProviderSessionForkRequest::Cursor {
                     source: source.clone(),
@@ -1764,6 +1752,14 @@ impl WakuBackend {
                 ) =>
             {
                 bail!("Oh My Pi's native session file is unavailable");
+            }
+            ProviderKind::Muse
+                if !matches!(
+                    source.provider_cursor.as_ref(),
+                    Some(ProviderResumeCursor::Muse { .. })
+                ) =>
+            {
+                bail!("Muse Code's native session is unavailable");
             }
             _ => {}
         }

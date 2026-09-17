@@ -257,6 +257,28 @@ fn items_to_history(items: &[Value], visible_turn_limit: usize) -> ProviderSessi
     history
 }
 
+/// One finished turn in view order. `turn/completed` fires for every
+/// terminal state — failed and cancelled turns count toward Goddard's
+/// provider-turn indexes, but only `completed` is a legal `session/fork`
+/// boundary.
+#[derive(Clone)]
+pub(crate) struct FinishedTurn {
+    pub(crate) turn_id: String,
+    pub(crate) completed: bool,
+}
+
+/// The `session/fork` cut point for "keep the first `retained` finished
+/// turns": the nearest `completed` turn at or before that edge. A failed
+/// or cancelled edge cannot be a boundary, so the cut snaps back to the
+/// last completed turn — never keeps a turn meant to be dropped.
+pub(crate) fn fork_boundary_id(finished: &[FinishedTurn], retained: usize) -> Option<String> {
+    finished
+        .get(..retained)?
+        .iter()
+        .rposition(|turn| turn.completed)
+        .map(|index| finished[index].turn_id.clone())
+}
+
 /// Branches a stored session, keeping its first `retained_turns` completed
 /// turns. Cold path: the daemon calls this when no live driver can fork.
 pub fn fork_session_at_turn(
@@ -268,19 +290,16 @@ pub fn fork_session_at_turn(
         Some(service) => service,
         None => muse_service::acquire(binary)?,
     };
-    let completed = completed_turn_ids(&service, session_id)?;
-    if retained_turns > completed.len() {
+    let finished = finished_turns(&service, session_id)?;
+    if retained_turns > finished.len() {
         bail!(
-            "Muse Code has only {} completed turns, but Goddard needs {retained_turns}",
-            completed.len()
+            "Muse Code has only {} turns, but Goddard needs {retained_turns}",
+            finished.len()
         );
     }
-    let Some(last_turn_id) = completed.get(retained_turns.wrapping_sub(1)) else {
-        bail!("Muse Code cannot fork to before its first turn");
+    let Some(last_turn_id) = fork_boundary_id(&finished, retained_turns) else {
+        bail!("Muse Code cannot fork to before its first completed turn");
     };
-    if retained_turns == 0 {
-        bail!("Muse Code cannot fork to before its first turn");
-    }
     let result = service
         .call(
             "session/fork",
@@ -305,9 +324,13 @@ pub fn fork_session_at_turn(
     })
 }
 
-/// Completed turn ids in order, read from `turn/completed` view events.
-fn completed_turn_ids(service: &MuseService, session_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut ids = Vec::new();
+/// Every turn that finished, in view order, from `turn/completed` events —
+/// all terminals, so the list lines up with Goddard's provider-turn count.
+pub(crate) fn finished_turns(
+    service: &MuseService,
+    session_id: &str,
+) -> anyhow::Result<Vec<FinishedTurn>> {
+    let mut turns: Vec<FinishedTurn> = Vec::new();
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
         let mut params = json!({
@@ -331,10 +354,18 @@ fn completed_turn_ids(service: &MuseService, session_id: &str) -> anyhow::Result
             .unwrap_or_default()
         {
             if event.get("method").and_then(Value::as_str) == Some("turn/completed")
-                && event.pointer("/params/terminal").and_then(Value::as_str) == Some("completed")
                 && let Some(turn_id) = event.pointer("/params/turnId").and_then(Value::as_str)
             {
-                ids.push(turn_id.to_owned());
+                let completed = event.pointer("/params/terminal").and_then(Value::as_str)
+                    == Some("completed");
+                if let Some(turn) = turns.iter_mut().find(|turn| turn.turn_id == turn_id) {
+                    turn.completed |= completed;
+                } else {
+                    turns.push(FinishedTurn {
+                        turn_id: turn_id.to_owned(),
+                        completed,
+                    });
+                }
             }
         }
         match result.get("nextCursor").and_then(Value::as_str) {
@@ -342,7 +373,7 @@ fn completed_turn_ids(service: &MuseService, session_id: &str) -> anyhow::Result
             None => break,
         }
     }
-    Ok(ids)
+    Ok(turns)
 }
 
 /// The live `model/list` catalog, or the last-good cache the catalog layer
@@ -400,6 +431,32 @@ mod tests {
     use super::*;
     use crate::muse_service::test_support::fake_muse;
 
+    /// A cut snaps back to the last `completed` turn at or before the edge:
+    /// failed and cancelled turns count toward the index but cannot be a
+    /// boundary, and nothing retained means no cut at all.
+    #[test]
+    fn fork_boundary_snaps_back_to_completed() {
+        let turns = vec![
+            FinishedTurn {
+                turn_id: "t1".into(),
+                completed: true,
+            },
+            FinishedTurn {
+                turn_id: "t2".into(),
+                completed: false,
+            },
+            FinishedTurn {
+                turn_id: "t3".into(),
+                completed: true,
+            },
+        ];
+        assert_eq!(fork_boundary_id(&turns, 3).as_deref(), Some("t3"));
+        assert_eq!(fork_boundary_id(&turns, 2).as_deref(), Some("t1"));
+        assert_eq!(fork_boundary_id(&turns, 1).as_deref(), Some("t1"));
+        assert_eq!(fork_boundary_id(&turns, 0), None);
+        assert_eq!(fork_boundary_id(&turns, 4), None);
+    }
+
     /// `session/read` may refuse inline items; the fallback then pages the
     /// view — whose `cursor` param must be absent, not null, on page one.
     #[test]
@@ -418,6 +475,28 @@ mod tests {
             .collect();
         assert!(texts.contains(&"first prompt"));
         assert!(texts.contains(&"first answer"));
+        assert!(!directory.join("violations.log").exists());
+    }
+
+    /// The cold fork pages `turn/completed` events to find the boundary and
+    /// returns the forked session's resume cursor.
+    #[test]
+    fn cold_fork_pages_the_view_for_a_boundary() {
+        let directory =
+            std::env::temp_dir().join(format!("waku-muse-session-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let binary = fake_muse(&directory);
+
+        let cursor = fork_session_at_turn(&binary, "s1", 1).unwrap();
+        let ProviderResumeCursor::Muse {
+            session_id,
+            view_cursor,
+        } = cursor
+        else {
+            panic!("expected a Muse cursor");
+        };
+        assert_eq!(session_id, "fork-1");
+        assert_eq!(view_cursor.as_deref(), Some("cf"));
         assert!(!directory.join("violations.log").exists());
     }
 }
