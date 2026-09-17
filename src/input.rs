@@ -627,11 +627,12 @@ fn pasted_text_for_mode(mode: FieldMode, text: &str) -> String {
     }
 }
 
-/// Pasted text at either bound leaves the field: enough breaks to scroll the
+/// Pasted text at either bound leaves the field: enough breaks to swamp the
 /// composer, or enough bytes to bury a one-line thought — minified JSON,
-/// logs, a stack trace. The owner presents it as a [`CollapsedPaste`] block.
-const COLLAPSED_PASTE_MIN_NEWLINES: usize = 3;
-const COLLAPSED_PASTE_MIN_BYTES: usize = 500;
+/// logs, a stack trace. Smaller pastes stay inline where the user can edit
+/// them; the owner presents a collapsed one as a [`CollapsedPaste`] block.
+const COLLAPSED_PASTE_MIN_NEWLINES: usize = 20;
+const COLLAPSED_PASTE_MIN_BYTES: usize = 4 * 1024;
 
 /// Whether a paste surfaces as [`CollapsedPaste`] instead of splicing. Only a
 /// multi-line field collapses — a single-line field already flattens breaks,
@@ -4445,15 +4446,16 @@ mod tests {
 
     #[test]
     fn large_pastes_collapse() {
-        // Three breaks is enough to scroll the composer; so is a long
-        // unbroken run like minified JSON.
-        assert!(collapsible_paste(FieldMode::MultiLine, "a\nb\nc\nd"));
-        assert!(collapsible_paste(FieldMode::MultiLine, &"x".repeat(501)));
-        assert!(!collapsible_paste(FieldMode::MultiLine, "a\nb\nc"));
-        assert!(!collapsible_paste(FieldMode::MultiLine, &"x".repeat(500)));
+        // Twenty breaks is enough to swamp the composer; so is a long
+        // unbroken run like minified JSON. Anything smaller splices in.
+        let tall = &"a\n".repeat(20);
+        assert!(collapsible_paste(FieldMode::MultiLine, tall));
+        assert!(collapsible_paste(FieldMode::MultiLine, &"x".repeat(4097)));
+        assert!(!collapsible_paste(FieldMode::MultiLine, &"a\n".repeat(19)));
+        assert!(!collapsible_paste(FieldMode::MultiLine, &"x".repeat(4096)));
         // Single-line fields flatten breaks and never collapse.
-        assert!(!collapsible_paste(FieldMode::SingleLine, "a\nb\nc\nd"));
-        assert!(!collapsible_paste(FieldMode::SingleLine, &"x".repeat(501)));
+        assert!(!collapsible_paste(FieldMode::SingleLine, tall));
+        assert!(!collapsible_paste(FieldMode::SingleLine, &"x".repeat(4097)));
     }
 
     #[test]

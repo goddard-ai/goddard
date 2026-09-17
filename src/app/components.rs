@@ -443,6 +443,54 @@ fn render_sent_message_attachments(
         let Some(menu) = attachment_menus.get(index) else {
             continue;
         };
+        if let Some(preview) = attachment.pasted_text_preview.as_ref() {
+            let key_menu = menu.clone();
+            let mut chip = div()
+                .id(SharedString::from(format!(
+                    "message-{message_id}-attachment-{index}"
+                )))
+                .h(px(24.0))
+                .pl(px(6.0))
+                .pr(px(10.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .track_focus(menu.trigger_focus_handle())
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("composer.pasted_block")),
+                );
+            if !preview.is_empty() {
+                chip = chip.tooltip(composer::pasted_text_tooltip(SharedString::from(
+                    preview.clone(),
+                )));
+            }
+            chip = chip.on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                    key_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            });
+            let reveal_path = attachment.path.clone();
+            row = row.child(context_menu(
+                chip,
+                SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),
+                menu,
+                move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
+            ));
+            continue;
+        }
         let icon_path = if attachment.is_dir {
             "icons/folder.svg"
         } else {

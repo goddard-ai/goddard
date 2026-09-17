@@ -87,6 +87,7 @@ impl From<&ComposerAttachment> for crate::persistence::ComposerDraftAttachment {
             is_dir: attachment.is_dir,
             is_image: attachment.is_image,
             blob_reference: attachment.blob_reference.clone(),
+            pasted_text_preview: attachment.pasted_text_preview.clone(),
             session_id: attachment.session_id,
         }
     }
@@ -102,6 +103,7 @@ impl From<crate::persistence::ComposerDraftAttachment> for ComposerAttachment {
             is_dir: attachment.is_dir,
             is_image: attachment.is_image,
             blob_reference: attachment.blob_reference,
+            pasted_text_preview: attachment.pasted_text_preview,
             session_id: attachment.session_id,
         }
     }
@@ -116,6 +118,7 @@ impl From<ComposerAttachment> for MessageAttachment {
             is_dir: attachment.is_dir,
             is_image: attachment.is_image,
             blob_reference: attachment.blob_reference,
+            pasted_text_preview: attachment.pasted_text_preview,
             session_id: attachment.session_id,
         }
     }
@@ -131,6 +134,7 @@ impl From<MessageAttachment> for ComposerAttachment {
             is_dir: attachment.is_dir,
             is_image: attachment.is_image,
             blob_reference: attachment.blob_reference,
+            pasted_text_preview: attachment.pasted_text_preview,
             session_id: attachment.session_id,
         }
     }

@@ -2059,6 +2059,11 @@ pub struct MessageAttachment {
     /// name is retained for storage compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blob_reference: Option<String>,
+    /// Leading characters of a pasted-text attachment for the chip's hover
+    /// preview. `Some` doubles as the pasted-text marker — clients render a
+    /// "Pasted text" chip rather than a file tile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pasted_text_preview: Option<String>,
     /// When set, the attachment references another Goddard task rather than a
     /// file: `name` holds its title and `mention` its provider-facing token.
     /// `path`, `is_dir`, `is_image`, and `blob_reference` carry no file
@@ -3994,6 +3999,7 @@ mod tests {
             is_dir: false,
             is_image: true,
             blob_reference: Some("waku-blob:ab/reference.png".to_owned()),
+            pasted_text_preview: None,
             session_id: None,
         };
 

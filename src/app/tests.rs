@@ -1,7 +1,7 @@
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, prompt_with_pasted_blocks, supports_reasoning_default_reset,
-    visible_branch_entries, workspace_subject_for,
+    next_picker_highlight, pasted_text_preview, prompt_with_pasted_blocks,
+    supports_reasoning_default_reset, visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::{next_idle_session, next_non_busy_session, next_unread_completion};
@@ -408,6 +408,7 @@ fn file_attachment(mention: &str) -> MessageAttachment {
         is_dir: false,
         is_image: false,
         blob_reference: None,
+        pasted_text_preview: None,
         session_id: None,
     }
 }
@@ -441,6 +442,16 @@ fn session_attachments_submit_as_task_references() {
         merged_submission("ask it", &attachments).as_deref(),
         Some(format!("ask it [session \"Fix flake\" (task_id: {session_id})]").as_str())
     );
+}
+
+#[test]
+fn pasted_text_preview_caps_at_two_hundred_characters() {
+    let short = "  first line\nsecond line  ";
+    assert_eq!(pasted_text_preview(short), "first line\nsecond line");
+    let long = "x".repeat(300);
+    let preview = pasted_text_preview(&long);
+    assert_eq!(preview, format!("{}…", "x".repeat(200)));
+    assert_eq!(pasted_text_preview("   "), "");
 }
 
 #[test]
