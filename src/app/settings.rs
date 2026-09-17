@@ -4157,6 +4157,23 @@ impl Waku {
                 ),
                 theme,
             ))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+            .child(settings_row(
+                tr!("settings.high_contrast"),
+                tr!("settings.high_contrast_description"),
+                toggle_switch(
+                    "high-contrast-toggle",
+                    self.state.high_contrast || crate::platform::increase_contrast(),
+                    crate::platform::increase_contrast(),
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.high_contrast;
+                        move |this, window, cx| this.set_high_contrast(!enabled, window, cx)
+                    },
+                ),
+                theme,
+            ))
             .into_any_element()
     }
 
@@ -6044,6 +6061,26 @@ impl Waku {
         }
         self.state.thick_borders = enabled;
         crate::theme::set_thick_borders(enabled);
+        self.save();
+        cx.notify();
+    }
+
+    /// The "High contrast" preference widens the border-tier floors, so it
+    /// rebuilds the theme rather than only flagging a static. The OS's own
+    /// Increase Contrast setting forces it on — the toggle renders disabled
+    /// in that case.
+    fn set_high_contrast(&mut self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.high_contrast == enabled {
+            return;
+        }
+        self.state.high_contrast = enabled;
+        crate::theme::set_high_contrast(enabled);
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            self.state.sidebar_transparency,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }

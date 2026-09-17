@@ -3225,7 +3225,7 @@ impl Waku {
                                         .px(px(5.0))
                                         .rounded(px(4.0))
                                         .border(hairline())
-                                        .border_color(theme.border)
+                                        .border_color(theme.border_subtle)
                                         .bg(theme.raised)
                                         .flex()
                                         .items_center()

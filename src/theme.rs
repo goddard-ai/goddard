@@ -41,6 +41,21 @@ pub fn set_thick_borders(enabled: bool) {
     THICK_BORDERS.store(enabled, Ordering::Relaxed);
 }
 
+/// Whether the border tiers solve against the wider high-contrast floors.
+/// Themes are built once and republished on changes, so the flag can be a
+/// process-level static like [`THICK_BORDERS`].
+static HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
+
+/// Store the "High contrast" preference. The OS's own Increase Contrast
+/// setting forces it on regardless of the app toggle.
+pub fn set_high_contrast(enabled: bool) {
+    HIGH_CONTRAST.store(enabled || crate::platform::increase_contrast(), Ordering::Relaxed);
+}
+
+fn high_contrast() -> bool {
+    HIGH_CONTRAST.load(Ordering::Relaxed)
+}
+
 /// A translucent color wash — selection, etc. `rgb()` yields `Rgba`; this
 /// hops through `Hsla` so the alpha can be set.
 fn wash(color: u32, alpha: f32) -> Hsla {
@@ -48,22 +63,37 @@ fn wash(color: u32, alpha: f32) -> Hsla {
     color.opacity(alpha)
 }
 
-/// WCAG 2.2 §1.4.11 floor for non-text contrast: a boundary needed to
-/// identify a component must sit 3:1 against the colors it touches.
-/// `border_strong` — the outline on interactive controls — carries that
-/// floor; `border` sits a half-step under for outlines that organize
-/// rather than identify.
-const BORDER_CONTRAST: f32 = 2.5;
-const BORDER_STRONG_CONTRAST: f32 = 3.0;
-/// Outlines on components whose own fill already delimits them — the
-/// composer card, inset text fields, panel cards. The boundary is
-/// reinforcement rather than identification, so 2:1 keeps it soft without
-/// disappearing; roughly GitHub's default input-border weight.
-const BORDER_SUBTLE_CONTRAST: f32 = 2.0;
-/// Decorative rules — fold dividers, menu separators, guide rails — are
-/// exempt from §1.4.11, but "exempt" is no license to be invisible: held to
-/// 1.5:1, roughly GitHub's border-muted weight.
+/// Border-tier floors, in contrast ratios. Normal mode spaces the tiers in
+/// quarter-ratio steps — chrome stays quiet by default. High-contrast mode
+/// widens the steps to half a ratio, restoring the ladder where
+/// `border_strong` — the outline on interactive controls — carries WCAG
+/// 2.2 §1.4.11's 3:1 non-text floor. `separator` holds 1.5:1 in both:
+/// visible but clearly subordinate, roughly GitHub's border-muted weight.
 const SEPARATOR_CONTRAST: f32 = 1.5;
+const BORDER_SUBTLE_CONTRAST: f32 = 1.75;
+const BORDER_CONTRAST: f32 = 2.0;
+const BORDER_STRONG_CONTRAST: f32 = 2.25;
+const HIGH_CONTRAST_SUBTLE: f32 = 2.0;
+const HIGH_CONTRAST_BORDER: f32 = 2.5;
+const HIGH_CONTRAST_STRONG: f32 = 3.0;
+
+/// The active mode's floors: (subtle, border, strong). `separator` is
+/// mode-independent.
+fn border_floors() -> (f32, f32, f32) {
+    if high_contrast() {
+        (
+            HIGH_CONTRAST_SUBTLE,
+            HIGH_CONTRAST_BORDER,
+            HIGH_CONTRAST_STRONG,
+        )
+    } else {
+        (
+            BORDER_SUBTLE_CONTRAST,
+            BORDER_CONTRAST,
+            BORDER_STRONG_CONTRAST,
+        )
+    }
+}
 
 fn luminance(rgb: Rgba) -> f32 {
     fn linear(channel: f32) -> f32 {
@@ -312,22 +342,17 @@ impl Theme {
         ]
         .map(rgb);
         let border_pairs = surfaces.map(|surface| (surface, surface));
+        let (subtle_c, border_c, strong_c) = border_floors();
         let separator = contrast_wash(neutral, spec.is_dark, &border_pairs, SEPARATOR_CONTRAST);
-        let border_subtle =
-            contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_SUBTLE_CONTRAST);
-        let border = contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_CONTRAST);
-        let border_strong =
-            contrast_wash(neutral, spec.is_dark, &border_pairs, BORDER_STRONG_CONTRAST);
+        let border_subtle = contrast_wash(neutral, spec.is_dark, &border_pairs, subtle_c);
+        let border = contrast_wash(neutral, spec.is_dark, &border_pairs, border_c);
+        let border_strong = contrast_wash(neutral, spec.is_dark, &border_pairs, strong_c);
         // The sidebar divider is painted on the content column's `surface`
         // edge and must read against the sidebar fill on the other side too.
         let surface = rgb(spec.surface);
         let sidebar_pairs = [(surface, surface), (surface, rgb(spec.sidebar_solid))];
-        let sidebar_border = contrast_wash(
-            spec.sidebar_border,
-            spec.is_dark,
-            &sidebar_pairs,
-            BORDER_SUBTLE_CONTRAST,
-        );
+        let sidebar_border =
+            contrast_wash(spec.sidebar_border, spec.is_dark, &sidebar_pairs, subtle_c);
         let danger: Hsla = rgb(spec.danger).into();
         Self {
             is_dark: spec.is_dark,
@@ -1386,6 +1411,7 @@ pub fn init(cx: &mut App) {
         cx.window_appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
     );
+    set_high_contrast(false);
     set_active_theme(
         if system_dark {
             Theme::dark()
@@ -1431,55 +1457,62 @@ pub fn apply_theme_preference(
 mod tests {
     use super::*;
 
-    /// Every palette's line tokens must hit their solved floors — the 3:1
-    /// WCAG floor on `border_strong`, the lower targets on `border`,
-    /// `border_subtle`, and `separator` — on every surface they can be
-    /// painted on. This is the check `from_spec` solves for, asserted per
-    /// theme so a new or edited scheme can't regress it.
+    /// Every palette's line tokens must hit their solved floors in both
+    /// contrast modes — on every surface they can be painted on. This is the
+    /// check `from_spec` solves for, asserted per theme so a new or edited
+    /// scheme can't regress it.
     #[test]
     fn borders_clear_the_contrast_floor() {
-        for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {
-            let theme = theme_named(name);
-            let surfaces = [
-                theme.canvas,
-                theme.surface,
-                theme.raised,
-                theme.composer,
-                theme.inset,
-                theme.terminal,
-                theme.sidebar_drag_background,
-            ]
-            .map(Hsla::to_rgb);
-            // f32 solve noise sits under the floor by ~1e-6; the epsilon keeps
-            // the assert on the intent, not the rounding.
-            for (token, line, target) in [
-                ("separator", theme.separator, SEPARATOR_CONTRAST),
-                ("border_subtle", theme.border_subtle, BORDER_SUBTLE_CONTRAST),
-                ("border", theme.border, BORDER_CONTRAST),
-                ("border_strong", theme.border_strong, BORDER_STRONG_CONTRAST),
-            ] {
-                let floor = target - 0.01;
-                let line_rgb = line.to_rgb();
-                for surface in surfaces {
-                    let ratio = contrast_ratio(surface.blend(line_rgb), surface);
+        for hc in [false, true] {
+            // The flag is process state; store it directly rather than via
+            // `set_high_contrast`, which ORs in the host OS's own setting and
+            // would make the mode under test machine-dependent.
+            HIGH_CONTRAST.store(hc, Ordering::Relaxed);
+            let (subtle, border, strong) = border_floors();
+            for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {
+                let theme = theme_named(name);
+                let surfaces = [
+                    theme.canvas,
+                    theme.surface,
+                    theme.raised,
+                    theme.composer,
+                    theme.inset,
+                    theme.terminal,
+                    theme.sidebar_drag_background,
+                ]
+                .map(Hsla::to_rgb);
+                // f32 solve noise sits under the floor by ~1e-6; the epsilon
+                // keeps the assert on the intent, not the rounding.
+                for (token, line, target) in [
+                    ("separator", theme.separator, SEPARATOR_CONTRAST),
+                    ("border_subtle", theme.border_subtle, subtle),
+                    ("border", theme.border, border),
+                    ("border_strong", theme.border_strong, strong),
+                ] {
+                    let floor = target - 0.01;
+                    let line_rgb = line.to_rgb();
+                    for surface in surfaces {
+                        let ratio = contrast_ratio(surface.blend(line_rgb), surface);
+                        assert!(
+                            ratio >= floor,
+                            "{name:?} high_contrast={hc} {token} is {ratio:.2}:1 over {surface:?}"
+                        );
+                    }
+                }
+                let floor = subtle - 0.01;
+                // The sidebar divider is painted on `surface` and must also
+                // read against the sidebar fill it separates.
+                let surface = theme.surface.to_rgb();
+                let line_rgb = theme.sidebar_border.to_rgb();
+                for neighbor in [theme.surface, theme.sidebar_drag_background].map(Hsla::to_rgb) {
+                    let ratio = contrast_ratio(surface.blend(line_rgb), neighbor);
                     assert!(
                         ratio >= floor,
-                        "{name:?} {token} is {ratio:.2}:1 over {surface:?}"
+                        "{name:?} high_contrast={hc} sidebar_border is {ratio:.2}:1 over {neighbor:?}"
                     );
                 }
             }
-            let floor = BORDER_SUBTLE_CONTRAST - 0.01;
-            // The sidebar divider is painted on `surface` and must also read
-            // against the sidebar fill it separates.
-            let surface = theme.surface.to_rgb();
-            let line_rgb = theme.sidebar_border.to_rgb();
-            for neighbor in [theme.surface, theme.sidebar_drag_background].map(Hsla::to_rgb) {
-                let ratio = contrast_ratio(surface.blend(line_rgb), neighbor);
-                assert!(
-                    ratio >= floor,
-                    "{name:?} sidebar_border is {ratio:.2}:1 over {neighbor:?}"
-                );
-            }
         }
+        HIGH_CONTRAST.store(false, Ordering::Relaxed);
     }
 }
