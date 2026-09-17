@@ -275,17 +275,24 @@ const MODAL_SETTLE: Pixels = px(5.0);
 
 /// How far past a surface's bounds its drop shadow can reach — `shadow_xl`'s
 /// offset plus a 3× blur tail. The reveal targets the dilated bounds so the
-/// shadow lands inside the clip and fades in with the card; a clip that stops
-/// at the card's edge hides it until the last frame, where it pops in.
+/// shadow lands inside the clip and is revealed with the card; a clip that
+/// stops at the card's edge hides it until the last frame, where it pops in.
 const SHADOW_BLEED: Pixels = px(100.0);
 
 /// A one-shot entrance for a floating surface — menu, popover, or dialog.
 ///
 /// GPUI transforms only SVG subtrees, so the "grow" is painted as a clip: the
-/// visible region eases from a zero-size rect at the anchor out to the full
-/// bounds while the child fades in and drifts a few px toward the anchor. At
+/// visible region eases from a zero-size rect at the anchor out to the
+/// shadow-dilated bounds while the child drifts a few px toward the anchor. At
 /// these durations it reads as a small scale. Drive it with `with_animation`;
 /// under reduce-motion the oneshot delta is 1 and it renders settled.
+///
+/// The child stays opaque through the reveal rather than fading. GPUI applies
+/// opacity per primitive — there is no group compositing — and the drop-shadow
+/// silhouette fills the card's interior beneath the fill, so a translucent
+/// card shows it as a dark cast that vanishes on the last frame: a dark-to-
+/// light sweep on light themes. The opaque card occludes the silhouette for
+/// the whole animation and the clip reveals card and shadow together.
 pub struct SurfaceReveal<E> {
     child: Option<E>,
     /// The window-space point the surface grows out of — the click for a
@@ -327,7 +334,7 @@ where
 }
 
 /// The window-modal entrance: grow from the card's own center, settle a few
-/// px downward, fade in.
+/// px downward.
 pub fn modal_enter<E>(id: impl Into<ElementId>, child: E) -> AnimationElement<SurfaceReveal<E>>
 where
     E: Styled + IntoElement + 'static,
@@ -395,11 +402,8 @@ where
         let mut child = self
             .child
             .take()
-            .expect("request_layout runs once per frame");
-        if self.progress < 1.0 {
-            child = child.opacity(self.progress.max(0.0));
-        }
-        let mut child = child.into_any_element();
+            .expect("request_layout runs once per frame")
+            .into_any_element();
         let layout_id = child.request_layout(window, cx);
         (layout_id, child)
     }
@@ -431,8 +435,9 @@ where
             point(px(0.0), -MODAL_SETTLE * (1.0 - progress))
         };
         // Reveal toward the shadow-dilated bounds: scaling the dilation with
-        // progress keeps the grow-from-anchor read while keeping the fading
-        // shadow inside the clip.
+        // progress keeps the grow-from-anchor read while keeping the shadow
+        // inside the clip, so it sweeps out with the card instead of popping
+        // in on the last frame.
         let mask = ContentMask {
             bounds: reveal_bounds(anchor, bounds.dilate(SHADOW_BLEED), progress),
         };
