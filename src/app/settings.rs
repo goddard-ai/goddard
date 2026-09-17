@@ -64,6 +64,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
         "settings.archived_keywords",
     ),
     (
+        SettingsPage::Git,
+        "settings.git",
+        "icons/git-branch.svg",
+        "settings.git_keywords",
+    ),
+    (
         SettingsPage::Commands,
         "settings.commands",
         "icons/terminal.svg",
@@ -192,7 +198,11 @@ pub(super) fn filter_archived_sessions(
 }
 
 impl Waku {
-    pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
@@ -394,7 +404,7 @@ impl Waku {
             )
     }
 
-    fn render_settings_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let page = self.settings_page.unwrap_or(SettingsPage::General);
         let right_window_controls = self.render_client_window_controls(
@@ -433,6 +443,7 @@ impl Waku {
         // their pages fill the viewport instead of riding the shared scroll
         // container; the Archived page's virtualized list needs the same.
         let fills_viewport = page == SettingsPage::Archived
+            || page == SettingsPage::Git
             || (page == SettingsPage::Usage
                 && matches!(
                     self.usage_view,
@@ -470,6 +481,7 @@ impl Waku {
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
                         SettingsPage::Commands => tr!("settings.commands"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
+                        SettingsPage::Git => tr!("settings.git"),
                         SettingsPage::Experiments => tr!("settings.experiments"),
                     }),
             )
@@ -483,6 +495,7 @@ impl Waku {
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
                 SettingsPage::Commands => self.render_commands_settings(cx),
                 SettingsPage::Appearance => self.render_appearance_settings(cx),
+                SettingsPage::Git => self.render_git_settings(window, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(cx),
             });
 

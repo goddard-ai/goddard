@@ -2862,6 +2862,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Providers,
         SettingsPage::Skills,
         SettingsPage::Archived,
+        SettingsPage::Git,
         SettingsPage::Commands,
         SettingsPage::Usage,
         SettingsPage::Daemon,

@@ -287,6 +287,12 @@ settings.experiments_description:
   en: Unfinished features you can try early. Each is off by default, may change or disappear, and can be turned off at any time.
 settings.archived:
   en: Archived chats
+settings.git:
+  en: Git
+settings.git_keywords:
+  en: git worktrees branches repository checkout local repo commits remote prune
+settings.git_no_projects:
+  en: Add a project to browse its worktrees and branches.
 settings.archived_keywords:
   en: archived chats conversations hidden history restore unarchive remove
 settings.archived_description:

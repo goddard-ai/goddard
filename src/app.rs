@@ -261,6 +261,7 @@ enum SettingsPage {
     ComputerUse,
     Commands,
     Appearance,
+    Git,
     Experiments,
 }
 
@@ -2264,6 +2265,13 @@ pub struct Waku {
     last_projects_page_project: Option<Uuid>,
     /// Per-project page state kept across page toggles.
     projects_page_states: HashMap<Uuid, projects::ProjectsPageState>,
+    /// The Settings → Git page's project selection — which repo's worktrees
+    /// and branches the page lists.
+    settings_git_project: Option<Uuid>,
+    /// Set when the Git page's data should be (re)fetched on its next
+    /// render — opening the page or switching its project. Cleared once
+    /// `projects_refresh` runs with state in place.
+    git_page_refresh_pending: bool,
     /// Projects whose stored path the last `refresh_project_locations` pass
     /// could not find — by missing folder, not by missing entity. The
     /// Projects page and sidebar badge read the set; submissions check the
@@ -4494,6 +4502,8 @@ impl Waku {
                 projects_page: None,
                 last_projects_page_project: None,
                 projects_page_states: HashMap::new(),
+                settings_git_project: None,
+                git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),
                 transcript_row_kinds: RefCell::new(Vec::new()),

@@ -55,6 +55,12 @@ impl Waku {
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
         }
+        // The Git page's lists are fetched on its next render, once the
+        // per-project state exists — `open_settings_page` has no window to
+        // create the filter inputs with.
+        if page == SettingsPage::Git {
+            self.git_page_refresh_pending = true;
+        }
         cx.notify();
     }
 

@@ -1250,6 +1250,12 @@ impl Waku {
                 "settings preferences skills library create disable agent skill",
             ),
             (
+                SettingsPage::Git,
+                "settings.git",
+                "icons/git-branch.svg",
+                "settings preferences git worktrees branches repository checkout",
+            ),
+            (
                 SettingsPage::Commands,
                 "settings.commands",
                 "icons/terminal.svg",

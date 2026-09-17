@@ -1,12 +1,14 @@
-//! The Projects page: one surface over a project's worktrees, branches,
-//! issues, and pull requests, with an agent composer docked underneath.
+//! The Projects page: one surface over a project's issues and pull
+//! requests, with an agent composer docked underneath. The local-repo half
+//! of that surface — worktrees and branches — lives on the Settings → Git
+//! page, which shares this file's per-project state, tables, and menus.
 //!
 //! The page is scoped to its own project selection — independent of the
 //! sidebar's — and claims the main column while open, like the GitHub
 //! browser it replaces. Every read is a daemon workspace operation on the
 //! background executor; render only paints what has landed. Selection on the
-//! Worktrees and Branches tabs follows macOS list conventions so rows take
-//! bulk actions from a right-click menu or the bar above the composer.
+//! Worktrees and Branches lists follows macOS list conventions so rows take
+//! bulk actions from a right-click menu or the bar under the table.
 
 use std::collections::HashSet;
 
@@ -16,8 +18,9 @@ use waku_client::{
     GitHubAvailability, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemQueryState,
 };
 
-/// The page's four tabs. Issues and Pull Requests read through the `gh`
-/// machinery in `github.rs`; Worktrees and Branches read the local repo.
+/// The two surfaces' tabs. Issues and Pull Requests read through the `gh`
+/// machinery in `github.rs` and form the Projects page; Worktrees and
+/// Branches read the local repo and form the Settings → Git page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ProjectsTab {
     Worktrees,
@@ -27,12 +30,16 @@ pub(super) enum ProjectsTab {
 }
 
 impl ProjectsTab {
-    pub const ALL: [Self; 4] = [
-        Self::Worktrees,
-        Self::Branches,
-        Self::Issues,
-        Self::PullRequests,
-    ];
+    /// The Projects page's tab strip — its ⌘⌥n chords index this list.
+    pub const ALL: [Self; 2] = [Self::Issues, Self::PullRequests];
+
+    /// The Settings → Git page's sub-tabs.
+    pub const GIT_TABS: [Self; 2] = [Self::Worktrees, Self::Branches];
+
+    /// Whether the tab is one of the Git page's local-repo lists.
+    fn is_git_tab(self) -> bool {
+        matches!(self, Self::Worktrees | Self::Branches)
+    }
 
     pub fn label(self) -> String {
         match self {
@@ -243,11 +250,16 @@ const PROJECTS_DIVERGENCE_COL: f32 = 96.0;
 const PROJECTS_COUNT_COL: f32 = 64.0;
 const PROJECTS_UPDATED_COL: f32 = 76.0;
 
-/// Per-project page state: tab, per-tab filters, fetched tables, selection,
-/// and the docked composer. Kept in `Waku::projects_page_states` by project
-/// id so toggling the page or switching projects loses nothing.
+/// Per-project page state: tabs, per-tab filters, fetched tables,
+/// selection, and the Projects page's docked composer. Kept in
+/// `Waku::projects_page_states` by project id so toggling either surface or
+/// switching projects loses nothing.
 pub(super) struct ProjectsPageState {
+    /// The Projects page's tab — always an Issues/Pull Requests variant.
     pub tab: ProjectsTab,
+    /// The Settings → Git page's sub-tab — always a Worktrees/Branches
+    /// variant, kept separate so the two surfaces never fight over `tab`.
+    pub git_tab: ProjectsTab,
     worktree_filter: Entity<TextInput>,
     branch_filter: Entity<TextInput>,
     issue_filter: Entity<TextInput>,
@@ -294,7 +306,8 @@ impl ProjectsPageState {
             })
         }
         Self {
-            tab: ProjectsTab::Worktrees,
+            tab: ProjectsTab::Issues,
+            git_tab: ProjectsTab::Worktrees,
             worktree_filter: filter_input(tr!("projects.filter_worktrees"), window, cx),
             branch_filter: filter_input(tr!("projects.filter_branches"), window, cx),
             issue_filter: filter_input(tr!("projects.filter_issues"), window, cx),
@@ -493,7 +506,7 @@ impl Waku {
         }
     }
 
-    /// ⌘⌥1–4: switch the open page's tab, or open the page straight onto it.
+    /// ⌘⌥1–2: switch the open page's tab, or open the page straight onto it.
     pub(super) fn select_projects_tab_action(
         &mut self,
         action: &SelectProjectsTab,
@@ -509,9 +522,9 @@ impl Waku {
         }
     }
 
-    /// ⌘A on the page selects every filtered row on the Worktrees/Branches
-    /// tabs; inside a filter field the TextInput context still wins and the
-    /// chord selects its text.
+    /// ⌘A selects every filtered row on the surface's active
+    /// Worktrees/Branches tab; inside a filter field the TextInput context
+    /// still wins and the chord selects its text.
     pub(super) fn select_all_projects_rows_action(
         &mut self,
         _: &SelectAllProjectsRows,
@@ -521,8 +534,39 @@ impl Waku {
         let Some(project_id) = self.projects_page else {
             return;
         };
+        let Some(tab) = self
+            .projects_page_states
+            .get(&project_id)
+            .map(|state| state.tab)
+        else {
+            return;
+        };
+        self.select_all_page_rows(project_id, tab, cx);
+    }
+
+    /// The Settings → Git page's ⌘A — the same selection, on `git_tab`.
+    fn select_all_git_rows_action(
+        &mut self,
+        _: &SelectAllProjectsRows,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_id) = self.settings_git_project else {
+            return;
+        };
+        let Some(tab) = self
+            .projects_page_states
+            .get(&project_id)
+            .map(|state| state.git_tab)
+        else {
+            return;
+        };
+        self.select_all_page_rows(project_id, tab, cx);
+    }
+
+    fn select_all_page_rows(&mut self, project_id: Uuid, tab: ProjectsTab, cx: &mut Context<Self>) {
         let keys: Vec<ProjectsRowKey> = self
-            .projects_list_rows(project_id, cx)
+            .projects_list_rows(project_id, tab, cx)
             .iter()
             .filter_map(|row| self.projects_row_key(project_id, row, cx))
             .collect();
@@ -539,9 +583,37 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.projects_page.is_some() {
-            self.focus_projects_filter(window, cx);
-        }
+        let Some(project_id) = self.projects_page else {
+            return;
+        };
+        let Some(tab) = self
+            .projects_page_states
+            .get(&project_id)
+            .map(|state| state.tab)
+        else {
+            return;
+        };
+        self.focus_tab_filter(project_id, tab, window, cx);
+    }
+
+    /// The Settings → Git page's ⌘F — its `git_tab`'s filter.
+    fn focus_git_filter_action(
+        &mut self,
+        _: &FocusProjectsFilter,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_id) = self.settings_git_project else {
+            return;
+        };
+        let Some(tab) = self
+            .projects_page_states
+            .get(&project_id)
+            .map(|state| state.git_tab)
+        else {
+            return;
+        };
+        self.focus_tab_filter(project_id, tab, window, cx);
     }
 
     /// Escape on the page peels one layer at a time: the selection, then the
@@ -561,10 +633,12 @@ impl Waku {
             .projects_page_states
             .get_mut(&project_id)
             .is_some_and(|state| {
-                if state.selection.is_empty() {
+                let tab = state.tab;
+                let before = state.selection.len();
+                state.selection.retain(|key| key.tab() != tab);
+                if state.selection.len() == before {
                     false
                 } else {
-                    state.selection.clear();
                     state.anchor = None;
                     true
                 }
@@ -580,14 +654,58 @@ impl Waku {
         }
     }
 
+    /// Escape on the Settings → Git page peels the active sub-tab's
+    /// selection; there is no page layer underneath to close — Settings
+    /// handles its own exit.
+    fn dismiss_git_layer_action(
+        &mut self,
+        _: &DismissProjectsLayer,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_id) = self.settings_git_project else {
+            return;
+        };
+        let Some(state) = self.projects_page_states.get_mut(&project_id) else {
+            return;
+        };
+        let tab = state.git_tab;
+        let before = state.selection.len();
+        state.selection.retain(|key| key.tab() != tab);
+        if state.selection.len() != before {
+            state.anchor = None;
+            cx.notify();
+        }
+    }
+
     fn focus_projects_filter(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(state) = self
-            .projects_page
-            .and_then(|id| self.projects_page_states.get(&id))
+        let Some(project_id) = self.projects_page else {
+            return;
+        };
+        let Some(tab) = self
+            .projects_page_states
+            .get(&project_id)
+            .map(|state| state.tab)
         else {
             return;
         };
-        let focus = state.filter_input(state.tab).read(cx).focus();
+        self.focus_tab_filter(project_id, tab, window, cx);
+    }
+
+    /// Focus `tab`'s filter field on `project_id`'s page state — shared by
+    /// the Projects page (`state.tab`) and the Settings → Git page
+    /// (`state.git_tab`).
+    fn focus_tab_filter(
+        &self,
+        project_id: Uuid,
+        tab: ProjectsTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.projects_page_states.get(&project_id) else {
+            return;
+        };
+        let focus = state.filter_input(tab).read(cx).focus();
         window.focus(&focus, cx);
     }
 
@@ -632,6 +750,76 @@ impl Waku {
         }
         self.projects_refresh(project_id, cx);
         self.focus_projects_filter(window, cx);
+        cx.notify();
+    }
+
+    /// The Settings → Git page's sub-tab switch — the same shape as
+    /// `set_projects_tab`, scoped to `git_tab`.
+    fn set_git_tab(
+        &mut self,
+        project_id: Uuid,
+        tab: ProjectsTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !tab.is_git_tab() {
+            return;
+        }
+        let changed = self
+            .projects_page_states
+            .get_mut(&project_id)
+            .is_some_and(|state| {
+                if state.git_tab == tab {
+                    return false;
+                }
+                state.git_tab = tab;
+                state
+                    .list_state
+                    .reset_with_uniform_height(0, px(PROJECTS_ROW_HEIGHT));
+                true
+            });
+        if !changed {
+            return;
+        }
+        self.projects_refresh(project_id, cx);
+        self.focus_tab_filter(project_id, tab, window, cx);
+        cx.notify();
+    }
+
+    /// The project whose repo the Settings → Git page shows: the page's own
+    /// selection, then the Projects page's last project, then the sidebar's,
+    /// then the first real project.
+    fn resolve_git_settings_project(&mut self) -> Option<Uuid> {
+        let valid = |id: &Uuid| {
+            self.state
+                .projects
+                .iter()
+                .any(|project| project.id == *id && !project.is_projectless())
+        };
+        let resolved = self
+            .settings_git_project
+            .filter(&valid)
+            .or_else(|| self.last_projects_page_project.filter(&valid))
+            .or_else(|| self.state.selected_project.filter(&valid))
+            .or_else(|| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| !project.is_projectless())
+                    .map(|project| project.id)
+            });
+        self.settings_git_project = resolved;
+        resolved
+    }
+
+    /// Point the Settings → Git page at another project; the fetch runs on
+    /// the next render once the per-project state exists.
+    fn select_git_settings_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        if self.settings_git_project == Some(project_id) {
+            return;
+        }
+        self.settings_git_project = Some(project_id);
+        self.git_page_refresh_pending = true;
         cx.notify();
     }
 
@@ -707,12 +895,18 @@ impl Waku {
         self.github_refresh(project_id, cx);
     }
 
-    /// The current tab's flattened Worktrees/Branches rows.
-    fn projects_list_rows(&self, project_id: Uuid, cx: &App) -> Vec<ProjectsListRow> {
-        let Some(state) = self.projects_page_states.get(&project_id) else {
+    /// `tab`'s flattened Worktrees/Branches rows — the GitHub tabs have no
+    /// row list and return empty.
+    fn projects_list_rows(
+        &self,
+        project_id: Uuid,
+        tab: ProjectsTab,
+        cx: &App,
+    ) -> Vec<ProjectsListRow> {
+        if !self.projects_page_states.contains_key(&project_id) {
             return Vec::new();
-        };
-        match state.tab {
+        }
+        match tab {
             ProjectsTab::Worktrees => self
                 .projects_filtered_worktrees(project_id, cx)
                 .map(|(_, indices)| {
@@ -792,7 +986,8 @@ impl Waku {
 
     /// Click selection on a Worktrees/Branches row: plain selects just the
     /// row and moves the anchor, ⌘ toggles it in place, ⇧ ranges from the
-    /// anchor through the filtered order.
+    /// anchor through the filtered order. The key's own row-set supplies the
+    /// order — the same row may render on either surface.
     fn projects_row_select(
         &mut self,
         project_id: Uuid,
@@ -801,7 +996,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let ordered: Vec<ProjectsRowKey> = self
-            .projects_list_rows(project_id, cx)
+            .projects_list_rows(project_id, key.tab(), cx)
             .iter()
             .filter_map(|row| self.projects_row_key(project_id, row, cx))
             .collect();
@@ -848,6 +1043,8 @@ impl Waku {
     // ----- actions shared by menus, the bulk bar, and the composer -----
 
     /// A draft bound to an existing worktree — the task owns it from there.
+    /// Reachable from the Settings → Git page too, so leave settings before
+    /// landing on the draft.
     fn projects_new_task_in_worktree(
         &mut self,
         project_id: Uuid,
@@ -857,6 +1054,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.settings_page = None;
         self.close_projects_page(cx);
         self.bind_new_draft_to_worktree(
             project_id,
@@ -872,6 +1070,8 @@ impl Waku {
     }
 
     /// A draft whose worktree materializes from `base_ref` at first submit.
+    /// Reachable from the Settings → Git page too, so leave settings before
+    /// landing on the draft.
     fn projects_new_task_on_branch(
         &mut self,
         project_id: Uuid,
@@ -879,6 +1079,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.settings_page = None;
         self.close_projects_page(cx);
         self.create_session_for(project_id, self.state.last_provider, cx);
         self.select_workspace(
@@ -1164,8 +1365,7 @@ impl Waku {
     }
 
     /// Submit the page's composer: a normal task on the page's project whose
-    /// prompt carries the visible context — project, tab, filter, and the
-    /// selected rows. One selected worktree pre-binds the task to it.
+    /// prompt carries the visible context — project, tab, and filter.
     pub(super) fn projects_submit(&mut self, prompt: &str, cx: &mut Context<Self>) {
         if self.projects_page.is_none() {
             return;
@@ -1210,44 +1410,6 @@ impl Waku {
         if !filter.is_empty() {
             context.push_str(&format!("\n- Filter: {filter}"));
         }
-        let mut selected_worktree: Option<(PathBuf, String, Option<String>)> = None;
-        if !state.selection.is_empty() {
-            let mut lines = Vec::new();
-            for key in &state.selection {
-                match key {
-                    ProjectsRowKey::Worktree(path) => {
-                        lines.push(format!("worktree {}", path.display()));
-                    }
-                    ProjectsRowKey::Branch(name) => {
-                        lines.push(format!("branch {name}"));
-                    }
-                }
-            }
-            lines.sort();
-            context.push_str(&format!("\n- Selected: {}", lines.join(", ")));
-        }
-        if state.selected_in(ProjectsTab::Worktrees) == 1
-            && let github::GitHubFetch::Loaded(Some(entries)) = &state.worktrees
-            && let Some(key) = state
-                .selection
-                .iter()
-                .find(|key| matches!(key, ProjectsRowKey::Worktree(_)))
-        {
-            let ProjectsRowKey::Worktree(path) = key else {
-                unreachable!();
-            };
-            if let Some(entry) = entries.iter().find(|entry| entry.path == *path) {
-                selected_worktree = Some((
-                    entry.path.clone(),
-                    entry
-                        .path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    entry.branch.clone(),
-                ));
-            }
-        }
 
         // The stored prompt carries the context block; the bubble keeps the
         // user's own words with the context readable in the same turn.
@@ -1263,25 +1425,8 @@ impl Waku {
         };
         submission.display_content = Some(format!("{context}\n\n{display_body}"));
 
-        if let Some(state) = self.projects_page_states.get_mut(&project_id) {
-            state.selection.clear();
-            state.anchor = None;
-        }
         self.close_projects_page(cx);
         self.create_session_for(project_id, self.state.last_provider, cx);
-        if let Some((path, name, branch)) = selected_worktree
-            && let Some(session_id) = self.state.selected_session
-            && let Some(session) = self.state.session_mut(session_id)
-            && !session.has_started()
-        {
-            session.workspace = SessionWorkspace::Worktree {
-                path,
-                name,
-                branch,
-                base_branch: None,
-            };
-            self.save();
-        }
         let Some(session_id) = self.state.selected_session else {
             return;
         };
@@ -1318,9 +1463,11 @@ impl Waku {
         let Some(state) = self.projects_page_states.get(&project_id) else {
             return div().into_any_element();
         };
-        // A tab whose repo resolved as non-GitHub can't stay selected.
-        let tab = if !github_enabled && state.tab.github_tab().is_some() {
-            ProjectsTab::Worktrees
+        // The page's tabs are the GitHub pair; a non-GitHub repo disables
+        // them but the tab still shows its hint, and a git sub-tab held over
+        // from shared state falls back to Issues.
+        let tab = if state.tab.is_git_tab() {
+            ProjectsTab::Issues
         } else {
             state.tab
         };
@@ -1330,7 +1477,7 @@ impl Waku {
         } else {
             match tab {
                 ProjectsTab::Worktrees | ProjectsTab::Branches => {
-                    self.render_projects_table(project_id, window, cx)
+                    self.render_projects_table(project_id, tab, window, cx)
                 }
                 tab => {
                     let github_tab = tab.github_tab().unwrap_or(github::GitHubTab::PullRequests);
@@ -1371,7 +1518,7 @@ impl Waku {
                         element.child(self.render_projects_toolbar(project_id, tab, cx))
                     })
                     .child(content)
-                    .children(self.render_projects_bulk_bar(project_id, cx))
+                    .children(self.render_projects_bulk_bar(project_id, tab, cx))
                     .child(self.render_projects_composer(project_id, window, cx)),
             )
             .into_any_element()
@@ -1540,25 +1687,29 @@ impl Waku {
                     .bg(theme.inset)
                     .children(ProjectsTab::ALL.into_iter().map(|candidate| {
                         let enabled = github_enabled || candidate.github_tab().is_none();
-                        self.projects_tab_button(project_id, candidate, tab, enabled, &theme, cx)
+                        self.projects_tab_button(project_id, candidate, tab, enabled, false, cx)
                     })),
             )
             .child(div().flex_1())
             .into_any_element()
     }
 
+    /// One segmented-control button. `for_git` swaps the click target to
+    /// the Settings → Git page's `git_tab`; the Projects page drives `tab`.
     fn projects_tab_button(
         &mut self,
         project_id: Uuid,
         candidate: ProjectsTab,
         current: ProjectsTab,
         enabled: bool,
-        theme: &Theme,
+        for_git: bool,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
         let selected = candidate == current;
+        let id_prefix = if for_git { "git-settings" } else { "projects" };
         div()
-            .id(SharedString::from(format!("projects-tab-{candidate:?}")))
+            .id(SharedString::from(format!("{id_prefix}-tab-{candidate:?}")))
             .h(px(20.0))
             .px(px(10.0))
             .rounded(px(5.0))
@@ -1584,7 +1735,11 @@ impl Waku {
             .child(candidate.label())
             .when(enabled, |element| {
                 element.on_click(cx.listener(move |this, _, window, cx| {
-                    this.set_projects_tab(project_id, candidate, window, cx);
+                    if for_git {
+                        this.set_git_tab(project_id, candidate, window, cx);
+                    } else {
+                        this.set_projects_tab(project_id, candidate, window, cx);
+                    }
                 }))
             })
     }
@@ -1708,18 +1863,21 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The Worktrees/Branches table, virtualized over the flattened rows.
-    /// The two per-frame folds — sessions bound per worktree and open PRs
-    /// per head branch — land here so row builders read maps.
+    /// A Worktrees/Branches table, virtualized over `tab`'s flattened
+    /// rows — shared by the Projects page's former tabs and the Settings →
+    /// Git page that hosts them now. The two per-frame folds — sessions
+    /// bound per worktree and open PRs per head branch — land here so row
+    /// builders read maps.
     fn render_projects_table(
         &mut self,
         project_id: Uuid,
+        tab: ProjectsTab,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let (loading, missing) = match self.projects_page_states.get(&project_id) {
-            Some(state) => match state.tab {
+            Some(state) => match tab {
                 ProjectsTab::Worktrees => (
                     matches!(state.worktrees, github::GitHubFetch::Loading),
                     matches!(state.worktrees, github::GitHubFetch::Loaded(None)),
@@ -1732,11 +1890,6 @@ impl Waku {
             },
             None => return div().into_any_element(),
         };
-        let tab = self
-            .projects_page_states
-            .get(&project_id)
-            .map(|state| state.tab)
-            .unwrap_or(ProjectsTab::Worktrees);
         if loading {
             return github::github_centered(
                 icon("icons/loader-circle.svg", 16.0, theme.text_tertiary).into_any_element(),
@@ -1782,7 +1935,7 @@ impl Waku {
             *state.prs_by_head.borrow_mut() = Rc::new(prs_by_head);
         }
 
-        let rows = self.projects_list_rows(project_id, cx);
+        let rows = self.projects_list_rows(project_id, tab, cx);
         if rows.is_empty() {
             let filter_empty = self
                 .projects_page_states
@@ -2587,16 +2740,16 @@ impl Waku {
 
     // ----- bulk bar + composer -----
 
-    /// The selection bar stacked above the composer — only while the active
+    /// The selection bar stacked under the table — only while the shown
     /// tab's row-set has a selection.
     fn render_projects_bulk_bar(
         &mut self,
         project_id: Uuid,
+        tab: ProjectsTab,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
         let state = self.projects_page_states.get(&project_id)?;
-        let tab = state.tab;
         let count = state.selected_in(tab);
         if count == 0 {
             return None;
@@ -2776,7 +2929,7 @@ impl Waku {
         };
         let tab = state.tab;
         let filter = state.filter_text(tab, cx).trim().to_owned();
-        let selected = state.selection.len();
+        let selected = state.selected_in(tab);
         let project_name = self
             .state
             .projects
@@ -2870,6 +3023,140 @@ impl Waku {
             .when(!self.big_picture.is_open(), |element| {
                 element.child(self.render_composer(window, cx))
             })
+            .into_any_element()
+    }
+
+    // ----- Settings → Git page -----
+
+    /// The Settings → Git page: the Worktrees/Branches half of the old
+    /// Projects page — same per-project state, tables, selection, and
+    /// menus — without the docked composer.
+    pub(super) fn render_git_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(project_id) = self.resolve_git_settings_project() else {
+            return github::github_centered(
+                icon("icons/git-branch.svg", 16.0, theme.text_tertiary).into_any_element(),
+                tr!("settings.git_no_projects"),
+                &theme,
+            );
+        };
+        self.projects_ensure_state(project_id, window, cx);
+        if std::mem::take(&mut self.git_page_refresh_pending) {
+            self.projects_refresh(project_id, cx);
+        }
+        let tab = self
+            .projects_page_states
+            .get(&project_id)
+            .map(|state| state.git_tab)
+            .unwrap_or(ProjectsTab::Worktrees);
+        let missing = self.missing_projects.contains(&project_id);
+        let content = if missing {
+            self.render_projects_missing(project_id, cx)
+        } else {
+            self.render_projects_table(project_id, tab, window, cx)
+        };
+
+        div()
+            .key_context("GitSettingsPage")
+            .mt(px(15.0))
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .on_action(cx.listener(Self::select_all_git_rows_action))
+            .on_action(cx.listener(Self::focus_git_filter_action))
+            .on_action(cx.listener(Self::dismiss_git_layer_action))
+            .child(self.render_git_settings_header(project_id, tab, cx))
+            .when(!missing, |element| {
+                element.child(self.render_projects_toolbar(project_id, tab, cx))
+            })
+            .child(content)
+            .children(self.render_projects_bulk_bar(project_id, tab, cx))
+            .into_any_element()
+    }
+
+    /// The Git page's top row: the project selector left of the
+    /// Worktrees/Branches sub-tab strip.
+    fn render_git_settings_header(
+        &mut self,
+        project_id: Uuid,
+        tab: ProjectsTab,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let project_name = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.display_name())
+            .unwrap_or_else(|| tr!("sidebar.unknown_project"));
+        let menu_handle = self.menu_handle("git-settings-project-selector", cx);
+        let selector_open = menu_handle.is_open();
+        let weak = cx.entity().downgrade();
+        let selector = dropdown_menu(
+            MenuChip::new("git-settings-project-selector")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(project_name)
+                .outlined()
+                .selected(selector_open)
+                .max_w(px(220.0))
+                .flex_none(),
+            "git-settings-project-selector-menu",
+            &menu_handle,
+            MenuAlign::BelowLeft,
+            move |cx| {
+                let items = weak
+                    .update(cx, |this, _| {
+                        this.state
+                            .projects
+                            .iter()
+                            .filter(|project| !project.is_projectless())
+                            .map(|project| (project.id, project.display_name()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                items
+                    .into_iter()
+                    .map(|(id, label)| {
+                        let weak = weak.clone();
+                        MenuItem::new(label, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.select_git_settings_project(id, cx);
+                            });
+                        })
+                        .selected(id == project_id)
+                    })
+                    .collect()
+            },
+        );
+
+        div()
+            .flex_none()
+            .w_full()
+            .pb(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(selector)
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.0))
+                    .p(px(2.0))
+                    .bg(theme.inset)
+                    .children(ProjectsTab::GIT_TABS.into_iter().map(|candidate| {
+                        self.projects_tab_button(project_id, candidate, tab, true, true, cx)
+                    })),
+            )
             .into_any_element()
     }
 }

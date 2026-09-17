@@ -527,18 +527,24 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘⇧P opens the Projects page; pressed while open, it starts
         // the recent-project cycle the modifier release commits.
         KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),
-        // ⌘⌥1–4 name the page's tabs; with the page closed the same
+        // ⌘⌥1–2 name the page's tabs; with the page closed the same
         // chords open it straight onto that tab.
         KeyBinding::new("secondary-alt-1", SelectProjectsTab { index: 0 }, None),
         KeyBinding::new("secondary-alt-2", SelectProjectsTab { index: 1 }, None),
-        KeyBinding::new("secondary-alt-3", SelectProjectsTab { index: 2 }, None),
-        KeyBinding::new("secondary-alt-4", SelectProjectsTab { index: 3 }, None),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own
-        // ⌘A and first Escape.
+        // ⌘A and first Escape. The Settings → Git page keeps the same
+        // row set, so it claims the same chords on its own context.
         KeyBinding::new("secondary-a", SelectAllProjectsRows, Some("ProjectsPage")),
         KeyBinding::new("secondary-f", FocusProjectsFilter, Some("ProjectsPage")),
         KeyBinding::new("escape", DismissProjectsLayer, Some("ProjectsPage")),
+        KeyBinding::new(
+            "secondary-a",
+            SelectAllProjectsRows,
+            Some("GitSettingsPage"),
+        ),
+        KeyBinding::new("secondary-f", FocusProjectsFilter, Some("GitSettingsPage")),
+        KeyBinding::new("escape", DismissProjectsLayer, Some("GitSettingsPage")),
         // Step between turn prompts — the navigation rail's
         // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
         // pair works with the composer focused; in the terminal the
