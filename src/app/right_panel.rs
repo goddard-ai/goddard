@@ -4642,6 +4642,17 @@ impl Waku {
                             let current = editor.state.read(cx).content();
                             editor.disk_content = content.clone();
                             editor.dirty = current != content;
+                            // The saved text is now what preview mode would
+                            // read from disk — refresh a cached image from
+                            // these bytes instead of re-reading the file.
+                            if let Some(format) =
+                                image_preview::image_format_for_name(&relative_path)
+                            {
+                                editor.image = Some(Ok(Arc::new(gpui::Image::from_bytes(
+                                    format,
+                                    content.clone().into_bytes(),
+                                ))));
+                            }
                         }
                     }
                     Err(error) => waku.show_toast(tr!(
