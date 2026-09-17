@@ -25,6 +25,7 @@ pub struct TextField {
 }
 
 impl TextField {
+    #[track_caller]
     pub fn new(id: impl Into<ElementId>, input: gpui::Entity<TextInput>) -> Self {
         Self {
             base: div().id(id),

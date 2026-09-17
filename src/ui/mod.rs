@@ -21,6 +21,7 @@ use crate::ui::shortcut::ShortcutHint;
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI
 /// font size setting moves.
+#[track_caller]
 pub fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
     svg()
         .path(path)
@@ -33,6 +34,7 @@ pub fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
 /// A polychrome file icon rendered as an image so the SVG's authored colors
 /// are preserved. GPUI's `svg()` element intentionally renders an alpha mask
 /// tinted with one text color.
+#[track_caller]
 pub fn file_icon(path: &'static str, size: f32) -> Img {
     img(path).w(sp(size)).h(sp(size)).flex_none()
 }
@@ -40,6 +42,7 @@ pub fn file_icon(path: &'static str, size: f32) -> Img {
 /// The brand mark, tinted with the theme accent so it tracks the active
 /// palette. `img()` would keep the SVG's baked coral fill — the default
 /// accent — frozen in every scheme.
+#[track_caller]
 pub fn goddard_logo(theme: &Theme) -> Svg {
     svg()
         .path("icons/goddard-logo.svg")
@@ -51,6 +54,7 @@ pub fn goddard_logo(theme: &Theme) -> Svg {
 
 /// A compact ghost icon button: the only button shape outside the composer's
 /// bespoke send control.
+#[track_caller]
 pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -> Stateful<Div> {
     div()
         .id(id)
@@ -94,6 +98,7 @@ pub struct RemScale {
 }
 
 /// Wrap `child`'s subtree in a [`RemScale`] of `scale`.
+#[track_caller]
 pub fn rem_scale(scale: f32) -> RemScale {
     RemScale { div: div(), scale }
 }
@@ -230,6 +235,7 @@ impl ActivationExt for Stateful<Div> {
 ///
 /// `activate` is ignored while `disabled` is true, but the control remains in
 /// the tab order so a pending operation does not move focus unexpectedly.
+#[track_caller]
 pub fn toggle_switch<E>(
     id: impl Into<ElementId>,
     on: bool,
@@ -337,6 +343,7 @@ pub fn provider_badge(provider: ProviderKind) -> Option<&'static str> {
 /// Prefer this over `icon(provider_icon(..), ..)`: a bare `icon` call silently
 /// drops the badge, which is the only thing distinguishing the two OpenCode
 /// marks at a glance.
+#[track_caller]
 pub fn provider_mark(theme: &Theme, provider: ProviderKind, size: f32, color: Hsla) -> Div {
     let base = div()
         .relative()
@@ -428,6 +435,7 @@ pub struct MenuChip {
 }
 
 impl MenuChip {
+    #[track_caller]
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             base: div().id(id),
@@ -610,6 +618,7 @@ pub struct ProjectNameSelector {
 }
 
 impl ProjectNameSelector {
+    #[track_caller]
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Self {
         Self {
             base: div().id(id),

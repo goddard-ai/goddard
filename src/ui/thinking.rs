@@ -201,6 +201,7 @@ pub fn goddard_thinking(color: Hsla) -> AnyElement {
 
 /// One full-canvas layer, stacked on its siblings and carrying the transform
 /// its nested groups would apply.
+#[track_caller]
 fn layer(path: &'static str, transform: Affine, color: Hsla) -> Svg {
     svg()
         .path(path)

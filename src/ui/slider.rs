@@ -63,6 +63,7 @@ fn value_at(bounds: Bounds<Pixels>, x: Pixels, max: f32) -> f32 {
 /// A focusable slider. Pointer drags move the drawn thumb continuously and
 /// `commit` fires once per gesture, on release, and once per arrow/Home/End
 /// key — so `commit` is where the value is stored, persisted, and previewed.
+#[track_caller]
 pub fn slider<E>(
     id: impl Into<ElementId>,
     state: &Rc<SliderState>,
