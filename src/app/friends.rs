@@ -412,6 +412,11 @@ impl Waku {
             TransferStatus::Pending | TransferStatus::Transferring
         );
         let transfer_id = transfer.id;
+        let session_id = transfer.session_id;
+        let reveal_dir = (transfer.direction == TransferDirection::Incoming
+            && transfer.status == TransferStatus::Done)
+            .then(|| transfer.dest_dir.clone())
+            .flatten();
         div()
             .mt(px(10.0))
             .flex()
@@ -435,6 +440,27 @@ impl Waku {
                             .child(status),
                     ),
             )
+            .when_some(session_id, |element, session_id| {
+                element.child(self.friends_button(
+                    SharedString::from(format!("transfer-open-{transfer_id}")),
+                    tr!("friends.open_chat"),
+                    theme,
+                    move |this, cx| {
+                        this.settings_page = None;
+                        this.select_session(session_id, cx);
+                    },
+                    cx,
+                ))
+            })
+            .when_some(reveal_dir, |element, dir| {
+                element.child(self.friends_button(
+                    SharedString::from(format!("transfer-reveal-{transfer_id}")),
+                    tr!("friends.show_in_finder"),
+                    theme,
+                    move |_, cx| crate::platform::reveal_in_file_manager(&dir, cx),
+                    cx,
+                ))
+            })
             .when(cancellable, |element| {
                 element.child(self.friends_button(
                     SharedString::from(format!("transfer-cancel-{transfer_id}")),

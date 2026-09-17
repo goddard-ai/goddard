@@ -1350,6 +1350,25 @@ impl Waku {
         let Some(state) = latest else {
             return false;
         };
+        // Transfers that gained a session since the last document are fresh
+        // receipts — badge them so the bell offers "go to latest".
+        for transfer in &state.transfers {
+            let had_session = self
+                .friends_state
+                .transfers
+                .iter()
+                .any(|old| old.id == transfer.id && old.session_id.is_some());
+            if !had_session
+                && let Some(session_id) = transfer.session_id
+                && !sidebar::sidebar_session_selected(
+                    self.state.selected_session,
+                    self.pending_session_activation.map(|p| p.session_id),
+                    session_id,
+                )
+            {
+                self.state.unseen_completions.insert(session_id, unix_time());
+            }
+        }
         self.friends_state = state;
         // Presence is lazy — a fresh document is the cheapest place to
         // refresh probe verdicts for the open page.

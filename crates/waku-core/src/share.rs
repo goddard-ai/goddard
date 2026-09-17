@@ -34,6 +34,15 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 /// progress) reach every subscribed client.
 pub type FriendsSink = Arc<dyn Fn(FriendsState) + Send + Sync>;
 
+/// Fired when an incoming transfer finishes and its files are on disk.
+/// The daemon creates the transfer's agent session from this hook and
+/// returns its id, which is recorded on the transfer for clients.
+pub type TransferHook = Arc<dyn Fn(&TransferInfo) -> Option<Uuid> + Send + Sync>;
+
+/// Fired when the share layer changed session/project state — the hub
+/// translates it into a `TaskStateChanged` bump for every client.
+pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
+
 enum ShareCommand {
     SendRequest {
         code: String,
@@ -77,6 +86,8 @@ struct ShareInner {
     pending: HashMap<String, tokio::sync::oneshot::Sender<RequestDecision>>,
     /// ticket string → outgoing transfer id, so `TransferDone` can match.
     outgoing_tickets: HashMap<String, Uuid>,
+    transfer_hook: Option<TransferHook>,
+    task_notifier: Option<TaskNotifier>,
     friend_code: String,
 }
 
@@ -152,6 +163,8 @@ impl ShareService {
                 probes: HashMap::new(),
                 pending: HashMap::new(),
                 outgoing_tickets: HashMap::new(),
+                transfer_hook: None,
+                task_notifier: None,
                 friend_code: String::new(),
             })),
             sink: Arc::new(Mutex::new(None)),
@@ -161,6 +174,17 @@ impl ShareService {
     /// Where the server installs the `FriendsChanged` broadcast.
     pub fn set_sink(&self, sink: FriendsSink) {
         *self.sink.lock() = Some(sink);
+    }
+
+    /// Where the daemon installs session creation for finished incoming
+    /// transfers.
+    pub fn set_transfer_hook(&self, hook: TransferHook) {
+        self.state.lock().transfer_hook = Some(hook);
+    }
+
+    /// Where the server installs the `TaskStateChanged` bump.
+    pub fn set_task_notifier(&self, notifier: TaskNotifier) {
+        self.state.lock().task_notifier = Some(notifier);
     }
 
     /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required.
@@ -360,6 +384,7 @@ fn run_runtime(
                                 bytes_done: 0,
                                 bytes_total: 0,
                                 dest_dir: None,
+                                session_id: None,
                             });
                         }
                         publish(&state, &sink);
@@ -380,7 +405,7 @@ fn run_runtime(
                             anyhow::Ok(dest_dir)
                         }
                         .await;
-                        {
+                        let (hook, notifier) = {
                             let mut s = state.lock();
                             if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
                                 match result {
@@ -390,6 +415,27 @@ fn run_runtime(
                                     }
                                     Err(_) => t.status = TransferStatus::Failed,
                                 }
+                            }
+                            let transfer = s.transfers.iter().find(|t| t.id == id).cloned();
+                            (
+                                transfer.filter(|t| t.status == TransferStatus::Done).zip(
+                                    s.transfer_hook.clone(),
+                                ),
+                                s.task_notifier.clone(),
+                            )
+                        };
+                        if let Some((transfer, hook)) = hook {
+                            let session_id = hook(&transfer);
+                            if let Some(session_id) = session_id {
+                                let mut s = state.lock();
+                                if let Some(t) =
+                                    s.transfers.iter_mut().find(|t| t.id == id)
+                                {
+                                    t.session_id = Some(session_id);
+                                }
+                            }
+                            if let Some(notifier) = notifier {
+                                notifier();
                             }
                         }
                         publish(&state, &sink);
@@ -553,6 +599,7 @@ fn run_runtime(
                                 bytes_done: 0,
                                 bytes_total: 0,
                                 dest_dir: None,
+                                session_id: None,
                             });
                         }
                         publish(&state, &sink);

@@ -92,6 +92,10 @@ pub trait Backend: Send + Sync + 'static {
     /// Where async friend/share events are delivered once the hub exists —
     /// `serve` installs this before accepting connections.
     fn set_friends_sink(&self, _sink: crate::share::FriendsSink) {}
+
+    /// Where the share layer reports session-catalog mutations (a transfer
+    /// session materialized outside any client request).
+    fn set_task_state_sink(&self, _sink: crate::share::TaskNotifier) {}
 }
 
 #[derive(Clone)]
@@ -658,6 +662,10 @@ pub fn serve(
     {
         let hub = hub.clone();
         backend.set_friends_sink(Arc::new(move |state| hub.friends_changed(state)));
+    }
+    {
+        let hub = hub.clone();
+        backend.set_task_state_sink(Arc::new(move || hub.task_state_changed(u64::MAX)));
     }
     let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
     let options = Arc::new(options);

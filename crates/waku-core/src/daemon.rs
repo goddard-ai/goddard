@@ -20,7 +20,7 @@ use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
-    Project, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace,
+    Project, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -126,9 +126,23 @@ impl WakuBackend {
             daemon_address: Mutex::new(None),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            share: crate::share::ShareService::new(share_dir, our_name),
+            share: crate::share::ShareService::new(share_dir.clone(), our_name),
         };
         backend.purge_expired_archived_sessions();
+        {
+            let task_state = backend.task_state.clone();
+            let task_store = backend.task_store.clone();
+            let share_dir = share_dir.clone();
+            backend.share.set_transfer_hook(Arc::new(move |transfer| {
+                match create_transfer_session(&task_state, &task_store, &share_dir, transfer) {
+                    Ok(session_id) => Some(session_id),
+                    Err(error) => {
+                        eprintln!("could not create transfer session: {error:#}");
+                        None
+                    }
+                }
+            }));
+        }
         Ok(backend)
     }
 
@@ -362,6 +376,63 @@ fn migrate_projectless_state(
     Ok(())
 }
 
+/// Materialize a transfer's agent session: a task under the synthetic
+/// "Friends" project whose first message is the receipt — peer, title,
+/// sender note, and where the files landed. The session stays quarantined
+/// (idle, no turn started) until the user chooses to trust it.
+fn create_transfer_session(
+    task_state: &Arc<Mutex<PersistedState>>,
+    task_store: &Arc<StateStore>,
+    share_dir: &Path,
+    transfer: &waku_protocol::friends::TransferInfo,
+) -> anyhow::Result<Uuid> {
+    let Some(dest_dir) = &transfer.dest_dir else {
+        bail!("incoming transfer completed without a destination");
+    };
+    let mut state = task_state.lock();
+    let project_id = match state
+        .projects
+        .iter()
+        .find(|project| project.path == share_dir)
+        .map(|project| project.id)
+    {
+        Some(id) => id,
+        None => {
+            let mut project = Project::from_path(share_dir.to_path_buf());
+            project.name = "Friends".to_owned();
+            let id = project.id;
+            state.projects.push(project);
+            id
+        }
+    };
+    let mut session = AgentSession::new(project_id, ProviderKind::Claude);
+    session.title = format!("{} from {}", transfer.title, transfer.peer_name);
+    let mut receipt = format!(
+        "{} sent you \"{}\".",
+        transfer.peer_name, transfer.title
+    );
+    if let Some(note) = transfer.note.as_deref().filter(|note| !note.is_empty()) {
+        receipt.push_str(&format!("\n\n{note}"));
+    }
+    receipt.push_str(&format!(
+        "\n\nFiles are in {}\n\nThe files have not been opened or executed — decide whether you trust them before asking me to work with them.",
+        dest_dir.display()
+    ));
+    session.adopt_submitted_prompt(&receipt, Uuid::new_v4(), Uuid::new_v4(), None, false);
+    // The receipt is a notification, not a turn awaiting a reply — close it
+    // out so the session renders Idle instead of an eternal spinner.
+    let now = crate::model::unix_time();
+    if let Some(turn) = session.turns.last_mut() {
+        turn.status = TurnStatus::Completed;
+        turn.completed_at = Some(now);
+    }
+    session.status = SessionStatus::Idle;
+    let session_id = session.id;
+    state.push_session(session);
+    task_store.save(&mut state)?;
+    Ok(session_id)
+}
+
 impl Backend for WakuBackend {
     fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
         self.agent.resolve(token)
@@ -369,6 +440,10 @@ impl Backend for WakuBackend {
 
     fn set_friends_sink(&self, sink: crate::share::FriendsSink) {
         self.share.set_sink(sink);
+    }
+
+    fn set_task_state_sink(&self, sink: crate::share::TaskNotifier) {
+        self.share.set_task_notifier(sink);
     }
 
     fn handle(

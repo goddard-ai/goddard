@@ -3389,3 +3389,7 @@ friends.status_failed:
   en: Failed
 friends.status_cancelled:
   en: Cancelled
+friends.open_chat:
+  en: Open chat
+friends.show_in_finder:
+  en: Show in Finder

@@ -64,6 +64,10 @@ pub struct TransferInfo {
     /// Where received files landed (incoming transfers only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dest_dir: Option<PathBuf>,
+    /// The agent session the daemon materialized for a completed incoming
+    /// transfer — clients reopen it from transfer history and badge it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
