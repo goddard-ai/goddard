@@ -12,8 +12,9 @@ use gpui::{
     Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, ClipboardEntry, ClipboardItem,
     Context, Div, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, FontWeight,
     HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit,
-    PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful, StyleRefinement,
+    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
+    ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful,
+    StyleRefinement,
     TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div, ease_out_quint, fill, font,
     img, linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
 };

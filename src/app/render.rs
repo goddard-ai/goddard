@@ -593,10 +593,12 @@ impl Render for Waku {
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
             .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
-            // Type-to-focus: the last listener on every dispatch path through
-            // the workspace, so an unclaimed printable keystroke from a
-            // focused descendant — or from nothing, on platforms where this
-            // div is the dispatch root — lands in the composer.
+            // Enter-to-continue and type-to-focus are the last listeners on
+            // every dispatch path through the workspace: an unclaimed
+            // keystroke from a focused descendant — or from nothing, on
+            // platforms where this div is the dispatch root — either fires
+            // the stopped-turn Continue or lands in the composer.
+            .on_key_down(cx.listener(Self::enter_to_continue))
             .on_key_down(cx.listener(Self::type_to_focus_composer))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))

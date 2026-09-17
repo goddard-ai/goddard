@@ -39,6 +39,23 @@ pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
         .filter(|text| text.chars().all(|character| !character.is_control()))
 }
 
+/// Contexts that tell a root-level key listener the keystroke is spoken for:
+/// a text surface — or a surface that consumes keystrokes itself — already
+/// holds focus. "TextInput" covers every field in the app; the rest are
+/// focused panes whose typing is not the composer's to take.
+const TYPING_OWNED_CONTEXTS: &[&str] = &[
+    "TextInput",
+    "Terminal",
+    "Browser",
+    "BrowserAddress",
+    "WakuMenu",
+    "CommandPalette",
+    "TaskSwitcher",
+    "ProjectSwitcher",
+    "FindBar",
+    "FileEditorPane",
+];
+
 /// How selection moves once an archived session's row departs. A sidebar-row
 /// archive tries the not-busy neighbor that slid into the row's slot before
 /// the unread fallback; ⌘⇧A goes straight to the shared next-unread scan.
@@ -1901,22 +1918,6 @@ impl Waku {
         {
             return;
         }
-        // A text surface — or a surface that consumes keystrokes itself —
-        // already holds focus, so the keystroke is spoken for. "TextInput"
-        // covers every field in the app; the rest are focused panes whose
-        // typing is not the composer's to take.
-        const TYPING_OWNED_CONTEXTS: &[&str] = &[
-            "TextInput",
-            "Terminal",
-            "Browser",
-            "BrowserAddress",
-            "WakuMenu",
-            "CommandPalette",
-            "TaskSwitcher",
-            "ProjectSwitcher",
-            "FindBar",
-            "FileEditorPane",
-        ];
         if window.context_stack().iter().any(|context| {
             TYPING_OWNED_CONTEXTS
                 .iter()
@@ -1929,6 +1930,78 @@ impl Waku {
         let text = text.to_owned();
         self.composer
             .update(cx, |composer, cx| composer.insert_text(&text, cx));
+        cx.stop_propagation();
+    }
+
+    /// Enter outside the composer. The field's own binding claims it while
+    /// the composer is focused, and a focused control that activates on Enter
+    /// — a transcript button, a rail item — stops it earlier in the bubble.
+    /// What arrives here is a keystroke nobody wanted, so when the submit
+    /// affordance is the stopped-turn Continue, Enter fires it exactly like
+    /// the play button. A draft keeps Enter dead: the affordance would be
+    /// Send, and submitting a draft the user may not be looking at is the
+    /// one thing this keystroke must not do.
+    pub(super) fn enter_to_continue(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.key != "enter" || event.keystroke.modifiers != Modifiers::none() {
+            return;
+        }
+        // The same reach as type-to-focus: a surface that owns its keys — or
+        // an overlay whose focus has not landed yet — is not the composer's
+        // to take over. Big Picture and an open message edit own Enter for
+        // their own layers too.
+        if self.selected_project().is_none()
+            || self.settings_page.is_some()
+            || self.selected_terminal.is_some()
+            || self.projects_page.is_some()
+            || self.big_picture.is_open()
+            || self.message_edit.is_some()
+        {
+            return;
+        }
+        if self.command_palette.is_open()
+            || self.task_switcher.is_open()
+            || self.project_switcher.is_open()
+            || self.commit_dialog.is_some()
+            || self.archive_dialog.is_some()
+            || self.shortcuts_dialog.is_some()
+            || self.goal_dialog.is_some()
+            || self.image_preview.is_some()
+            || self.menus.borrow().values().any(|menu| menu.is_open())
+        {
+            return;
+        }
+        if window.context_stack().iter().any(|context| {
+            TYPING_OWNED_CONTEXTS
+                .iter()
+                .any(|owned| context.contains(owned))
+        }) {
+            return;
+        }
+        let session = self.composer_session();
+        let preparing = session.is_some_and(|session| {
+            self.submission_preparations.contains(&session.id)
+                || self.response_fork_preparations.contains_key(&session.id)
+        });
+        let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
+            || !self.composer_attachments.is_empty()
+            || !self.composer_pasted_blocks.is_empty()
+            || !self
+                .transcript_selection
+                .annotations
+                .borrow()
+                .items
+                .is_empty();
+        if composer::composer_submit_action(session, preparing, has_draft)
+            != composer::ComposerSubmitAction::Continue
+        {
+            return;
+        }
+        self.continue_interrupted_session(cx);
         cx.stop_propagation();
     }
 
