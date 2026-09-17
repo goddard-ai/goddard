@@ -25,16 +25,16 @@ else
     IFS= read -r cached_identity < "$debug_identity_cache" || cached_identity=""
     if [ -n "$cached_identity" ]; then
       codesign_identity=$(security find-identity -v -p codesigning 2>/dev/null \
-        | awk -v identity="$cached_identity" 'index($0, identity) { print $2; exit }')
+        | awk -v identity="$cached_identity" '!/CSSMERR/ && index($0, identity) { print $2; exit }')
     fi
   fi
   if [ -z "$codesign_identity" ]; then
     codesign_identity=$(security find-identity -v -p codesigning 2>/dev/null \
-      | awk -v identity="$preferred_identity" 'index($0, "\"" identity) { print $2; exit }')
+      | awk -v identity="$preferred_identity" '!/CSSMERR/ && index($0, "\"" identity) { print $2; exit }')
   fi
   if [ -z "$codesign_identity" ]; then
     codesign_identity=$(security find-identity -v -p codesigning 2>/dev/null \
-      | awk -v identity="$fallback_identity" 'index($0, "\"" identity) { print $2; exit }')
+      | awk -v identity="$fallback_identity" '!/CSSMERR/ && index($0, "\"" identity) { print $2; exit }')
   fi
   if [ -z "$codesign_identity" ]; then
     codesign_identity="-"
