@@ -7,7 +7,7 @@ use std::io::Write as _;
 use std::sync::Arc;
 
 use iroh::RelayMode;
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 use waku_share::friends::{
     FriendStore, FriendsProtocol, OfferInfo, RequestDecision, send_friend_request,
 };
@@ -88,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
                         let bob_ep_holder = bob_ep_holder.clone();
                         let bob_dir = bob_dir.clone();
                         tokio::spawn(async move {
-                            let bob = bob_ep_holder.lock().await.clone().unwrap();
+                            let bob = bob_ep_holder.lock().clone().unwrap();
                             let ticket: Ticket = offer.ticket.parse().expect("bad ticket");
                             eprintln!("bob: fetching {}", ticket.hash());
                             let hash = match bob.fetch(&ticket).await {
@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             eprintln!("bob: fetched {hash}");
-                            let dest = bob_dir.join("files").join("hello.txt");
+                            let dest = bob_dir.join("files").join(&offer.file_name);
                             bob.export(hash, &dest).await.expect("export failed");
                             eprintln!("bob: exported, notifying done");
                             match waku_share::friends::notify_transfer_done(
@@ -121,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?,
     );
-    *bob_ep_holder.lock().await = Some(bob.clone());
+    *bob_ep_holder.lock() = Some(bob.clone());
 
     // ---- friend handshake --------------------------------------------------
     let bob_addr = bob.addr();
@@ -131,8 +131,8 @@ async fn main() -> anyhow::Result<()> {
     let their_name =
         send_friend_request(alice.endpoint(), bob_addr, "alice", &alice_store).await?;
     println!("alice friended: {their_name}");
-    assert!(alice_store.lock().await.is_friend(&bob.addr().id));
-    assert!(bob_store.lock().await.is_friend(&alice.addr().id));
+    assert!(alice_store.lock().is_friend(&bob.addr().id));
+    assert!(bob_store.lock().is_friend(&alice.addr().id));
     println!("both sides recorded the friendship — OK");
 
     // ---- offer → auto-fetch → done ------------------------------------------
@@ -141,6 +141,7 @@ async fn main() -> anyhow::Result<()> {
         alice.endpoint(),
         bob.addr(),
         "alice",
+        "hello.txt",
         Some("here's the new mockups".into()),
         &ticket.to_string(),
     )

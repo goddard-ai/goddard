@@ -61,6 +61,7 @@ pub mod projectless;
 pub mod pull_requests;
 pub mod repo;
 pub mod settings;
+pub mod share;
 pub mod shell_command;
 pub mod skills;
 mod slash_command_catalog;

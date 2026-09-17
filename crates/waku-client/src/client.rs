@@ -35,6 +35,7 @@ struct ClientInner {
     pending_events: Mutex<HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>>,
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
     settings_subscribers: Mutex<Vec<Sender<DaemonSettings>>>,
+    friends_subscribers: Mutex<Vec<Sender<waku_protocol::friends::FriendsState>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -112,6 +113,7 @@ impl DaemonClient {
             pending_events: Mutex::new(HashMap::new()),
             task_state_subscribers: Mutex::new(Vec::new()),
             settings_subscribers: Mutex::new(Vec::new()),
+            friends_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -209,6 +211,14 @@ impl DaemonClient {
     pub fn subscribe_settings(&self) -> Receiver<DaemonSettings> {
         let (events, receiver) = unbounded();
         self.inner.settings_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// Every `friendsChanged` the daemon broadcasts — requests, offers,
+    /// transfer progress — lands here as the authoritative document.
+    pub fn subscribe_friends(&self) -> Receiver<waku_protocol::friends::FriendsState> {
+        let (events, receiver) = unbounded();
+        self.inner.friends_subscribers.lock().push(events);
         receiver
     }
 
@@ -388,6 +398,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(settings.clone()).is_ok());
                     }
+                    ServerMessage::FriendsChanged { state } => {
+                        inner
+                            .friends_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send(state.clone()).is_ok());
+                    }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
                 }
@@ -422,6 +438,7 @@ fn fail_connection(inner: &ClientInner) {
     drop(std::mem::take(&mut *inner.sessions.lock()));
     inner.task_state_subscribers.lock().clear();
     inner.settings_subscribers.lock().clear();
+    inner.friends_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

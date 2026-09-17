@@ -75,6 +75,9 @@ pub struct WakuBackend {
     daemon_address: Mutex<Option<String>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
+    /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
+    /// friends command so tests and headless runs pay nothing.
+    share: crate::share::ShareService,
 }
 
 impl WakuBackend {
@@ -96,6 +99,15 @@ impl WakuBackend {
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_owned();
+        let share_dir = task_store
+            .path()
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("share");
+        let our_name = std::env::var("USER")
+            .ok()
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Goddard".to_owned());
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             terminals: Mutex::new(HashMap::new()),
@@ -114,6 +126,7 @@ impl WakuBackend {
             daemon_address: Mutex::new(None),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            share: crate::share::ShareService::new(share_dir, our_name),
         };
         backend.purge_expired_archived_sessions();
         Ok(backend)
@@ -354,6 +367,10 @@ impl Backend for WakuBackend {
         self.agent.resolve(token)
     }
 
+    fn set_friends_sink(&self, sink: crate::share::FriendsSink) {
+        self.share.set_sink(sink);
+    }
+
     fn handle(
         &self,
         request: Request,
@@ -379,6 +396,37 @@ impl Backend for WakuBackend {
             Command::GetSettings => Ok(ResponsePayload::Settings {
                 settings: self.settings.get(),
             }),
+            Command::GetFriends => Ok(ResponsePayload::Friends {
+                state: self.share.state(),
+            }),
+            Command::SendFriendRequest { code, name } => {
+                self.share.send_friend_request(code, name)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RespondFriendRequest { node_id, accept } => {
+                self.share.respond_friend_request(node_id, accept)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RemoveFriend { node_id } => {
+                self.share.remove_friend(node_id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SendFileToFriend {
+                node_id,
+                path,
+                note,
+            } => {
+                self.share.send_file(node_id, path, note)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::CancelTransfer { transfer_id } => {
+                self.share.cancel_transfer(transfer_id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::ProbeFriend { node_id } => {
+                self.share.probe_friend(node_id)?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
                 events.settings_changed(self.settings.get());
@@ -1075,6 +1123,7 @@ impl Backend for WakuBackend {
         self.agent.clear();
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);
+        self.share.shutdown();
     }
 }
 
@@ -2667,7 +2716,14 @@ fn handle_driver_command(
         | Command::AgentPrompt { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }
-        | Command::ListCustomCommands => {
+        | Command::ListCustomCommands
+        | Command::GetFriends
+        | Command::SendFriendRequest { .. }
+        | Command::RespondFriendRequest { .. }
+        | Command::RemoveFriend { .. }
+        | Command::SendFileToFriend { .. }
+        | Command::CancelTransfer { .. }
+        | Command::ProbeFriend { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

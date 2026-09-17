@@ -14,7 +14,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId};
 use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 
 /// ALPN for the friends control channel (friend requests, transfer offers).
 /// Bumped on breaking wire changes; v0.
@@ -98,7 +98,10 @@ pub enum FriendsMessage {
     /// File offer — filled in by the transfer step. `ticket` is a
     /// sendme-compatible blob ticket string; `note` is the sender's message.
     Offer {
+        /// Sender's display name.
         name: String,
+        /// File or folder name being offered.
+        file_name: String,
         note: Option<String>,
         ticket: String,
     },
@@ -135,6 +138,7 @@ pub type RequestHandler = Arc<
 pub struct OfferInfo {
     pub from: EndpointId,
     pub name: String,
+    pub file_name: String,
     pub note: Option<String>,
     pub ticket: String,
 }
@@ -205,7 +209,7 @@ impl ProtocolHandler for FriendsProtocol {
                 let reply = match decision {
                     RequestDecision::Accept { our_name } => {
                         {
-                            let mut store = self.store.lock().await;
+                            let mut store = self.store.lock();
                             store.friends.insert(
                                 remote,
                                 Friend {
@@ -225,9 +229,9 @@ impl ProtocolHandler for FriendsProtocol {
                 write_message(&mut send, &reply).await.map_err(accept_err)?;
                 send.finish()?;
             }
-            FriendsMessage::Offer { name, note, ticket } => {
+            FriendsMessage::Offer { name, file_name, note, ticket } => {
                 let is_friend = {
-                    let mut store = self.store.lock().await;
+                    let mut store = self.store.lock();
                     let is_friend = store.is_friend(&remote);
                     if is_friend {
                         store.mark_seen(&remote);
@@ -239,6 +243,7 @@ impl ProtocolHandler for FriendsProtocol {
                     (self.on_offer)(OfferInfo {
                         from: remote,
                         name,
+                        file_name,
                         note,
                         ticket,
                     });
@@ -260,7 +265,7 @@ impl ProtocolHandler for FriendsProtocol {
             }
             FriendsMessage::TransferDone { ticket } => {
                 {
-                    let mut store = self.store.lock().await;
+                    let mut store = self.store.lock();
                     store.mark_seen(&remote);
                     let _ = store.save();
                 }
@@ -306,7 +311,7 @@ pub async fn send_friend_request(
     conn.close(0u32.into(), b"done");
     match reply? {
         FriendsMessage::FriendAccept { name } => {
-            let mut store = store.lock().await;
+            let mut store = store.lock();
             store.friends.insert(
                 remote,
                 Friend {
@@ -331,6 +336,7 @@ pub async fn send_offer(
     endpoint: &Endpoint,
     addr: impl Into<EndpointAddr>,
     our_name: &str,
+    file_name: &str,
     note: Option<String>,
     ticket: &str,
 ) -> anyhow::Result<()> {
@@ -340,6 +346,7 @@ pub async fn send_offer(
         &mut send,
         &FriendsMessage::Offer {
             name: our_name.to_string(),
+            file_name: file_name.to_string(),
             note,
             ticket: ticket.to_string(),
         },

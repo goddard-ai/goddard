@@ -66,14 +66,14 @@ pub struct TransferInfo {
     pub dest_dir: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum TransferDirection {
     Outgoing,
     Incoming,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum TransferStatus {
     /// Offer sent / received, fetch not yet flowing.

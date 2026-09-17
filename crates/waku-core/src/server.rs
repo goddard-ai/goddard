@@ -88,6 +88,10 @@ pub trait Backend: Send + Sync + 'static {
     ) -> anyhow::Result<ResponsePayload>;
 
     fn shutdown(&self) {}
+
+    /// Where async friend/share events are delivered once the hub exists —
+    /// `serve` installs this before accepting connections.
+    fn set_friends_sink(&self, _sink: crate::share::FriendsSink) {}
 }
 
 #[derive(Clone)]
@@ -458,6 +462,18 @@ impl Hub {
         );
     }
 
+    /// The friends document changed outside any request — an incoming
+    /// friend request, an offer, a finished transfer. Broadcast to every
+    /// subscriber; there is no initiator to skip.
+    fn friends_changed(&self, state: waku_protocol::friends::FriendsState) {
+        let mut hub_state = self.state.lock();
+        Self::broadcast(
+            &mut hub_state,
+            &ServerMessage::FriendsChanged { state },
+            None,
+        );
+    }
+
     fn cached_response(&self, request_id: Uuid) -> Option<ResponseOutcome> {
         self.state
             .lock()
@@ -639,6 +655,10 @@ pub fn serve(
         .set_nonblocking(true)
         .context("could not configure Goddard daemon listener")?;
     let hub = Arc::new(Hub::default());
+    {
+        let hub = hub.clone();
+        backend.set_friends_sink(Arc::new(move |state| hub.friends_changed(state)));
+    }
     let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
     let options = Arc::new(options);
     let active_connections = Arc::new(AtomicUsize::new(0));

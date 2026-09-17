@@ -9,10 +9,12 @@
 pub mod friends;
 pub mod identity;
 
+pub use iroh::{EndpointId, RelayMode};
+
 use std::path::Path;
 
 use anyhow::{Context as _, bail};
-use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
+use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
 use iroh::protocol::Router;
 use iroh_blobs::{
     BlobFormat, BlobsProtocol, Hash,

@@ -10763,6 +10763,7 @@ dependencies = [
  "uuid",
  "waku-client",
  "waku-protocol",
+ "waku-share",
  "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
@@ -10804,6 +10805,7 @@ dependencies = [
  "iroh",
  "iroh-blobs",
  "n0-future",
+ "parking_lot",
  "serde",
  "serde_json",
  "tokio",
