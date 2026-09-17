@@ -1452,3 +1452,15 @@ a11y.task_name: 任务名称
 a11y.task_description: 任务描述
 a11y.answer: 你的回答
 a11y.comment: 评论
+keybind.category.projects: 项目
+keybind.category.git: Git
+keybind.category.skills: 技能
+keybind.category.other: 其他
+keybind.command.sidebar_task: "选择侧边栏任务 %{n}"
+keybind.command.projects_tab: "选择项目标签 %{n}"
+keybind.command.bigpicture_card: "选择概览卡片 %{n}"
+keybind.command.run_command: 在终端中运行命令
+keybind.reason.text_entry: 核心文本输入 — 此版本不可重映射
+keybind.reason.modal_nav: 内置列表导航 — 此版本不可重映射
+keybind.reason.hand_rolled: 由终端直接处理 — 不可重映射
+shortcuts.projects_page: 项目

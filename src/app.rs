@@ -2579,6 +2579,24 @@ pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow, format_time_ago, mix_str};
 pub use skills_page::init as init_skills_keys;
+
+// Re-exported for the keybinding catalog (`crate::keybindings`), which needs
+// every dispatchable action by path without making each module public.
+pub use archive_dialog::{ConfirmArchiveDialog, DismissArchiveDialog};
+pub use big_picture::{
+    BigPictureConfirm, BigPictureLeft, BigPictureRight, DismissBigPicture, SelectBigPictureCard,
+};
+pub use command_palette::{
+    Confirm, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown, SelectPageUp,
+    SelectPrevious,
+};
+pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog};
+pub use git_panel::{DismissGitPanelModal, GitPanelPrimaryAction};
+pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
+pub use image_preview::DismissImagePreview;
+pub use settings::{FocusNext, FocusPrevious};
+pub use shortcuts_dialog::DismissShortcutsDialog;
+pub use sidebar::CancelSessionRename;
 use streaming::*;
 use terminals::TerminalRecord;
 use transcript::*;

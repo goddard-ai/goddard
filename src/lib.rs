@@ -39,6 +39,7 @@ pub mod daemon;
 mod driver;
 mod fonts;
 mod input;
+mod keybindings;
 mod md;
 mod platform;
 mod query;

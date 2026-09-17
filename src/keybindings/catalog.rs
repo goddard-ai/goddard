@@ -1,0 +1,682 @@
+//! The authored catalog: one [`CommandDescriptor`] per command and a flat
+//! [`CatalogEntry`] list in exact registration order.
+//!
+//! Registration order is precedence order in GPUI's keymap, so `ENTRIES` is
+//! laid out to mirror the init sequence in `crate::run` — `input::init`,
+//! `ui::menu::init`, the `app::init_*_keys` calls in their call order, then
+//! `crate::bind_keys`. The parity test compares the generated keymap against
+//! the hand-written registrations before the catalog takes over.
+
+use gpui::{Action, SharedString};
+
+use super::{CommandCategory, CommandId, Editability};
+
+/// One command: stable id, action constructor, display metadata.
+pub struct CommandDescriptor {
+    pub id: CommandId,
+    /// Builds the action value this command dispatches. Parameterized
+    /// actions (per-index, per-direction) are separate commands.
+    pub action: fn() -> Box<dyn Action>,
+    /// i18n key for the row title.
+    pub title_key: &'static str,
+    /// When set, `title_key` is interpolated with `{n}` = this + 1 — the
+    /// numbered commands (sidebar tasks, project tabs, cards).
+    pub title_index: Option<usize>,
+    pub category: CommandCategory,
+    pub editability: Editability,
+    /// For gestures the keymap can't express, the authored chord text shown
+    /// instead of resolved bindings (e.g. `"⇧⌘K"`).
+    pub builtin_label: Option<&'static str>,
+}
+
+/// One default binding registration, in keymap precedence order.
+pub struct CatalogEntry {
+    pub command: CommandId,
+    pub platform: PlatformSet,
+    /// GPUI keystroke syntax; space separates chord strokes.
+    pub sequence: &'static str,
+    /// Context predicate source, exactly as `KeyBinding::new` receives it.
+    pub context: Option<&'static str>,
+}
+
+/// Which platforms a default binding applies to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlatformSet {
+    All,
+    MacOS,
+    NotMacOS,
+}
+
+impl PlatformSet {
+    /// The set this build compiles for.
+    pub const CURRENT: Self = if cfg!(target_os = "macos") {
+        Self::MacOS
+    } else {
+        Self::NotMacOS
+    };
+
+    pub fn applies(self, platform: PlatformSet) -> bool {
+        match (self, platform) {
+            (Self::All, _) => true,
+            (Self::MacOS, Self::MacOS) => true,
+            (Self::NotMacOS, Self::NotMacOS) => true,
+            _ => false,
+        }
+    }
+
+    /// `true` when this binding is active on the platform being run.
+    pub fn is_current(self) -> bool {
+        self.applies(Self::CURRENT)
+    }
+}
+
+const EDITABLE: Editability = Editability::Editable;
+/// Bare-key bindings in a context that contains text entry — capturing a
+/// replacement there would fight typing, so v1 shows them locked.
+const TEXT_ENTRY: Editability = Editability::Locked {
+    reason_key: "keybind.reason.text_entry",
+};
+/// Modal/list navigation: real bindings, but rebinding arrows and escapes
+/// inside pickers is a trap for almost no gain in v1.
+const MODAL_NAV: Editability = Editability::Locked {
+    reason_key: "keybind.reason.modal_nav",
+};
+/// Hand-rolled outside the GPUI keymap entirely.
+const HAND_ROLLED: Editability = Editability::BuiltIn {
+    reason_key: "keybind.reason.hand_rolled",
+};
+
+fn title(descriptor: &CommandDescriptor) -> SharedString {
+    match descriptor.title_index {
+        Some(index) => tr!(descriptor.title_key, n = index + 1).into(),
+        None => tr!(descriptor.title_key).into(),
+    }
+}
+
+impl CommandDescriptor {
+    /// Resolved display title in the active locale.
+    pub fn title(&self) -> SharedString {
+        title(self)
+    }
+}
+
+use CommandCategory as C;
+
+pub static COMMANDS: &[CommandDescriptor] = &[
+    CommandDescriptor { id: "text.backspace", action: || Box::new(crate::input::Backspace), title_key: "shortcuts.delete_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_forward", action: || Box::new(crate::input::Delete), title_key: "shortcuts.delete_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_word_back", action: || Box::new(crate::input::DeleteToPreviousWord), title_key: "shortcuts.delete_word_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_word_forward", action: || Box::new(crate::input::DeleteToNextWord), title_key: "shortcuts.delete_word_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.left", action: || Box::new(crate::input::Left), title_key: "shortcuts.move_left", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.right", action: || Box::new(crate::input::Right), title_key: "shortcuts.move_right", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.up", action: || Box::new(crate::input::Up), title_key: "shortcuts.move_up", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.down", action: || Box::new(crate::input::Down), title_key: "shortcuts.move_down", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_left", action: || Box::new(crate::input::SelectLeft), title_key: "shortcuts.select_left", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_right", action: || Box::new(crate::input::SelectRight), title_key: "shortcuts.select_right", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_up", action: || Box::new(crate::input::SelectUp), title_key: "shortcuts.select_up", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_down", action: || Box::new(crate::input::SelectDown), title_key: "shortcuts.select_down", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_all", action: || Box::new(crate::input::SelectAll), title_key: "menu.select_all", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.paste", action: || Box::new(crate::input::Paste), title_key: "menu.paste", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.copy", action: || Box::new(crate::input::Copy), title_key: "menu.copy", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.cut", action: || Box::new(crate::input::Cut), title_key: "menu.cut", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.undo", action: || Box::new(crate::input::Undo), title_key: "menu.undo", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.redo", action: || Box::new(crate::input::Redo), title_key: "menu.redo", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.enter", action: || Box::new(crate::input::Enter), title_key: "shortcuts.submit", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.newline", action: || Box::new(crate::input::Newline), title_key: "shortcuts.newline", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.submit_steer", action: || Box::new(crate::input::SubmitSteer), title_key: "shortcuts.steer", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.clear", action: || Box::new(crate::input::Clear), title_key: "shortcuts.clear_field", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.home", action: || Box::new(crate::input::Home), title_key: "shortcuts.doc_start", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.end", action: || Box::new(crate::input::End), title_key: "shortcuts.doc_end", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.line_start", action: || Box::new(crate::input::LineStart), title_key: "shortcuts.line_start", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.line_end", action: || Box::new(crate::input::LineEnd), title_key: "shortcuts.line_end", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.paragraph_start", action: || Box::new(crate::input::ParagraphStart), title_key: "shortcuts.paragraph_start", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.paragraph_end", action: || Box::new(crate::input::ParagraphEnd), title_key: "shortcuts.paragraph_end", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.paragraph_back", action: || Box::new(crate::input::ParagraphBackward), title_key: "shortcuts.paragraph_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.paragraph_forward", action: || Box::new(crate::input::ParagraphForward), title_key: "shortcuts.paragraph_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.word_back", action: || Box::new(crate::input::MoveToPreviousWord), title_key: "shortcuts.word_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.word_forward", action: || Box::new(crate::input::MoveToNextWord), title_key: "shortcuts.word_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_to_start", action: || Box::new(crate::input::SelectToStart), title_key: "shortcuts.select_doc_start", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_to_end", action: || Box::new(crate::input::SelectToEnd), title_key: "shortcuts.select_doc_end", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_line_start", action: || Box::new(crate::input::SelectToLineStart), title_key: "shortcuts.select_line_start", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_line_end", action: || Box::new(crate::input::SelectToLineEnd), title_key: "shortcuts.select_line_end", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_paragraph_start", action: || Box::new(crate::input::SelectToParagraphStart), title_key: "shortcuts.select_paragraph_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_paragraph_end", action: || Box::new(crate::input::SelectToParagraphEnd), title_key: "shortcuts.select_paragraph_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_paragraph_back", action: || Box::new(crate::input::SelectParagraphBackward), title_key: "shortcuts.select_paragraph_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_paragraph_forward", action: || Box::new(crate::input::SelectParagraphForward), title_key: "shortcuts.select_paragraph_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_word_back", action: || Box::new(crate::input::SelectToPreviousWord), title_key: "shortcuts.select_word_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.select_word_forward", action: || Box::new(crate::input::SelectToNextWord), title_key: "shortcuts.select_word_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_line_back", action: || Box::new(crate::input::DeleteToLineStart), title_key: "shortcuts.delete_line_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_line_forward", action: || Box::new(crate::input::DeleteToLineEnd), title_key: "shortcuts.delete_line_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_paragraph_back", action: || Box::new(crate::input::DeleteToParagraphStart), title_key: "shortcuts.kill_line_back", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "text.delete_paragraph_forward", action: || Box::new(crate::input::DeleteToParagraphEnd), title_key: "shortcuts.kill_line_forward", title_index: None, category: C::TextInput, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "menu.dismiss", action: || Box::new(crate::ui::menu::DismissMenu), title_key: "shortcuts.dismiss", title_index: None, category: C::Menus, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "menu.select_next", action: || Box::new(crate::ui::menu::SelectNextEntry), title_key: "shortcuts.select_next", title_index: None, category: C::Menus, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "menu.select_previous", action: || Box::new(crate::ui::menu::SelectPreviousEntry), title_key: "shortcuts.select_previous", title_index: None, category: C::Menus, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "menu.next_tab", action: || Box::new(crate::ui::menu::SelectNextTab), title_key: "shortcuts.select_next", title_index: None, category: C::Menus, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "menu.previous_tab", action: || Box::new(crate::ui::menu::SelectPreviousTab), title_key: "shortcuts.select_previous", title_index: None, category: C::Menus, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "menu.confirm", action: || Box::new(crate::ui::menu::ConfirmEntry), title_key: "shortcuts.confirm", title_index: None, category: C::Menus, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.select_next", action: || Box::new(crate::app::SelectNext), title_key: "shortcuts.select_next", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.select_previous", action: || Box::new(crate::app::SelectPrevious), title_key: "shortcuts.select_previous", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.select_first", action: || Box::new(crate::app::SelectFirst), title_key: "shortcuts.select_first", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.select_last", action: || Box::new(crate::app::SelectLast), title_key: "shortcuts.select_last", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.select_page_down", action: || Box::new(crate::app::SelectPageDown), title_key: "shortcuts.select_page_down", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.select_page_up", action: || Box::new(crate::app::SelectPageUp), title_key: "shortcuts.select_page_up", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.confirm", action: || Box::new(crate::app::Confirm), title_key: "shortcuts.confirm", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "palette.dismiss", action: || Box::new(crate::app::Dismiss), title_key: "shortcuts.dismiss", title_index: None, category: C::CommandPalette, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "settings.focus_next", action: || Box::new(crate::app::FocusNext), title_key: "shortcuts.next_field", title_index: None, category: C::Settings, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "settings.focus_previous", action: || Box::new(crate::app::FocusPrevious), title_key: "shortcuts.previous_field", title_index: None, category: C::Settings, editability: MODAL_NAV, builtin_label: None },
+    CommandDescriptor { id: "dialog.commit.confirm", action: || Box::new(crate::app::ConfirmCommitDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.commit.dismiss", action: || Box::new(crate::app::DismissCommitDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.git.primary", action: || Box::new(crate::app::GitPanelPrimaryAction), title_key: "shortcuts.git_primary", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.git.dismiss", action: || Box::new(crate::app::DismissGitPanelModal), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.archive.confirm", action: || Box::new(crate::app::ConfirmArchiveDialog), title_key: "shortcuts.confirm_archive", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "dialog.archive.dismiss", action: || Box::new(crate::app::DismissArchiveDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "dialog.goal.confirm", action: || Box::new(crate::app::ConfirmGoalDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.goal.dismiss", action: || Box::new(crate::app::DismissGoalDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.image_preview.dismiss", action: || Box::new(crate::app::DismissImagePreview), title_key: "shortcuts.dismiss", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "dialog.shortcuts.dismiss", action: || Box::new(crate::app::DismissShortcutsDialog), title_key: "shortcuts.dismiss", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.cancel_rename", action: || Box::new(crate::app::CancelSessionRename), title_key: "shortcuts.dismiss", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.dismiss", action: || Box::new(crate::app::DismissBigPicture), title_key: "shortcuts.dismiss", title_index: None, category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.left", action: || Box::new(crate::app::BigPictureLeft), title_key: "shortcuts.bigpicture_move", title_index: None, category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.right", action: || Box::new(crate::app::BigPictureRight), title_key: "shortcuts.bigpicture_move_right", title_index: None, category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.confirm", action: || Box::new(crate::app::BigPictureConfirm), title_key: "shortcuts.bigpicture_open", title_index: None, category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.1", action: || Box::new(crate::app::SelectBigPictureCard { index: 0 }), title_key: "keybind.command.bigpicture_card", title_index: Some(0), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.2", action: || Box::new(crate::app::SelectBigPictureCard { index: 1 }), title_key: "keybind.command.bigpicture_card", title_index: Some(1), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.3", action: || Box::new(crate::app::SelectBigPictureCard { index: 2 }), title_key: "keybind.command.bigpicture_card", title_index: Some(2), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.4", action: || Box::new(crate::app::SelectBigPictureCard { index: 3 }), title_key: "keybind.command.bigpicture_card", title_index: Some(3), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.5", action: || Box::new(crate::app::SelectBigPictureCard { index: 4 }), title_key: "keybind.command.bigpicture_card", title_index: Some(4), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.6", action: || Box::new(crate::app::SelectBigPictureCard { index: 5 }), title_key: "keybind.command.bigpicture_card", title_index: Some(5), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.7", action: || Box::new(crate::app::SelectBigPictureCard { index: 6 }), title_key: "keybind.command.bigpicture_card", title_index: Some(6), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.8", action: || Box::new(crate::app::SelectBigPictureCard { index: 7 }), title_key: "keybind.command.bigpicture_card", title_index: Some(7), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "bigpicture.card.9", action: || Box::new(crate::app::SelectBigPictureCard { index: 8 }), title_key: "keybind.command.bigpicture_card", title_index: Some(8), category: C::BigPicture, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "terminal.command_bar.confirm", action: || Box::new(crate::terminal::ConfirmTerminalCommand), title_key: "shortcuts.confirm", title_index: None, category: C::Terminal, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "terminal.command_bar.run", action: || Box::new(crate::terminal::RunTerminalCommand), title_key: "keybind.command.run_command", title_index: None, category: C::Terminal, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "terminal.command_bar.dismiss", action: || Box::new(crate::terminal::DismissTerminalCommand), title_key: "shortcuts.dismiss", title_index: None, category: C::Terminal, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "terminal.clear_scrollback", action: || unreachable_builtin(), title_key: "shortcuts.clear_scrollback", title_index: None, category: C::Terminal, editability: HAND_ROLLED, builtin_label: Some("⇧⌘K") },
+    CommandDescriptor { id: "app.quit", action: || Box::new(crate::Quit), title_key: "menu.quit", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.close_window", action: || Box::new(crate::CloseWindow), title_key: "menu.close_window", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.new_task", action: || Box::new(crate::NewSession), title_key: "menu.new_task", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.new_project", action: || Box::new(crate::NewProject), title_key: "menu.new_project", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.open_settings", action: || Box::new(crate::OpenSettings), title_key: "shortcuts.open_settings", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.toggle_sidebar", action: || Box::new(crate::ToggleSidebar), title_key: "menu.toggle_sidebar", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.toggle_right_panel", action: || Box::new(crate::ToggleRightPanel), title_key: "menu.toggle_right_panel", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.toggle_git_panel", action: || Box::new(crate::ToggleGitPanel), title_key: "menu.toggle_git_panel", title_index: None, category: C::Git, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.command_palette", action: || Box::new(crate::ToggleCommandPalette), title_key: "menu.command_palette", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.file_finder", action: || Box::new(crate::ToggleFileFinder), title_key: "shortcuts.file_finder", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.fps_counter", action: || Box::new(crate::ToggleFpsCounter), title_key: "shortcuts.fps_counter", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.hide", action: || Box::new(crate::Hide), title_key: "menu.hide", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.hide_others", action: || Box::new(crate::HideOthers), title_key: "menu.hide_others", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.big_picture", action: || Box::new(crate::ToggleBigPicture), title_key: "shortcuts.big_picture", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.projects_page", action: || Box::new(crate::ToggleProjectsPage), title_key: "shortcuts.projects_page", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.usage_panel", action: || Box::new(crate::ToggleUsagePanel), title_key: "shortcuts.usage_panel", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.run_script", action: || Box::new(crate::RunProjectScript), title_key: "menu.run_project_script", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.save_file", action: || Box::new(crate::SaveFile), title_key: "shortcuts.save_file", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.open_localhost", action: || Box::new(crate::OpenLocalhostUrl), title_key: "shortcuts.open_localhost", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.open_localhost_tab", action: || Box::new(crate::OpenLocalhostUrlInTab), title_key: "shortcuts.open_localhost_tab", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.navigate_back", action: || Box::new(crate::NavigateBack), title_key: "shortcuts.navigate_back", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.navigate_forward", action: || Box::new(crate::NavigateForward), title_key: "shortcuts.navigate_forward", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.previous_turn", action: || Box::new(crate::GoToPreviousTurn), title_key: "shortcuts.previous_turn", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.next_turn", action: || Box::new(crate::GoToNextTurn), title_key: "shortcuts.next_turn", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.latest_unseen", action: || Box::new(crate::GoToLatestUnseenCompletion), title_key: "shortcuts.latest_unseen", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.mark_unread", action: || Box::new(crate::MarkSessionUnread), title_key: "shortcuts.mark_unread", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.mark_unread_next", action: || Box::new(crate::MarkUnreadAndGoToNextUnseen), title_key: "shortcuts.mark_unread_next", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.stop_turn", action: || Box::new(crate::CancelTurn { immediate: false }), title_key: "shortcuts.stop_turn", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.stop_turn_now", action: || Box::new(crate::CancelTurn { immediate: true }), title_key: "shortcuts.stop_turn_now", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.add_to_chat", action: || Box::new(crate::AddToChat), title_key: "shortcuts.add_to_chat", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.archive_task", action: || Box::new(crate::ArchiveSession), title_key: "shortcuts.archive_task", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.pin_task", action: || Box::new(crate::ToggleSessionPin), title_key: "shortcuts.pin_task", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.copy_selection", action: || Box::new(crate::CopySelection), title_key: "shortcuts.copy_selection", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.copy_workdir", action: || Box::new(crate::CopyWorkingDirectory), title_key: "shortcuts.copy_workdir", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.focus_composer", action: || Box::new(crate::FocusComposer), title_key: "menu.focus_composer", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.focus_terminal", action: || Box::new(crate::FocusTerminal), title_key: "menu.focus_terminal", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.toggle_model_picker", action: || Box::new(crate::ToggleModelPicker), title_key: "menu.toggle_model_picker", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.toggle_branch_picker", action: || Box::new(crate::ToggleBranchPicker), title_key: "menu.toggle_branch_picker", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.toggle_runtime_mode_picker", action: || Box::new(crate::ToggleRuntimeModePicker), title_key: "menu.toggle_runtime_mode_picker", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.toggle_workspace", action: || Box::new(crate::ToggleWorkspace), title_key: "menu.toggle_workspace", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.toggle_terminals", action: || Box::new(crate::ToggleTerminals), title_key: "shortcuts.toggle_terminals", title_index: None, category: C::Terminal, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.1", action: || Box::new(crate::SelectSidebarSession { index: 0 }), title_key: "keybind.command.sidebar_task", title_index: Some(0), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.2", action: || Box::new(crate::SelectSidebarSession { index: 1 }), title_key: "keybind.command.sidebar_task", title_index: Some(1), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.3", action: || Box::new(crate::SelectSidebarSession { index: 2 }), title_key: "keybind.command.sidebar_task", title_index: Some(2), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.4", action: || Box::new(crate::SelectSidebarSession { index: 3 }), title_key: "keybind.command.sidebar_task", title_index: Some(3), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.5", action: || Box::new(crate::SelectSidebarSession { index: 4 }), title_key: "keybind.command.sidebar_task", title_index: Some(4), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.6", action: || Box::new(crate::SelectSidebarSession { index: 5 }), title_key: "keybind.command.sidebar_task", title_index: Some(5), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.7", action: || Box::new(crate::SelectSidebarSession { index: 6 }), title_key: "keybind.command.sidebar_task", title_index: Some(6), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.8", action: || Box::new(crate::SelectSidebarSession { index: 7 }), title_key: "keybind.command.sidebar_task", title_index: Some(7), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "sidebar.task.9", action: || Box::new(crate::SelectSidebarSession { index: 8 }), title_key: "keybind.command.sidebar_task", title_index: Some(8), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.select_all", action: || Box::new(crate::SelectAllProjectsRows), title_key: "menu.select_all", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.focus_filter", action: || Box::new(crate::FocusProjectsFilter), title_key: "shortcuts.find", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.dismiss_layer", action: || Box::new(crate::DismissProjectsLayer), title_key: "shortcuts.dismiss", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.tab.1", action: || Box::new(crate::SelectProjectsTab { index: 0 }), title_key: "keybind.command.projects_tab", title_index: Some(0), category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.tab.2", action: || Box::new(crate::SelectProjectsTab { index: 1 }), title_key: "keybind.command.projects_tab", title_index: Some(1), category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.tab.3", action: || Box::new(crate::SelectProjectsTab { index: 2 }), title_key: "keybind.command.projects_tab", title_index: Some(2), category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "projects.tab.4", action: || Box::new(crate::SelectProjectsTab { index: 3 }), title_key: "keybind.command.projects_tab", title_index: Some(3), category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.task_forward", action: || Box::new(crate::SwitchTaskForward), title_key: "shortcuts.task_switcher", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.task_backward", action: || Box::new(crate::SwitchTaskBackward), title_key: "shortcuts.task_switcher_back", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.task_first", action: || Box::new(crate::SelectFirstTask), title_key: "shortcuts.switcher_first", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.task_last", action: || Box::new(crate::SelectLastTask), title_key: "shortcuts.switcher_last", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.task_confirm", action: || Box::new(crate::ConfirmTaskSwitch), title_key: "shortcuts.switcher_confirm", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.task_cancel", action: || Box::new(crate::CancelTaskSwitch), title_key: "shortcuts.switcher_cancel", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.project_forward", action: || Box::new(crate::SwitchProjectForward), title_key: "shortcuts.project_switcher", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.project_backward", action: || Box::new(crate::SwitchProjectBackward), title_key: "shortcuts.project_switcher_back", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.project_first", action: || Box::new(crate::SelectFirstProject), title_key: "shortcuts.switcher_first", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.project_last", action: || Box::new(crate::SelectLastProject), title_key: "shortcuts.switcher_last", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.project_confirm", action: || Box::new(crate::ConfirmProjectSwitch), title_key: "shortcuts.switcher_confirm", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "switcher.project_cancel", action: || Box::new(crate::CancelProjectSwitch), title_key: "shortcuts.switcher_cancel", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.open", action: || Box::new(crate::OpenFind), title_key: "shortcuts.find", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.open_replace", action: || Box::new(crate::OpenFindReplace), title_key: "shortcuts.find_replace", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.next", action: || Box::new(crate::FindNext), title_key: "shortcuts.find_next", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.previous", action: || Box::new(crate::FindPrevious), title_key: "shortcuts.find_previous", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.close", action: || Box::new(crate::CloseFind), title_key: "shortcuts.close_find", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.case_sensitive", action: || Box::new(crate::ToggleFindCaseSensitive), title_key: "shortcuts.find_case", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.whole_word", action: || Box::new(crate::ToggleFindWholeWord), title_key: "shortcuts.find_word", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.regex", action: || Box::new(crate::ToggleFindRegex), title_key: "shortcuts.find_regex", title_index: None, category: C::Find, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "find.replace_all", action: || Box::new(crate::ReplaceAllMatches), title_key: "shortcuts.replace_all", title_index: None, category: C::Find, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "font.ui_increase", action: || Box::new(crate::AdjustFontSize { target: crate::FontSizeTarget::Ui, direction: crate::FontSizeDirection::Increase }), title_key: "shortcuts.font_bigger_ui", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "font.ui_decrease", action: || Box::new(crate::AdjustFontSize { target: crate::FontSizeTarget::Ui, direction: crate::FontSizeDirection::Decrease }), title_key: "shortcuts.font_smaller_ui", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "font.code_increase", action: || Box::new(crate::AdjustFontSize { target: crate::FontSizeTarget::Code, direction: crate::FontSizeDirection::Increase }), title_key: "shortcuts.font_bigger", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "font.code_decrease", action: || Box::new(crate::AdjustFontSize { target: crate::FontSizeTarget::Code, direction: crate::FontSizeDirection::Decrease }), title_key: "shortcuts.font_smaller", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "font.terminal_increase", action: || Box::new(crate::AdjustFontSize { target: crate::FontSizeTarget::Terminal, direction: crate::FontSizeDirection::Increase }), title_key: "shortcuts.font_bigger", title_index: None, category: C::Terminal, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "font.terminal_decrease", action: || Box::new(crate::AdjustFontSize { target: crate::FontSizeTarget::Terminal, direction: crate::FontSizeDirection::Decrease }), title_key: "shortcuts.font_smaller", title_index: None, category: C::Terminal, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.address", action: || Box::new(crate::FocusBrowserAddress), title_key: "shortcuts.browser_address", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.reload", action: || Box::new(crate::BrowserReload), title_key: "shortcuts.browser_reload", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.hard_reload", action: || Box::new(crate::BrowserHardReload), title_key: "shortcuts.browser_hard_reload", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.back", action: || Box::new(crate::BrowserBack), title_key: "shortcuts.browser_back", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.forward", action: || Box::new(crate::BrowserForward), title_key: "shortcuts.browser_forward", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.stop", action: || Box::new(crate::BrowserStop), title_key: "shortcuts.browser_stop", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.devtools", action: || Box::new(crate::BrowserDevtools), title_key: "shortcuts.browser_devtools", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.copy", action: || Box::new(crate::WebviewCopy), title_key: "menu.copy", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.cut", action: || Box::new(crate::WebviewCut), title_key: "menu.cut", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.paste", action: || Box::new(crate::WebviewPaste), title_key: "menu.paste", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.select_all", action: || Box::new(crate::WebviewSelectAll), title_key: "menu.select_all", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "browser.address_cancel", action: || Box::new(crate::BrowserAddressCancel), title_key: "shortcuts.browser_address_cancel", title_index: None, category: C::Browser, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "editor.exit_panel_fullscreen", action: || Box::new(crate::ExitPanelFullscreen), title_key: "shortcuts.exit_fullscreen_panel", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
+];
+
+/// Unreachable action constructor for built-in gestures — they are never
+/// registered, so the factory must never be called.
+fn unreachable_builtin() -> Box<dyn Action> {
+    unreachable!("built-in gestures have no GPUI action")
+}
+
+/// Every default registration in precedence order. `command` must resolve in
+/// [`COMMANDS`].
+pub static ENTRIES: &[CatalogEntry] = &[
+    // === input::init — common ==============================================
+    e("text.backspace", All, "backspace", TextInput),
+    e("text.delete_forward", All, "delete", TextInput),
+    e("text.backspace", All, "shift-backspace", TextInput),
+    e("text.delete_forward", All, "shift-delete", TextInput),
+    e("text.delete_word_back", All, "alt-backspace", TextInput),
+    e("text.delete_word_forward", All, "alt-delete", TextInput),
+    e("text.left", All, "left", TextInput),
+    e("text.right", All, "right", TextInput),
+    e("text.up", All, "up", TextInput),
+    e("text.down", All, "down", TextInput),
+    e("text.select_left", All, "shift-left", TextInput),
+    e("text.select_right", All, "shift-right", TextInput),
+    e("text.select_up", All, "shift-up", TextInput),
+    e("text.select_down", All, "shift-down", TextInput),
+    e("text.word_back", All, "alt-left", TextInput),
+    e("text.word_forward", All, "alt-right", TextInput),
+    e("text.select_word_back", All, "alt-shift-left", TextInput),
+    e("text.select_word_forward", All, "alt-shift-right", TextInput),
+    e("text.select_all", All, "secondary-a", TextInput),
+    e("text.paste", All, "secondary-v", TextInput),
+    e("text.copy", All, "secondary-c", TextInput),
+    e("text.cut", All, "secondary-x", TextInput),
+    e("text.undo", All, "secondary-z", TextInput),
+    e("text.redo", All, "secondary-shift-z", TextInput),
+    e("text.enter", All, "enter", TextInput),
+    e("text.newline", All, "shift-enter", TextInput),
+    e("text.newline", All, "ctrl-enter", TextInput),
+    e("text.newline", All, "alt-enter", TextInput),
+    e("text.submit_steer", All, "secondary-enter", TextInput),
+    e("text.clear", All, "escape", TextInput),
+    // === input::init — macOS ===============================================
+    e("text.home", MacOS, "home", TextInput),
+    e("text.end", MacOS, "end", TextInput),
+    e("text.select_to_start", MacOS, "shift-home", TextInput),
+    e("text.select_to_end", MacOS, "shift-end", TextInput),
+    e("text.delete_line_back", MacOS, "cmd-backspace", TextInput),
+    e("text.delete_line_forward", MacOS, "cmd-delete", TextInput),
+    e("text.backspace", MacOS, "ctrl-h", TextInput),
+    e("text.delete_forward", MacOS, "ctrl-d", TextInput),
+    e("text.backspace", MacOS, "ctrl-backspace", TextInput),
+    e("text.delete_forward", MacOS, "ctrl-delete", TextInput),
+    e("text.backspace", MacOS, "ctrl-shift-backspace", TextInput),
+    e("text.delete_forward", MacOS, "ctrl-shift-delete", TextInput),
+    e("text.delete_paragraph_back", MacOS, "ctrl-u", TextInput),
+    e("text.delete_paragraph_forward", MacOS, "ctrl-k", TextInput),
+    e("text.delete_word_back", MacOS, "ctrl-alt-backspace", TextInput),
+    e("text.word_back", MacOS, "ctrl-alt-b", TextInput),
+    e("text.word_forward", MacOS, "ctrl-alt-f", TextInput),
+    e("text.select_word_back", MacOS, "ctrl-alt-shift-b", TextInput),
+    e("text.select_word_forward", MacOS, "ctrl-alt-shift-f", TextInput),
+    e("text.left", MacOS, "ctrl-b", TextInput),
+    e("text.right", MacOS, "ctrl-f", TextInput),
+    e("text.up", MacOS, "ctrl-p", TextInput),
+    e("text.down", MacOS, "ctrl-n", TextInput),
+    e("text.line_start", MacOS, "cmd-left", TextInput),
+    e("text.line_end", MacOS, "cmd-right", TextInput),
+    e("text.home", MacOS, "cmd-up", TextInput),
+    e("text.end", MacOS, "cmd-down", TextInput),
+    e("text.paragraph_start", MacOS, "ctrl-a", TextInput),
+    e("text.paragraph_end", MacOS, "ctrl-e", TextInput),
+    e("text.paragraph_back", MacOS, "alt-up", TextInput),
+    e("text.paragraph_forward", MacOS, "alt-down", TextInput),
+    e("text.select_line_start", MacOS, "shift-cmd-left", TextInput),
+    e("text.select_line_end", MacOS, "shift-cmd-right", TextInput),
+    e("text.select_to_start", MacOS, "cmd-shift-up", TextInput),
+    e("text.select_to_end", MacOS, "cmd-shift-down", TextInput),
+    e("text.select_paragraph_start", MacOS, "ctrl-shift-a", TextInput),
+    e("text.select_paragraph_end", MacOS, "ctrl-shift-e", TextInput),
+    e("text.select_left", MacOS, "ctrl-shift-b", TextInput),
+    e("text.select_right", MacOS, "ctrl-shift-f", TextInput),
+    e("text.select_up", MacOS, "ctrl-shift-p", TextInput),
+    e("text.select_down", MacOS, "ctrl-shift-n", TextInput),
+    e("text.select_paragraph_back", MacOS, "alt-shift-up", TextInput),
+    e("text.select_paragraph_forward", MacOS, "alt-shift-down", TextInput),
+    e("text.select_line_start", MacOS, "ctrl-shift-left", TextInput),
+    e("text.select_line_end", MacOS, "ctrl-shift-right", TextInput),
+    // === input::init — Windows/Linux ========================================
+    e("text.line_start", NotMacOS, "home", TextInput),
+    e("text.line_end", NotMacOS, "end", TextInput),
+    e("text.select_to_start", NotMacOS, "shift-home", TextInput),
+    e("text.select_to_end", NotMacOS, "shift-end", TextInput),
+    e("text.home", NotMacOS, "ctrl-home", TextInput),
+    e("text.end", NotMacOS, "ctrl-end", TextInput),
+    e("text.select_to_start", NotMacOS, "ctrl-shift-home", TextInput),
+    e("text.select_to_end", NotMacOS, "ctrl-shift-end", TextInput),
+    e("text.delete_word_back", NotMacOS, "ctrl-backspace", TextInput),
+    e("text.delete_word_forward", NotMacOS, "ctrl-delete", TextInput),
+    e("text.word_back", NotMacOS, "ctrl-left", TextInput),
+    e("text.word_forward", NotMacOS, "ctrl-right", TextInput),
+    e("text.select_word_back", NotMacOS, "ctrl-shift-left", TextInput),
+    e("text.select_word_forward", NotMacOS, "ctrl-shift-right", TextInput),
+    e("text.redo", NotMacOS, "ctrl-y", TextInput),
+    // === ui::menu::init ======================================================
+    e("menu.dismiss", All, "escape", WakuMenu),
+    e("menu.select_next", All, "down", MenuPanelField),
+    e("menu.select_previous", All, "up", MenuPanelField),
+    e("menu.next_tab", All, "tab", MenuPanelField),
+    e("menu.previous_tab", All, "shift-tab", MenuPanelField),
+    e("menu.confirm", All, "enter", MenuPanelField),
+    // === app::init_composer_autocomplete ======================================
+    e("menu.select_next", All, "down", Autocomplete),
+    e("menu.select_previous", All, "up", Autocomplete),
+    e("menu.select_next", All, "ctrl-n", Autocomplete),
+    e("menu.select_previous", All, "ctrl-p", Autocomplete),
+    e("menu.confirm", All, "enter", Autocomplete),
+    e("menu.confirm", All, "tab", Autocomplete),
+    e("menu.dismiss", All, "escape", Autocomplete),
+    e("menu.dismiss", All, "escape", AutocompleteLoading),
+    // === app::init_settings_keys ===============================================
+    e("menu.select_next", All, "down", SettingsSearch),
+    e("menu.select_previous", All, "up", SettingsSearch),
+    e("settings.focus_next", All, "tab", CustomCommandEditor),
+    e("settings.focus_previous", All, "shift-tab", CustomCommandEditor),
+    // === app::init_command_palette ==============================================
+    e("palette.select_next", All, "down", PaletteSearch),
+    e("palette.select_previous", All, "up", PaletteSearch),
+    e("palette.select_next", All, "ctrl-n", PaletteSearch),
+    e("palette.select_previous", All, "ctrl-p", PaletteSearch),
+    e("palette.select_next", All, "tab", PaletteSearch),
+    e("palette.select_previous", All, "shift-tab", PaletteSearch),
+    e("palette.select_first", All, "home", PaletteSearch),
+    e("palette.select_last", All, "end", PaletteSearch),
+    e("palette.select_page_down", All, "pagedown", PaletteSearch),
+    e("palette.select_page_up", All, "pageup", PaletteSearch),
+    e("palette.confirm", All, "enter", PaletteSearch),
+    e("palette.dismiss", All, "escape", CommandPalette),
+    // === app::init_file_finder ====================================================
+    e("palette.select_next", All, "down", FinderSearch),
+    e("palette.select_previous", All, "up", FinderSearch),
+    e("palette.select_next", All, "ctrl-n", FinderSearch),
+    e("palette.select_previous", All, "ctrl-p", FinderSearch),
+    e("palette.select_next", All, "tab", FinderSearch),
+    e("palette.select_previous", All, "shift-tab", FinderSearch),
+    e("palette.select_first", All, "home", FinderSearch),
+    e("palette.select_last", All, "end", FinderSearch),
+    e("palette.select_page_down", All, "pagedown", FinderSearch),
+    e("palette.select_page_up", All, "pageup", FinderSearch),
+    e("palette.confirm", All, "enter", FinderSearch),
+    e("palette.dismiss", All, "escape", FileFinder),
+    // === app::init_commit_dialog_keys ==============================================
+    e("dialog.commit.confirm", All, "secondary-enter", CommitInput),
+    e("dialog.commit.confirm", All, "secondary-enter", CommitDialog),
+    e("dialog.commit.dismiss", All, "escape", CommitDialog),
+    // === app::init_git_panel_keys ===================================================
+    e("dialog.git.primary", All, "secondary-enter", GitPanelInput),
+    e("dialog.git.primary", All, "secondary-enter", GitPanel),
+    e("dialog.git.dismiss", All, "escape", GitPanel),
+    e("dialog.git.dismiss", All, "escape", GitPanelModal),
+    // === app::init_archive_dialog_keys ===============================================
+    e("dialog.archive.confirm", All, "enter", ArchiveDialog),
+    e("dialog.archive.dismiss", All, "escape", ArchiveDialog),
+    // === app::init_big_picture_keys ===================================================
+    e("bigpicture.dismiss", All, "escape", BigPicture),
+    e("bigpicture.left", All, "left", BigPicture),
+    e("bigpicture.right", All, "right", BigPicture),
+    e("bigpicture.confirm", All, "enter", BigPicture),
+    e("bigpicture.card.1", All, "secondary-1", BigPicture),
+    e("bigpicture.card.2", All, "secondary-2", BigPicture),
+    e("bigpicture.card.3", All, "secondary-3", BigPicture),
+    e("bigpicture.card.4", All, "secondary-4", BigPicture),
+    e("bigpicture.card.5", All, "secondary-5", BigPicture),
+    e("bigpicture.card.6", All, "secondary-6", BigPicture),
+    e("bigpicture.card.7", All, "secondary-7", BigPicture),
+    e("bigpicture.card.8", All, "secondary-8", BigPicture),
+    e("bigpicture.card.9", All, "secondary-9", BigPicture),
+    // === app::init_goal_dialog_keys =====================================================
+    e("dialog.goal.confirm", All, "secondary-enter", GoalInput),
+    e("dialog.goal.confirm", All, "secondary-enter", GoalDialog),
+    e("dialog.goal.dismiss", All, "escape", GoalDialog),
+    // === app::init_annotation_keys ========================================================
+    e("menu.dismiss", All, "escape", WakuAnnotation),
+    // === app::init_image_preview_keys ======================================================
+    e("dialog.image_preview.dismiss", All, "escape", ImagePreview),
+    // === app::init_sidebar_keys =============================================================
+    e("sidebar.cancel_rename", All, "escape", SessionRenameField),
+    // === app::init_skills_keys ================================================================
+    e("menu.select_next", All, "down", SkillsSearch),
+    e("menu.select_previous", All, "up", SkillsSearch),
+    // === app::init_shortcuts_dialog_keys ======================================================
+    e("dialog.shortcuts.dismiss", All, "escape", ShortcutsDialog),
+    // === terminal::init_command_bar_keys ======================================================
+    e("terminal.command_bar.confirm", All, "enter", TerminalBarInput),
+    e("terminal.command_bar.run", All, "secondary-enter", TerminalBarInput),
+    e("terminal.command_bar.dismiss", All, "escape", TerminalBarInput),
+    e("terminal.command_bar.dismiss", All, "escape", TerminalCommandBar),
+    // === crate::bind_keys =====================================================================
+    e("app.quit", All, "secondary-q", ""),
+    e("app.close_window", All, "secondary-w", ""),
+    e("app.new_task", All, "secondary-n", ""),
+    e("app.new_project", All, "secondary-o", ""),
+    e("app.open_settings", All, "secondary-,", ""),
+    e("app.toggle_sidebar", All, "secondary-b", ""),
+    e("app.toggle_right_panel", All, "secondary-alt-b", ""),
+    e("app.toggle_git_panel", All, "secondary-alt-g", ""),
+    e("app.command_palette", MacOS, "secondary-k", ""),
+    e("app.command_palette", NotMacOS, "secondary-k", NotTerminal),
+    e("app.file_finder", All, "secondary-p", ""),
+    e("app.fps_counter", All, "secondary-alt-shift-f", ""),
+    e("workspace.navigate_back", All, "secondary-[", Waku),
+    e("workspace.navigate_forward", All, "secondary-]", Waku),
+    e("sidebar.task.1", All, "secondary-1", ""),
+    e("sidebar.task.2", All, "secondary-2", ""),
+    e("sidebar.task.3", All, "secondary-3", ""),
+    e("sidebar.task.4", All, "secondary-4", ""),
+    e("sidebar.task.5", All, "secondary-5", ""),
+    e("sidebar.task.6", All, "secondary-6", ""),
+    e("sidebar.task.7", All, "secondary-7", ""),
+    e("sidebar.task.8", All, "secondary-8", ""),
+    e("sidebar.task.9", All, "secondary-9", ""),
+    e("app.big_picture", All, "secondary-0", ""),
+    e("app.projects_page", All, "secondary-shift-p", ""),
+    e("projects.tab.1", All, "secondary-alt-1", ""),
+    e("projects.tab.2", All, "secondary-alt-2", ""),
+    e("projects.tab.3", All, "secondary-alt-3", ""),
+    e("projects.tab.4", All, "secondary-alt-4", ""),
+    e("projects.select_all", All, "secondary-a", ProjectsPage),
+    e("projects.focus_filter", All, "secondary-f", ProjectsPage),
+    e("projects.dismiss_layer", All, "escape", ProjectsPage),
+    e("workspace.previous_turn", All, "secondary-alt-up", WakuNotTerminal),
+    e("workspace.next_turn", All, "secondary-alt-down", WakuNotTerminal),
+    e("workspace.latest_unseen", All, "ctrl-`", Waku),
+    e("workspace.latest_unseen", All, "secondary-d", Waku),
+    e("workspace.mark_unread_next", All, "secondary-shift-d", Waku),
+    e("workspace.mark_unread", All, "secondary-alt-u", Waku),
+    e("switcher.task_forward", All, "ctrl-tab", Waku),
+    e("switcher.task_backward", All, "ctrl-shift-tab", Waku),
+    e("switcher.task_cancel", All, "ctrl-escape", Waku),
+    e("switcher.task_cancel", All, "ctrl-shift-escape", Waku),
+    e("switcher.task_forward", All, "down", TaskSwitcher),
+    e("switcher.task_forward", All, "right", TaskSwitcher),
+    e("switcher.task_backward", All, "up", TaskSwitcher),
+    e("switcher.task_backward", All, "left", TaskSwitcher),
+    e("switcher.task_first", All, "home", TaskSwitcher),
+    e("switcher.task_last", All, "end", TaskSwitcher),
+    e("switcher.task_confirm", All, "enter", TaskSwitcher),
+    e("switcher.task_cancel", All, "escape", TaskSwitcher),
+    e("switcher.project_forward", All, "secondary-n", ""),
+    e("switcher.project_backward", All, "secondary-shift-n", ""),
+    e("switcher.project_cancel", All, "secondary-escape", Waku),
+    e("switcher.project_cancel", All, "secondary-shift-escape", Waku),
+    e("switcher.project_cancel", All, "secondary-escape", ProjectSwitcher),
+    e("switcher.project_cancel", All, "secondary-shift-escape", ProjectSwitcher),
+    e("switcher.project_forward", All, "down", ProjectSwitcher),
+    e("switcher.project_forward", All, "right", ProjectSwitcher),
+    e("switcher.project_backward", All, "up", ProjectSwitcher),
+    e("switcher.project_backward", All, "left", ProjectSwitcher),
+    e("switcher.project_first", All, "home", ProjectSwitcher),
+    e("switcher.project_last", All, "end", ProjectSwitcher),
+    e("switcher.project_confirm", All, "enter", ProjectSwitcher),
+    e("switcher.project_cancel", All, "escape", ProjectSwitcher),
+    e("workspace.focus_composer", All, "secondary-l", ""),
+    e("workspace.add_to_chat", All, "secondary-l", TranscriptOrEditor),
+    e("workspace.focus_terminal", All, "secondary-j", ""),
+    e("app.run_script", All, "secondary-r", ""),
+    e("workspace.toggle_terminals", All, "secondary-t", ""),
+    e("workspace.toggle_model_picker", All, "secondary-/", ""),
+    e("workspace.toggle_branch_picker", All, "secondary-shift-b", ""),
+    e("workspace.toggle_runtime_mode_picker", All, "secondary-.", ""),
+    e("workspace.toggle_workspace", All, "secondary-shift-t", ""),
+    e("app.usage_panel", All, "secondary-u", ""),
+    e("app.save_file", All, "secondary-s", ""),
+    e("font.terminal_increase", All, "secondary-=", Terminal),
+    e("font.terminal_increase", All, "secondary-shift-=", Terminal),
+    e("font.terminal_decrease", All, "secondary--", Terminal),
+    e("font.code_increase", All, "secondary-=", ReviewDiffOrEditor),
+    e("font.code_increase", All, "secondary-shift-=", ReviewDiffOrEditor),
+    e("font.code_decrease", All, "secondary--", ReviewDiffOrEditor),
+    e("font.ui_increase", All, "secondary-=", NotBrowser),
+    e("font.ui_increase", All, "secondary-shift-=", NotBrowser),
+    e("font.ui_decrease", All, "secondary--", NotBrowser),
+    e("workspace.stop_turn", All, "escape", WakuNotTerminal),
+    e("workspace.stop_turn_now", All, "alt-escape", Waku),
+    e("workspace.archive_task", All, "secondary-shift-a", Waku),
+    e("workspace.pin_task", All, "secondary-alt-p", Waku),
+    e("workspace.copy_selection", All, "secondary-c", Waku),
+    e("workspace.copy_workdir", All, "secondary-shift-c", Waku),
+    e("find.open", All, "secondary-f", Waku),
+    e("find.open", All, "secondary-f", WakuTextInput),
+    e("find.open_replace", All, "secondary-alt-f", Waku),
+    e("find.next", All, "secondary-g", Waku),
+    e("find.previous", All, "secondary-shift-g", Waku),
+    e("find.close", All, "escape", FileEditorPane),
+    e("find.close", All, "escape", FindBar),
+    e("editor.exit_panel_fullscreen", All, "escape", PanelFullscreenNotTerminal),
+    e("find.case_sensitive", All, "secondary-alt-c", FileEditorPane),
+    e("find.whole_word", All, "secondary-alt-w", FileEditorPane),
+    e("find.regex", All, "secondary-alt-r", FileEditorPane),
+    e("find.previous", All, "shift-enter", FindBar),
+    e("find.replace_all", All, "secondary-alt-enter", FindBar),
+    e("browser.address", All, "secondary-l", Browser),
+    e("browser.reload", All, "secondary-r", Browser),
+    e("browser.hard_reload", All, "secondary-shift-r", Browser),
+    e("browser.back", All, "secondary-[", Browser),
+    e("browser.forward", All, "secondary-]", Browser),
+    e("browser.stop", All, "escape", Browser),
+    e("browser.devtools", All, "secondary-alt-i", Browser),
+    e("browser.copy", All, "secondary-c", Browser),
+    e("browser.cut", All, "secondary-x", Browser),
+    e("browser.paste", All, "secondary-v", Browser),
+    e("browser.select_all", All, "secondary-a", Browser),
+    e("browser.address_cancel", All, "escape", BrowserAddress),
+    e("app.open_localhost", All, "secondary-alt-o", ""),
+    e("app.open_localhost_tab", All, "secondary-alt-shift-o", ""),
+    // === crate::bind_keys — macOS only ==========================================
+    e("app.hide", MacOS, "cmd-h", ""),
+    e("app.hide_others", MacOS, "alt-cmd-h", ""),
+];
+
+use PlatformSet::*;
+
+/// Context predicate spellings, as literal constants so typos in the catalog
+/// fail the same parse check the registrations run.
+#[allow(non_upper_case_globals)]
+mod ctx {
+    pub const TextInput: &str = "TextInput";
+    pub const WakuMenu: &str = "WakuMenu";
+    pub const MenuPanelField: &str = "WakuMenu > TextInput";
+    pub const Autocomplete: &str = "ComposerAutocomplete > TextInput";
+    pub const AutocompleteLoading: &str = "ComposerAutocompleteLoading > TextInput";
+    pub const SettingsSearch: &str = "SettingsSidebar > TextInput";
+    pub const CustomCommandEditor: &str = "CustomCommandEditor";
+    pub const PaletteSearch: &str = "CommandPalette > TextInput";
+    pub const CommandPalette: &str = "CommandPalette";
+    pub const FinderSearch: &str = "FileFinder > TextInput";
+    pub const FileFinder: &str = "FileFinder";
+    pub const CommitInput: &str = "CommitDialog > TextInput";
+    pub const CommitDialog: &str = "CommitDialog";
+    pub const GitPanelInput: &str = "GitPanel > TextInput";
+    pub const GitPanel: &str = "GitPanel";
+    pub const GitPanelModal: &str = "GitPanelModal";
+    pub const ArchiveDialog: &str = "ArchiveDialog";
+    pub const BigPicture: &str = "BigPicture";
+    pub const GoalInput: &str = "GoalDialog > TextInput";
+    pub const GoalDialog: &str = "GoalDialog";
+    pub const WakuAnnotation: &str = "WakuAnnotation";
+    pub const ImagePreview: &str = "ImagePreview";
+    pub const SessionRenameField: &str = "SessionRename > TextInput";
+    pub const SkillsSearch: &str = "SkillsPane > TextInput";
+    pub const ShortcutsDialog: &str = "ShortcutsDialog";
+    pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
+    pub const TerminalCommandBar: &str = "TerminalCommandBar";
+    pub const NotTerminal: &str = "!Terminal";
+    pub const Waku: &str = "Waku";
+    pub const ProjectsPage: &str = "ProjectsPage";
+    pub const WakuNotTerminal: &str = "Waku && !Terminal";
+    pub const TaskSwitcher: &str = "TaskSwitcher";
+    pub const ProjectSwitcher: &str = "ProjectSwitcher";
+    pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";
+    pub const Terminal: &str = "Terminal";
+    pub const ReviewDiffOrEditor: &str = "ReviewDiff || FileEditorPane";
+    pub const NotBrowser: &str = "!Browser";
+    pub const WakuTextInput: &str = "Waku > TextInput";
+    pub const FileEditorPane: &str = "FileEditorPane";
+    pub const FindBar: &str = "FindBar";
+    pub const PanelFullscreenNotTerminal: &str = "PanelFullscreen && !Terminal";
+    pub const Browser: &str = "Browser";
+    pub const BrowserAddress: &str = "BrowserAddress";
+}
+
+use ctx::*;
+
+const fn e(
+    command: CommandId,
+    platform: PlatformSet,
+    sequence: &'static str,
+    context: &'static str,
+) -> CatalogEntry {
+    CatalogEntry {
+        command,
+        platform,
+        sequence,
+        context: if context.is_empty() {
+            None
+        } else {
+            Some(context)
+        },
+    }
+}

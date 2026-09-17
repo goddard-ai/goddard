@@ -1494,3 +1494,15 @@ a11y.task_name: タスク名
 a11y.task_description: タスクの説明
 a11y.answer: あなたの回答
 a11y.comment: コメント
+keybind.category.projects: プロジェクト
+keybind.category.git: Git
+keybind.category.skills: スキル
+keybind.category.other: その他
+keybind.command.sidebar_task: "サイドバータスク %{n} を選択"
+keybind.command.projects_tab: "プロジェクトタブ %{n} を選択"
+keybind.command.bigpicture_card: "全体カード %{n} を選択"
+keybind.command.run_command: ターミナルでコマンドを実行
+keybind.reason.text_entry: テキスト入力の基本操作 — このバージョンでは変更できません
+keybind.reason.modal_nav: 組み込みのリスト操作 — このバージョンでは変更できません
+keybind.reason.hand_rolled: ターミナルが直接処理 — 変更できません
+shortcuts.projects_page: プロジェクト

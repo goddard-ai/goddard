@@ -3403,3 +3403,27 @@ friends.trust:
   en: Trust files
 friends.command_failed:
   en: "Friend command failed: {error}"
+keybind.category.projects:
+  en: Projects
+keybind.category.git:
+  en: Git
+keybind.category.skills:
+  en: Skills
+keybind.category.other:
+  en: Other
+keybind.command.sidebar_task:
+  en: Select Sidebar Task %{n}
+keybind.command.projects_tab:
+  en: Select Projects Tab %{n}
+keybind.command.bigpicture_card:
+  en: Select Big Picture Card %{n}
+keybind.command.run_command:
+  en: Run Command in Terminal
+keybind.reason.text_entry:
+  en: Core text entry — not remappable in this version
+keybind.reason.modal_nav:
+  en: Built-in list navigation — not remappable in this version
+keybind.reason.hand_rolled:
+  en: Handled directly by the terminal — not remappable
+shortcuts.projects_page:
+  en: Projects
