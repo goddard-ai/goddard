@@ -152,6 +152,26 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     }
 }
 
+/// Byte offset of a 1-based `line:column` in `content`, clamped into the
+/// file: a line past the end lands at the end, a column past its line's end
+/// lands on the line break. `column` counts characters, the way editors
+/// spell it.
+fn cursor_offset_for_line_column(content: &str, line: usize, column: usize) -> usize {
+    let mut offset = 0;
+    for (index, text) in content.split('\n').enumerate() {
+        if index + 1 == line.max(1) {
+            return offset
+                + text
+                    .chars()
+                    .take(column.saturating_sub(1))
+                    .map(char::len_utf8)
+                    .sum::<usize>();
+        }
+        offset += text.len() + 1;
+    }
+    content.len()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ReviewDiffTreeRow {
     Directory {
@@ -1143,6 +1163,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn line_column_offsets_clamp_into_the_file() {
+        let content = "ab\ncd\néf\n";
+
+        assert_eq!(cursor_offset_for_line_column(content, 1, 1), 0);
+        assert_eq!(cursor_offset_for_line_column(content, 2, 1), 3);
+        assert_eq!(cursor_offset_for_line_column(content, 2, 3), 5);
+        // Columns count characters, so the second column of `éf` is past é's
+        // two bytes.
+        assert_eq!(cursor_offset_for_line_column(content, 3, 2), 8);
+        // A column past the line's end lands on the line break; a line past
+        // the file's end lands at the end.
+        assert_eq!(cursor_offset_for_line_column(content, 2, 99), 5);
+        assert_eq!(cursor_offset_for_line_column(content, 99, 1), content.len());
+        // Zero clamps up to the first line and column.
+        assert_eq!(cursor_offset_for_line_column(content, 0, 0), 0);
+    }
+
     /// Selection resolves rows by key, so a repeated key makes a drag jump
     /// between the duplicates. Numbered rows keep their number-derived keys
     /// (stable across Review's gap expansion); rows a provider never
@@ -1854,6 +1892,10 @@ impl Waku {
         // edits made while another session was on screen.
         for editor in self.right_panel_file_editors.values_mut() {
             editor.reading = false;
+            // A `path:line` jump that never landed dies with the swap too —
+            // firing it sessions later would look like the caret moved on
+            // its own.
+            editor.pending_position = None;
         }
         // The find bar pointed into the editors that were just swapped out;
         // its match list means nothing here, and restored editors may carry
@@ -3727,17 +3769,31 @@ impl Waku {
     ) -> (Entity<TextInput>, bool, bool) {
         // A `Cmd+P` confirm asks for editor focus here, on the first frame the
         // entity is known to exist; deferring once more lets this frame's
-        // paint put the element in the dispatch tree before focus moves.
-        let focus_pending = self.right_panel_pending_file_focus.as_deref() == Some(relative_path);
-        if focus_pending {
-            self.right_panel_pending_file_focus = None;
-        }
-        if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
+        // paint put the element in the dispatch tree before focus moves. Its
+        // `path:line[:column]` target moves onto the editor itself — the caret
+        // cannot land until the file's read does.
+        let pending_open = if self
+            .right_panel_pending_file_focus
+            .as_ref()
+            .is_some_and(|pending| pending.path == relative_path)
+        {
+            self.right_panel_pending_file_focus.take()
+        } else {
+            None
+        };
+        let focus_pending = pending_open.is_some();
+        let position_pending = pending_open.and_then(|pending| pending.position);
+        if let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) {
+            if let Some(position) = position_pending {
+                editor.pending_position = Some(position);
+            }
             if focus_pending {
                 let focus = editor.state.read(cx).focus();
                 window.on_next_frame(move |window, cx| window.focus(&focus, cx));
             }
-            return (editor.state.clone(), editor.writable, editor.dirty);
+            let found = (editor.state.clone(), editor.writable, editor.dirty);
+            self.apply_pending_file_position(relative_path, window, cx);
+            return found;
         }
 
         // Reached from `render`, so the file cannot be read here. The editor
@@ -3771,6 +3827,7 @@ impl Waku {
                 dirty: false,
                 reading: false,
                 read_epoch: 0,
+                pending_position: position_pending,
                 annotations: Rc::new(RefCell::new(annotations)),
             },
         );
@@ -3812,11 +3869,42 @@ impl Waku {
         .detach();
 
         self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
+        self.apply_pending_file_position(relative_path, window, cx);
         if focus_pending {
             let focus = state.read(cx).focus();
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         }
         (state, false, false)
+    }
+
+    /// Lands a `path:line[:column]` jump the finder asked for: caret onto the
+    /// line, then scrolled into view. `pending_position` waits inside the
+    /// editor across renders because the file's read lands off the UI thread,
+    /// so this runs from `ensure` until text exists to place the caret in.
+    /// The reveal defers a frame for the same reason — `position_for_offset`
+    /// measures the last painted layout.
+    fn apply_pending_file_position(
+        &mut self,
+        relative_path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) else {
+            return;
+        };
+        if !editor.reading
+            && let Some((line, column)) = editor.pending_position.take()
+        {
+            let state = editor.state.clone();
+            let offset = cursor_offset_for_line_column(state.read(cx).content(), line, column);
+            state.update(cx, |state, cx| state.select_range(offset..offset, cx));
+            let weak = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.reveal_editor_offset(&state, offset, cx);
+                });
+            });
+        }
     }
 
     /// Reads a file into its editor off the UI thread.

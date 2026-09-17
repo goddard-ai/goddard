@@ -893,6 +893,14 @@ impl Render for WakuPane {
     }
 }
 
+/// What a `Cmd+P` confirm hands to a file editor: which file takes keyboard
+/// focus on the first frame its entity exists, and optionally the 1-based
+/// `(line, column)` a `path:line[:column]` query asked the caret to land on.
+struct PendingFileFocus {
+    path: String,
+    position: Option<(usize, usize)>,
+}
+
 struct RightPanelFileEditor {
     state: Entity<TextInput>,
     disk_content: String,
@@ -907,6 +915,9 @@ struct RightPanelFileEditor {
     /// started earlier cannot apply over a newer truth — a save in particular,
     /// which makes any read already in flight describe the pre-save file.
     read_epoch: u64,
+    /// A `(line, column)` jump target from the finder, waiting on the file's
+    /// read — the caret cannot land on a line the editor does not have yet.
+    pending_position: Option<(usize, usize)>,
     /// Pinned selection highlights with comments — this editor's share of the
     /// session's annotation set. Painted inside the field, counted in the
     /// composer chip, drained into the next submission alongside the
@@ -1761,8 +1772,9 @@ pub struct Waku {
     file_preview_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
     /// A file the `Cmd+P` finder just opened whose editor should take
-    /// keyboard focus on the first frame the entity exists.
-    right_panel_pending_file_focus: Option<String>,
+    /// keyboard focus on the first frame the entity exists — carrying the
+    /// `path:line[:column]` jump target when the query had one.
+    right_panel_pending_file_focus: Option<PendingFileFocus>,
     right_panel_pending_terminal_focus: Option<Uuid>,
     /// Terminal surface that most recently held focus. Swapped in and out with
     /// the rest of the per-session panel state.

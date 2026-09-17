@@ -514,15 +514,15 @@ impl Waku {
             }
         });
         if reveal && let Some(range) = active_range {
-            self.reveal_file_search_match(&editor, range.start, cx);
+            self.reveal_editor_offset(&editor, range.start, cx);
         }
         cx.notify();
     }
 
-    /// Scrolls the shared editor viewport so the match at `offset` is
+    /// Scrolls the shared editor viewport so the text at `offset` is
     /// visible. Uses the last painted layout, so right after an edit it can
     /// land a line off; the next navigation corrects it.
-    fn reveal_file_search_match(
+    pub(super) fn reveal_editor_offset(
         &self,
         editor: &Entity<TextInput>,
         offset: usize,

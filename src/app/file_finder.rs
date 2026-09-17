@@ -6,7 +6,8 @@
 //! filtered into `results` per keystroke and per index arrival, so a frame
 //! never walks the filesystem or re-runs the fuzzy match. The search field
 //! keeps real focus while the row highlight is drawn, matching the command
-//! palette. Confirming opens the file in the right panel through the same
+//! palette. A `path:line[:column]` suffix jumps straight to that position.
+//! Confirming opens the file in the right panel through the same
 //! path a transcript file link takes; keyboard focus then lands on the file's
 //! editor via `right_panel_pending_file_focus`, which the editor's ensure
 //! path consumes on the first frame the entity exists.
@@ -91,6 +92,27 @@ impl FileFinderUi {
     pub(super) fn is_open(&self) -> bool {
         self.open
     }
+}
+
+/// Split a finder query into its path filter and an optional `line[:column]`
+/// jump target — `main.rs:12`, `main.rs:12:4`. A trailing colon is a
+/// separator still being typed, so it drops off too; a segment that is not
+/// all digits stays part of the path filter.
+fn split_position_suffix(query: &str) -> (&str, Option<usize>, Option<usize>) {
+    let query = query.trim_end_matches(':');
+    let Some((head, last)) = query.rsplit_once(':') else {
+        return (query, None, None);
+    };
+    if last.is_empty() || !last.bytes().all(|byte| byte.is_ascii_digit()) {
+        return (query, None, None);
+    }
+    if let Some((path, line)) = head.rsplit_once(':')
+        && !line.is_empty()
+        && line.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return (path, line.parse().ok(), last.parse().ok());
+    }
+    (head, last.parse().ok(), None)
 }
 
 fn file_finder_results_height(result_count: usize, show_placeholder: bool) -> f32 {
@@ -234,9 +256,10 @@ impl Waku {
             );
         }
         let query = self.file_finder.search.read(cx).content().to_owned();
+        let (path_query, _, _) = split_position_suffix(&query);
         self.file_finder.results = composer_complete::filter_files(
             &self.file_finder.files,
-            &query,
+            path_query,
             &mut self.file_finder.matcher,
         );
         self.file_finder.selected = self
@@ -282,7 +305,12 @@ impl Waku {
             return;
         };
         let relative_path = row.item.path.clone();
-        self.right_panel_pending_file_focus = Some(relative_path.clone());
+        let query = self.file_finder.search.read(cx).content().to_owned();
+        let (_, line, column) = split_position_suffix(&query);
+        self.right_panel_pending_file_focus = Some(PendingFileFocus {
+            path: relative_path.clone(),
+            position: line.map(|line| (line, column.unwrap_or(1))),
+        });
         self.open_right_panel_surface(RightPanelSurface::Files, cx);
         self.open_right_panel_file(relative_path, cx);
         // Restoring the previous focus is harmless: the pending handoff above
@@ -569,6 +597,44 @@ impl Waku {
 
 #[cfg(test)]
 mod tests {
+    use super::split_position_suffix;
+
+    #[test]
+    fn position_suffix_splits_line_and_column_off_the_path() {
+        assert_eq!(
+            split_position_suffix("src/main.rs"),
+            ("src/main.rs", None, None)
+        );
+        assert_eq!(
+            split_position_suffix("src/main.rs:12"),
+            ("src/main.rs", Some(12), None)
+        );
+        assert_eq!(
+            split_position_suffix("src/main.rs:12:4"),
+            ("src/main.rs", Some(12), Some(4))
+        );
+        // A colon still being typed is a separator, not part of the filter.
+        assert_eq!(
+            split_position_suffix("src/main.rs:"),
+            ("src/main.rs", None, None)
+        );
+        assert_eq!(
+            split_position_suffix("src/main.rs:12:"),
+            ("src/main.rs", Some(12), None)
+        );
+        // Non-numeric segments stay in the filter, so a path with a colon in
+        // it still matches.
+        assert_eq!(split_position_suffix("foo:bar"), ("foo:bar", None, None));
+        assert_eq!(
+            split_position_suffix("foo:bar:12"),
+            ("foo:bar", Some(12), None)
+        );
+        assert_eq!(
+            split_position_suffix("foo:12:bar"),
+            ("foo:12:bar", None, None)
+        );
+    }
+
     /// The modal repaints on every keystroke frame; the index walk and the
     /// fuzzy match must stay out of it — everything the render path shows
     /// comes from the prefetched, pre-filtered snapshot.
