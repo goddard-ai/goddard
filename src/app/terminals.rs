@@ -763,10 +763,57 @@ impl Waku {
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
         let waku = cx.entity().downgrade();
+        let group_name = SharedString::from(format!("terminal-row-{terminal_id}"));
+        let close_focus = self
+            .sidebar_terminal_close_focuses
+            .borrow_mut()
+            .entry(terminal_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // The close control borrows the status slot: it stays zero-width
+        // until the row is hovered or the button takes keyboard focus.
+        let close_button = div()
+            .id(SharedString::from(format!("terminal-close-{terminal_id}")))
+            .track_focus(&close_focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(tr!("common.close")))
+            .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.close_terminal(terminal_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.close_terminal(terminal_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
         let row = div()
             .id(SharedString::from(format!(
                 "sidebar-terminal-{terminal_id}"
             )))
+            .group(group_name.clone())
             .w_full()
             .min_w_0()
             .h(px(SIDEBAR_TERMINAL_CARD_HEIGHT))
@@ -810,9 +857,11 @@ impl Waku {
                                 .flex()
                                 .items_center()
                                 .justify_center()
+                                .group_hover(group_name.clone(), |style| style.invisible())
                                 .child(status_icon),
                         )
-                    }),
+                    })
+                    .child(close_button),
             )
             .child(
                 div()
