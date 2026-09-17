@@ -20,7 +20,7 @@ pub mod layout;
 mod service;
 
 pub use catalog::{COMMANDS, CommandDescriptor, ENTRIES, CatalogEntry, PlatformSet};
-pub use conflict::{Conflict, ConflictKind, analyze_conflicts};
+pub use conflict::{BindingFact, Conflict, ConflictKind, analyze_conflicts};
 // Used by the manager UI/service wiring in later phases.
 #[allow(unused_imports)]
 pub use layout::{
@@ -132,6 +132,35 @@ pub fn generate_key_bindings() -> Vec<KeyBinding> {
                 .map(std::rc::Rc::from);
             KeyBinding::load(
                 entry.sequence,
+                (command.action)(),
+                predicate,
+                false,
+                None,
+                &DummyKeyboardMapper,
+            )
+            .ok()
+        })
+        .collect()
+}
+
+/// Rebuild the live keymap from a resolved snapshot — same `KeyBinding::load`
+/// path as `generate_key_bindings`, but over the effective (default+override)
+/// list. The caller clears the keymap first; ordering is the snapshot's
+/// precedence order.
+pub fn snapshot_key_bindings(snapshot: &crate::keybindings::KeymapSnapshot) -> Vec<KeyBinding> {
+    snapshot
+        .bindings
+        .iter()
+        .filter(|binding| binding.platform.is_current())
+        .filter_map(|binding| {
+            let command = command(binding.command)?;
+            let predicate = binding
+                .context
+                .as_deref()
+                .and_then(|context| KeyBindingContextPredicate::parse(context).ok())
+                .map(std::rc::Rc::from);
+            KeyBinding::load(
+                &binding.sequence,
                 (command.action)(),
                 predicate,
                 false,

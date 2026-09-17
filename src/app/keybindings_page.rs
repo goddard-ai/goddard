@@ -7,23 +7,116 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, Entity, ListAlignment, ListState, SharedString, Window, div, list, px,
-    prelude::*,
+    AnyElement, App, Context, Entity, FocusHandle, ListAlignment, ListState, SharedString, Task,
+    Window, div, list, px, prelude::*,
 };
 
 use crate::input::{InputEvent, TextInput};
-use crate::keybindings::layout::{KeyboardLayout, layout_by_id};
 use crate::keybindings::{
-    BindingSource, CommandRow, KeybindingService, KeymapSnapshot, LayoutId, LayoutSource,
-    default_path, detect_layout,
+    BindingFact, BindingOperation, BindingSource, CommandId, CommandRow, Conflict, ConflictKind,
+    Editability, KeyboardLayout, KeybindingService, KeymapSnapshot, LayoutId, LayoutSource,
+    PlatformSet, UserOverride, analyze_conflicts, default_path, detect_layout, layout_by_id,
+    snapshot_key_bindings,
 };
+use std::collections::HashMap;
 use crate::theme::{Theme, sp};
 
 const ROW_HEIGHT: f32 = 34.0;
 const KEY_UNIT: f32 = 30.0;
 const KEY_GAP: f32 = 3.0;
+/// How long capture waits for the next stroke before committing — long
+/// enough for multi-stroke chords, short enough to feel immediate.
+const CAPTURE_TIMEOUT: Duration = Duration::from_millis(1500);
+const MAX_CAPTURE_STROKES: usize = 3;
+
+/// In-progress chord recording against one command's binding slot.
+/// `binding` is the index into the row's bindings being replaced, or
+/// `None` when recording a new binding to add.
+struct Capture {
+    command: CommandId,
+    binding: Option<usize>,
+    /// Each stroke as GPUI canonical parts (`["cmd","shift","p"]`).
+    strokes: Vec<Vec<String>>,
+    /// Guards the timeout task: a superseded generation means a newer
+    /// keystroke already replaced it.
+    generation: usize,
+}
+
+/// `Keystroke` → the parts vector `UserOverride::sequence` stores, using the
+/// same modifier spellings `Keystroke::parse` accepts.
+fn stroke_parts(keystroke: &gpui::Keystroke) -> Vec<String> {
+    let modifiers = keystroke.modifiers;
+    let mut parts = Vec::new();
+    if modifiers.function {
+        parts.push("fn".to_string());
+    }
+    if modifiers.control {
+        parts.push("ctrl".to_string());
+    }
+    if modifiers.alt {
+        parts.push("alt".to_string());
+    }
+    if modifiers.platform {
+        parts.push(platform_modifier_name().to_string());
+    }
+    if modifiers.shift {
+        parts.push("shift".to_string());
+    }
+    parts.push(keystroke.key.clone());
+    parts
+}
+
+fn platform_modifier_name() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "cmd"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "win"
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "super"
+    }
+}
+
+/// The `platforms` value overrides written on this build carry.
+fn current_platform_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "macos"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows"
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "linux"
+    }
+}
+
+/// Worst-collision analysis over the resolved keymap, keyed by command.
+fn compute_conflicts(snapshot: &KeymapSnapshot) -> HashMap<String, Vec<Conflict>> {
+    let facts: Vec<BindingFact> = snapshot
+        .bindings
+        .iter()
+        .map(|binding| BindingFact {
+            command: binding.command,
+            sequence: &binding.sequence,
+            context: binding.context.as_deref(),
+            platform: binding.platform,
+        })
+        .collect();
+    analyze_conflicts(&facts, PlatformSet::CURRENT)
+        .into_iter()
+        .map(|(command, conflicts)| (command.to_string(), conflicts))
+        .collect()
+}
 
 /// The manager's state: the persistence service, the last resolved
 /// snapshot, and view state. `filtered` holds positions into
@@ -37,9 +130,21 @@ pub(super) struct KeybindingsUi {
     list_state: ListState,
     hovered: Option<usize>,
     selected: Option<usize>,
+    capture: Option<Capture>,
+    capture_focus: FocusHandle,
+    capture_intercept: Option<gpui::Subscription>,
+    capture_timeout: Option<Task<()>>,
+    /// Focus handle for the command table so arrow-key navigation works
+    /// without leaving the keyboard.
+    table_focus: FocusHandle,
     stage_collapsed: bool,
     layout: LayoutId,
     layout_source: LayoutSource,
+    /// Last rejected write (stale revision, validation failure), shown in
+    /// the header strip until the next successful commit clears it.
+    commit_error: Option<String>,
+    /// Conflicts across the effective keymap, recomputed with the snapshot.
+    conflicts: HashMap<String, Vec<Conflict>>,
     _search_subscription: gpui::Subscription,
 }
 
@@ -67,6 +172,7 @@ impl KeybindingsUi {
         let (layout, layout_source) = detect_layout(cx.keyboard_layout().id());
 
         let filtered = (0..snapshot.rows.len()).collect();
+        let conflicts = compute_conflicts(&snapshot);
         Self {
             search,
             service,
@@ -75,9 +181,16 @@ impl KeybindingsUi {
             list_state: ListState::new(0, ListAlignment::Top, px(ROW_HEIGHT)),
             hovered: None,
             selected: None,
+            capture: None,
+            capture_focus: cx.focus_handle(),
+            capture_intercept: None,
+            capture_timeout: None,
+            table_focus: cx.focus_handle(),
             stage_collapsed: false,
             layout,
             layout_source,
+            commit_error: None,
+            conflicts,
             _search_subscription: subscription,
         }
     }
@@ -161,6 +274,290 @@ impl super::Waku {
         cx.notify();
     }
 
+    /// Start recording a chord for `command`. `binding` selects which
+    /// existing binding gets replaced; `None` adds a new one.
+    pub(super) fn keybindings_begin_capture(
+        &mut self,
+        command: CommandId,
+        binding: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        ui.capture = Some(Capture {
+            command,
+            binding,
+            strokes: Vec::new(),
+            generation: 0,
+        });
+        let this = cx.weak_entity();
+        // Interception is scoped to the capture's lifetime: the subscription
+        // drops when recording ends, and stop_propagation inside the handler
+        // keeps captured keys from dispatching their commands.
+        ui.capture_intercept = Some(cx.intercept_keystrokes(move |event, window, app| {
+            let _ = this.update(app, |this, cx| {
+                this.keybindings_on_capture_keystroke(&event.keystroke, window, cx);
+            });
+        }));
+        ui.capture_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn keybindings_cancel_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        ui.capture = None;
+        ui.capture_intercept = None;
+        ui.capture_timeout = None;
+        ui.table_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// One captured key event: Escape cancels, Backspace undoes the last
+    /// stroke, Enter commits early, anything else records a stroke.
+    fn keybindings_on_capture_keystroke(
+        &mut self,
+        keystroke: &gpui::Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.keybindings.as_ref().is_none_or(|ui| ui.capture.is_none()) {
+            return;
+        }
+        cx.stop_propagation();
+        match keystroke.key.as_str() {
+            "escape" => {
+                self.keybindings_cancel_capture(window, cx);
+                return;
+            }
+            "backspace" => {
+                if let Some(capture) = self
+                    .keybindings
+                    .as_mut()
+                    .and_then(|ui| ui.capture.as_mut())
+                {
+                    capture.strokes.pop();
+                }
+                cx.notify();
+                return;
+            }
+            "enter" => {
+                self.keybindings_finish_capture(cx);
+                return;
+            }
+            _ => {}
+        }
+
+        let mapper = cx.keyboard_mapper().clone();
+        let normalized = gpui::KeybindingKeystroke::new_with_mapper(
+            keystroke.clone(),
+            false,
+            mapper.as_ref(),
+        );
+        let stroke = stroke_parts(normalized.inner());
+
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        let Some(capture) = ui.capture.as_mut() else {
+            return;
+        };
+        capture.strokes.push(stroke);
+        if capture.strokes.len() >= MAX_CAPTURE_STROKES {
+            self.keybindings_finish_capture(cx);
+            return;
+        }
+
+        // Reset the commit timeout: a keystroke that just landed must outlive
+        // the task scheduled for the previous one.
+        capture.generation += 1;
+        let generation = capture.generation;
+        let this = cx.weak_entity();
+        ui.capture_timeout = Some(cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(CAPTURE_TIMEOUT).await;
+            let _ = this.update(cx, |this, cx| {
+                let still_current = this
+                    .keybindings
+                    .as_ref()
+                    .and_then(|ui| ui.capture.as_ref())
+                    .is_some_and(|capture| capture.generation == generation);
+                if still_current {
+                    this.keybindings_finish_capture(cx);
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Commit the captured chord through the service, then swap the live
+    /// keymap so the new binding works immediately.
+    fn keybindings_finish_capture(&mut self, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        let Some(capture) = ui.capture.take() else {
+            return;
+        };
+        ui.capture_intercept = None;
+        ui.capture_timeout = None;
+
+        // Empty capture means the user backspaced everything or pressed
+        // Enter before typing — close without writing. Unbinding is the
+        // row's explicit remove control, not a capture outcome.
+        if capture.strokes.is_empty() {
+            cx.notify();
+            return;
+        }
+
+        let row = ui
+            .snapshot
+            .rows
+            .iter()
+            .find(|row| row.descriptor.id == capture.command);
+        let context = capture
+            .binding
+            .and_then(|index| row.and_then(|row| row.bindings.get(index)))
+            .and_then(|binding| binding.context.clone());
+
+        let override_record = UserOverride {
+            command_id: capture.command.to_string(),
+            platforms: vec![current_platform_label().to_string()],
+            context,
+            operation: match capture.binding {
+                Some(_) => BindingOperation::Replace,
+                None => BindingOperation::Add,
+            },
+            semantics: "logical".to_string(),
+            sequence: Some(capture.strokes),
+            extra: Default::default(),
+        };
+
+        let revision = ui.snapshot.revision;
+        match ui.service.commit(revision, vec![override_record]) {
+            Ok(_) => {
+                ui.snapshot = ui.service.snapshot();
+                ui.conflicts = compute_conflicts(&ui.snapshot);
+                ui.commit_error = None;
+                // Live rebind: the new effective map replaces the keymap
+                // wholesale, preserving precedence order.
+                let bindings = snapshot_key_bindings(&ui.snapshot);
+                cx.clear_key_bindings();
+                cx.bind_keys(bindings);
+                ui.refilter(cx);
+            }
+            Err(error) => {
+                ui.commit_error = Some(format!("{error:?}"));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Remove one binding slot outright (the row's context menu action).
+    pub(super) fn keybindings_unbind(
+        &mut self,
+        command: CommandId,
+        binding_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        let context = ui
+            .snapshot
+            .rows
+            .iter()
+            .find(|row| row.descriptor.id == command)
+            .and_then(|row| row.bindings.get(binding_index))
+            .and_then(|binding| binding.context.clone());
+        let override_record = UserOverride {
+            command_id: command.to_string(),
+            platforms: vec![current_platform_label().to_string()],
+            context,
+            operation: BindingOperation::Unbind,
+            semantics: "logical".to_string(),
+            sequence: None,
+            extra: Default::default(),
+        };
+        let revision = ui.snapshot.revision;
+        if ui.service.commit(revision, vec![override_record]).is_ok() {
+            ui.snapshot = ui.service.snapshot();
+            ui.conflicts = compute_conflicts(&ui.snapshot);
+            ui.commit_error = None;
+            let bindings = snapshot_key_bindings(&ui.snapshot);
+            cx.clear_key_bindings();
+            cx.bind_keys(bindings);
+            ui.refilter(cx);
+        }
+        cx.notify();
+    }
+
+    /// Restore a command's default bindings (drops its overrides).
+    pub(super) fn keybindings_reset(&mut self, command: CommandId, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        if ui.service.reset(command).is_ok() {
+            ui.snapshot = ui.service.snapshot();
+            ui.conflicts = compute_conflicts(&ui.snapshot);
+            ui.commit_error = None;
+            let bindings = snapshot_key_bindings(&ui.snapshot);
+            cx.clear_key_bindings();
+            cx.bind_keys(bindings);
+            ui.refilter(cx);
+        }
+        cx.notify();
+    }
+
+    fn keybindings_select_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        if ui.filtered.is_empty() {
+            return;
+        }
+        let index = index.min(ui.filtered.len() - 1);
+        ui.selected = Some(index);
+        ui.list_state.scroll_to_reveal_item(index);
+        cx.notify();
+    }
+
+    /// Enter on a selected row starts capture on its first binding (or adds
+    /// one when the command has none).
+    fn keybindings_edit_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_ref() else {
+            return;
+        };
+        let Some(row_index) = ui.selected.and_then(|index| ui.filtered.get(index)) else {
+            return;
+        };
+        let Some(row) = ui.snapshot.rows.get(*row_index) else {
+            return;
+        };
+        if !matches!(row.descriptor.editability, Editability::Editable) {
+            return;
+        }
+        let binding = (!row.bindings.is_empty()).then_some(0);
+        self.keybindings_begin_capture(row.descriptor.id, binding, window, cx);
+    }
+
+    /// Arrow-key navigation over the filtered table.
+    fn keybindings_move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        if ui.filtered.is_empty() {
+            return;
+        }
+        let current = ui.selected.unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, ui.filtered.len() as isize - 1) as usize;
+        ui.selected = Some(next);
+        ui.list_state.scroll_to_reveal_item(next);
+        cx.notify();
+    }
+
     pub(super) fn render_keybindings_page(
         &self,
         _window: &Window,
@@ -172,15 +569,29 @@ impl super::Waku {
         };
         let layout = layout_by_id(ui.layout);
 
-        // The chord the stage shows: selected > hover > none (capture joins
-        // this precedence chain in the editing phase).
+        // The chord the stage shows: an in-progress capture wins over
+        // selected, which wins over hover.
         let preview_row = ui
-            .selected
-            .or(ui.hovered)
-            .and_then(|index| ui.filtered.get(index))
-            .and_then(|row| ui.snapshot.rows.get(*row));
+            .capture
+            .as_ref()
+            .and_then(|capture| {
+                ui.snapshot
+                    .rows
+                    .iter()
+                    .find(|row| row.descriptor.id == capture.command)
+            })
+            .or_else(|| {
+                ui.selected
+                    .or(ui.hovered)
+                    .and_then(|index| ui.filtered.get(index))
+                    .and_then(|row| ui.snapshot.rows.get(*row))
+            });
         let mut codes = HashSet::new();
-        if let Some(row) = preview_row {
+        if let Some(capture) = &ui.capture {
+            for stroke in &capture.strokes {
+                codes.extend(highlight_codes(&stroke.join("-"), layout));
+            }
+        } else if let Some(row) = preview_row {
             for binding in &row.bindings {
                 codes.extend(highlight_codes(&binding.sequence, layout));
             }
@@ -204,16 +615,61 @@ impl super::Waku {
         };
 
         // `list`'s item closure gets `&mut App`, not the entity — hand it a
-        // snapshot clone so rows render without touching `self`.
+        // snapshot clone plus a weak handle back to `Waku` so hover and
+        // click can still reach the page state.
         let rows = ui.snapshot.rows.clone();
         let filtered = ui.filtered.clone();
         let selected = ui.selected;
+        let this = cx.weak_entity();
+        // Worst conflict per command, for chip tinting in the table.
+        let severities: HashMap<String, ConflictKind> = ui
+            .conflicts
+            .iter()
+            .map(|(command, conflicts)| {
+                let worst = conflicts
+                    .iter()
+                    .map(|conflict| conflict.kind)
+                    .max_by_key(|kind| match kind {
+                        ConflictKind::Hard => 3,
+                        ConflictKind::UnknownOverlap => 2,
+                        ConflictKind::Shadowed | ConflictKind::PartialOverlap => 1,
+                        ConflictKind::Duplicate => 0,
+                    });
+                (command.clone(), worst.unwrap_or(ConflictKind::Duplicate))
+            })
+            .collect();
+        let hard_conflicts = severities
+            .values()
+            .filter(|kind| **kind == ConflictKind::Hard)
+            .count();
 
-        div()
+        let mut page = div()
             .size_full()
             .flex()
             .flex_col()
-            .child(
+            .track_focus(&ui.table_focus)
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if let Some(ui) = this.keybindings.as_ref() {
+                    if ui.capture.is_some() || ui.search.read(cx).focus().is_focused(window) {
+                        return;
+                    }
+                }
+                match event.keystroke.key.as_str() {
+                    "down" => this.keybindings_move_selection(1, cx),
+                    "up" => this.keybindings_move_selection(-1, cx),
+                    "pagedown" => this.keybindings_move_selection(20, cx),
+                    "pageup" => this.keybindings_move_selection(-20, cx),
+                    "home" => this.keybindings_select_row(0, cx),
+                    "end" => this.keybindings_select_row(usize::MAX, cx),
+                    "enter" => {
+                        this.keybindings_edit_selected(window, cx);
+                    }
+                    _ => return,
+                }
+                cx.stop_propagation();
+            }));
+
+        page = page.child(
                 // Header: title, search, layout readout.
                 div()
                     .px(px(20.0))
@@ -238,8 +694,79 @@ impl super::Waku {
                             .text_color(theme.text_secondary)
                             .child(format!("{source_label} · {}", layout.name)),
                     ),
-            )
-            .child(render_keyboard_stage(ui, layout, &codes, preview_row, theme))
+            );
+
+        page = page.child(render_keyboard_stage(ui, layout, &codes, preview_row, theme));
+
+        // While recording, a banner shows the strokes captured so far and
+        // the keys that cancel or commit.
+        if let Some(capture) = &ui.capture {
+            let command_title = ui
+                .snapshot
+                .rows
+                .iter()
+                .find(|row| row.descriptor.id == capture.command)
+                .map(|row| row.descriptor.title().to_string())
+                .unwrap_or_else(|| capture.command.to_string());
+            let chord = capture
+                .strokes
+                .iter()
+                .map(|stroke| {
+                    crate::ui::shortcut::sequence_label(&stroke.join("-"))
+                })
+                .collect::<Vec<_>>()
+                .join("  ");
+            page = page.child(
+                div()
+                    .id("keybindings-capture")
+                    .track_focus(&ui.capture_focus)
+                    .px(px(20.0))
+                    .py(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .bg(theme.canvas)
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(format!("{command_title}:")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text)
+                            .child(if chord.is_empty() {
+                                tr!("keybind.capture.waiting")
+                            } else {
+                                chord
+                            }),
+                    )
+                    .child(
+                        div()
+                            .ml_auto()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("keybind.capture.hint")),
+                    ),
+            );
+        }
+
+        if let Some(error) = &ui.commit_error {
+            page = page.child(
+                div()
+                    .px(px(20.0))
+                    .py(px(6.0))
+                    .text_size(sp(11.5))
+                    .text_color(theme.danger)
+                    .child(format!("{error}")),
+            );
+        }
+
+        page = page
             .child(
                 // Counts strip between stage and table.
                 div()
@@ -248,9 +775,14 @@ impl super::Waku {
                     .text_size(sp(11.5))
                     .text_color(theme.text_tertiary)
                     .child(format!(
-                        "{} · {}",
+                        "{} · {}{}",
                         tr!("keybind.counts", n = ui.filtered.len()),
-                        tr!("keybind.modified", n = modified)
+                        tr!("keybind.modified", n = modified),
+                        if hard_conflicts > 0 {
+                            format!(" · {}", tr!("keybind.conflicts", n = hard_conflicts))
+                        } else {
+                            String::new()
+                        }
                     )),
             )
             .child(
@@ -264,12 +796,19 @@ impl super::Waku {
                         let Some(row) = rows.get(row_index) else {
                             return div().into_any_element();
                         };
-                        render_row(row, selected == Some(index), theme)
+                        render_row(
+                            row,
+                            index,
+                            selected == Some(index),
+                            severities.get(row.descriptor.id).copied(),
+                            this.clone(),
+                            theme,
+                        )
                     })
                     .size_full(),
                 ),
-            )
-            .into_any_element()
+            );
+        page.into_any_element()
     }
 }
 
@@ -345,9 +884,17 @@ fn render_keyboard_stage(
     stage
 }
 
-fn render_row(row: &CommandRow, selected: bool, theme: Theme) -> AnyElement {
+fn render_row(
+    row: &CommandRow,
+    index: usize,
+    selected: bool,
+    conflict: Option<ConflictKind>,
+    this: gpui::WeakEntity<super::Waku>,
+    theme: Theme,
+) -> AnyElement {
     let category = tr!(row.descriptor.category.title_key());
     let title = row.descriptor.title();
+    let hover_this = this.clone();
     div()
         .id(SharedString::from(row.descriptor.id))
         .h(px(ROW_HEIGHT))
@@ -357,6 +904,29 @@ fn render_row(row: &CommandRow, selected: bool, theme: Theme) -> AnyElement {
         .px(px(8.0))
         .rounded(px(6.0))
         .when(selected, |element| element.bg(theme.sidebar_item_background))
+        .hover(|element| element.bg(theme.overlay))
+        .on_hover(move |hovered, _window, app| {
+            if !*hovered {
+                return;
+            }
+            let _ = hover_this.update(app, |this, cx| {
+                if let Some(ui) = this.keybindings.as_mut() {
+                    ui.hovered = Some(index);
+                }
+                cx.notify();
+            });
+        })
+        .on_click({
+            let this = this.clone();
+            move |_, _window, app| {
+                let _ = this.update(app, |this, cx| {
+                    if let Some(ui) = this.keybindings.as_mut() {
+                        ui.selected = Some(index);
+                    }
+                    cx.notify();
+                });
+            }
+        })
         .child(
             div()
                 .w(px(110.0))
@@ -388,18 +958,88 @@ fn render_row(row: &CommandRow, selected: bool, theme: Theme) -> AnyElement {
             div()
                 .flex()
                 .gap(px(4.0))
-                .children(row.bindings.iter().map(|binding| {
-                    div()
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .rounded(px(4.0))
-                        .border_1()
-                        .border_color(theme.border)
-                        .text_size(sp(11.0))
-                        .text_color(theme.text)
-                        .child(crate::ui::shortcut::sequence_label(&binding.sequence))
-                        .into_any_element()
-                }))
+                .children(
+                    row.bindings
+                        .iter()
+                        .enumerate()
+                        .map(|(binding_index, binding)| {
+                            let editable = matches!(
+                                row.descriptor.editability,
+                                Editability::Editable
+                            );
+                            let command = row.descriptor.id;
+                            // Hard conflicts read as danger; shadowed and
+                            // unknown overlaps as warning.
+                            let conflict_color = match conflict {
+                                Some(ConflictKind::Hard) => Some(theme.danger),
+                                Some(_) => Some(theme.warning),
+                                None => None,
+                            };
+                            let chip = div()
+                                .id(SharedString::from(format!(
+                                    "{}:{binding_index}",
+                                    row.descriptor.id
+                                )))
+                                .px(px(6.0))
+                                .py(px(2.0))
+                                .rounded(px(4.0))
+                                .border_1()
+                                .border_color(conflict_color.unwrap_or(theme.border))
+                                .text_size(sp(11.0))
+                                .text_color(theme.text)
+                                .child(crate::ui::shortcut::sequence_label(
+                                    &binding.sequence,
+                                ));
+                            // The chip is the edit control: clicking an
+                            // editable binding records a replacement chord.
+                            if editable {
+                                let this = this.clone();
+                                chip.cursor_pointer()
+                                    .hover(|element| {
+                                        element.border_color(theme.border_strong)
+                                    })
+                                    .on_click(move |_, window, app| {
+                                        let _ = this.update(app, |this, cx| {
+                                            this.keybindings_begin_capture(
+                                                command,
+                                                Some(binding_index),
+                                                window,
+                                                cx,
+                                            );
+                                        });
+                                    })
+                                    .into_any_element()
+                            } else {
+                                chip.into_any_element()
+                            }
+                        }),
+                )
+                .children(
+                    matches!(row.descriptor.editability, Editability::Editable)
+                        .then(|| {
+                            let command = row.descriptor.id;
+                            let this = this.clone();
+                            div()
+                                .id(SharedString::from(format!("{}:add", row.descriptor.id)))
+                                .px(px(5.0))
+                                .py(px(2.0))
+                                .rounded(px(4.0))
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .cursor_pointer()
+                                .hover(|element| element.text_color(theme.text))
+                                .child("+")
+                                .on_click(move |_, window, app| {
+                                    let _ = this.update(app, |this, cx| {
+                                        this.keybindings_begin_capture(
+                                            command, None, window, cx,
+                                        );
+                                    });
+                                })
+                                .into_any_element()
+                        })
+                        .into_iter(),
+                )
                 .children(row.descriptor.builtin_label.iter().map(|label| {
                     div()
                         .px(px(6.0))

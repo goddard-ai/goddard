@@ -3441,8 +3441,14 @@ keybind.counts:
   en: "%{n} commands"
 keybind.modified:
   en: "%{n} customized"
+keybind.conflicts:
+  en: "%{n} conflicts"
 keybind.stage.collapsed:
   en: Keyboard hidden
+keybind.capture.waiting:
+  en: Press keys…
+keybind.capture.hint:
+  en: Esc cancels · Backspace removes a stroke · Enter saves now
 keybind.keywords:
   en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:
