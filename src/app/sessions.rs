@@ -460,8 +460,53 @@ impl Waku {
         self.select_session(id, cx);
     }
 
+    /// The session a workspace choice from the composer lands on, resolving
+    /// the workspace subject: the selection normally, the armed card under
+    /// Big Picture, or — untargeted — the destination project's unstarted
+    /// draft, materialized on first choice so the pick has somewhere to
+    /// live. That draft is the same session the submit path's
+    /// `create_session_for` finds and sends on.
+    pub(super) fn ensure_workspace_subject_session(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<Uuid> {
+        let (session_id, project_id) = self.workspace_subject();
+        if session_id.is_some() || !self.big_picture.is_open() {
+            return session_id;
+        }
+        let project_id = project_id?;
+        let runtime_mode =
+            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        let mut session = self.state.new_session(project_id, self.state.last_provider);
+        session.runtime_mode = runtime_mode;
+        let session_id = session.id;
+        self.state.push_session(session);
+        self.save();
+        cx.notify();
+        Some(session_id)
+    }
+
     pub(super) fn select_workspace(&mut self, workspace: SessionWorkspace, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session() else {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        self.select_workspace_for(session_id, workspace, cx);
+    }
+
+    /// `select_workspace` against an explicit session — the workspace subject
+    /// under Big Picture is not necessarily the session selected underneath.
+    pub(super) fn select_workspace_for(
+        &mut self,
+        session_id: Uuid,
+        workspace: SessionWorkspace,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
             return;
         };
         if session.has_started() || session.is_busy() {
@@ -484,7 +529,7 @@ impl Waku {
         };
         let changed = session.workspace != workspace;
         self.state.remember_workspace(project_id, &workspace);
-        if changed && let Some(session) = self.selected_session_mut() {
+        if changed && let Some(session) = self.state.session_mut(session_id) {
             session.workspace = workspace;
         }
         self.save();
@@ -495,8 +540,11 @@ impl Waku {
                 self.remove_draft_worktree(path, cx);
             }
             // An open terminal keeps the old workspace's cwd; respawn it
-            // where the draft now points.
-            self.ensure_right_panel_terminals(cx);
+            // where the draft now points. Only the visible session's
+            // surfaces can be open — a Big Picture subject's are not.
+            if self.state.selected_session == Some(session_id) {
+                self.ensure_right_panel_terminals(cx);
+            }
             cx.notify();
         }
     }
@@ -514,26 +562,46 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        let Some(session) = self.composer_session() else {
-            return;
-        };
-        if session.has_started() || session.is_busy() {
+        let (subject_session_id, subject_project_id) = self.workspace_subject();
+        let session = subject_session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        });
+        if session.is_some_and(|session| session.has_started() || session.is_busy()) {
             return;
         }
+        let Some(project_id) = session
+            .map(|session| session.project_id)
+            .or(subject_project_id)
+        else {
+            return;
+        };
         if self
             .state
             .projects
             .iter()
-            .any(|project| project.id == session.project_id && project.is_projectless())
+            .any(|project| project.id == project_id && project.is_projectless())
         {
             return;
         }
-        let next = if session.workspace.is_local() {
+        let next = if session
+            .map(|session| session.workspace.is_local())
+            .unwrap_or_else(|| {
+                matches!(
+                    self.state.workspace_for_new_session(project_id),
+                    SessionWorkspace::Local
+                )
+            }) {
             SessionWorkspace::NewWorktree { base_branch: None }
         } else {
             SessionWorkspace::Local
         };
-        self.select_workspace(next, cx);
+        let Some(session_id) = self.ensure_workspace_subject_session(cx) else {
+            return;
+        };
+        self.select_workspace_for(session_id, next, cx);
     }
 
     pub(super) fn remove_session(
@@ -2747,6 +2815,18 @@ impl Waku {
                     let project_id = project.id;
                     waku.state.projects.push(project);
                     waku.create_session_for(project_id, waku.state.last_provider, cx);
+                    // A "no project" pick from the overlay's composer
+                    // retargets its new-task destination to the provisioned
+                    // workspace, carrying the typed draft across.
+                    if waku.big_picture.is_open()
+                        && waku.big_picture.target().is_none()
+                        && waku.big_picture.new_task_project != Some(project_id)
+                    {
+                        let source = waku.big_picture.draft_key;
+                        waku.big_picture.new_task_project = Some(project_id);
+                        waku.sync_big_picture_draft(cx);
+                        waku.move_composer_draft_after_project_change(source, cx);
+                    }
                     // A Big Picture new-task submit stashes its prompt while
                     // the workspace is provisioned; the fresh draft is now
                     // selected, so it can land.

@@ -97,6 +97,36 @@ pub(super) enum ComposerSubmitAction {
     Continue,
 }
 
+/// Which session and project the composer workspace controls act on.
+/// Outside Big Picture that's the selection; inside it, the armed card, or —
+/// while nothing is armed — the standing new-task destination project and
+/// its unstarted draft session when one exists.
+pub(super) fn workspace_subject_for(
+    big_picture_open: bool,
+    target_session: Option<Uuid>,
+    selected_session: Option<Uuid>,
+    selected_project: Option<Uuid>,
+    new_task_project: Option<Uuid>,
+    sessions: &[AgentSession],
+) -> (Option<Uuid>, Option<Uuid>) {
+    if !big_picture_open {
+        return (selected_session, selected_project);
+    }
+    if let Some(session_id) = target_session {
+        let project_id = sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id);
+        return (Some(session_id), project_id);
+    }
+    let project_id = new_task_project;
+    let session_id = sessions
+        .iter()
+        .find(|session| Some(session.project_id) == project_id && !session.has_started())
+        .map(|session| session.id);
+    (session_id, project_id)
+}
+
 /// Whether an idle session's last turn ended unsettled: explicit Stop, an app
 /// quit mid-turn, and orphaned-runtime recovery settle the turn as
 /// `Interrupted`, while a provider error or a runtime dying with its daemon
@@ -3408,6 +3438,69 @@ impl Waku {
         self.state.session_mut(id)
     }
 
+    /// The session and project the workspace footer's chips describe and its
+    /// pickers configure. Outside Big Picture both come from the selection;
+    /// while the overlay is open they follow the composer — the armed card's
+    /// session and project, or the standing new-task destination: that
+    /// project's unstarted draft when one already exists, and no session at
+    /// all before a workspace choice materializes one.
+    pub(super) fn workspace_subject(&self) -> (Option<Uuid>, Option<Uuid>) {
+        workspace_subject_for(
+            self.big_picture.is_open(),
+            self.big_picture.target(),
+            self.state.selected_session,
+            self.state.selected_project,
+            self.big_picture.new_task_project,
+            &self.state.sessions,
+        )
+    }
+
+    /// The subject's session, when one exists yet.
+    pub(super) fn workspace_subject_session(&self) -> Option<&AgentSession> {
+        let (session_id, _) = self.workspace_subject();
+        session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        })
+    }
+
+    /// The directory the subject's workspace resolves to — the session's
+    /// materialized worktree, else its project's ordinary checkout. `None`
+    /// only when the subject names no project at all.
+    pub(super) fn workspace_subject_path(&self) -> Option<PathBuf> {
+        let (session_id, project_id) = self.workspace_subject();
+        let session = session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        });
+        let project = project_id.and_then(|project_id| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+        });
+        session
+            .and_then(|session| self.workspace_path_for_session(session))
+            .or_else(|| project.map(|project| project.path.as_path()))
+            .map(std::path::Path::to_path_buf)
+    }
+
+    /// The workspace the chips should display: the subject session's own,
+    /// or — for the overlay's untargeted composer before its draft exists —
+    /// the workspace a fresh task in the destination project would open
+    /// with.
+    pub(super) fn workspace_subject_workspace(&self) -> Option<SessionWorkspace> {
+        if let Some(session) = self.workspace_subject_session() {
+            return Some(session.workspace.clone());
+        }
+        let (_, project_id) = self.workspace_subject();
+        project_id.map(|project_id| self.state.workspace_for_new_session(project_id))
+    }
+
     /// A submit click goes where Enter would: the overlay's own routing while
     /// Big Picture is open, the page's task creation while the Projects page
     /// is open, the selected session otherwise.
@@ -3730,12 +3823,29 @@ impl Waku {
 
     fn render_branch_selector(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = Theme::current(cx);
-        let session = self.selected_session()?;
-        let workspace = session.workspace.clone();
-        let workspace_path = self.workspace_path_for_session(session)?.to_path_buf();
-        self.selected_project()
-            .filter(|project| !project.is_projectless())?;
-        let branch_enabled = !session.is_busy() && !self.branch_operation_pending;
+        let (subject_session_id, subject_project_id) = self.workspace_subject();
+        let session = subject_session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        });
+        let subject_project = subject_project_id.and_then(|project_id| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+        });
+        let project = subject_project.filter(|project| !project.is_projectless())?;
+        let workspace = session
+            .map(|session| session.workspace.clone())
+            .unwrap_or_else(|| self.state.workspace_for_new_session(project.id));
+        let workspace_path = session
+            .and_then(|session| session.workspace.path())
+            .unwrap_or(&project.path)
+            .to_path_buf();
+        let branch_enabled =
+            !session.is_some_and(|session| session.is_busy()) && !self.branch_operation_pending;
         let planned_worktree = matches!(workspace, SessionWorkspace::NewWorktree { .. });
         let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
         let selected_branch = match &workspace {
@@ -3766,10 +3876,18 @@ impl Waku {
                     if open {
                         this.branch_picker_mode = BranchPickerMode::Browse;
                         this.branch_picker_highlight = None;
-                        let project_name = this
-                            .selected_project()
-                            .map(Project::display_name)
-                            .unwrap_or_else(|| tr!("project.project_lower"));
+                        let project_name = {
+                            let (_, project_id) = this.workspace_subject();
+                            project_id
+                                .and_then(|project_id| {
+                                    this.state
+                                        .projects
+                                        .iter()
+                                        .find(|project| project.id == project_id)
+                                })
+                                .map(Project::display_name)
+                                .unwrap_or_else(|| tr!("project.project_lower"))
+                        };
                         reset_search.update(cx, |input, cx| {
                             input.set_placeholder(
                                 tr!("branches.search_project", project = project_name),
@@ -3778,7 +3896,9 @@ impl Waku {
                             input.clear(cx);
                         });
                         reset_create.update(cx, |input, cx| input.clear(cx));
-                        this.refresh_selected_branch_snapshot(cx);
+                        if let Some(path) = this.workspace_subject_path() {
+                            this.refresh_workspace_branch_snapshot(&path, cx);
+                        }
                     } else {
                         this.branch_picker_mode = BranchPickerMode::Browse;
                         let focus = this.composer_focus(cx);
@@ -4268,30 +4388,58 @@ impl Waku {
 
     pub(super) fn render_workspace_footer(&mut self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let selected_project_id = self.state.selected_project;
-        let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
-        let project_name = self
-            .selected_project()
-            .map(|project| {
-                if project.is_projectless() {
-                    tr!("project.choose_project")
-                } else {
-                    project.display_name()
-                }
-            })
-            .unwrap_or_else(|| tr!("project.choose_project"));
-        let can_configure_workspace = self
-            .selected_session()
-            .is_some_and(|session| !session.has_started() && !session.is_busy());
+        let (subject_session_id, subject_project_id) = self.workspace_subject();
+        let (
+            subject_configurable,
+            subject_movable,
+            subject_moving,
+            subject_projectless,
+            project_name,
+            subject_project_path,
+        ) = {
+            let subject_session = subject_session_id.and_then(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+            });
+            let subject_project = subject_project_id.and_then(|project_id| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+            });
+            (
+                subject_session.is_some_and(|session| !session.has_started() && !session.is_busy()),
+                subject_session
+                    .is_some_and(|session| self.can_move_session_to_worktree(session.id)),
+                subject_session
+                    .is_some_and(|session| self.worktree_move_pending.contains(&session.id)),
+                subject_project.is_some_and(Project::is_projectless),
+                subject_project
+                    .map(|project| {
+                        if project.is_projectless() {
+                            tr!("project.choose_project")
+                        } else {
+                            project.display_name()
+                        }
+                    })
+                    .unwrap_or_else(|| tr!("project.choose_project")),
+                subject_project
+                    .filter(|project| !project.is_projectless())
+                    .map(|project| project.path.clone()),
+            )
+        };
+        let projectless_selected = subject_projectless;
+        // The overlay's untargeted composer has no draft session to inspect
+        // yet — its new task is configurable by definition.
+        let can_configure_workspace =
+            subject_configurable || (self.big_picture.is_open() && subject_project_id.is_some());
         // A started task can't reconfigure its workspace, but a local one
         // can still move into a worktree carrying its state.
-        let can_move_to_worktree = self
-            .selected_session()
-            .is_some_and(|session| self.can_move_session_to_worktree(session.id));
+        let can_move_to_worktree = subject_movable;
         let can_pick_worktree = can_configure_workspace || can_move_to_worktree;
-        let moving_to_worktree = self
-            .selected_session()
-            .is_some_and(|session| self.worktree_move_pending.contains(&session.id));
+        let moving_to_worktree = subject_moving;
 
         let project_handle = self.menu_handle("workspace-project", cx);
         let project_trigger = MenuChip::new("workspace-project")
@@ -4311,13 +4459,13 @@ impl Waku {
                 .projects
                 .iter()
                 .filter(|project| !project.is_projectless())
-                .filter(|project| Some(project.id) == selected_project_id)
+                .filter(|project| Some(project.id) == subject_project_id)
                 .chain(
                     self.state
                         .projects
                         .iter()
                         .filter(|project| !project.is_projectless())
-                        .filter(|project| Some(project.id) != selected_project_id),
+                        .filter(|project| Some(project.id) != subject_project_id),
                 )
                 .map(|project| (project.id, project.display_name()))
                 .collect::<Vec<_>>();
@@ -4334,13 +4482,13 @@ impl Waku {
                         .map(|(project_id, project_name)| {
                             let weak = weak.clone();
                             MenuItem::new(project_name, move |_, cx| {
-                                if Some(project_id) != selected_project_id {
+                                if Some(project_id) != subject_project_id {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.select_project_from_composer(project_id, cx);
                                     });
                                 }
                             })
-                            .selected(Some(project_id) == selected_project_id)
+                            .selected(Some(project_id) == subject_project_id)
                         })
                         .collect::<Vec<_>>();
                     if !items.is_empty() {
@@ -4358,7 +4506,15 @@ impl Waku {
                     items.push(
                         MenuItem::new(tr!("project.no_project"), move |_, cx| {
                             let _ = projectless.update(cx, |this, cx| {
-                                if !this.selected_project().is_some_and(Project::is_projectless) {
+                                let subject_projectless = {
+                                    let (_, project_id) = this.workspace_subject();
+                                    project_id.is_some_and(|project_id| {
+                                        this.state.projects.iter().any(|project| {
+                                            project.id == project_id && project.is_projectless()
+                                        })
+                                    })
+                                };
+                                if !subject_projectless {
                                     this.create_projectless_session_from_composer(cx);
                                 }
                             });
@@ -4373,10 +4529,7 @@ impl Waku {
             project_trigger.into_any_element()
         };
 
-        let workspace = self
-            .selected_session()
-            .map(|session| session.workspace.clone())
-            .unwrap_or_default();
+        let workspace = self.workspace_subject_workspace().unwrap_or_default();
         let workspace_label = match &workspace {
             SessionWorkspace::Local => SharedString::from(tr!("workspace.local")),
             SessionWorkspace::NewWorktree { .. } => {
@@ -4401,9 +4554,17 @@ impl Waku {
                         name_input.update(cx, |input, cx| input.clear(cx));
                         // Base entries describe the project checkout, which
                         // may differ from the draft's materialized worktree.
-                        if let Some(path) =
-                            this.selected_project().map(|project| project.path.clone())
-                        {
+                        let subject_project_path = {
+                            let (_, project_id) = this.workspace_subject();
+                            project_id.and_then(|project_id| {
+                                this.state
+                                    .projects
+                                    .iter()
+                                    .find(|project| project.id == project_id)
+                                    .map(|project| project.path.clone())
+                            })
+                        };
+                        if let Some(path) = subject_project_path {
                             this.branch_snapshots.invalidate(&path);
                         }
                     } else {
@@ -4443,10 +4604,7 @@ impl Waku {
             // is already bound to a worktree. Only the create rows consume
             // it, so a started session — which can only move — skips the
             // fetch.
-            let project_path = self
-                .selected_project()
-                .filter(|project| !project.is_projectless())
-                .map(|project| project.path.clone());
+            let project_path = subject_project_path.clone();
             let project_snapshot = if worktree_handle.is_open() && can_configure_workspace {
                 project_path.and_then(|path| self.branch_snapshot_for_workspace(&path, cx))
             } else {
@@ -4572,7 +4730,15 @@ impl Waku {
                                     .update(cx, |this, cx| match &action {
                                         worktrees::WorktreePickerAction::Current { .. } => true,
                                         worktrees::WorktreePickerAction::Local => {
-                                            this.select_workspace(SessionWorkspace::Local, cx);
+                                            if let Some(session_id) =
+                                                this.ensure_workspace_subject_session(cx)
+                                            {
+                                                this.select_workspace_for(
+                                                    session_id,
+                                                    SessionWorkspace::Local,
+                                                    cx,
+                                                );
+                                            }
                                             true
                                         }
                                         worktrees::WorktreePickerAction::Move => {
@@ -4582,7 +4748,7 @@ impl Waku {
                                                 .content()
                                                 .trim()
                                                 .to_owned();
-                                            if let Some(session_id) = this.state.selected_session {
+                                            if let Some(session_id) = this.workspace_subject().0 {
                                                 this.move_session_to_worktree(
                                                     session_id,
                                                     (!name.is_empty()).then_some(name),
@@ -4598,11 +4764,16 @@ impl Waku {
                                                 .content()
                                                 .trim()
                                                 .to_owned();
-                                            this.create_workspace_worktree(
-                                                (!name.is_empty()).then_some(name),
-                                                base_ref.clone(),
-                                                cx,
-                                            );
+                                            if let Some(session_id) =
+                                                this.ensure_workspace_subject_session(cx)
+                                            {
+                                                this.create_workspace_worktree_for(
+                                                    session_id,
+                                                    (!name.is_empty()).then_some(name),
+                                                    base_ref.clone(),
+                                                    cx,
+                                                );
+                                            }
                                             true
                                         }
                                     })

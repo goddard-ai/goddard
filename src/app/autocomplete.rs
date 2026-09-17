@@ -487,7 +487,7 @@ impl Waku {
                         anchor,
                     )),
             )
-            .with_priority(1)
+            .with_priority(crate::ui::menu::MENU_PAINT_PRIORITY)
             .into_any_element(),
             !rows.is_empty(),
         ))

@@ -228,7 +228,7 @@ impl Waku {
     /// A project choice in the composer changes where the current unsent task
     /// will run; it is not ordinary task navigation. Carry its draft into a
     /// blank destination instead of letting session activation clear it.
-    fn move_composer_draft_after_project_change(
+    pub(super) fn move_composer_draft_after_project_change(
         &mut self,
         source: Option<crate::persistence::ComposerDraftKey>,
         cx: &mut Context<Self>,
@@ -264,6 +264,21 @@ impl Waku {
     pub(super) fn create_projectless_session_from_composer(&mut self, cx: &mut Context<Self>) {
         let source = self.composer_draft_key();
         self.create_projectless_session(cx);
+        // Reusing an existing projectless draft resolves synchronously; a
+        // freshly provisioned one lands in `create_projectless_session`'s
+        // completion, which retargets the overlay there instead.
+        if self.big_picture.is_open()
+            && let Some(project_id) = self.selected_session().map(|session| session.project_id)
+            && self
+                .state
+                .projects
+                .iter()
+                .any(|project| project.id == project_id && project.is_projectless())
+            && self.big_picture.new_task_project != Some(project_id)
+        {
+            self.big_picture.new_task_project = Some(project_id);
+            self.sync_big_picture_draft(cx);
+        }
         self.move_composer_draft_after_project_change(source, cx);
     }
 

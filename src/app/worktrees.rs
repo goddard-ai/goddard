@@ -50,21 +50,27 @@ impl Waku {
     /// Create the draft's worktree now — at selection time rather than first
     /// submit — named by the user and detached at `base_ref`. The daemon call
     /// runs on the background executor; the draft binds the result when it
-    /// lands.
-    pub(super) fn create_workspace_worktree(
+    /// lands. Takes an explicit session — the Big Picture workspace subject
+    /// is not necessarily the selection underneath.
+    pub(super) fn create_workspace_worktree_for(
         &mut self,
+        session_id: Uuid,
         name: Option<String>,
         base_ref: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
             return;
         };
         if session.has_started() || session.is_busy() || self.worktree_creation_pending {
             return;
         }
         let project_id = session.project_id;
-        let session_id = session.id;
         let Some(project) = self
             .state
             .projects
@@ -724,7 +730,9 @@ impl Waku {
         match action {
             Some(WorktreePickerAction::Current { .. }) => true,
             Some(WorktreePickerAction::Local) => {
-                self.select_workspace(SessionWorkspace::Local, cx);
+                if let Some(session_id) = self.ensure_workspace_subject_session(cx) {
+                    self.select_workspace_for(session_id, SessionWorkspace::Local, cx);
+                }
                 true
             }
             Some(WorktreePickerAction::Move) => {
@@ -734,7 +742,7 @@ impl Waku {
                     .content()
                     .trim()
                     .to_owned();
-                if let Some(session_id) = self.state.selected_session {
+                if let Some(session_id) = self.workspace_subject().0 {
                     self.move_session_to_worktree(
                         session_id,
                         (!name.is_empty()).then_some(name),
@@ -750,7 +758,14 @@ impl Waku {
                     .content()
                     .trim()
                     .to_owned();
-                self.create_workspace_worktree((!name.is_empty()).then_some(name), base_ref, cx);
+                if let Some(session_id) = self.ensure_workspace_subject_session(cx) {
+                    self.create_workspace_worktree_for(
+                        session_id,
+                        (!name.is_empty()).then_some(name),
+                        base_ref,
+                        cx,
+                    );
+                }
                 true
             }
             None => false,

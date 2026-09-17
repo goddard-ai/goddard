@@ -50,6 +50,11 @@ actions!(
 /// Key context the open menu declares, and the scope its bindings live in.
 const MENU_CONTEXT: &str = "WakuMenu";
 
+/// Deferred paint order for open menus and picker surfaces: above every
+/// full-window overlay — Big Picture's layer sits at 7 — since a menu's
+/// trigger may live inside one.
+pub(crate) const MENU_PAINT_PRIORITY: usize = 8;
+
 /// Vertical gap between a trigger and its anchored card.
 const TRIGGER_GAP: f32 = 4.0;
 
@@ -1017,7 +1022,7 @@ where
                 px(TRIGGER_GAP),
                 px(8.0),
             ))
-            .with_priority(1),
+            .with_priority(MENU_PAINT_PRIORITY),
         )
         .into_any_element()
 }
@@ -1143,7 +1148,7 @@ where
                         anchor: position,
                     }),
             )
-            .with_priority(1),
+            .with_priority(MENU_PAINT_PRIORITY),
         )
         .into_any_element()
 }

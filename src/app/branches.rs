@@ -206,13 +206,25 @@ impl Waku {
             self.visible_branch_snapshot = None;
             return;
         };
-        self.branch_snapshots.invalidate(&path);
+        self.refresh_workspace_branch_snapshot(&path, cx);
+    }
+
+    /// Invalidate the cached snapshot for an explicit workspace — the
+    /// composer's branch picker can describe a Big Picture subject whose
+    /// checkout is not the selection's.
+    pub(super) fn refresh_workspace_branch_snapshot(
+        &mut self,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        self.branch_snapshots.invalidate(&path.to_path_buf());
         cx.notify();
     }
 
-    /// Select an existing branch. A planned worktree remembers it as the base
-    /// ref without touching the ordinary checkout; concrete workspaces run a
-    /// real `git switch` on the background executor.
+    /// Select an existing branch on the workspace subject. A planned
+    /// worktree remembers it as the base ref without touching the ordinary
+    /// checkout; concrete workspaces run a real `git switch` on the
+    /// background executor.
     ///
     /// `true` asks the caller to dismiss the picker after this entity update
     /// ends. Closing sooner runs the toggle observer, which re-enters `Waku`
@@ -222,15 +234,34 @@ impl Waku {
         branch: String,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(session) = self.selected_session() else {
-            return false;
-        };
-        if session.is_busy() || self.branch_operation_pending {
+        let (subject_session_id, _) = self.workspace_subject();
+        let session = subject_session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+        });
+        if session.is_some_and(|session| session.is_busy()) || self.branch_operation_pending {
             return false;
         }
-        if matches!(session.workspace, SessionWorkspace::NewWorktree { .. }) {
-            let project_id = session.project_id;
-            let changed = self.selected_session_mut().is_some_and(|session| {
+        let workspace = self.workspace_subject_workspace();
+        if matches!(workspace, Some(SessionWorkspace::NewWorktree { .. })) {
+            // The untargeted overlay composer may have no draft yet; the
+            // base-branch pick materializes it so the choice has somewhere
+            // to live.
+            let Some(session_id) = self.ensure_workspace_subject_session(cx) else {
+                return false;
+            };
+            let Some(project_id) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(|session| session.project_id)
+            else {
+                return false;
+            };
+            let changed = self.state.session_mut(session_id).is_some_and(|session| {
                 let SessionWorkspace::NewWorktree { base_branch } = &mut session.workspace else {
                     return false;
                 };
@@ -253,10 +284,7 @@ impl Waku {
             return true;
         }
 
-        let Some(path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        let Some(path) = self.workspace_subject_path() else {
             return false;
         };
         if self
@@ -268,16 +296,23 @@ impl Waku {
         {
             return true;
         }
-        self.start_branch_operation(path, BranchOperation::Checkout(branch), cx);
+        self.start_branch_operation(
+            subject_session_id,
+            path,
+            BranchOperation::Checkout(branch),
+            cx,
+        );
         true
     }
 
     pub(super) fn begin_branch_creation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let subject_session = self.workspace_subject_session();
         if self.branch_operation_pending
-            || self.selected_session().is_none_or(|session| {
-                session.is_busy()
-                    || matches!(session.workspace, SessionWorkspace::NewWorktree { .. })
-            })
+            || subject_session.is_some_and(|session| session.is_busy())
+            || !matches!(
+                self.workspace_subject_workspace(),
+                Some(SessionWorkspace::Local | SessionWorkspace::Worktree { .. })
+            )
         {
             return;
         }
@@ -321,13 +356,16 @@ impl Waku {
         if branch.is_empty() {
             return false;
         }
-        let Some(path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        let (subject_session_id, _) = self.workspace_subject();
+        let Some(path) = self.workspace_subject_path() else {
             return false;
         };
-        self.start_branch_operation(path, BranchOperation::Create(branch), cx);
+        self.start_branch_operation(
+            subject_session_id,
+            path,
+            BranchOperation::Create(branch),
+            cx,
+        );
         true
     }
 
@@ -388,8 +426,14 @@ impl Waku {
         }
     }
 
+    /// `subject_session_id` is the workspace subject the operation ran for —
+    /// the selection normally, the Big Picture subject while the overlay is
+    /// open — so a worktree's persisted branch bookkeeping lands on the
+    /// session the picker was describing, not whichever task sits
+    /// underneath.
     fn start_branch_operation(
         &mut self,
+        subject_session_id: Option<Uuid>,
         path: PathBuf,
         operation: BranchOperation,
         cx: &mut Context<Self>,
@@ -433,17 +477,36 @@ impl Waku {
                         waku.cache_sidebar_branch_label(&path, snapshot.display_branch());
                         waku.visible_branch_snapshot = Some((path.clone(), snapshot));
                         waku.branch_snapshots.invalidate(&path);
+                        // A worktree's persisted branch follows the checkout
+                        // that just moved — for the subject session even
+                        // when it is not the selection underneath.
+                        if let Some(current) = current {
+                            let mut persisted_branch_changed = false;
+                            for session_id in [waku.state.selected_session, subject_session_id]
+                                .into_iter()
+                                .flatten()
+                            {
+                                if let Some(session) = waku.state.session_mut(session_id)
+                                    && let SessionWorkspace::Worktree {
+                                        branch,
+                                        path: worktree_path,
+                                        ..
+                                    } = &mut session.workspace
+                                    && worktree_path == &path
+                                    && branch.as_deref() != Some(current.as_str())
+                                {
+                                    *branch = Some(current.clone());
+                                    persisted_branch_changed = true;
+                                }
+                            }
+                            if persisted_branch_changed {
+                                waku.save();
+                            }
+                        }
                         let selected_path = waku
                             .selected_workspace_path()
                             .map(std::path::Path::to_path_buf);
                         if selected_path.as_ref() == Some(&path) {
-                            if let Some(current) = current
-                                && let Some(session) = waku.selected_session_mut()
-                                && let SessionWorkspace::Worktree { branch, .. } =
-                                    &mut session.workspace
-                            {
-                                *branch = Some(current);
-                            }
                             waku.invalidate_workspace_queries(cx);
                             waku.reload_clean_right_panel_file_editors(cx);
                             waku.save();

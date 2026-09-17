@@ -1,7 +1,7 @@
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
     next_picker_highlight, prompt_with_pasted_blocks, supports_reasoning_default_reset,
-    visible_branch_entries,
+    visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::{next_unread_session, next_unread_session_in_sidebar_order};
@@ -3073,5 +3073,76 @@ fn type_to_focus_only_claims_printable_keystrokes() {
     assert_eq!(
         type_to_focus_text(&keystroke("f5", None, Modifiers::none())),
         None
+    );
+}
+
+#[test]
+fn workspace_subject_follows_the_overlay_composer() {
+    use uuid::Uuid;
+
+    let project_a = Uuid::new_v4();
+    let project_b = Uuid::new_v4();
+    let mut selected = AgentSession::new(project_a, ProviderKind::Codex);
+    selected
+        .messages
+        .push(Message::new(MessageRole::User, "selected task"));
+    let selected_id = selected.id;
+    let mut card = AgentSession::new(project_b, ProviderKind::Codex);
+    card.messages
+        .push(Message::new(MessageRole::User, "running task"));
+    let card_id = card.id;
+    let draft = AgentSession::new(project_b, ProviderKind::Codex);
+    let draft_id = draft.id;
+    let sessions = vec![selected, card, draft];
+
+    // Overlay closed: the selection, exactly like before.
+    assert_eq!(
+        workspace_subject_for(false, None, Some(selected_id), Some(project_a), None, &sessions),
+        (Some(selected_id), Some(project_a))
+    );
+
+    // Armed card: the card's own session and project, not the selection's.
+    assert_eq!(
+        workspace_subject_for(
+            true,
+            Some(card_id),
+            Some(selected_id),
+            Some(project_a),
+            Some(project_a),
+            &sessions,
+        ),
+        (Some(card_id), Some(project_b))
+    );
+
+    // Untargeted: the destination project and its unstarted draft.
+    assert_eq!(
+        workspace_subject_for(
+            true,
+            None,
+            Some(selected_id),
+            Some(project_a),
+            Some(project_b),
+            &sessions,
+        ),
+        (Some(draft_id), Some(project_b))
+    );
+
+    // The destination's started task is not its draft; none exists.
+    assert_eq!(
+        workspace_subject_for(
+            true,
+            None,
+            Some(selected_id),
+            Some(project_a),
+            Some(project_a),
+            &sessions,
+        ),
+        (None, Some(project_a))
+    );
+
+    // No destination project: no subject at all.
+    assert_eq!(
+        workspace_subject_for(true, None, Some(selected_id), Some(project_a), None, &sessions),
+        (None, None)
     );
 }

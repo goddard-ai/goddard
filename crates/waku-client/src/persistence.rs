@@ -818,7 +818,7 @@ impl PersistedState {
     /// The workspace mode a fresh draft for `project_id` opens with — the
     /// last one chosen there. Projectless and unknown projects stay local:
     /// they have no repository to fork a worktree from.
-    fn workspace_for_new_session(&self, project_id: Uuid) -> SessionWorkspace {
+    pub fn workspace_for_new_session(&self, project_id: Uuid) -> SessionWorkspace {
         let has_repository = self
             .projects
             .iter()

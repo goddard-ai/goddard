@@ -1653,12 +1653,15 @@ impl Waku {
     }
 
     /// The same composer card the session column docks — same controls, same
-    /// shortcuts. Only the submit routing and the target chip differ.
-    fn render_big_picture_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    /// shortcuts — plus the workspace footer: its project, worktree, and
+    /// branch chips follow the armed card, or the standing new-task
+    /// destination while nothing is armed.
+    fn render_big_picture_composer(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
         div()
             .w_full()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(self.render_composer(window, cx))
+            .child(self.render_workspace_footer(cx))
     }
 
     pub(super) fn render_big_picture(
