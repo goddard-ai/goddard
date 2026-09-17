@@ -922,6 +922,8 @@ impl Waku {
             cx.notify();
             return;
         };
+        let sync_default_branch = self.state.new_worktree_sync_default_branch;
+        let sync_branches = self.state.new_worktree_sync_branches.clone();
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -930,6 +932,8 @@ impl Waku {
                         project_path: cwd,
                         name: None,
                         base_ref: Some(base_ref),
+                        sync_default_branch,
+                        sync_branches,
                     })
                 })
                 .await;

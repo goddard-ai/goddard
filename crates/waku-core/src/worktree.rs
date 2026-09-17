@@ -134,12 +134,18 @@ pub fn is_linked_worktree(path: &Path) -> bool {
 
 /// Create a detached linked worktree named `name` — or given a generated
 /// name when `name` is `None` — based on `base_ref` or the repository's
-/// default branch. The returned path is project-relative, preserving a
-/// project that points at a subdirectory of its repository.
+/// default branch. When `sync_default_branch` is set and the base resolves
+/// to the local default branch — or the base is a branch listed in
+/// `sync_branches` — that branch is first fast-forwarded to its upstream,
+/// so the worktree starts from the fetched state. The returned path is
+/// project-relative, preserving a project that points at a subdirectory of
+/// its repository.
 pub fn create(
     project_path: &Path,
     name: Option<&str>,
     base_ref: Option<&str>,
+    sync_default_branch: bool,
+    sync_branches: &[String],
 ) -> anyhow::Result<CreatedWorktree> {
     let (_, repository, project_relative) = resolve_repository(project_path)?;
     let base_ref = base_ref
@@ -148,6 +154,9 @@ pub fn create(
         .map(str::to_owned)
         .map(Ok)
         .unwrap_or_else(|| default_base_ref(&repository))?;
+    if sync_default_branch || !sync_branches.is_empty() {
+        sync_base_branch(&repository, &base_ref, sync_default_branch, sync_branches);
+    }
     git_stdout(
         &repository,
         &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
@@ -598,6 +607,72 @@ fn default_base_ref(repository: &Path) -> anyhow::Result<String> {
     Ok("HEAD".to_owned())
 }
 
+/// Fetch `base_ref`'s upstream and fast-forward the local branch to it, but
+/// only when the base qualifies: the repository's local default branch while
+/// `sync_default` is set, or a name on `sync_branches`. An explicitly picked
+/// base that qualifies for neither stays untouched. Best-effort throughout:
+/// a remote ref or missing upstream, a failed fetch, a non-fast-forward, or
+/// the branch being checked out in a worktree each leave the base as it was.
+fn sync_base_branch(
+    repository: &Path,
+    base_ref: &str,
+    sync_default: bool,
+    sync_branches: &[String],
+) {
+    let whitelisted = sync_branches.iter().any(|branch| branch == base_ref);
+    let is_default = sync_default
+        && local_default_branch(repository).as_deref() == Some(base_ref);
+    if !whitelisted && !is_default {
+        return;
+    }
+    // `@{upstream}` fails for remote refs and untracked branches alike.
+    let Some(upstream) = git_optional_stdout(
+        repository,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            &format!("{base_ref}@{{upstream}}"),
+        ],
+    )
+    .ok()
+    .flatten()
+    else {
+        return;
+    };
+    let Some((remote, branch)) = upstream.trim().split_once('/') else {
+        return;
+    };
+    // `<branch>:<local>` is a fast-forward-only update of the local branch;
+    // Git refuses it for a checked-out branch or a non-fast-forward, so a
+    // failure here simply keeps the existing base.
+    let _ = git_stdout(
+        repository,
+        &["fetch", remote, &format!("{branch}:{base_ref}")],
+    );
+}
+
+/// The local branch `origin/HEAD` points at, when one exists.
+fn local_default_branch(repository: &Path) -> Option<String> {
+    git_optional_stdout(
+        repository,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )
+    .ok()
+    .flatten()
+    .and_then(|remote_default| {
+        remote_default
+            .trim()
+            .strip_prefix("origin/")
+            .map(str::to_owned)
+    })
+}
+
 fn local_branch_exists(repository: &Path, branch: &str) -> anyhow::Result<bool> {
     let output = crate::command_env::plain_command("git")
         .args(["show-ref", "--verify", "--quiet"])
@@ -731,7 +806,7 @@ mod tests {
         let repository = repository();
         let project = repository.join("packages/app");
 
-        let named = create(&project, Some("My Worktree"), None).unwrap();
+        let named = create(&project, Some("My Worktree"), None, false, &[]).unwrap();
         assert_eq!(named.name, "My Worktree");
         assert_eq!(
             named.path,
@@ -755,11 +830,11 @@ mod tests {
         );
 
         // An explicit name collides with the directory it just made.
-        assert!(create(&project, Some("My Worktree"), None).is_err());
+        assert!(create(&project, Some("My Worktree"), None, false, &[]).is_err());
 
         // Generated names are random dictionary pairs; a rolled collision
         // retries with a fresh pair, so two creates never share a name.
-        let generated = create(&project, None, Some("feature")).unwrap();
+        let generated = create(&project, None, Some("feature"), false, &[]).unwrap();
         let (first, second) = generated.name.split_once('-').unwrap();
         assert!(SLUG_ADJECTIVES.contains(&first));
         assert!(SLUG_NOUNS.contains(&second));
@@ -767,7 +842,7 @@ mod tests {
             fs::read_to_string(generated.path.join("README.md")).unwrap(),
             "feature\n"
         );
-        let other = create(&project, None, None).unwrap();
+        let other = create(&project, None, None, false, &[]).unwrap();
         assert_ne!(other.name, generated.name);
 
         // Removal runs in the repository and frees the name.
@@ -786,10 +861,140 @@ mod tests {
             ],
         );
         remove(&named.path, false).unwrap();
-        let recreated = create(&project, Some("My Worktree"), None).unwrap();
+        let recreated = create(&project, Some("My Worktree"), None, false, &[]).unwrap();
         assert_eq!(recreated.name, "My Worktree");
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn create_fast_forwards_the_local_default_branch() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let root = repository.parent().unwrap().to_path_buf();
+        let remote = root.join("remote.git");
+        run_git(&root, &["init", "--bare", remote.to_str().unwrap()]);
+        run_git(
+            &repository,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&repository, &["push", "origin", "main"]);
+        run_git(
+            &repository,
+            &["branch", "--set-upstream-to=origin/main", "main"],
+        );
+
+        // A second clone advances the upstream one commit beyond local main.
+        let clone = root.join("clone");
+        run_git(
+            &root,
+            &["clone", remote.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+        fs::write(clone.join("packages/app/README.md"), "upstream\n").unwrap();
+        run_git(&clone, &["add", "."]);
+        run_git(
+            &clone,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "upstream",
+            ],
+        );
+        run_git(&clone, &["push", "origin", "main"]);
+
+        let behind = git_stdout(&repository, &["rev-parse", "main"]).unwrap();
+        let created = create(&project, None, None, true, &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(created.path.join("README.md")).unwrap(),
+            "upstream\n"
+        );
+        assert_ne!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            behind
+        );
+
+        // An explicitly picked base leaves the default branch where it was.
+        run_git(&repository, &["update-ref", "refs/heads/main", &behind]);
+        let other = create(&project, None, Some("feature"), true, &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(other.path.join("README.md")).unwrap(),
+            "feature\n"
+        );
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            behind
+        );
+
+        // A whitelisted base fast-forwards the same way — even with the
+        // default-branch flag off — while an unlisted one stays put.
+        run_git(&repository, &["branch", "develop", &behind]);
+        run_git(&repository, &["push", "origin", "develop"]);
+        run_git(
+            &repository,
+            &["branch", "--set-upstream-to=origin/develop", "develop"],
+        );
+        run_git(&clone, &["fetch", "origin"]);
+        run_git(&clone, &["checkout", "-b", "develop", "origin/develop"]);
+        fs::write(clone.join("packages/app/README.md"), "develop\n").unwrap();
+        run_git(&clone, &["add", "."]);
+        run_git(
+            &clone,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "develop upstream",
+            ],
+        );
+        run_git(&clone, &["push", "origin", "develop"]);
+
+        let develop_behind = git_stdout(&repository, &["rev-parse", "develop"]).unwrap();
+        let synced = create(
+            &project,
+            None,
+            Some("develop"),
+            false,
+            &["develop".to_owned()],
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(synced.path.join("README.md")).unwrap(),
+            "develop\n"
+        );
+        assert_ne!(
+            git_stdout(&repository, &["rev-parse", "develop"]).unwrap(),
+            develop_behind
+        );
+
+        run_git(
+            &repository,
+            &["update-ref", "refs/heads/develop", &develop_behind],
+        );
+        let untouched = create(
+            &project,
+            None,
+            Some("develop"),
+            false,
+            &["other".to_owned()],
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(untouched.path.join("README.md")).unwrap(),
+            "main\n"
+        );
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "develop"]).unwrap(),
+            develop_behind
+        );
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -871,7 +1076,7 @@ mod tests {
     fn ensure_recreates_a_deleted_worktree() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Restore Me"), Some("feature")).unwrap();
+        let created = create(&project, Some("Restore Me"), Some("feature"), false, &[]).unwrap();
         // The stored path is the project subdirectory; the worktree root is
         // its grandparent.
         let worktree_dir = created
@@ -934,7 +1139,7 @@ mod tests {
     fn force_removes_a_dirty_worktree() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Dirty"), None).unwrap();
+        let created = create(&project, Some("Dirty"), None, false, &[]).unwrap();
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();
         fs::write(created.path.join("scratch.txt"), "untracked\n").unwrap();
 
@@ -942,7 +1147,7 @@ mod tests {
         remove(&created.path, true).unwrap();
         assert!(!created.path.exists());
         // The name frees up for reuse.
-        let recreated = create(&project, Some("Dirty"), None).unwrap();
+        let recreated = create(&project, Some("Dirty"), None, false, &[]).unwrap();
         assert_eq!(recreated.name, "Dirty");
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
@@ -952,7 +1157,7 @@ mod tests {
     fn a_removed_worktree_restores_from_its_archive_ref() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Archived"), Some("feature")).unwrap();
+        let created = create(&project, Some("Archived"), Some("feature"), false, &[]).unwrap();
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();
         fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
 
@@ -1007,7 +1212,7 @@ mod tests {
     fn a_removed_worktree_on_a_branch_restores_its_dirty_state() {
         let repository = repository();
         let project = repository.join("packages/app");
-        let created = create(&project, Some("Branched"), None).unwrap();
+        let created = create(&project, Some("Branched"), None, false, &[]).unwrap();
         // The session checked its worktree out onto a branch, then dirtied it.
         run_git(&created.path, &["checkout", "-b", "session-branch"]);
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();

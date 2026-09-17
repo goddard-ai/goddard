@@ -16,7 +16,18 @@ name?: string | null,
  * Ref the worktree detaches at; `None` resolves the repository's
  * default branch.
  */
-base_ref?: string | null, } | { "type": "createWorktreeFromCheckout", project_path: string,
+base_ref?: string | null,
+/**
+ * Fast-forward the local default branch to its tracking branch
+ * before the worktree bases on it. `false` matches older clients
+ * that did not send the field.
+ */
+sync_default_branch: boolean,
+/**
+ * Additional local branches that get the same fast-forward when one
+ * is the resolved base. Empty matches older clients.
+ */
+sync_branches?: Array<string>, } | { "type": "createWorktreeFromCheckout", project_path: string,
 /**
  * User-chosen worktree name. When `None`, the daemon generates a
  * random one.

@@ -587,6 +587,8 @@ export async function materializeWorktree(
         project_path: project.path,
         name: null,
         base_ref: session.workspace.baseBranch ?? null,
+        sync_default_branch: false,
+        sync_branches: [],
       },
     }),
     'workspace',

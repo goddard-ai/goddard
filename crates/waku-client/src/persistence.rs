@@ -540,6 +540,13 @@ pub struct AppSettings {
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     pub new_worktree_default_branch: bool,
+    /// Fast-forward the local default branch to its tracking branch before a
+    /// new worktree bases on it.
+    pub new_worktree_sync_default_branch: bool,
+    /// Additional local branches that get the same fast-forward when one is
+    /// a new worktree's base.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub new_worktree_sync_branches: Vec<String>,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
@@ -604,6 +611,8 @@ impl Default for AppSettings {
             open_at_last_prompt: true,
             sync_with_merge: false,
             new_worktree_default_branch: false,
+            new_worktree_sync_default_branch: false,
+            new_worktree_sync_branches: Vec::new(),
             sidebar_transparency: default_sidebar_transparency(),
             thick_borders: false,
             high_contrast: false,
@@ -819,6 +828,14 @@ pub struct PersistedState {
     /// of reopening the base branch last picked for the project.
     #[serde(default)]
     pub new_worktree_default_branch: bool,
+    /// Fast-forward the local default branch to its tracking branch before a
+    /// new worktree bases on it.
+    #[serde(default)]
+    pub new_worktree_sync_default_branch: bool,
+    /// Additional local branches that get the same fast-forward when one is
+    /// a new worktree's base.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub new_worktree_sync_branches: Vec<String>,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
@@ -985,6 +1002,8 @@ impl PersistedState {
             open_at_last_prompt: true,
             sync_with_merge: false,
             new_worktree_default_branch: false,
+            new_worktree_sync_default_branch: false,
+            new_worktree_sync_branches: Vec::new(),
             sidebar_transparency: default_sidebar_transparency(),
             thick_borders: false,
             high_contrast: false,
@@ -1217,6 +1236,8 @@ impl PersistedState {
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
             new_worktree_default_branch: self.new_worktree_default_branch,
+            new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
+            new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
             sidebar_transparency: self.sidebar_transparency,
             thick_borders: self.thick_borders,
             high_contrast: self.high_contrast,
@@ -1292,6 +1313,8 @@ impl PersistedState {
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
+        self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
+        self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.thick_borders = settings.thick_borders;
         self.high_contrast = settings.high_contrast;
@@ -2102,6 +2125,33 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.new_worktree_default_branch);
+    }
+
+    #[test]
+    fn new_worktree_sync_default_branch_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.new_worktree_sync_default_branch);
+        let mut state = PersistedState::empty();
+        assert!(!state.new_worktree_sync_default_branch);
+        assert!(state.new_worktree_sync_branches.is_empty());
+        state.new_worktree_sync_default_branch = true;
+        state.new_worktree_sync_branches = vec!["develop".to_owned()];
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["new_worktree_sync_default_branch"], true);
+        assert_eq!(
+            settings["new_worktree_sync_branches"],
+            serde_json::json!(["develop"])
+        );
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("new_worktree_sync_default_branch")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.new_worktree_sync_default_branch);
+        assert_eq!(restored.new_worktree_sync_branches, ["develop"]);
     }
 
     #[test]
