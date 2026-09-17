@@ -107,6 +107,19 @@
   dev watcher against the exact provider interaction; a successful Rust build
   alone is insufficient.
 
+## Changelog
+
+- Record changes as `.changelog/<slug>.md` fragments — one bullet per file —
+  never by editing `CHANGELOG.md` directly; `bun run changelog` folds them
+  into the released version's section.
+- Only two kinds of changes get a fragment: new user-facing features, and
+  fixes for bugs that existed in a previously released version.
+- Do not log tweaks or polish (sizing, icon swaps, visual refinements),
+  internal/build tooling changes, or fixes to features that haven't shipped
+  yet — those fold into the unreleased feature's own fragment instead.
+- When fixing an unreleased feature, update its existing fragment rather than
+  adding a new one.
+
 <!-- graft:start -->
 ## Graft — repo context graph
 
