@@ -171,7 +171,7 @@ OpenCode server itself, whose driver kills it explicitly on drop.
 | Model discovery | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes | yes | yes | yes |
 | Computer Use | yes | yes | no (ships its own) | no | no | no | no | yes | yes | no | no | no | no |
 | Restricted to Full access | no | yes | yes | no | yes | no | no | no | no | no | no | no | no |
-| Rewind and branch at a turn | yes | yes | yes | yes | yes | yes | **no** | yes | yes | **no** | **no** | **no** | **no** |
+| Rewind and branch at a turn | yes | yes | yes | yes | yes | yes | **no** | yes | yes | **no** | **no** | **no** | yes |
 
 Kimi Code's and Devin CLI's steering is the transport's, not a probed policy:
 the ACP driver sends the second `session/prompt` for every agent it drives, but
@@ -904,12 +904,18 @@ there is nothing to retarget.
 directly — `events.jsonl` is the same event log the SDK broadcasts live, so
 titles, workspace, and the user/assistant transcript replay straight out of
 it. Event ids double as `provider_resume_at` values (they are exactly the
-boundaries `session.fork`'s `to_event_id` accepts, should branching land later).
+boundaries `sessions.fork`'s `to_event_id` accepts).
 
-**Rewind and branch** — not wired. The SDK does expose `session.fork` with a
-`to_event_id` truncation point, so a turn-aware branch is possible; until it is
-implemented the capability flags stay false rather than offering a control
-that would silently keep history.
+**Rewind and branch** — `client.rpc().sessions().fork` with a `to_event_id`
+boundary, resolved in
+[copilot_session.rs](../crates/waku-core/src/copilot_session.rs) by counting
+root-agent `user.message` events in `events.jsonl` to the first dropped turn
+(the count mirrors `provider_turn_started`: every turn that reached the
+provider is one submitted `user.message`). The RPC needs a live `copilot`
+process, so the helper spins the same scratch runtime and throwaway client
+model discovery uses. Rewind adopts the fork the way Claude's does: the
+truncated copy becomes the task's cursor, and rewinding to the first turn
+resets to a fresh session instead of forking an empty history.
 
 **Models** — `client.list_models` on a throwaway client is the account-specific
 catalog: subscription tier, BYOK routes, per-model reasoning efforts and
@@ -961,7 +967,7 @@ persisted with the session and is what makes a Goddard task outlive its process:
 | Grok | `session_id` | `--resume` / ACP fork |
 | Kimi Code | `session_id` | `session/resume`; no fork, see above |
 | Droid | `session_id` | `session/resume` (no replay) or `session/load`; no fork, see above |
-| GitHub Copilot | `session_id` | SDK `client.resume_session`; catalog read off `~/.copilot/session-state` |
+| GitHub Copilot | `session_id` | SDK `client.resume_session`; catalog read off `~/.copilot/session-state`; `sessions.fork` `to_event_id` for rewind/branch |
 
 A cursor from the wrong provider is rejected at driver start rather than
 silently ignored.

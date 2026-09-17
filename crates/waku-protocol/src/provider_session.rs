@@ -47,6 +47,16 @@ pub enum ProviderSessionForkRequest {
         session_id: String,
         turn_count: usize,
     },
+    /// `sessions.fork` is a live RPC, so `binary` launches the throwaway
+    /// client that issues it; `turn_count` is the retained provider-turn
+    /// count the daemon resolves to the fork's `to_event_id` boundary.
+    Copilot {
+        binary: PathBuf,
+        cwd: PathBuf,
+        session_id: String,
+        turn_count: usize,
+        title: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
