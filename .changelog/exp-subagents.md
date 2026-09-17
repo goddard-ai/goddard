@@ -1,1 +1,0 @@
-- Delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript

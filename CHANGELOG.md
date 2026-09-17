@@ -25,6 +25,54 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.2.0]
+
+### Features
+
+- Annotate transcript lines and file-editor selections with comments that fold into the next prompt (⌥-click a line, ⌘L on a selection); "Annotation N" references resolve to hover citations
+- Highlight and auto-continue Markdown lists in the composer, collapse large pastes into expandable cards, and accept file drops anywhere in the session
+- Continue an interrupted session by typing in its empty composer
+- Add user-defined custom commands to the command palette — with custom icons and toast notifications — and let agents manage them through daemon settings
+- Add an Experiments settings page where unfinished features — Big Picture, the Git panel, GitHub integration, and subagents — can be turned on individually; all default off
+- Open workspace files in the right panel with a ⌘P file finder and preview Markdown files fullscreen
+- Add UI and code font family pickers and a separate terminal font size to Appearance settings; right-panel cards adapt cleanly when the UI font size is increased
+- Hide the app with Cmd+H on macOS
+- Play a sound when a background task finishes its turn, with a volume slider and in-selector previews, and show an unseen-completion bell in the top bar
+- Add a Projects page listing worktrees, branches, issues, and pull requests
+- Add Devin and Droid (Factory) as agent providers
+- Recover renamed or moved project folders instead of losing them, and archive projectless workspaces automatically
+- Run project scripts from a ⌘R picker and generate terminal commands with the session's agent
+- New settings: thick borders, sidebar transparency, a Markdown preview toggle, and an opt-in response token speed readout
+- Surface keyboard shortcuts in menus, tooltips, the command palette, a hold-⌘ overlay, and a cheatsheet next to the sidebar settings icon
+- Peek at the closed sidebar by hovering the left window edge
+- Pin, archive, and mark sessions unread from the sidebar, drag sessions into the composer as reference chips, and jump between tasks with ⌘1–9, ⌘D, and ⌘⇧D
+- Syntax-highlight Lua, PHP, Zig, Dart, Elixir, and Astro code blocks
+- Reshape the ⌃⇥ task switcher into a compact recently-viewed list with session status glyphs
+- Add a Terminals group to the sidebar showing live command status, working directory, and last-activity time; ⌘J focuses the session terminal
+- Add 15 new themes (Dracula, Rosé Pine, Kansō, Gruvbox, GitHub, and more), split the theme preference into separate light and dark slots with a system-following toggle, and preview themes while browsing the selectors
+- Create named adjective-noun worktrees beside the repository, move a session into a new worktree, and remove an archived task's worktree behind a snapshot ref
+
+### Experiments
+
+- **[Experimental]** Add Big Picture mode on ⌘0 — a full-window grid of session cards with live transcripts, per-card composers, and ⌘1–9 arming
+- **[Experimental]** Add a Git panel (⌘⌥G) with a commit graph, expandable diffs, upstream tracking, and a /land command to land a worktree on its base
+- **[Experimental]** Browse a project's GitHub issues and pull requests, start tasks from them, and track check and review status on sidebar rows and in the right panel
+- **[Experimental]** Delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript
+
+### Fixed
+
+- Keep Amp threads resumable after restarting the app
+- Fix escaped backticks rendering literally inside inline code
+- Prefer exact matches in the branch selector's filter
+- Fix Cursor model discovery and model options
+- Fix the IME candidate popup appearing in the wrong position
+- Apply OpenCode model and effort changes to the live session instead of the next one
+- Stop rendering blank reasoning-only lines in the transcript
+- Fix remote images failing to load in transcripts
+- Fix the transcript segment left behind when steering an in-flight reply
+- Stop a quick ⌃⇥ chord from flashing the task switcher
+- Fix startup on Macs without Xcode installed
+
 ## [0.1.19]
 
 - Render inline and block LaTeX math in Markdown, with a Copy Expression action and a setting to show the source

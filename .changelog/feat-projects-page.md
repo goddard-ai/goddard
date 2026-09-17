@@ -1,1 +1,0 @@
-- Add a Projects page listing worktrees, branches, issues, and pull requests

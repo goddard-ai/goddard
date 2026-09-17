@@ -1,1 +1,0 @@
-- Fix remote images failing to load in transcripts

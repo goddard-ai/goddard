@@ -1,1 +1,0 @@
-- Keep Amp threads resumable after restarting the app

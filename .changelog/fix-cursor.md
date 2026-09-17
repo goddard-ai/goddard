@@ -1,1 +1,0 @@
-- Fix Cursor model discovery and model options

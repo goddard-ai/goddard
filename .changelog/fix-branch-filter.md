@@ -1,1 +1,0 @@
-- Prefer exact matches in the branch selector's filter

@@ -1,1 +1,0 @@
-- Syntax-highlight Lua, PHP, Zig, Dart, Elixir, and Astro code blocks

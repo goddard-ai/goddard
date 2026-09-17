@@ -1,1 +1,0 @@
-- Fix the IME candidate popup appearing in the wrong position

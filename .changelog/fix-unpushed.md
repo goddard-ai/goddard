@@ -1,1 +1,0 @@
-- Stop warning about unpushed commits that are already merged into a branch

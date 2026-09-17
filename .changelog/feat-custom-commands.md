@@ -1,1 +1,0 @@
-- Add user-defined custom commands to the command palette — with custom icons and toast notifications — and let agents manage them through daemon settings

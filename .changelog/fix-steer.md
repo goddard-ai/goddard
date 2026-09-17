@@ -1,1 +1,0 @@
-- Fix the transcript segment left behind when steering an in-flight reply

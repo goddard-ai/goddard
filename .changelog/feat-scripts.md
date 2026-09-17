@@ -1,1 +1,0 @@
-- Run project scripts from a ⌘R picker and generate terminal commands with the session's agent

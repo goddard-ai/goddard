@@ -1,1 +1,0 @@
-- Fix startup on Macs without Xcode installed

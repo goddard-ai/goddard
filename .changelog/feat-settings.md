@@ -1,1 +1,0 @@
-- New settings: thick borders, sidebar transparency, a Markdown preview toggle, and an opt-in response token speed readout

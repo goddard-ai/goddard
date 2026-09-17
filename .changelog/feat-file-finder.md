@@ -1,1 +1,0 @@
-- Open workspace files in the right panel with a ⌘P file finder and preview Markdown files fullscreen

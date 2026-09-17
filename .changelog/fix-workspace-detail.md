@@ -1,1 +1,0 @@
-- Fix interrupted session saves erasing stored workspace details

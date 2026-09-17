@@ -1,1 +1,0 @@
-- Stop rendering blank reasoning-only lines in the transcript

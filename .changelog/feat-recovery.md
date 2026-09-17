@@ -1,1 +1,0 @@
-- Recover renamed or moved project folders instead of losing them, and archive projectless workspaces automatically
