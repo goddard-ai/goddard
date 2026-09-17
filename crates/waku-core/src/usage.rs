@@ -616,10 +616,31 @@ fn parse_credentials(payload: &str) -> anyhow::Result<OauthCredentials> {
     })
 }
 
+/// One HTTP response as `curl -D -` reported it: status, the raw header
+/// block, and the body. Callers that poll read header values out of
+/// `headers`; everyone else takes status and body through `http_get`.
+pub(crate) struct HttpResponse {
+    pub status: u16,
+    pub headers: String,
+    pub body: String,
+}
+
+/// GET `url` keeping the response headers — the notifications poll reads
+/// `Last-Modified` and `X-Poll-Interval` out of them.
+pub(crate) fn http_get_response(url: &str, headers: &[String]) -> anyhow::Result<HttpResponse> {
+    let raw = curl_get(url, headers)?;
+    split_response(&raw)
+}
+
 /// GET `url` with the given header lines. Headers travel to curl as a config
 /// on stdin, never on argv, so bearer tokens cannot show up in the process
 /// table. Shared with the usage-history rate-table fetch.
 pub fn http_get(url: &str, headers: &[String]) -> anyhow::Result<(u16, String)> {
+    let response = http_get_response(url, headers)?;
+    Ok((response.status, response.body))
+}
+
+fn curl_get(url: &str, headers: &[String]) -> anyhow::Result<String> {
     let mut child = crate::command_env::plain_command(CURL_PATH)
         .args(["-sS", "--max-time", "15", "-D", "-", "-K", "-", url])
         .stdin(Stdio::piped())
@@ -650,24 +671,28 @@ pub fn http_get(url: &str, headers: &[String]) -> anyhow::Result<(u16, String)> 
             .unwrap_or_else(|| tr!("usage_error.unknown_error"));
         return Err(anyhow!(tr!("usage_error.curl_failed", error = error)));
     }
-    split_status_and_body(&String::from_utf8_lossy(&output.stdout))
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// `-D -` prefixes the body with the response headers; the status code is on
-/// the first line and the body follows the blank separator line.
-fn split_status_and_body(raw: &str) -> anyhow::Result<(u16, String)> {
+/// the first line and the body follows the blank separator line. A 304 has
+/// no separator at all — the whole dump is the header block.
+fn split_response(raw: &str) -> anyhow::Result<HttpResponse> {
     let status = raw
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or_else(|| anyhow!(tr!("usage_error.curl_no_status")))?;
-    let body = raw
+    let (headers, body) = raw
         .split_once("\r\n\r\n")
         .or_else(|| raw.split_once("\n\n"))
-        .map(|(_, body)| body)
-        .unwrap_or_default();
-    Ok((status, body.to_owned()))
+        .unwrap_or((raw, ""));
+    Ok(HttpResponse {
+        status,
+        headers: headers.to_owned(),
+        body: body.to_owned(),
+    })
 }
 
 fn parse_plan_usage(body: &Value, credentials: &OauthCredentials) -> PlanUsage {
@@ -924,11 +949,12 @@ mod tests {
 
     #[test]
     fn status_line_and_body_split_from_curl_header_dump() {
-        let (status, body) =
-            split_status_and_body("HTTP/2 200 \r\ncontent-type: application/json\r\n\r\n{\"a\":1}")
+        let response =
+            split_response("HTTP/2 200 \r\ncontent-type: application/json\r\n\r\n{\"a\":1}")
                 .unwrap();
-        assert_eq!(status, 200);
-        assert_eq!(body, "{\"a\":1}");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "{\"a\":1}");
+        assert!(response.headers.contains("content-type"));
     }
 
     #[test]

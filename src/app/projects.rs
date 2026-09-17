@@ -440,6 +440,7 @@ impl Waku {
             return;
         }
         self.settings_page = None;
+        self.notifications.open = false;
         // The page claims the main area — a selected terminal gives way and
         // the Terminals group folds, same as picking a chat does. A selected
         // task gives way too: park the transcript's draft, panel, and scroll

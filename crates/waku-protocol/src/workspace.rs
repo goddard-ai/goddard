@@ -351,6 +351,97 @@ pub struct BranchDeleteFailure {
     pub error: String,
 }
 
+/// The kind of GitHub subject a notification thread points at. `Other`
+/// keeps forward compatibility with subject types this build does not map.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationSubjectType {
+    PullRequest,
+    Issue,
+    Discussion,
+    Release,
+    Commit,
+    CheckSuite,
+    WorkflowRun,
+    RepositoryInvitation,
+    RepositoryVulnerabilityAlert,
+    Other,
+}
+
+/// Why GitHub raised the thread — drives the reason pill and which threads
+/// may raise an OS banner.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationReason {
+    Assign,
+    Author,
+    CiActivity,
+    Comment,
+    Invitation,
+    Manual,
+    Mention,
+    ReviewRequested,
+    SecurityAlert,
+    StateChange,
+    Subscribed,
+    TeamMention,
+    Other,
+}
+
+/// One GitHub notification thread as the inbox lists it. `url` is the
+/// already-resolved web address; `number` is the pull request or issue
+/// number when the subject type carries one — together they let a client
+/// deep-link without re-resolving the subject.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationThread {
+    /// GitHub's thread id, the mark-read/done handle.
+    pub id: String,
+    /// `owner/name` — the inbox's grouping key.
+    pub repo: String,
+    /// The repository's web URL, the fallback open target.
+    pub repo_url: String,
+    pub title: String,
+    pub subject_type: NotificationSubjectType,
+    pub reason: NotificationReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u64>,
+    pub unread: bool,
+    /// Unix seconds, matching session and turn times.
+    pub updated_at: u64,
+}
+
+/// One poll of the notifications endpoint. `Unchanged` means the
+/// conditional request came back 304 — the client's threads still stand.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum NotificationPoll {
+    /// `gh` is missing or unauthenticated — the same availability model the
+    /// repo-level surfaces report.
+    Unavailable { availability: GitHubAvailability },
+    Unchanged {
+        /// The endpoint's `X-Poll-Interval` advisory, when it sent one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        poll_interval_seconds: Option<u64>,
+    },
+    Changed {
+        threads: Vec<NotificationThread>,
+        /// The response's `ETag`, replayed as `If-None-Match` on the next
+        /// poll — the validator github.com actually sends.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        etag: Option<String>,
+        /// The response's `Last-Modified`, replayed as `If-Modified-Since`
+        /// for hosts that send one instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_modified: Option<String>,
+        /// The endpoint's `X-Poll-Interval` advisory, when it sent one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        poll_interval_seconds: Option<u64>,
+    },
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -805,6 +896,33 @@ pub enum WorkspaceOperation {
         number: u64,
         branch: String,
     },
+    /// The authenticated user's GitHub notification inbox — user-level, so
+    /// it takes no `cwd`. `etag`/`if_modified_since` replay the previous
+    /// poll's validators for a free 304; `all` includes read threads
+    /// (GitHub cannot distinguish read from done). Returns `Notifications`.
+    ListNotifications {
+        all: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        etag: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        if_modified_since: Option<String>,
+    },
+    /// Mark one thread read. Returns `Ack`.
+    MarkNotificationRead {
+        thread_id: String,
+    },
+    /// Mark one thread done — irreversible; the thread leaves the inbox.
+    /// Returns `Ack`.
+    MarkNotificationDone {
+        thread_id: String,
+    },
+    /// Mark every thread in `repo` ("owner/name") read — the inbox's one
+    /// bulk write, matching the per-repo-group affordance. Returns `Ack`.
+    MarkRepoNotificationsRead {
+        repo: String,
+    },
+    /// Mark every thread read. Returns `Ack`.
+    MarkAllNotificationsRead,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -943,5 +1061,8 @@ pub enum WorkspaceResult {
     /// requested branch is gone.
     BranchDeletions {
         failures: Vec<BranchDeleteFailure>,
+    },
+    Notifications {
+        poll: NotificationPoll,
     },
 }

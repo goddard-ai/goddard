@@ -903,6 +903,8 @@ sidebar.search:
   en: Search
 sidebar.projects:
   en: Projects
+sidebar.inbox:
+  en: Inbox
 sidebar.options:
   en: Sidebar options
 sidebar.grouping:
@@ -1040,6 +1042,56 @@ github.no_pull_requests:
   en: No pull requests
 github.no_issues:
   en: No issues
+notifications.title:
+  en: Inbox
+notifications.filter_placeholder:
+  en: Filter notifications
+notifications.empty:
+  en: Inbox zero — nothing unread
+notifications.mark_read:
+  en: Mark as read
+notifications.mark_done:
+  en: Mark as done
+notifications.mark_repo_read:
+  en: Mark all read
+notifications.mark_all_read:
+  en: Mark all read
+notifications.show_read:
+  en: Show read
+notifications.show_read_tooltip:
+  en: Include read notifications
+notifications.fix_tooltip:
+  en: Fix review findings — in the session that opened it, or a new worktree
+notifications.new_activity:
+  en: new activity
+notifications.update_failed:
+  en: Couldn't update the notification — check `gh`
+notifications.reason_assign:
+  en: Assigned
+notifications.reason_author:
+  en: Author
+notifications.reason_ci_activity:
+  en: CI activity
+notifications.reason_comment:
+  en: Comment
+notifications.reason_invitation:
+  en: Invitation
+notifications.reason_manual:
+  en: Manual
+notifications.reason_mention:
+  en: Mentioned
+notifications.reason_review_requested:
+  en: Review requested
+notifications.reason_security_alert:
+  en: Security alert
+notifications.reason_state_change:
+  en: State change
+notifications.reason_subscribed:
+  en: Subscribed
+notifications.reason_team_mention:
+  en: Team mention
+notifications.reason_other:
+  en: Activity
 github.pr_open:
   en: Open
 github.pr_draft:

@@ -617,6 +617,8 @@ pub(super) enum SidebarRow {
     Search,
     /// Opens the Projects page and scrolls with history.
     Projects,
+    /// Opens the GitHub notification inbox and scrolls with history.
+    Inbox,
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
@@ -675,7 +677,7 @@ fn sidebar_shortcut_chip_label(index: usize) -> String {
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search | SidebarRow::Projects => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox => SIDEBAR_ACTION_ROW_HEIGHT,
         SidebarRow::Header(SidebarGroup::Terminals) => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
@@ -1246,6 +1248,63 @@ impl Waku {
                         this.close_projects_page(cx);
                     } else {
                         this.open_projects_page(None, window, cx);
+                    }
+                    cx.stop_propagation();
+                }
+            }));
+        div()
+            .w_full()
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .flex_none()
+            .child(row)
+    }
+
+    /// The notification inbox's entry — same action-row contract as
+    /// Projects, plus the unread count pill GitHub's bell wears.
+    fn render_sidebar_inbox(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let open = self.notifications.open;
+        let unread = self.notifications.unread_count();
+        let row = self
+            .render_sidebar_action_row(
+                "sidebar-inbox",
+                "icons/bell.svg",
+                tr!("sidebar.inbox"),
+                ShortcutHint::action(&ToggleInboxPage),
+                window,
+                cx,
+            )
+            .when(open, |element| element.bg(theme.sidebar_item_background))
+            .when(unread > 0, |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .h(px(17.0))
+                        .min_w(px(17.0))
+                        .px(px(4.0))
+                        .rounded_full()
+                        .bg(theme.info)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(sp(10.5))
+                        .text_color(theme.on_inverse)
+                        .child(unread.to_string()),
+                )
+            })
+            .on_click(cx.listener(|this, _, window, cx| {
+                if this.notifications.open {
+                    this.close_inbox(cx);
+                } else {
+                    this.open_inbox(window, cx);
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    if this.notifications.open {
+                        this.close_inbox(cx);
+                    } else {
+                        this.open_inbox(window, cx);
                     }
                     cx.stop_propagation();
                 }
@@ -2229,6 +2288,7 @@ impl Waku {
         if self.state.projects_page_enabled {
             rows.push(SidebarRow::Projects);
         }
+        rows.push(SidebarRow::Inbox);
 
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an
@@ -2428,6 +2488,7 @@ impl Waku {
         match *row {
             SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
             SidebarRow::Projects => self.render_sidebar_projects(window, cx).into_any_element(),
+            SidebarRow::Inbox => self.render_sidebar_inbox(window, cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
                     matches!(
@@ -3388,6 +3449,17 @@ impl Waku {
             .and_then(|entries| {
                 sidebar_pull_request_badge(entries, session_pull_request_window(session))
             });
+        // The informational-blue dot an unread notification thread earns —
+        // a status marker, not a control. The header chip owns interaction.
+        let pull_request_unread = self
+            .sidebar_pull_requests
+            .borrow()
+            .get(&session_id)
+            .is_some_and(|entries| {
+                session_pull_requests_in_window(entries, session_pull_request_window(session))
+                    .iter()
+                    .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
+            });
         let status_indicator: Option<AnyElement> = if shortcut_hint {
             None
         } else if working {
@@ -3651,6 +3723,11 @@ impl Waku {
                                     .flex()
                                     .items_center()
                                     .gap(px(3.0))
+                                    .when(pull_request_unread, |element| {
+                                        element.child(
+                                            div().size(px(5.0)).rounded_full().bg(theme.info),
+                                        )
+                                    })
                                     .child(icon(
                                         sidebar_pull_request_icon(badge.state),
                                         12.0,
@@ -3677,7 +3754,15 @@ impl Waku {
                                             sidebar_review_decision_color(&theme, decision),
                                         ))
                                     })
-                                    .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge))),
+                                    .tooltip(Tooltip::text(if pull_request_unread {
+                                        format!(
+                                            "{} · {}",
+                                            sidebar_pull_request_tooltip(&badge),
+                                            tr!("notifications.new_activity")
+                                        )
+                                    } else {
+                                        sidebar_pull_request_tooltip(&badge)
+                                    })),
                             )
                         },
                     )

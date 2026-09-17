@@ -402,6 +402,33 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::pull_requests::fetch_head(&cwd, number, &branch)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::ListNotifications {
+            all,
+            etag,
+            if_modified_since,
+        } => WorkspaceResult::Notifications {
+            poll: crate::notifications::list(
+                etag.as_deref(),
+                if_modified_since.as_deref(),
+                all,
+            )?,
+        },
+        WorkspaceOperation::MarkNotificationRead { thread_id } => {
+            crate::notifications::mark_read(&thread_id)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::MarkNotificationDone { thread_id } => {
+            crate::notifications::mark_done(&thread_id)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::MarkRepoNotificationsRead { repo } => {
+            crate::notifications::mark_repo_read(&repo)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::MarkAllNotificationsRead => {
+            crate::notifications::mark_all_read()?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },

@@ -55,6 +55,7 @@ impl Waku {
             return;
         }
         self.settings_page = Some(page);
+        self.notifications.open = false;
         // Each page starts at its own top; a scroll position carried over
         // from the previous page would land mid-content.
         self.settings_scroll.set_offset(gpui::Point::default());

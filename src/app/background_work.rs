@@ -911,7 +911,10 @@ impl Waku {
                     .cloned()
                     .collect();
             others.sort_by_key(|entry| entry.number);
-            Some(self.render_pull_request_control(&badge, Rc::new(others), cx))
+            let unread = sidebar::session_pull_requests_in_window(&entries, window)
+                .iter()
+                .any(|entry| self.notifications.has_unread_pull_request(&entry.url));
+            Some(self.render_pull_request_control(&badge, Rc::new(others), unread, cx))
         });
         let open_in = self.render_open_in_control(workspace_path, cx);
         let entries = Rc::new(entries);
@@ -1137,6 +1140,7 @@ impl Waku {
         &self,
         badge: &sidebar::SidebarPullRequestBadge,
         others: Rc<Vec<waku_client::PullRequestSummary>>,
+        unread: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -1168,7 +1172,18 @@ impl Waku {
             })
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(sidebar::sidebar_pull_request_tooltip(badge)))
+            .tooltip(Tooltip::text(if unread {
+                format!(
+                    "{} · {}",
+                    sidebar::sidebar_pull_request_tooltip(badge),
+                    tr!("notifications.new_activity")
+                )
+            } else {
+                sidebar::sidebar_pull_request_tooltip(badge)
+            }))
+            .when(unread, |element| {
+                element.child(div().size(px(5.0)).rounded_full().bg(theme.info))
+            })
             .child(icon(
                 sidebar::sidebar_pull_request_icon(badge.state),
                 12.5,

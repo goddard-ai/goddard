@@ -484,6 +484,7 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::new_terminal_action))
                 .on_action(cx.listener(Self::toggle_terminals_action))
                 .on_action(cx.listener(Self::toggle_projects_page_action))
+                .on_action(cx.listener(Self::toggle_inbox_page_action))
                 .on_action(cx.listener(Self::select_projects_tab_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
@@ -588,6 +589,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::new_terminal_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
             .on_action(cx.listener(Self::toggle_projects_page_action))
+            .on_action(cx.listener(Self::toggle_inbox_page_action))
             .on_action(cx.listener(Self::select_projects_tab_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
@@ -649,7 +651,8 @@ impl Render for Waku {
                     .when(
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
-                            && self.projects_page.is_none(),
+                            && self.projects_page.is_none()
+                            && !self.notifications.open,
                         |element| {
                             element
                                 .group(composer::SESSION_DROP_GROUP)
@@ -683,6 +686,8 @@ impl Render for Waku {
                             )
                         } else if projects_page.is_some() {
                             self.render_projects_page(window, cx)
+                        } else if self.notifications.open {
+                            self.render_inbox_page(window, cx)
                         } else if empty {
                             self.render_empty_state(cx).into_any_element()
                         } else {
@@ -702,7 +707,8 @@ impl Render for Waku {
                     .when(
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
-                            && self.projects_page.is_none(),
+                            && self.projects_page.is_none()
+                            && !self.notifications.open,
                         |element| {
                             if self.big_picture.is_open() {
                                 element

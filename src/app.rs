@@ -78,7 +78,7 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
+    DismissInbox, DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
     FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
     MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
     NewSession, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
@@ -87,9 +87,9 @@ use crate::{
     SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward,
     SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette,
     ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
-    ToggleFpsCounter, ToggleGitPanel, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
-    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
-    ToggleWorkspace,
+    ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage,
+    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
+    ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -2302,6 +2302,10 @@ pub struct Waku {
     /// page's Issues and Pull Requests tabs — state survives the view
     /// toggling back to the transcript.
     github_browsers: HashMap<Uuid, github::GitHubBrowser>,
+    /// The GitHub notification inbox — user-level, not project-level, so it
+    /// lives here rather than in `github_browsers`. See
+    /// [`notifications::Inbox`].
+    notifications: notifications::Inbox,
     /// The Projects page's own project selection — `Some` while the page
     /// claims the main column — independent of `state.selected_project`.
     projects_page: Option<Uuid>,
@@ -2558,6 +2562,7 @@ mod go_to_line;
 mod goal_dialog;
 mod keybindings_page;
 mod image_preview;
+mod notifications;
 mod project_switcher;
 mod projects;
 mod relocate;
@@ -4172,7 +4177,10 @@ impl Waku {
                         .timer(BACKGROUND_WORK_TICK_INTERVAL)
                         .await;
                     if this
-                        .update(cx, |this, cx| this.maybe_refresh_background_work(cx))
+                        .update(cx, |this, cx| {
+                            this.maybe_refresh_background_work(cx);
+                            this.maybe_poll_notifications(cx);
+                        })
                         .is_err()
                     {
                         break;
@@ -4597,6 +4605,7 @@ impl Waku {
                 sidebar_pull_request_scan_fingerprint: Cell::new(None),
                 sidebar_pull_request_scan_generation: Cell::new(0),
                 github_browsers: HashMap::new(),
+                notifications: notifications::Inbox::new(window, cx),
                 projects_page: None,
                 last_projects_page_project: None,
                 projects_page_states: HashMap::new(),

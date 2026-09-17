@@ -86,6 +86,8 @@ actions!(
         SelectAllProjectsRows,
         FocusProjectsFilter,
         DismissProjectsLayer,
+        ToggleInboxPage,
+        DismissInbox,
         ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
@@ -531,6 +533,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘⇧P opens the Projects page; pressed while open, it starts
         // the recent-project cycle the modifier release commits.
         KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),
+        // ⌘⇧I opens the notification inbox — the same page contract the
+        // Projects page has. ⌘⇧N stays on ToggleWorkspace.
+        KeyBinding::new("secondary-shift-i", ToggleInboxPage, None),
         // ⌘⌥1–2 name the page's tabs; with the page closed the same
         // chords open it straight onto that tab.
         KeyBinding::new("secondary-alt-1", SelectProjectsTab { index: 0 }, None),
@@ -549,6 +554,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         ),
         KeyBinding::new("secondary-f", FocusProjectsFilter, Some("GitSettingsPage")),
         KeyBinding::new("escape", DismissProjectsLayer, Some("GitSettingsPage")),
+        KeyBinding::new("escape", DismissInbox, Some("InboxPage")),
         // Step between turn prompts — the navigation rail's
         // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
         // pair works with the composer focused; in the terminal the

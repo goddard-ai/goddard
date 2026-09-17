@@ -316,8 +316,32 @@ impl Waku {
         .detach();
     }
 
+    /// Create the project's browser on first touch — notification deep
+    /// links land on projects that may never have opened the surface.
+    pub(super) fn github_ensure_browser(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id)
+        {
+            return false;
+        }
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            self.github_browsers.entry(project_id)
+        {
+            entry.insert(GitHubBrowser::new(project_id, window, cx));
+        }
+        true
+    }
+
     /// Fetch a detail that has never been read (or that errored last time).
-    fn github_ensure_detail(
+    pub(super) fn github_ensure_detail(
         &mut self,
         project_id: Uuid,
         detail: GitHubDetailRef,
@@ -747,7 +771,7 @@ impl Waku {
     /// Resume a Fix press that waited on the detail read. Called wherever a
     /// detail result lands; no-ops until the read settles, so the prompt
     /// always sees the complete findings.
-    fn github_maybe_run_pending_fix(
+    pub(super) fn github_maybe_run_pending_fix(
         &mut self,
         project_id: Uuid,
         detail: GitHubDetailRef,
@@ -895,7 +919,7 @@ impl Waku {
 
     /// Seed the composer with the fix prompt. Text the user already drafted
     /// is kept as a trailing addendum rather than overwritten.
-    fn github_fill_fix_prompt(&mut self, prompt: String, cx: &mut Context<Self>) {
+    pub(super) fn github_fill_fix_prompt(&mut self, prompt: String, cx: &mut Context<Self>) {
         self.composer.update(cx, |input, cx| {
             let existing = input.content(cx).to_owned();
             let content = if existing.trim().is_empty() {
@@ -2173,7 +2197,7 @@ fn github_issue_meta(issue: &IssueSummary) -> Vec<String> {
 
 /// A detail-header action chip: icon + label, hover and focus treatments
 /// matching the list rows.
-fn github_detail_action(
+pub(super) fn github_detail_action(
     id: impl Into<gpui::ElementId>,
     icon_path: &'static str,
     label: String,
@@ -2323,7 +2347,10 @@ fn strip_html_comments(body: &str) -> String {
 /// directive is load-bearing, not decoration. `detail` is `None` when the
 /// detail read failed and only the list summary is available. Not
 /// localized — it is input for the agent, not UI copy.
-fn github_fix_prompt(summary: &PullRequestSummary, detail: Option<&PullRequestDetail>) -> String {
+pub(super) fn github_fix_prompt(
+    summary: &PullRequestSummary,
+    detail: Option<&PullRequestDetail>,
+) -> String {
     const MAX_FINDINGS: usize = 20;
     const FIELD_MAX_LENGTH: usize = 300;
 
