@@ -36,12 +36,18 @@ actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
     (
         SettingsPage::General,
         "settings.general",
         "icons/settings.svg",
         "settings.general_keywords",
+    ),
+    (
+        SettingsPage::Keybindings,
+        "keybind.title",
+        "icons/keyboard.svg",
+        "keybind.keywords",
     ),
     (
         SettingsPage::Appearance,
@@ -449,6 +455,32 @@ impl Waku {
                         .child(self.render_skills_settings(cx)),
                 );
         }
+        // The Keybinding Manager is a self-contained surface like Skills:
+        // fixed keyboard stage over its own virtualized table.
+        if page == SettingsPage::Keybindings {
+            return div()
+                .flex_1()
+                .h_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .border_l(hairline())
+                .border_color(theme.sidebar_border)
+                .bg(theme.surface)
+                .children(right_window_controls.map(|controls| {
+                    self.render_settings_drag_region("settings-keybindings-titlebar", cx)
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .child(controls)
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(self.render_keybindings_page(window, cx)),
+                );
+        }
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
         // container; the Archived page's virtualized list needs the same.
@@ -496,6 +528,7 @@ impl Waku {
                         SettingsPage::Appearance => tr!("settings.appearance"),
                         SettingsPage::Git => tr!("settings.git"),
                         SettingsPage::Experiments => tr!("settings.experiments"),
+                        SettingsPage::Keybindings => tr!("keybind.title"),
                     }),
             )
             .child(match page {
@@ -511,6 +544,7 @@ impl Waku {
                 SettingsPage::Appearance => self.render_appearance_settings(cx),
                 SettingsPage::Git => self.render_git_settings(window, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(cx),
+                SettingsPage::Keybindings => div().into_any_element(),
             });
 
         div()

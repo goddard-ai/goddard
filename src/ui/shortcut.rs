@@ -4,7 +4,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    Action, App, FocusHandle, KeyBinding, KeyContext, KeybindingKeystroke, SharedString, Window,
+    Action, App, FocusHandle, KeyBinding, KeyContext, KeybindingKeystroke, Keystroke, SharedString,
+    Window,
 };
 
 /// A shortcut hint shown beside a menu row, tooltip, or palette entry.
@@ -141,6 +142,22 @@ impl std::fmt::Debug for ShortcutHint {
                 .finish(),
         }
     }
+}
+
+/// Formats a canonical sequence like `"ctrl-t cmd-shift-p"` into the same
+/// glyph label a live `KeyBinding` would produce.
+pub fn sequence_label(sequence: &str) -> String {
+    sequence
+        .split_whitespace()
+        .map(|stroke| {
+            Keystroke::parse(stroke)
+                .map(|keystroke| {
+                    keystroke_label(&KeybindingKeystroke::from_keystroke(keystroke))
+                })
+                .unwrap_or_else(|_| stroke.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// "⌘⇧T" on macOS, "Ctrl+Shift+T" elsewhere — the same format the app's

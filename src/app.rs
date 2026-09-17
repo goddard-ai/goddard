@@ -265,6 +265,7 @@ enum SettingsPage {
     Appearance,
     Git,
     Experiments,
+    Keybindings,
 }
 
 impl SettingsPage {
@@ -272,7 +273,11 @@ impl SettingsPage {
     /// its navigation entry points. Keeping this decision on the page itself
     /// makes the Settings sidebar and command palette use the same gate.
     fn is_visible_in_navigation(self) -> bool {
-        self != Self::ComputerUse || crate::computer_use::is_available()
+        match self {
+            Self::ComputerUse => crate::computer_use::is_available(),
+            Self::Keybindings => crate::keybindings::manager_enabled(),
+            _ => true,
+        }
     }
 }
 
@@ -2158,6 +2163,9 @@ pub struct Waku {
     /// The toggle's current value, mirrored from `dev_state_path` at launch
     /// and on each palette flip.
     auto_restart_enabled: bool,
+    /// Lazily built with the Keybindings page so the persistence service and
+    /// search subscription only exist while the surface is in use.
+    keybindings: Option<keybindings_page::KeybindingsUi>,
     /// The Commands settings page's open editor; `None` shows the list.
     custom_command_editor: Option<settings::CustomCommandEditor>,
     /// The Daemon page's open remote-host editor; `None` shows the list.
@@ -2535,6 +2543,7 @@ mod github;
 mod github_media;
 mod go_to_line;
 mod goal_dialog;
+mod keybindings_page;
 mod image_preview;
 mod project_switcher;
 mod projects;
@@ -4482,6 +4491,7 @@ impl Waku {
                 settings_page: None,
                 dev_state_path,
                 auto_restart_enabled,
+                keybindings: None,
                 custom_command_editor: None,
                 remote_host_editor: None,
                 skills_catalog: None,

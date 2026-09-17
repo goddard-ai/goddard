@@ -3425,5 +3425,25 @@ keybind.reason.modal_nav:
   en: Built-in list navigation — not remappable in this version
 keybind.reason.hand_rolled:
   en: Handled directly by the terminal — not remappable
+keybind.title:
+  en: Keybindings
+keybind.search:
+  en: Search commands
+keybind.search_placeholder:
+  en: Search commands or shortcuts…
+keybind.layout.auto:
+  en: Auto-detected
+keybind.layout.manual:
+  en: Manual
+keybind.layout.unrecognized:
+  en: Unrecognized layout — showing US
+keybind.counts:
+  en: "%{n} commands"
+keybind.modified:
+  en: "%{n} customized"
+keybind.stage.collapsed:
+  en: Keyboard hidden
+keybind.keywords:
+  en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:
   en: Projects

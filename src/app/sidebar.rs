@@ -1440,6 +1440,10 @@ impl Waku {
                     .tooltip(Tooltip::text(tr!("shortcuts.title")))
                     .child(icon("icons/keyboard.svg", 14.0, theme.text_tertiary))
                     .on_click(cx.listener(|this, _, window, cx| {
+                        if crate::keybindings::manager_enabled() {
+                            this.open_keybindings_page(window, cx);
+                            return;
+                        }
                         let focus = this.open_shortcuts_dialog(cx);
                         // Like the other deferred surfaces, focus lands two
                         // frames after the modal joins the dispatch tree.
@@ -1451,10 +1455,16 @@ impl Waku {
                         if !event.keystroke.modifiers.modified()
                             && matches!(event.keystroke.key.as_str(), "enter" | "space")
                         {
-                            let focus = this.open_shortcuts_dialog(cx);
-                            window.on_next_frame(move |window, _| {
-                                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                            });
+                            if crate::keybindings::manager_enabled() {
+                                this.open_keybindings_page(window, cx);
+                            } else {
+                                let focus = this.open_shortcuts_dialog(cx);
+                                window.on_next_frame(move |window, _| {
+                                    window.on_next_frame(move |window, cx| {
+                                        window.focus(&focus, cx)
+                                    });
+                                });
+                            }
                             cx.stop_propagation();
                         }
                     })),
