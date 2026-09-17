@@ -168,7 +168,7 @@ fi
 
 rm -rf "$bundle"
 mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/goddard-computer-use" "$contents/Helpers"
-cp "$cargo_target_dir//goddard" "$contents/MacOS/$app_name"
+cp "$cargo_target_dir/$profile/goddard" "$contents/MacOS/$app_name"
 cp "$cargo_target_dir/$profile/goddard_js_repl" "$repl_executable"
 chmod 755 "$repl_executable"
 cp "$cargo_target_dir/$profile/goddard-agent" "$agent_executable"
