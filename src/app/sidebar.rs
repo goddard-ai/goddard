@@ -2445,7 +2445,7 @@ impl Waku {
                         .tooltip(if group == SidebarGroup::Terminals {
                             Tooltip::text_with_action(
                                 tr!("right_panel.new_terminal"),
-                                &ToggleTerminals,
+                                &NewTerminal,
                             )
                         } else {
                             Tooltip::text_with_action(tr!("menu.new_task"), &NewSession)

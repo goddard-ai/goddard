@@ -1856,9 +1856,6 @@ workspace.workspace:
   en: workspace
 workspace.worktree:
   en: Worktree
-workspace.toggle_hint:
-  en: Toggle workspace (%{shortcut})
-
 sync.behind_one:
   en: 1 commit behind %{upstream}
 sync.behind_many:

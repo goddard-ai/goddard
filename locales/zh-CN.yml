@@ -888,8 +888,6 @@ workspace.from_ref: "从 %{branch}"
 workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
-workspace.toggle_hint: 切换工作位置 (%{shortcut})
-
 sync.behind_one: "落后 %{upstream} 1 个提交"
 sync.behind_many: "落后 %{upstream} %{count} 个提交"
 sync.ahead_one: 领先 1 个提交

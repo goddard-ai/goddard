@@ -1763,6 +1763,7 @@ impl Waku {
             .on_action(cx.listener(|_, _: &ToggleRightPanel, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleGitPanel, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleTerminals, _, cx| cx.stop_propagation()))
+            .on_action(cx.listener(|_, _: &NewTerminal, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleUsagePanel, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &ToggleProjectsPage, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &SelectProjectsTab, _, cx| cx.stop_propagation()))

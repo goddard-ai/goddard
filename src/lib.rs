@@ -116,6 +116,7 @@ actions!(
         ArchiveSession,
         ToggleSessionPin,
         ToggleTerminals,
+        NewTerminal,
         RunProjectScript,
         CopySelection,
         CopyWorkingDirectory,
@@ -621,15 +622,18 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘R opens the run-a-script picker everywhere except the
         // browser surface, whose deeper context keeps it as reload.
         KeyBinding::new("secondary-r", RunProjectScript, None),
-        // ⌘T is the Terminals group chord: it expands the sidebar
-        // section (selecting the last-shown terminal, or spawning one
-        // in ~ when none exists), and once a full-width terminal is
-        // active it opens another in the same directory.
-        KeyBinding::new("secondary-t", ToggleTerminals, None),
+        // ⌘T always spawns a terminal — rooted in the selected
+        // terminal's directory, the selected session's workspace, or ~
+        // when the main area shows neither.
+        KeyBinding::new("secondary-t", NewTerminal, None),
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
         KeyBinding::new("secondary-shift-b", ToggleBranchPicker, None),
         KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
-        KeyBinding::new("secondary-shift-t", ToggleWorkspace, None),
+        // ⌘⇧T is the Terminals group chord: it expands the sidebar
+        // section (selecting the last-shown terminal, or spawning one
+        // in ~ when none exists), and once a full-width terminal is
+        // active it opens another in the same directory.
+        KeyBinding::new("secondary-shift-t", ToggleTerminals, None),
         KeyBinding::new("secondary-u", ToggleUsagePanel, None),
         KeyBinding::new("secondary-s", SaveFile, None),
         // Font-size zoom follows focus: in the terminal it sizes the

@@ -4435,10 +4435,7 @@ impl Waku {
             .selected(can_pick_worktree && !creating_worktree && worktree_handle.is_open())
             .max_w(px(180.0))
             .when(can_pick_worktree, |chip| {
-                chip.tooltip(tr!(
-                    "workspace.toggle_hint",
-                    shortcut = crate::platform::primary_shortcut("⌘⇧T", "Ctrl+Shift+T")
-                ))
+                chip.tooltip(tr!("menu.toggle_workspace"))
             });
         let worktree_selector = if can_pick_worktree {
             // The base entries describe the project's ordinary checkout, so

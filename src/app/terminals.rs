@@ -505,9 +505,58 @@ impl Waku {
         }
     }
 
-    /// `secondary-t` — the Terminals chord. While a full-width terminal is
-    /// active it opens another in the same directory and scope; otherwise
-    /// it expands the group.
+    /// `secondary-t` — always a fresh terminal, rooted where the user is:
+    /// the selected terminal's directory and scope, the selected session's
+    /// workspace, or a global terminal in ~ when the main area shows
+    /// neither.
+    pub(super) fn new_terminal_action(
+        &mut self,
+        _: &NewTerminal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        // Expand the group so the new row — and the selection — is visible.
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        // The terminal on screen seeds the spawn directory: the full-width
+        // selection in terminal mode, or the visible right panel's active
+        // tab while its session is selected.
+        let source_terminal = self.selected_terminal.or_else(|| {
+            if self.right_panel_visible {
+                self.active_right_panel_surface()
+                    .and_then(RightPanelSurface::terminal_id)
+            } else {
+                None
+            }
+        });
+        let (working_directory, session) = if let Some(terminal_id) = source_terminal {
+            (
+                self.terminal_cwd(terminal_id, cx),
+                self.terminal_records
+                    .get(&terminal_id)
+                    .and_then(|record| record.session),
+            )
+        } else if let Some(session) = self.selected_session() {
+            (
+                self.workspace_path_for_session(session)
+                    .map(std::path::Path::to_path_buf),
+                Some(session.id),
+            )
+        } else {
+            (dirs::home_dir(), None)
+        };
+        if let Some(working_directory) = working_directory
+            && let Some(terminal_id) =
+                self.create_terminal(working_directory, session, None, cx)
+        {
+            self.select_terminal(terminal_id, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// `secondary-shift-t` — the Terminals chord. While a full-width
+    /// terminal is active it opens another in the same directory and
+    /// scope; otherwise it expands the group.
     pub(super) fn toggle_terminals_action(
         &mut self,
         _: &ToggleTerminals,

@@ -910,8 +910,6 @@ workspace.from_ref: "%{branch} から"
 workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
-workspace.toggle_hint: 作業場所を切り替え (%{shortcut})
-
 sync.behind_one: "%{upstream} より 1 コミット遅れています"
 sync.behind_many: "%{upstream} より %{count} コミット遅れています"
 sync.ahead_one: 1 コミット進んでいます
