@@ -10,7 +10,7 @@ use super::icon;
 
 /// The one-line text box shell: a fixed-height bordered field around a
 /// [`TextInput`], with an optional leading icon and an accent border
-/// while focused.
+/// on keyboard-driven focus.
 ///
 /// The embedded input must stay single-line (the default mode) — that is
 /// what keeps the text from wrapping and slides overlong content under the
@@ -59,19 +59,17 @@ impl ParentElement for TextField {
 }
 
 impl RenderOnce for TextField {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
-        let focused = self.input.read(cx).is_visually_focused(window);
+        let focus_handle = self.input.read(cx).focus();
         self.base
+            .track_focus(&focus_handle)
             .h(px(28.0))
             .px(px(8.0))
             .rounded(px(8.0))
             .border(hairline())
-            .border_color(if focused {
-                theme.accent
-            } else {
-                theme.border_strong
-            })
+            .border_color(theme.border_strong)
+            .focus_visible(|style| style.border_color(theme.accent))
             .bg(theme.inset)
             .flex()
             .items_center()
