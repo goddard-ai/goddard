@@ -4699,7 +4699,13 @@ impl Waku {
                     Some(notice) => format!("{notice}\n\n{driver_prompt}"),
                     None => driver_prompt,
                 };
-                driver.prompt(driver_prompt, turn_id, message_id, submission.hidden);
+                driver.prompt(
+                    driver_prompt,
+                    turn_id,
+                    message_id,
+                    submission.hidden,
+                    submission.attachments.clone(),
+                );
             }
             Err(error) => {
                 failed_to_start = true;

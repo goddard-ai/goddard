@@ -862,9 +862,12 @@ tasks of the same runtime. One client and one session per task — the SDK can
 multiplex sessions on a process, but keeping it 1:1 means the driver's `Drop`
 still reads as "this task's runtime is gone" like every other transport's.
 
-**Per turn** — `session.send(MessageOptions::new(prompt))`. The turn boundary
-is not the send reply but the event stream: `assistant.turn_start` opens the
-turn and `session.idle` settles it (`aborted` marks a cancelled turn).
+**Per turn** — `session.send(MessageOptions)`. Composer attachment chips ride
+`MessageOptions::with_attachments` as `Attachment::File`/`Directory` — the
+prompt keeps the merged `@`-mention text too, the same shape the CLI produces
+for its own mentions. The turn boundary is not the send reply but the event
+stream: `assistant.turn_start` opens the turn and `session.idle` settles it
+(`aborted` marks a cancelled turn).
 
 **Inbound stream** — `session.subscribe()` yields `SessionEvent`s whose
 `data` payloads deserialize into generated `session_events` types:

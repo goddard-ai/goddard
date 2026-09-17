@@ -7,8 +7,8 @@ use crossbeam_channel::{Receiver, SendError, Sender, unbounded};
 use uuid::Uuid;
 use waku_protocol::computer_use::ComputerToolRequest;
 use waku_protocol::model::{
-    BackgroundWorkKey, DriverEvent, GoalOperation, ProviderResumeCursor, RuntimeMode,
-    UserInputAnswer,
+    BackgroundWorkKey, DriverEvent, GoalOperation, MessageAttachment, ProviderResumeCursor,
+    RuntimeMode, UserInputAnswer,
 };
 
 #[derive(Clone)]
@@ -46,15 +46,19 @@ impl DriverHandle {
     /// and that turn's user message, so the daemon can publish the same
     /// identity to every other client attached to the runtime. `hidden`
     /// marks the internal "continue" nudge: provider-facing text no client
-    /// renders.
+    /// renders. `attachments` are the composer's chips — `prompt` already
+    /// carries their mention text; providers with a native attachment channel
+    /// send them structurally too.
     pub fn prompt(
         &self,
         prompt: String,
         turn_id: Option<Uuid>,
         message_id: Option<Uuid>,
         hidden: bool,
+        attachments: Vec<MessageAttachment>,
     ) {
-        self.inner.prompt(prompt, turn_id, message_id, hidden);
+        self.inner
+            .prompt(prompt, turn_id, message_id, hidden, attachments);
     }
 
     pub fn supports_steer(&self) -> bool {
@@ -121,7 +125,14 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
-    fn prompt(&self, prompt: String, turn_id: Option<Uuid>, message_id: Option<Uuid>, hidden: bool);
+    fn prompt(
+        &self,
+        prompt: String,
+        turn_id: Option<Uuid>,
+        message_id: Option<Uuid>,
+        hidden: bool,
+        attachments: Vec<MessageAttachment>,
+    );
     fn supports_steer(&self) -> bool {
         false
     }

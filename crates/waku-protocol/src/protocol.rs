@@ -9,8 +9,8 @@ use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::model::{
-    AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
-    ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
+    AgentSession, GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe,
+    ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
@@ -111,6 +111,11 @@ pub enum Command {
         /// transcript row for it.
         #[serde(default, skip_serializing_if = "crate::model::is_false")]
         hidden: bool,
+        /// The composer's attachment chips. `prompt` already carries their
+        /// `@`-mention text; transports with a native attachment channel
+        /// (Copilot) also send them structurally.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<MessageAttachment>,
     },
     Steer {
         prompt: String,

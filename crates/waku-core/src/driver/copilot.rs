@@ -34,8 +34,8 @@ use github_copilot_sdk::rpc::{
     PermissionDecisionApproveForSessionApprovalWrite,
 };
 use github_copilot_sdk::types::{
-    ExitPlanModeData, MessageOptions, PermissionRequestData, PermissionRequestKind, RequestId,
-    ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SetModelOptions,
+    Attachment, ExitPlanModeData, MessageOptions, PermissionRequestData, PermissionRequestKind,
+    RequestId, ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SetModelOptions,
 };
 use github_copilot_sdk::{Client, ClientInfo, ClientOptions, CliProgram};
 use parking_lot::Mutex;
@@ -48,12 +48,15 @@ use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, PermissionOption, ProviderResumeCursor, RuntimeMode,
-    UserInputAnswer, UserInputOption, UserInputQuestion,
+    ActivityKind, DriverEvent, MessageAttachment, PermissionOption, ProviderResumeCursor,
+    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 
 enum CommandMessage {
-    Prompt(String),
+    Prompt {
+        text: String,
+        attachments: Vec<MessageAttachment>,
+    },
     Cancel,
     /// Model, reasoning effort, and context tier ride one `session.set_model`
     /// call; the mode half lives in the handler's shared state.
@@ -292,8 +295,13 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             command = commands.recv() => {
                 let Some(command) = command else { break };
                 match command {
-                    CommandMessage::Prompt(prompt) => {
-                        if let Err(error) = session.send(MessageOptions::new(prompt)).await {
+                    CommandMessage::Prompt { text, attachments } => {
+                        let mut message = MessageOptions::new(text);
+                        let attachments = copilot_attachments(attachments);
+                        if !attachments.is_empty() {
+                            message = message.with_attachments(attachments);
+                        }
+                        if let Err(error) = session.send(message).await {
                             let _ = events.send(DriverEvent::Error(format!(
                                 "GitHub Copilot: {error}"
                             )));
@@ -775,9 +783,43 @@ impl ExitPlanModeHandler for CopilotHandler {
     }
 }
 
+/// Composer chips map onto the SDK's typed attachments: directories attach
+/// as `Directory`, everything else — including images — as a `File` path the
+/// CLI reads itself. The merged `@`-mention text stays in the prompt, the
+/// same shape the CLI produces for its own mentions.
+fn copilot_attachments(attachments: Vec<MessageAttachment>) -> Vec<Attachment> {
+    attachments
+        .into_iter()
+        .map(|attachment| {
+            if attachment.is_dir {
+                Attachment::Directory {
+                    path: attachment.path,
+                    display_name: Some(attachment.name),
+                }
+            } else {
+                Attachment::File {
+                    path: attachment.path,
+                    display_name: Some(attachment.name),
+                    line_range: None,
+                }
+            }
+        })
+        .collect()
+}
+
 impl DriverControl for CopilotDriver {
     fn prompt(&self, prompt: String) {
-        let _ = self.commands.send(CommandMessage::Prompt(prompt));
+        let _ = self.commands.send(CommandMessage::Prompt {
+            text: prompt,
+            attachments: Vec::new(),
+        });
+    }
+
+    fn prompt_with_attachments(&self, prompt: String, attachments: Vec<MessageAttachment>) {
+        let _ = self.commands.send(CommandMessage::Prompt {
+            text: prompt,
+            attachments,
+        });
     }
 
     fn cancel(&self) {

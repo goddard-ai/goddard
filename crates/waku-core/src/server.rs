@@ -2158,6 +2158,7 @@ mod tests {
                     turn_id: None,
                     message_id: None,
                     hidden: false,
+                    attachments: Vec::new(),
                 },
             )
             .unwrap();
@@ -2813,6 +2814,7 @@ mod tests {
                     turn_id: None,
                     message_id: None,
                     hidden: false,
+                    attachments: Vec::new(),
                 },
             },
             second_client_outgoing,
