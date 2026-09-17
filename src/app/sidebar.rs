@@ -1182,7 +1182,7 @@ impl Waku {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .text_size(sp(13.0))
+                    .text_size(sp(14.0))
                     .text_color(theme.text_secondary)
                     .child(label),
             )
