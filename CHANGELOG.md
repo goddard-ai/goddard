@@ -7,10 +7,14 @@ extracts the section whose heading matches the version being released
 the update prompt.
 
 Format follows [Keep a Changelog](https://keepachangelog.com). Don't edit this
-file directly for pending changes — add a `.changelog/<slug>.md` fragment per
-change (one bullet per file) so parallel work never conflicts here. At release
-time `bun run changelog` folds every fragment plus any `## [unreleased]`
-bullets into a `## [<version>]` section for the version in `Cargo.toml`.
+file directly for pending changes — add a `.changelog/<prefix>-<slug>.md`
+fragment per change (one bullet per file) so parallel work never conflicts
+here. The required prefix picks the release-notes section: `highlight-` for
+headline features, `feat-` for other features, `fix-` for bugs that existed
+in a released version. At release time `bun run changelog` folds every
+fragment plus any `## [unreleased]` bullets into a `## [<version>]` section
+for the version in `Cargo.toml`, grouped under `### Highlights`,
+`### Features`, and `### Fixed`.
 
 Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into

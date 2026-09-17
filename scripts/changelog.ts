@@ -59,8 +59,17 @@ function cargoVersion(): string {
   return version;
 }
 
+/** Fragment categories, in the order their `###` sections are emitted.
+ *  A fragment's filename must start with one of these prefixes. */
+const CATEGORIES = [
+  { prefix: "highlight-", heading: "Highlights" },
+  { prefix: "feat-", heading: "Features" },
+  { prefix: "fix-", heading: "Fixed" },
+] as const;
+
 /** Fold `.changelog/*.md` fragments (and any `## [unreleased]` bullets) into a
- *  `## [<version>]` section, then delete the consumed fragments. */
+ *  `## [<version>]` section grouped by category, then delete the consumed
+ *  fragments. */
 export async function collectChangelog(): Promise<void> {
   const version = cargoVersion();
   const changelog = await Bun.file(changelogPath).text();
@@ -74,23 +83,40 @@ export async function collectChangelog(): Promise<void> {
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
     .map((entry) => entry.name)
     .sort();
-  const bodies: string[] = [];
+
+  const groups = new Map<string, string[]>();
+  for (const { heading } of CATEGORIES) groups.set(heading, []);
   for (const name of fragments) {
+    const category = CATEGORIES.find(({ prefix }) =>
+      name.startsWith(prefix),
+    );
+    if (!category) {
+      throw new Error(
+        `Fragment ${name} has no category prefix; expected one of: ` +
+          CATEGORIES.map(({ prefix }) => `${prefix}*`).join(", "),
+      );
+    }
     const body = (
       await Bun.file(join(fragmentsDir, name)).text()
     ).trim();
-    if (body) bodies.push(body);
+    if (body) groups.get(category.heading)!.push(body);
   }
   const unreleased = extractReleaseNotes(changelog, "unreleased");
-  if (unreleased) bodies.unshift(unreleased);
-  if (bodies.length === 0) {
+
+  const parts: string[] = [];
+  if (unreleased) parts.push(unreleased);
+  for (const { heading } of CATEGORIES) {
+    const items = groups.get(heading)!;
+    if (items.length > 0) parts.push(`### ${heading}\n\n${items.join("\n")}`);
+  }
+  if (parts.length === 0) {
     throw new Error(
       "Nothing to release: .changelog/ has no fragments and " +
         "## [unreleased] is empty.",
     );
   }
 
-  const section = `## [${version}]\n\n${bodies.join("\n")}\n`;
+  const section = `## [${version}]\n\n${parts.join("\n\n")}\n`;
   const lines = changelog.split("\n");
   const unreleasedIdx = lines.findIndex((line) =>
     /^##\s+\[?unreleased\]?/i.test(line),

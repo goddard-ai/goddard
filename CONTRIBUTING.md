@@ -137,8 +137,10 @@ your responses in your own words.
 - List the checks you ran.
 - Call out known limitations or follow-up work.
 - Link the related issue, if one exists.
-- Add a `.changelog/<slug>.md` fragment (one bullet) for user-visible changes;
-  `bun run changelog` folds them into `CHANGELOG.md` at release time.
+- Add a `.changelog/<prefix>-<slug>.md` fragment (one bullet) for user-visible
+  changes — `highlight-` for headline features, `feat-` for other features,
+  `fix-` for bugs that existed in a released version. `bun run changelog`
+  folds them into `CHANGELOG.md` at release time.
 
 ### AI policy
 

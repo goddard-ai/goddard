@@ -117,8 +117,9 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    stable channel. The local `bun run release` publish path still refuses
    them outright.
 2. **Write the release notes** — changes accumulate as fragments in
-   `.changelog/` (one `.md` file per change, one bullet each). Fold them into
-   `CHANGELOG.md`:
+   `.changelog/` (one `.md` file per change, one bullet each, named
+   `highlight-`/`feat-`/`fix-<slug>.md` to pick the `###` section). Fold them
+   into `CHANGELOG.md`:
    ```sh
    bun run changelog
    ```
