@@ -78,7 +78,7 @@ command_palette.copy_agent_cli_thread_id: エージェント CLI スレッド ID
 command_palette.task_id_copied: タスク ID をコピーしました
 command_palette.agent_cli_thread_id_copied: エージェント CLI スレッド ID をコピーしました
 command_palette.collapse_sidebar_groups: サイドバーのすべてのグループを折りたたむ
-command_palette.go_to_latest_unseen_completion: 最新の未読の完了タスクへ移動
+command_palette.go_to_next_unread_completion: 次の未読の完了タスクへ移動
 command_palette.show_sidebar: サイドバーを表示
 command_palette.hide_sidebar: サイドバーを隠す
 command_palette.show_right_panel: 右パネルを表示

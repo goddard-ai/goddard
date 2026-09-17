@@ -82,7 +82,7 @@ commits. Highlights, grouped by area:
   turns, and per-row queued follow-ups.
 - **Navigation:** Big Picture (⌘0), ⌘1–9 sidebar jumps with hold-to-reveal
   chips, Ctrl+Tab task switching with status glyphs, a ⌘N project switcher in
-  New Task drafts, ⌘⌥-arrow turn navigation, ⌘D to the latest unseen
+  New Task drafts, ⌘⌥-arrow turn navigation, ⌘D to the next unread
   completion, ⌘⇧D mark-unread-and-next, and optional three-finger swipe.
 - **Transcript:** clipped long prompts with Show more, shift-click selection
   extension, changed-file cards that open files and preview diffs on hover,
@@ -435,7 +435,7 @@ Goddard is designed to be driven without a mouse:
 - **Project switcher:** same pattern, for recent projects.
 - **Jump to task:** hold the primary modifier and press 1–9 for the sidebar's
   first tasks.
-- **Turn navigation:** jump to previous/next turn, latest unseen completion,
+- **Turn navigation:** jump to previous/next turn, next unread completion,
   or mark-unread-and-go-to-next.
 - **History navigation:** back/forward across where you've been, plus
   three-finger trackpad swipe between tasks on macOS (optional setting).

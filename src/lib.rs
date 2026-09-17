@@ -90,9 +90,9 @@ actions!(
         ToggleFpsCounter,
         NavigateBack,
         NavigateForward,
-        GoToLatestUnseenCompletion,
+        GoToNextUnreadCompletion,
         MarkSessionUnread,
-        MarkUnreadAndGoToNextUnseen,
+        MarkUnreadAndGoToNextUnread,
         GoToPreviousTurn,
         GoToNextTurn,
         SwitchTaskForward,
@@ -555,13 +555,13 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // Same spelling VS Code gives its terminal toggle; unclaimed
         // in text fields, so it fires with the composer focused too.
         // ⌘D reads as "done" and is the left-hand-only alternative.
-        KeyBinding::new("ctrl-`", GoToLatestUnseenCompletion, Some("Waku")),
-        KeyBinding::new("secondary-d", GoToLatestUnseenCompletion, Some("Waku")),
+        KeyBinding::new("ctrl-`", GoToNextUnreadCompletion, Some("Waku")),
+        KeyBinding::new("secondary-d", GoToNextUnreadCompletion, Some("Waku")),
         // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
         // jumps to the next one waiting.
         KeyBinding::new(
             "secondary-shift-d",
-            MarkUnreadAndGoToNextUnseen,
+            MarkUnreadAndGoToNextUnread,
             Some("Waku"),
         ),
         // ⌘⌥U is the sidebar's "Mark as Unread" on the viewed task,

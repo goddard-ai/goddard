@@ -2189,7 +2189,7 @@ impl Waku {
     }
 
     /// A turn that settled off-screen earns an unread dot in the sidebar's
-    /// status slot and a GoToLatestUnseenCompletion candidate until the task
+    /// status slot and a GoToNextUnreadCompletion candidate until the task
     /// is activated. Interrupted turns are user-driven stops, not completions,
     /// so the caller's status filter keeps them out.
     fn mark_unseen_turn_settled(&mut self, session_id: Uuid) {

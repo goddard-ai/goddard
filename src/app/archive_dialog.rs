@@ -25,10 +25,9 @@ pub fn init(cx: &mut App) {
 
 pub(super) struct ArchiveDialogState {
     session_id: Uuid,
-    /// Sidebar row index when the archive came from a sidebar row — carried
-    /// through to `finish_archive_session` so selection lands on a positional
-    /// neighbor. `None` for every other archive entry point.
-    sidebar_position: Option<usize>,
+    /// Where selection lands once the archive commits — carried through to
+    /// `finish_archive_session` untouched by the dialog.
+    landing: sessions::ArchiveLanding,
     title: String,
     /// Whether the session still had a live turn when the dialog opened —
     /// confirming stops it.
@@ -48,7 +47,7 @@ impl Waku {
         session_id: Uuid,
         preview: crate::git_commit::ArchivePreview,
         active_turn: bool,
-        sidebar_position: Option<usize>,
+        landing: sessions::ArchiveLanding,
         cx: &mut Context<Self>,
     ) -> FocusHandle {
         let title = self
@@ -61,7 +60,7 @@ impl Waku {
         let archive_focus = cx.focus_handle();
         let state = ArchiveDialogState {
             session_id,
-            sidebar_position,
+            landing,
             title,
             active_turn,
             preview,
@@ -78,7 +77,7 @@ impl Waku {
         let Some(dialog) = self.archive_dialog.take() else {
             return;
         };
-        self.finish_archive_session(dialog.session_id, dialog.sidebar_position, window, cx);
+        self.finish_archive_session(dialog.session_id, dialog.landing, window, cx);
     }
 
     fn close_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {

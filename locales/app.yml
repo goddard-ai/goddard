@@ -154,8 +154,8 @@ command_palette.agent_cli_thread_id_copied:
   en: Agent CLI thread ID copied
 command_palette.collapse_sidebar_groups:
   en: Collapse all sidebar groups
-command_palette.go_to_latest_unseen_completion:
-  en: Go to latest unseen completion
+command_palette.go_to_next_unread_completion:
+  en: Go to next unread completion
 command_palette.show_sidebar:
   en: Show sidebar
 command_palette.hide_sidebar:
@@ -3101,12 +3101,12 @@ shortcuts.previous_turn:
   en: Previous Turn
 shortcuts.next_turn:
   en: Next Turn
-shortcuts.latest_unseen:
-  en: Jump to Latest Unseen Completion
+shortcuts.next_unread_completion:
+  en: Go to Next Unread Completion
 shortcuts.mark_unread:
   en: Mark Current Task Unread
 shortcuts.mark_unread_next:
-  en: Mark Unread & Jump to Next
+  en: Mark Unread & Go to Next Unread
 shortcuts.task_switcher:
   en: Cycle Forward Through Tasks
 shortcuts.task_switcher_back:

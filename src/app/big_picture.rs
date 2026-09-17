@@ -255,10 +255,10 @@ fn big_picture_arrow_target(
 }
 
 /// The card order for this frame: tier first, then most recently touched.
-/// Waiting sessions rank by `updated_at` — the moment they parked — matching
-/// `next_unread_session`; everything else ranks by sidebar recency, with the
-/// unseen-completion stamp counting as activity. `limit` is how many cards
-/// this frame's grid can afford.
+/// Waiting sessions rank by `updated_at` — the moment they parked;
+/// everything else ranks by sidebar recency, with the unseen-completion
+/// stamp counting as activity. `limit` is how many cards this frame's grid
+/// can afford.
 fn big_picture_order(
     sessions: &[AgentSession],
     unseen: &HashMap<Uuid, u64>,

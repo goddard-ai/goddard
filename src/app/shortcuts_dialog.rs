@@ -183,8 +183,8 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("Waku && !Terminal"),
                 ),
                 bound(
-                    tr!("shortcuts.latest_unseen"),
-                    GoToLatestUnseenCompletion,
+                    tr!("shortcuts.next_unread_completion"),
+                    GoToNextUnreadCompletion,
                     Some("Waku"),
                 ),
                 bound(
@@ -194,7 +194,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 ),
                 bound(
                     tr!("shortcuts.mark_unread_next"),
-                    MarkUnreadAndGoToNextUnseen,
+                    MarkUnreadAndGoToNextUnread,
                     Some("Waku"),
                 ),
                 bound(

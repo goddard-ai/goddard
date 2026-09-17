@@ -39,86 +39,96 @@ pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
         .filter(|text| text.chars().all(|character| !character.is_control()))
 }
 
-/// The next unread session for GoToLatestUnseenCompletion. A task blocked on
-/// its user — a pending permission or question — cannot make progress until
-/// someone answers, so it outranks every settled turn even without an unseen
-/// stamp; among blocked tasks the most recently updated wins. Unseen entries
-/// are stamped when a turn finishes and cleared on activation, so the map
-/// itself is the settled candidate set; the on-screen filter only guards the
-/// window where a pending activation has not committed yet.
-///
-/// Pinned sessions are the user's declared keepers, so a pinned candidate —
-/// blocked or unseen — wins over every unpinned one; the ranking rules apply
-/// within each tier.
-///
-/// A session with prompts still queued is about to be busy again, so jumping
-/// to it buys nothing; queued sessions are skipped outright.
-pub(super) fn next_unread_session(
-    sessions: &[AgentSession],
-    unseen_completions: &HashMap<Uuid, u64>,
-    selected_session: Option<Uuid>,
-    pending_activation: Option<Uuid>,
-) -> Option<Uuid> {
-    let off_screen = |session_id: Uuid| {
-        !sidebar::sidebar_session_selected(selected_session, pending_activation, session_id)
-    };
-    let pinned = sessions
-        .iter()
-        .filter(|session| session.pinned_at.is_some())
-        .map(|session| session.id)
-        .collect::<HashSet<Uuid>>();
-    unread_session_candidate(sessions, unseen_completions, &off_screen, Some(&pinned))
-        .or_else(|| unread_session_candidate(sessions, unseen_completions, &off_screen, None))
+/// How selection moves once an archived session's row departs. A sidebar-row
+/// archive tries the not-busy neighbor that slid into the row's slot before
+/// the unread fallback; ⌘⇧A goes straight to the shared next-unread scan.
+/// Either way the carried index is the departed row's last position, which
+/// is also the scan's anchor.
+#[derive(Clone, Copy)]
+pub(super) enum ArchiveLanding {
+    Neighbor(usize),
+    NextUnread(Option<usize>),
 }
 
-fn unread_session_candidate(
+/// The next unread target shared by GoToNextUnreadCompletion (⌘D /
+/// ctrl-backtick), ⌘⇧D, and the session-departure fallbacks. "Unread" is the
+/// unseen-completion set plus a task blocked on its user — a pending
+/// permission or question cannot make progress until someone answers.
+/// Sessions with queued prompts are about to be busy again, so they are
+/// skipped, and the on-screen or pending-activation session is never a
+/// candidate — a lone unread task falls through to the New task page rather
+/// than reselecting itself.
+///
+/// Pinned sessions are the user's declared keepers. While the anchor session
+/// is unpinned or absent, the first unread pinned task in sidebar order wins
+/// outright; a pinned anchor instead scans its own section — below its row,
+/// then back above it — before the unpinned rows. The unpinned scan runs
+/// down the sidebar's displayed order from the anchor's row and wraps to the
+/// top.
+///
+/// `anchor_session` is the session being navigated away from — the selected
+/// session for the jumps, the departed session for the fallbacks. The
+/// at-or-below scan starts from `anchor_row`: the row after the anchor's for
+/// the jumps, the departed row's vacated slot for the fallbacks.
+pub(super) fn next_unread_completion(
     sessions: &[AgentSession],
     unseen_completions: &HashMap<Uuid, u64>,
-    off_screen: &impl Fn(Uuid) -> bool,
-    pinned: Option<&HashSet<Uuid>>,
-) -> Option<Uuid> {
-    let queued = sessions
-        .iter()
-        .filter(|session| !session.queued_messages.is_empty())
-        .map(|session| session.id)
-        .collect::<HashSet<Uuid>>();
-    let eligible = |session_id: Uuid| {
-        off_screen(session_id)
-            && !queued.contains(&session_id)
-            && pinned.is_none_or(|ids| ids.contains(&session_id))
-    };
-    sessions
-        .iter()
-        .filter(|session| session.status == SessionStatus::Waiting && eligible(session.id))
-        .max_by_key(|session| session.updated_at)
-        .map(|session| session.id)
-        .or_else(|| {
-            unseen_completions
-                .iter()
-                .filter(|(session_id, _)| eligible(**session_id))
-                .max_by_key(|(_, completed_at)| *completed_at)
-                .map(|(session_id, _)| *session_id)
-        })
-}
-
-/// The ⌘⇧D target: the next unread row below the selected session in the
-/// sidebar's displayed order, wrapping to the top. The selected session —
-/// which the action just stamped unread — is excluded so a lone unread task
-/// falls through to the New task page instead of reselecting itself.
-pub(super) fn next_unread_session_in_sidebar_order(
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
-    is_unread: impl Fn(Uuid) -> bool,
+    anchor_session: Option<Uuid>,
+    anchor_row: Option<usize>,
 ) -> Option<Uuid> {
-    let position = selected_session
-        .and_then(|session_id| sidebar::sidebar_session_row_index(rows, session_id))
-        .map_or(0, |index| index + 1);
-    sidebar::next_sidebar_session_in_rows(rows, position, |session_id| {
+    let by_id = sessions
+        .iter()
+        .map(|session| (session.id, session))
+        .collect::<HashMap<_, _>>();
+    let eligible = |session_id: Uuid| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
-            && is_unread(session_id)
-    })
+            && by_id.get(&session_id).is_some_and(|session| {
+                session.has_started()
+                    && session.archived_at.is_none()
+                    && session.queued_messages.is_empty()
+                    && (session.status == SessionStatus::Waiting
+                        || unseen_completions.contains_key(&session_id))
+            })
+    };
+    // Pinned order matches the sidebar's pinned group — most recent activity
+    // first. Archived pins stay in the ordering so a just-departed anchor
+    // still ranks; eligibility keeps them out of the results.
+    let mut pinned = sessions
+        .iter()
+        .filter(|session| session.pinned_at.is_some())
+        .collect::<Vec<_>>();
+    pinned.sort_by_key(|session| std::cmp::Reverse(sidebar::sidebar_session_timestamp(session)));
+    let pinned_ids = pinned
+        .iter()
+        .map(|session| session.id)
+        .collect::<Vec<Uuid>>();
+    let pinned_set = pinned_ids.iter().copied().collect::<HashSet<Uuid>>();
+
+    if anchor_session.is_some_and(|id| pinned_set.contains(&id)) {
+        let rank = pinned_ids
+            .iter()
+            .position(|id| Some(*id) == anchor_session)
+            .unwrap_or(pinned_ids.len());
+        return pinned_ids[rank + 1..]
+            .iter()
+            .chain(&pinned_ids[..rank])
+            .copied()
+            .find(|session_id| eligible(*session_id))
+            .or_else(|| {
+                sidebar::next_sidebar_session_in_rows(rows, 0, |session_id| {
+                    !pinned_set.contains(&session_id) && eligible(session_id)
+                })
+            });
+    }
+    pinned_ids
+        .iter()
+        .copied()
+        .find(|session_id| eligible(*session_id))
+        .or_else(|| sidebar::next_sidebar_session_in_rows(rows, anchor_row.unwrap_or(0), eligible))
 }
 
 impl Waku {
@@ -666,6 +676,12 @@ impl Waku {
             _ => None,
         };
         let was_selected = self.state.selected_session == Some(session_id);
+        // The row index captured now — before the session leaves the list —
+        // anchors the fallback's next-unread scan at the departed row's slot.
+        let departed_row = was_selected.then(|| {
+            let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+            sidebar::sidebar_session_row_index(&rows, session_id)
+        });
         self.submission_preparations.remove(&session_id);
         self.goal_runtime_starts.remove(&session_id);
         self.pending_goal_operations.remove(&session_id);
@@ -731,7 +747,14 @@ impl Waku {
         self.invalidate_checkpoint_refs();
 
         if was_selected {
-            self.select_session_fallback(project_id, projectless, window, cx);
+            self.select_session_fallback(
+                project_id,
+                projectless,
+                session_id,
+                departed_row.flatten(),
+                window,
+                cx,
+            );
         } else {
             self.save();
             cx.notify();
@@ -747,23 +770,29 @@ impl Waku {
     }
 
     /// Moves selection after the viewed task departs: the next unread session,
-    /// like GoToLatestUnseenCompletion, or the project's New task composer
-    /// when nothing is waiting.
+    /// like GoToNextUnreadCompletion anchored at the departed row, or the
+    /// project's New task composer when nothing is waiting.
     fn select_session_fallback(
         &mut self,
         project_id: Uuid,
         projectless: bool,
+        departed_session: Uuid,
+        departed_row: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.state.selected_session = None;
         self.settings_page = None;
-        if let Some(session_id) = next_unread_session(
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        if let Some(session_id) = next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
+            &rows,
             self.state.selected_session,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
+            Some(departed_session),
+            departed_row,
         ) {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
@@ -795,14 +824,13 @@ impl Waku {
     /// daemon purges archives once they outlive the retention window.
     /// Terminals that ran inside the directory are closed once the removal
     /// lands.
-    /// `sidebar_position` is the session's sidebar row index when the archive
-    /// was triggered from the sidebar; `finish_archive_session` uses it to
-    /// hand selection to a positional neighbor instead of the unread-based
-    /// fallback.
+    /// `landing` describes where selection moves once the row departs — a
+    /// positional neighbor for sidebar-initiated archives, the shared
+    /// next-unread scan for ⌘⇧A. See [`ArchiveLanding`].
     pub(super) fn archive_session(
         &mut self,
         session_id: Uuid,
-        sidebar_position: Option<usize>,
+        landing: ArchiveLanding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -830,7 +858,7 @@ impl Waku {
                     session_id,
                     crate::git_commit::ArchivePreview::default(),
                     true,
-                    sidebar_position,
+                    landing,
                     cx,
                 );
                 // Like the other deferred surfaces, focus lands two frames
@@ -839,7 +867,7 @@ impl Waku {
                     window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                 });
             } else if !busy {
-                self.finish_archive_session(session_id, sidebar_position, window, cx);
+                self.finish_archive_session(session_id, landing, window, cx);
             }
             return;
         };
@@ -848,7 +876,7 @@ impl Waku {
         }
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
             self.archive_preview_pending.remove(&session_id);
-            self.finish_archive_session(session_id, sidebar_position, window, cx);
+            self.finish_archive_session(session_id, landing, window, cx);
             return;
         };
         let window_handle = window.window_handle();
@@ -881,7 +909,7 @@ impl Waku {
                             session_id,
                             preview,
                             busy,
-                            sidebar_position,
+                            landing,
                             cx,
                         );
                         Some(focus)
@@ -901,7 +929,7 @@ impl Waku {
                     }
                     None => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_archive_session(session_id, sidebar_position, window, cx)
+                            waku.finish_archive_session(session_id, landing, window, cx)
                         });
                     }
                 }
@@ -913,13 +941,13 @@ impl Waku {
     /// Hides the task outright — the point every archive path reaches once
     /// the checkout proved clean or the user confirmed.
     ///
-    /// `sidebar_position` is `Some` only for archives initiated from a sidebar
-    /// row; it selects the next not-busy session at-or-below the departed
-    /// row's slot before falling back to the unread-based path.
+    /// `landing` is [`ArchiveLanding::Neighbor`] only for archives initiated
+    /// from a sidebar row; it selects the next not-busy session at-or-below
+    /// the departed row's slot before falling back to the unread-based path.
     pub(super) fn finish_archive_session(
         &mut self,
         session_id: Uuid,
-        sidebar_position: Option<usize>,
+        landing: ArchiveLanding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -969,14 +997,29 @@ impl Waku {
         }
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
+            let neighbor_row = match landing {
+                ArchiveLanding::Neighbor(row) => Some(row),
+                ArchiveLanding::NextUnread(_) => None,
+            };
             if let Some(next_id) =
-                sidebar_position.and_then(|position| self.next_sidebar_session_from_row(position))
+                neighbor_row.and_then(|position| self.next_sidebar_session_from_row(position))
             {
                 self.state.selected_session = None;
                 self.settings_page = None;
                 self.request_session_activation(next_id, SessionActivationTransition::Visit, cx);
             } else {
-                self.select_session_fallback(project_id, projectless, window, cx);
+                let anchor_row = match landing {
+                    ArchiveLanding::Neighbor(row) => Some(row),
+                    ArchiveLanding::NextUnread(row) => row,
+                };
+                self.select_session_fallback(
+                    project_id,
+                    projectless,
+                    session_id,
+                    anchor_row,
+                    window,
+                    cx,
+                );
             }
         } else {
             self.save();
@@ -1034,7 +1077,16 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if let Some(session_id) = self.composer_session_id() {
-            self.archive_session(session_id, None, window, cx);
+            // The departing row's index anchors the next-unread scan at the
+            // slot its successor slides into.
+            let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+            let anchor_row = sidebar::sidebar_session_row_index(&rows, session_id);
+            self.archive_session(
+                session_id,
+                ArchiveLanding::NextUnread(anchor_row),
+                window,
+                cx,
+            );
         }
     }
 
@@ -1538,22 +1590,34 @@ impl Waku {
         }
     }
 
-    pub(super) fn go_to_latest_unseen_completion_action(
+    /// ⌘D / ctrl-backtick: the next unread completion. Pinned tasks lead
+    /// while an unpinned session is current — see [`next_unread_completion`]
+    /// for the scan order — and the New task page is the landing when
+    /// nothing is unread.
+    pub(super) fn go_to_next_unread_completion_action(
         &mut self,
-        _: &GoToLatestUnseenCompletion,
+        _: &GoToNextUnreadCompletion,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = next_unread_session(
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let selected = self.state.selected_session;
+        let target = next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
-            self.state.selected_session,
+            &rows,
+            selected,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
-        ) else {
-            return;
-        };
-        self.go_to_unread_target(target, window, cx);
+            selected,
+            selected
+                .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
+                .map(|index| index + 1),
+        );
+        match target {
+            Some(target) => self.go_to_unread_target(target, window, cx),
+            None => self.new_session_action(&NewSession, window, cx),
+        }
     }
 
     /// Shared landing for the unread-jump actions. With the overlay up the
@@ -1575,7 +1639,7 @@ impl Waku {
     }
 
     /// Context-menu "Mark as unread": the task rejoins the unseen-completion
-    /// set — sidebar dot, GoToLatestUnseenCompletion candidate — on demand,
+    /// set — sidebar dot, GoToNextUnreadCompletion candidate — on demand,
     /// where `mark_unseen_turn_settled` only stamps off-screen finishes.
     /// Stamping now orders it newest.
     pub(super) fn mark_session_unread(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
@@ -1594,13 +1658,14 @@ impl Waku {
         cx.notify();
     }
 
-    /// ⌘⇧D: mark the viewed task unread — it stays a GoToLatestUnseenCompletion
-    /// candidate for a later ⌘D — then jump to the next unread session below
-    /// it in the sidebar's displayed order, wrapping to the top. With nothing
-    /// unread beyond the just-marked task, land on the New task page.
-    pub(super) fn mark_unread_and_go_to_next_unseen_action(
+    /// ⌘⇧D: mark the viewed task unread — it stays a GoToNextUnreadCompletion
+    /// candidate for a later ⌘D — then jump to the next unread session per
+    /// the shared scan. The just-marked session is the anchor but never a
+    /// candidate, so with nothing else unread the jump lands on the New task
+    /// page.
+    pub(super) fn mark_unread_and_go_to_next_unread_action(
         &mut self,
-        _: &MarkUnreadAndGoToNextUnseen,
+        _: &MarkUnreadAndGoToNextUnread,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1608,17 +1673,18 @@ impl Waku {
             self.mark_session_unread(session_id, cx);
         }
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
-        let target = next_unread_session_in_sidebar_order(
+        let selected = self.state.selected_session;
+        let target = next_unread_completion(
+            &self.state.sessions,
+            &self.state.unseen_completions,
             &rows,
-            self.state.selected_session,
+            selected,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
-            |session_id| {
-                self.state.unseen_completions.contains_key(&session_id)
-                    || self.state.sessions.iter().any(|session| {
-                        session.id == session_id && session.status == SessionStatus::Waiting
-                    })
-            },
+            selected,
+            selected
+                .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
+                .map(|index| index + 1),
         );
         match target {
             Some(target) => self.go_to_unread_target(target, window, cx),

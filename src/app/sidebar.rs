@@ -842,19 +842,26 @@ impl Waku {
             }))
     }
 
-    /// Mouse twin of GoToLatestUnseenCompletion (⌘D / ctrl-backtick): live
+    /// Mouse twin of GoToNextUnreadCompletion (⌘D / ctrl-backtick): live
     /// while an off-screen task is unread — blocked on its user, or holding an
     /// unseen finished turn. A blocked target earns a red X; anything else
     /// carries the same informational-blue dot the sidebar draws in that
     /// row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let target = sessions::next_unread_session(
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let selected = self.state.selected_session;
+        let target = sessions::next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
-            self.state.selected_session,
+            &rows,
+            selected,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
+            selected,
+            selected
+                .and_then(|session_id| sidebar_session_row_index(&rows, session_id))
+                .map(|index| index + 1),
         );
         let enabled = target.is_some();
         // A blocked task outranks plain completions, so the target being one
@@ -877,8 +884,8 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .tooltip(Tooltip::text_with_action(
-                tr!("command_palette.go_to_latest_unseen_completion"),
-                &GoToLatestUnseenCompletion,
+                tr!("command_palette.go_to_next_unread_completion"),
+                &GoToNextUnreadCompletion,
             ))
             .when(!enabled, |element| element.opacity(0.35))
             .when(enabled, |element| {
@@ -890,8 +897,8 @@ impl Waku {
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         cx.stop_propagation();
-                        this.go_to_latest_unseen_completion_action(
-                            &GoToLatestUnseenCompletion,
+                        this.go_to_next_unread_completion_action(
+                            &GoToNextUnreadCompletion,
                             window,
                             cx,
                         );
@@ -2360,8 +2367,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
-        let position = sidebar_session_row_index(&rows, session_id);
-        self.archive_session(session_id, position, window, cx);
+        let landing = match sidebar_session_row_index(&rows, session_id) {
+            Some(position) => sessions::ArchiveLanding::Neighbor(position),
+            None => sessions::ArchiveLanding::NextUnread(None),
+        };
+        self.archive_session(session_id, landing, window, cx);
     }
 
     /// The first not-busy session at or below `position` in the current

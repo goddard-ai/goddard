@@ -173,7 +173,7 @@ enum PaletteAction {
     LandChanges,
     ToggleUsage,
     CollapseSidebarGroups,
-    GoToLatestUnseenCompletion,
+    GoToNextUnreadCompletion,
     ToggleSidebar,
     ToggleRightPanel,
     OpenSettings(SettingsPage),
@@ -1088,22 +1088,29 @@ impl Waku {
             "collapse close fold all sidebar groups projects dates history",
             next(),
         ));
-        if sessions::next_unread_session(
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let selected = self.state.selected_session;
+        if sessions::next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
-            self.state.selected_session,
+            &rows,
+            selected,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
+            selected,
+            selected
+                .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
+                .map(|index| index + 1),
         )
         .is_some()
         {
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
-                tr!("command_palette.go_to_latest_unseen_completion"),
+                tr!("command_palette.go_to_next_unread_completion"),
                 "icons/corner-down-right.svg",
-                Some(ShortcutHint::action(&GoToLatestUnseenCompletion)),
-                PaletteAction::GoToLatestUnseenCompletion,
-                "go to latest most recent unseen unread blocked waiting completed finished failed turn task session jump navigate",
+                Some(ShortcutHint::action(&GoToNextUnreadCompletion)),
+                PaletteAction::GoToNextUnreadCompletion,
+                "go to next unseen unread blocked waiting completed finished failed turn task session jump navigate",
                 next(),
             ));
         }
@@ -2185,8 +2192,8 @@ impl Waku {
                 }
             }
             PaletteAction::CollapseSidebarGroups => self.collapse_all_sidebar_groups(cx),
-            PaletteAction::GoToLatestUnseenCompletion => {
-                self.go_to_latest_unseen_completion_action(&GoToLatestUnseenCompletion, window, cx)
+            PaletteAction::GoToNextUnreadCompletion => {
+                self.go_to_next_unread_completion_action(&GoToNextUnreadCompletion, window, cx)
             }
             PaletteAction::ToggleSidebar => self.toggle_sidebar_action(&ToggleSidebar, window, cx),
             PaletteAction::ToggleRightPanel => {
