@@ -3400,7 +3400,7 @@ impl Waku {
                         )
                     })
                     .when(!shortcut_hint, |element| {
-                        element.child(archive_button).child(pin_button)
+                        element.child(pin_button).child(archive_button)
                     }),
             )
             .child(
