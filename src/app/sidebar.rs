@@ -1175,7 +1175,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon(icon_path, 20.0, theme.text_secondary)),
+                    .child(icon(icon_path, 16.0, theme.text_secondary)),
             )
             .child(
                 div()
@@ -2490,6 +2490,7 @@ impl Waku {
                 .px(px(4.0))
                 .rounded(px(9.0))
                 .font_weight(FontWeight::NORMAL)
+                .text_size(sp(14.0))
         })
         .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
         .hover(|style| style.bg(theme.sidebar_item_background))
@@ -2511,7 +2512,7 @@ impl Waku {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(icon(group_icon, 14.0, theme.text_secondary)),
+                                .child(icon(group_icon, 16.0, theme.text_secondary)),
                         )
                     } else {
                         element.child(icon(group_icon, 14.0, theme.text_secondary))
