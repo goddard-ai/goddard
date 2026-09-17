@@ -430,7 +430,7 @@ pub(super) fn render_diff_code_row(
         .items_start()
         .justify_end()
         .border_r(hairline())
-        .border_color(theme.border)
+        .border_color(theme.separator)
         .text_color(number_color)
         .when_some(gutter_background, |gutter, background| {
             gutter.bg(background)
@@ -2493,7 +2493,7 @@ impl Waku {
             .flex_col()
             .min_w_0()
             .border_l(hairline())
-            .border_color(theme.border_strong)
+            .border_color(theme.separator)
             .bg(theme.surface)
             .relative()
             .child(self.render_right_panel_header(window, cx))
@@ -3433,7 +3433,7 @@ impl Waku {
                     .items_center()
                     .gap(px(8.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .child(icon("icons/folder.svg", 13.0, theme.text_tertiary))
                     .child(
                         div()
@@ -3720,7 +3720,7 @@ impl Waku {
                     .items_center()
                     .gap(px(8.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .child(file_icon(file_icon_for_path(&relative_path), 13.0))
                     .child(
                         div()
@@ -3755,7 +3755,7 @@ impl Waku {
                         .flex_col()
                         .relative()
                         .border_l(hairline())
-                        .border_color(theme.border_strong)
+                        .border_color(theme.separator)
                         .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
                         .child(self.render_panel_resize_handle(
                             "right-panel-file-tree-resize-handle",
@@ -4439,7 +4439,7 @@ impl Waku {
                             .flex_none()
                             .relative()
                             .border_l(hairline())
-                            .border_color(theme.border_strong)
+                            .border_color(theme.separator)
                             .child(self.render_right_panel_diff_tree(window, cx))
                             .child(self.render_panel_resize_handle(
                                 "right-panel-diff-tree-resize-handle",
@@ -4601,7 +4601,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(source)
             .child(
                 div()
@@ -4736,7 +4736,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .bg(theme.surface)
             .when(sticky, |header| header.block_mouse_except_scroll())
             .child(file_icon(file_icon_for_path(&file.path), 14.0))
@@ -4798,7 +4798,7 @@ impl Waku {
                     .flex()
                     .when(two_directions, |gutter| gutter.flex_col())
                     .border_r(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .bg(theme.overlay)
                     .when(expandable, |mut gutter| {
                         for (button_index, direction) in directions.iter().copied().enumerate() {
@@ -4895,7 +4895,7 @@ impl Waku {
                         .self_stretch()
                         .flex_none()
                         .border_r(hairline())
-                        .border_color(theme.border)
+                        .border_color(theme.separator)
                         .bg(theme.overlay),
                 )
                 .child(
@@ -4994,7 +4994,7 @@ impl Waku {
             .cursor_default()
             .when(compact_half, |button| button.h(px(16.0)).flex_none())
             .when(border_bottom, |button| {
-                button.border_b(hairline()).border_color(theme.border)
+                button.border_b(hairline()).border_color(theme.separator)
             })
             .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay_strong))
@@ -5075,7 +5075,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .child(
                         TextField::new(
                             "right-panel-diff-filter",

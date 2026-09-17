@@ -238,7 +238,7 @@ impl Waku {
                     .p(px(12.0))
                     .rounded(px(15.0))
                     .border(hairline())
-                    .border_color(theme.border_strong)
+                    .border_color(theme.border)
                     .bg(theme.raised)
                     .shadow_md()
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
@@ -1201,7 +1201,7 @@ impl Waku {
                     .rounded_bl(px(15.0))
                     .bg(theme.canvas)
                     .border_r(hairline())
-                    .border_color(theme.border);
+                    .border_color(theme.separator);
 
                 let favorites_selected = selected_tab == ModelPickerTab::Favorites && !searching;
                 let favorite_weak = weak.clone();
@@ -3356,7 +3356,7 @@ impl Waku {
                     .min_h(px(30.0))
                     .overflow_hidden()
                     .when(index > 0, |row| {
-                        row.border_t(hairline()).border_color(theme.border)
+                        row.border_t(hairline()).border_color(theme.separator)
                     })
                     .pl(px(12.0))
                     .pr(px(6.0))
@@ -3459,7 +3459,7 @@ impl Waku {
                             .border_t(hairline())
                             .border_l(hairline())
                             .border_r(hairline())
-                            .border_color(theme.border)
+                            .border_color(theme.separator)
                             .bg(theme.composer)
                             // Row hover fills are full-width rectangles; clip
                             // them to the card's rounded corners.

@@ -2723,7 +2723,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .border_b(hairline())
-                        .border_color(theme.border)
+                        .border_color(theme.separator)
                         .text_size(sp(15.5))
                         .text_color(theme.text)
                         .child(
@@ -2739,7 +2739,7 @@ impl Waku {
                         .h(px(FOOTER_HEIGHT))
                         .flex_none()
                         .border_t(hairline())
-                        .border_color(theme.border)
+                        .border_color(theme.separator)
                         .px(px(19.0))
                         .flex()
                         .items_center()

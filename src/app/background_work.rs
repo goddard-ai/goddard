@@ -1496,7 +1496,7 @@ impl Waku {
             detail = detail.child(
                 div()
                     .border_t(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .px(px(10.0))
                     .py(px(7.0))
                     .flex()
@@ -1541,7 +1541,7 @@ impl Waku {
         detail.child(
             div()
                 .border_t(hairline())
-                .border_color(theme.border)
+                .border_color(theme.separator)
                 .p(px(10.0))
                 .flex()
                 .flex_col()

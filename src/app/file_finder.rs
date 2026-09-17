@@ -463,7 +463,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .text_size(sp(15.5))
                     .text_color(theme.text)
                     .child(

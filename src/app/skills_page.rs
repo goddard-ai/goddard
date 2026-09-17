@@ -562,7 +562,7 @@ impl Waku {
             .flex()
             .flex_col()
             .border_r(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(
                 div()
                     .flex_none()
@@ -588,7 +588,7 @@ impl Waku {
                     .h(px(26.0))
                     .px(px(12.0))
                     .border_t(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1231,7 +1231,7 @@ impl Waku {
                 .mt(px(18.0))
                 .pt(px(14.0))
                 .border_t(hairline())
-                .border_color(theme.border)
+                .border_color(theme.separator)
                 .child(
                     div()
                         .font_family(crate::fonts::current(cx).code)
@@ -1470,7 +1470,7 @@ fn skill_info_row(theme: &Theme, label: String, value: AnyElement, last: bool) -
     div()
         .py(px(8.0))
         .when(!last, |element| {
-            element.border_b(hairline()).border_color(theme.border)
+            element.border_b(hairline()).border_color(theme.separator)
         })
         .flex()
         .items_baseline()

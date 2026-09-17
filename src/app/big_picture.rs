@@ -1023,7 +1023,7 @@ impl Waku {
                     .px(px(8.0))
                     .py(px(7.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .rounded_t(px(CARD_RADIUS - 1.0))
                     .bg(theme.surface)
                     .child(self.render_session_row_body(session_id, false, false, cx)),

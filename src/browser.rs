@@ -2024,7 +2024,7 @@ impl BrowserView {
             .items_center()
             .gap(px(2.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(self.toolbar_button(
                 "browser-back",
                 "icons/arrow-left.svg",

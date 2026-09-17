@@ -912,7 +912,7 @@ impl Waku {
                     .w(hairline())
                     .h(px(16.0))
                     .flex_none()
-                    .bg(theme.border_strong),
+                    .bg(theme.separator),
             )
             .child(find_bar_button(
                 "find-previous",
@@ -982,7 +982,7 @@ impl Waku {
                 .flex_none()
                 .overflow_hidden()
                 .border_b(hairline())
-                .border_color(theme.border)
+                .border_color(theme.separator)
                 .bg(theme.surface)
                 .font_family(crate::fonts::current(cx).ui)
                 .cursor_default()

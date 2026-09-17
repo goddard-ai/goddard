@@ -1961,7 +1961,7 @@ impl Waku {
             .min_w_0()
             .rounded(px(15.0))
             .border(hairline())
-            .border_color(theme.border_strong)
+            .border_color(theme.border)
             .bg(theme.overlay)
             .tab_index(0)
             .tab_group()
@@ -2029,7 +2029,7 @@ impl Waku {
             .flex()
             .flex_col()
             .border_t(hairline())
-            .border_color(theme.border);
+            .border_color(theme.separator);
         for (index, file) in files.iter().take(visible_count).enumerate() {
             let preview_open = self
                 .changed_files_diff_hover
@@ -2134,7 +2134,7 @@ impl Waku {
                     .h(px(34.0))
                     .px(px(12.0))
                     .border_t(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .flex()
                     .items_center()
                     .gap(px(6.0))
@@ -2221,7 +2221,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
             .child(
                 div()
@@ -2376,7 +2376,7 @@ impl Waku {
             .flex_col()
             .rounded(px(CHANGED_FILES_DIFF_CARD_RADIUS))
             .border(hairline())
-            .border_color(theme.border_strong)
+            .border_color(theme.border)
             .bg(theme.raised)
             .shadow_lg()
             .overflow_hidden()
@@ -2704,7 +2704,7 @@ impl Waku {
             .pl(px(12.0))
             .pb(px(2.0))
             .border_l(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .flex()
             .flex_col()
             .gap(px(8.0));
@@ -2802,7 +2802,7 @@ impl Waku {
                 .overflow_hidden()
                 .rounded(px(11.0))
                 .border(hairline())
-                .border_color(theme.border_strong)
+                .border_color(theme.border)
                 .bg(activity_surface)
                 .flex()
                 .flex_col()
@@ -2959,7 +2959,7 @@ impl Waku {
                         .max_h(px(400.0))
                         .overflow_hidden()
                         .border_t(hairline())
-                        .border_color(theme.border_strong)
+                        .border_color(theme.separator)
                         .child(
                             div()
                                 .id(SharedString::from(format!("reasoning-scroll-{id}")))
@@ -3026,7 +3026,7 @@ impl Waku {
                     .w_full()
                     .min_w_0()
                     .border_t(hairline())
-                    .border_color(theme.border_strong)
+                    .border_color(theme.separator)
                     .px(px(12.0))
                     .py(px(8.0))
                     .flex()
@@ -3296,7 +3296,7 @@ impl Waku {
             .max_h(px(ACTIVITY_DIFF_MAX_HEIGHT))
             .overflow_hidden()
             .border_t(hairline())
-            .border_color(theme.border_strong)
+            .border_color(theme.separator)
             .child(rows)
             .child(scrollbar::edge_fade(
                 viewport.scroll_handle.clone(),
@@ -3343,7 +3343,7 @@ impl Waku {
                     .gap(px(6.0))
                     .bg(theme.overlay)
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .text_color(theme.text_secondary)
                     .font_weight(FontWeight::MEDIUM)
                     .child(
@@ -3479,7 +3479,7 @@ pub(super) fn activity_diff_break_row(
                 .items_center()
                 .justify_center()
                 .border_r(hairline())
-                .border_color(theme.border)
+                .border_color(theme.separator)
                 .child("⋯"),
         )
         .children(label.map(|label| {

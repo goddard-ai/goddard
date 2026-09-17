@@ -1217,7 +1217,7 @@ impl Waku {
             .gap(px(8.0))
             .cursor_default()
             .border_b(hairline())
-            .border_color(theme.border)
+            .border_color(theme.separator)
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .focus_visible(|style| style.bg(theme.overlay))
@@ -1837,7 +1837,7 @@ impl Waku {
                     .items_center()
                     .gap(px(6.0))
                     .border_b(hairline())
-                    .border_color(theme.border)
+                    .border_color(theme.separator)
                     .child(
                         div()
                             .text_size(sp(12.0))
