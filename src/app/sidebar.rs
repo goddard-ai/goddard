@@ -3456,7 +3456,7 @@ impl Waku {
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
                     .when(
                         session.workspace.is_worktree() && !shortcut_hint,
-                        |element| element.child(icon("icons/fork.svg", 12.5, theme.text_tertiary)),
+                        |element| element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary)),
                     )
                     .when_some(
                         pull_request_badge.filter(|_| !shortcut_hint),
