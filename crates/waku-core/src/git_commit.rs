@@ -2,13 +2,13 @@
 //! generation. Every entry point performs process I/O and must run on the
 //! background executor; render code consumes only the returned snapshots.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -189,13 +189,19 @@ pub(crate) fn agent_oneshot(
     } else {
         None
     };
-    let args = agent_arguments(
+    let mut args = agent_arguments(
         invocation.provider,
         invocation.model.as_deref(),
         invocation.reasoning_effort.as_deref(),
         prompt,
         amp_settings.as_deref(),
     );
+    if invocation.provider == ProviderKind::Muse
+        && muse_supports_no_session_log(&invocation.binary)
+    {
+        // Keep a commit-subject run out of the user's session history.
+        args.insert(1, OsString::from("--no-session-log"));
+    }
     let mut command = crate::command_env::command(&invocation.binary);
     command
         .args(args)
@@ -293,6 +299,28 @@ fn commit_prompt(cwd: &Path, include_unstaged: bool) -> anyhow::Result<String> {
         },
         context
     ))
+}
+
+/// Whether this Muse binary's `exec` accepts `--no-session-log`. The flag is
+/// new enough that older installs reject it, so `exec --help` is probed once
+/// per binary and the answer cached — generation must not spam the probe.
+fn muse_supports_no_session_log(binary: &Path) -> bool {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(supported) = cache.lock().unwrap().get(binary) {
+        return *supported;
+    }
+    let supported = run_capture(
+        crate::command_env::command(binary).args(["exec", "--help"]),
+        Duration::from_secs(10),
+    )
+    .map(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).contains("--no-session-log")
+    })
+    .unwrap_or(false);
+    cache.lock().unwrap().insert(binary.to_owned(), supported);
+    supported
 }
 
 pub(crate) fn agent_arguments(
