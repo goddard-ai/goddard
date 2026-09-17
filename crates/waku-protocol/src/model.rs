@@ -14,6 +14,7 @@ pub enum ProviderKind {
     Claude,
     #[default]
     Codex,
+    Copilot,
     Cursor,
     DeepSeek,
     Devin,
@@ -28,10 +29,11 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Amp,
         Self::Claude,
         Self::Codex,
+        Self::Copilot,
         Self::Cursor,
         Self::DeepSeek,
         Self::Devin,
@@ -50,6 +52,7 @@ impl ProviderKind {
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Copilot => "copilot",
             Self::Cursor => "cursor",
             Self::DeepSeek => "deepseek",
             Self::Devin => "devin",
@@ -69,6 +72,7 @@ impl ProviderKind {
             Self::Amp => "Amp",
             Self::Claude => "Claude Code",
             Self::Codex => "Codex CLI",
+            Self::Copilot => "GitHub Copilot",
             Self::Cursor => "Cursor CLI",
             Self::DeepSeek => "DeepSeek Harness",
             Self::Devin => "Devin CLI",
@@ -88,6 +92,7 @@ impl ProviderKind {
             Self::Amp => "Amp",
             Self::Claude => "Claude",
             Self::Codex => "Codex",
+            Self::Copilot => "Copilot",
             Self::Cursor => "Cursor",
             Self::DeepSeek => "DeepSeek",
             Self::Devin => "Devin",
@@ -107,6 +112,7 @@ impl ProviderKind {
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Copilot => "copilot",
             // Cursor documents `agent` as its primary command, but that name is
             // shared by other CLIs. The backward-compatible alias is unambiguous.
             Self::Cursor => "cursor-agent",
@@ -147,6 +153,15 @@ impl ProviderKind {
                 sign_in: Some("codex login"),
                 api_key_env: None,
                 docs_url: "https://developers.openai.com/codex/cli",
+            },
+            // Copilot signs in inside its own TUI (`/login`), and headless
+            // sessions take a token from the environment — the SDK honors
+            // COPILOT_GITHUB_TOKEN, GH_TOKEN, and GITHUB_TOKEN.
+            Self::Copilot => ProviderSetup {
+                install: "npm install -g @github/copilot",
+                sign_in: Some("copilot"),
+                api_key_env: Some("COPILOT_GITHUB_TOKEN"),
+                docs_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
             },
             Self::Cursor => ProviderSetup {
                 install: "curl -fsSL https://cursor.com/install | bash",
@@ -223,11 +238,12 @@ impl ProviderKind {
         }
     }
 
-    /// Kimi Code, Fx, Devin, and Droid are deliberately absent from this list and
-    /// from [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork` copies
-    /// a whole session and takes no turn count, while Fx, Devin, and Droid expose
-    /// no turn-aware fork or truncation method. None of them can reproduce Goddard's
-    /// "drop the last N turns" semantics without corrupting history.
+    /// Kimi Code, Fx, Devin, Droid, and Copilot are deliberately absent from this
+    /// list and from [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork`
+    /// copies a whole session and takes no turn count, Fx, Devin, and Droid expose
+    /// no turn-aware fork or truncation method, and Copilot's `session.fork` is
+    /// not yet wired. None of them can reproduce Goddard's "drop the last N turns"
+    /// semantics without corrupting history.
     pub fn supports_conversation_rollback(self) -> bool {
         matches!(
             self,
@@ -265,6 +281,7 @@ impl ProviderKind {
             self,
             Self::Claude
                 | Self::Codex
+                | Self::Copilot
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::Devin
@@ -315,6 +332,9 @@ pub enum ProviderResumeCursor {
     },
     Codex {
         thread_id: String,
+    },
+    Copilot {
+        session_id: String,
     },
     Cursor {
         session_id: String,
@@ -371,6 +391,7 @@ impl ProviderResumeCursor {
                 resume_at: None,
             },
             ProviderKind::Codex => Self::Codex { thread_id: id },
+            ProviderKind::Copilot => Self::Copilot { session_id: id },
             ProviderKind::Cursor => Self::Cursor {
                 session_id: id,
                 fork_context: None,
@@ -402,6 +423,7 @@ impl ProviderResumeCursor {
             Self::Amp { .. } => ProviderKind::Amp,
             Self::Claude { .. } => ProviderKind::Claude,
             Self::Codex { .. } => ProviderKind::Codex,
+            Self::Copilot { .. } => ProviderKind::Copilot,
             Self::Cursor { .. } => ProviderKind::Cursor,
             Self::DeepSeek { .. } => ProviderKind::DeepSeek,
             Self::Devin { .. } => ProviderKind::Devin,
@@ -420,6 +442,7 @@ impl ProviderResumeCursor {
         match self {
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
+            | Self::Copilot { session_id }
             | Self::Cursor { session_id, .. }
             | Self::DeepSeek { session_id }
             | Self::Devin { session_id }
@@ -4570,7 +4593,11 @@ mod tests {
         for provider in ProviderKind::ALL {
             let supported = !matches!(
                 provider,
-                ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi
+                ProviderKind::Copilot
+                    | ProviderKind::Devin
+                    | ProviderKind::Droid
+                    | ProviderKind::Fx
+                    | ProviderKind::Kimi
             );
             assert_eq!(provider.supports_conversation_fork(), supported);
             assert_eq!(provider.supports_conversation_rollback(), supported);
@@ -4582,6 +4609,7 @@ mod tests {
         assert!(!ProviderKind::Amp.supports_model_discovery());
         assert!(ProviderKind::Claude.supports_model_discovery());
         assert!(ProviderKind::Codex.supports_model_discovery());
+        assert!(ProviderKind::Copilot.supports_model_discovery());
         assert!(ProviderKind::Cursor.supports_model_discovery());
         assert!(ProviderKind::DeepSeek.supports_model_discovery());
         assert!(ProviderKind::Devin.supports_model_discovery());
@@ -4654,7 +4682,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 14);
+        assert_eq!(ProviderKind::ALL.len(), 15);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

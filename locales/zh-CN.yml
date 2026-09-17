@@ -718,6 +718,7 @@ common.deny: 拒绝
 permission.allow_once: 仅允许一次
 permission.allow_for_session: 本次任务允许
 permission.always_allow: 始终允许
+permission.exit_plan_mode: 代理想要退出计划模式
 permission.a_tool: 某个工具
 permission.run_a_tool: 运行工具
 permission.run_a_tool_lower: 运行工具

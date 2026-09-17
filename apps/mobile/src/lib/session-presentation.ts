@@ -167,6 +167,7 @@ export function providerLabel(provider: ProviderKind): string {
     amp: 'Amp',
     claude: 'Claude',
     codex: 'Codex',
+    copilot: 'Copilot',
     cursor: 'Cursor',
     deepSeek: 'DeepSeek',
     devin: 'Devin',

@@ -92,6 +92,40 @@ pub fn merge_agent_environment(
     }
 }
 
+/// The environment a provider child runs with as explicit name/value pairs —
+/// for spawn APIs that take an env vector instead of a [`Command`] (the
+/// Copilot SDK's `ClientOptions.env`). Mirrors [`command`] plus
+/// [`apply_agent_environment`]: the login shell's variables, the search-path
+/// `PATH`, then the agent surface.
+pub(crate) fn spawn_environment(
+    program: &Path,
+    agent: Option<&crate::agent::AgentLaunchEnv>,
+) -> Vec<(OsString, OsString)> {
+    let mut environment = shell_environment();
+    if let Some(search_path) = child_search_path(program) {
+        environment.retain(|(name, _)| !name.eq_ignore_ascii_case(OsStr::new("PATH")));
+        environment.push((OsString::from("PATH"), search_path));
+    }
+    if let Some(agent) = agent {
+        let base_path = environment
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(OsStr::new("PATH")))
+            .map(|(_, value)| value.clone());
+        for (name, value) in agent_environment_pairs(agent, base_path) {
+            let name = OsString::from(name);
+            if let Some(existing) = environment
+                .iter_mut()
+                .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+            {
+                existing.1 = OsString::from(value);
+            } else {
+                environment.push((name, OsString::from(value)));
+            }
+        }
+    }
+    environment
+}
+
 fn agent_environment_pairs(
     agent: &crate::agent::AgentLaunchEnv,
     base_path: Option<OsString>,

@@ -38,10 +38,12 @@ pub(crate) fn discover(
         ProviderKind::OhMyPi => discover_oh_my_pi(binary, project_root),
         ProviderKind::Pi => discover_pi(binary, project_root),
         // ACP advertises commands only after session/new. Harness likewise
-        // requires an agent id for commands/list. Creating throwaway sessions
-        // merely to seed autocomplete would pollute provider history, so their
-        // live DriverEvent::AvailableCommands update is the catalog surface.
-        ProviderKind::Cursor
+        // requires an agent id for commands/list, and Copilot's `commands.list`
+        // is an SDK RPC on a live client. Creating throwaway sessions merely
+        // to seed autocomplete would pollute provider history, so their live
+        // DriverEvent::AvailableCommands update is the catalog surface.
+        ProviderKind::Copilot
+        | ProviderKind::Cursor
         | ProviderKind::DeepSeek
         | ProviderKind::Devin
         | ProviderKind::Droid

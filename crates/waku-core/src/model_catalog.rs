@@ -76,6 +76,12 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             )),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
         ],
+        // Copilot's catalog is subscription- and BYOK-route-specific; the SDK's
+        // `models.list` is authoritative. `auto` names the runtime's own
+        // routing and is valid on every account.
+        ProviderKind::Copilot => {
+            vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
+        }
         // Cursor's full catalog is account-specific and comes from ACP
         // `cursor/list_available_models`. Auto remains the provider-owned
         // default and keeps older CLIs selectable if discovery is unavailable.
@@ -142,6 +148,7 @@ pub fn discover_catalog(
         ProviderKind::Amp => (Vec::new(), None),
         ProviderKind::Codex => (discover_codex_models(binary), None),
         ProviderKind::Claude => (discover_claude_models(binary), None),
+        ProviderKind::Copilot => (discover_copilot_models(binary), None),
         ProviderKind::Cursor => (discover_cursor_models(binary), None),
         ProviderKind::DeepSeek => discover_deepseek_catalog(binary),
         ProviderKind::Devin => (discover_devin_models(binary), None),
@@ -295,6 +302,70 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
             }
             Some(model)
         })
+        .collect()
+}
+
+/// Copilot's `models.list` is an RPC, so discovery runs the SDK handshake on a
+/// scratch current-thread runtime — the same shape the driver uses. The
+/// account-specific list (subscription tier, BYOK routes) is authoritative;
+/// `auto` stays first because it names the runtime's own routing and is valid
+/// on every account.
+fn discover_copilot_models(binary: &Path) -> Vec<ProviderModel> {
+    let binary = binary.to_path_buf();
+    let discovered = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build();
+        let Ok(runtime) = runtime else {
+            return Vec::new();
+        };
+        runtime.block_on(async move {
+            let mut options = github_copilot_sdk::ClientOptions::default();
+            options.program = github_copilot_sdk::CliProgram::Path(binary.clone());
+            options.env = crate::command_env::spawn_environment(&binary, None);
+            let client = github_copilot_sdk::Client::start(options).await;
+            let Ok(client) = client else {
+                return Vec::new();
+            };
+            let models = client.list_models().await.unwrap_or_default();
+            let _ = client.stop().await;
+            models
+                .into_iter()
+                .map(|model| {
+                    let mut entry = ProviderModel::new(model.id, model.name);
+                    if let Some(efforts) = model.supported_reasoning_efforts.filter(|e| !e.is_empty())
+                    {
+                        let default = model
+                            .default_reasoning_effort
+                            .filter(|effort| efforts.iter().any(|known| known == effort))
+                            .unwrap_or_else(|| efforts[0].clone());
+                        entry = entry.reasoning(
+                            efforts.iter().map(|effort| {
+                                ProviderModelOption::new(effort, reasoning_effort_label(effort))
+                            }),
+                            default,
+                        );
+                    }
+                    if let Some(tiers) = model.supported_context_tiers.filter(|t| !t.is_empty()) {
+                        entry = entry.context_windows(
+                            tiers.iter().map(|tier| {
+                                ProviderModelOption::new(tier, tier.replace('_', " "))
+                            }),
+                            "default",
+                        );
+                    }
+                    entry
+                })
+                .collect::<Vec<_>>()
+        })
+    })
+    .join()
+    .unwrap_or_default();
+    if discovered.iter().any(|model| model.id == "auto") {
+        return discovered;
+    }
+    std::iter::once(ProviderModel::new("auto", tr!("model_option.auto")).default())
+        .chain(discovered)
         .collect()
 }
 

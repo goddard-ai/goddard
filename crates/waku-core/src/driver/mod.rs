@@ -6,6 +6,7 @@ mod amp;
 mod claude;
 mod codex;
 mod computer_use;
+mod copilot;
 mod deepseek;
 mod opencode;
 mod opencode2;
@@ -258,6 +259,10 @@ pub(crate) fn start_local(
         // Amp reads newline-delimited user messages on stdin and stays alive
         // until stdin closes, so it too serves the whole conversation.
         ProviderKind::Amp => Arc::new(amp::AmpDriver::start(options, events)?),
+        // Copilot's official SDK owns the CLI's server-mode lifecycle and its
+        // JSON-RPC session; the driver bridges it onto a dedicated Tokio
+        // runtime since the SDK's process and transport code is Tokio-native.
+        ProviderKind::Copilot => Arc::new(copilot::CopilotDriver::start(options, events)?),
     };
     Ok(DriverHandle { inner })
 }

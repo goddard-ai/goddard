@@ -732,6 +732,7 @@ common.deny: 拒否
 permission.allow_once: 1 回だけ許可
 permission.allow_for_session: このセッションで許可
 permission.always_allow: 常に許可
+permission.exit_plan_mode: エージェントがプランモードを終了しようとしています
 permission.a_tool: ツール
 permission.run_a_tool: ツールを実行
 permission.run_a_tool_lower: ツールを実行

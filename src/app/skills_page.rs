@@ -628,6 +628,7 @@ impl Waku {
             SkillSource::Shared,
             SkillSource::Provider(ProviderKind::Claude),
             SkillSource::Provider(ProviderKind::Codex),
+            SkillSource::Provider(ProviderKind::Copilot),
             SkillSource::Provider(ProviderKind::Cursor),
             SkillSource::Provider(ProviderKind::Devin),
             SkillSource::Provider(ProviderKind::Droid),

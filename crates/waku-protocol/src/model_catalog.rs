@@ -55,6 +55,12 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             )),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
         ],
+        // Copilot's catalog is subscription- and BYOK-route-specific; the SDK's
+        // `models.list` is authoritative. `auto` names the runtime's own
+        // routing and is valid on every account.
+        ProviderKind::Copilot => {
+            vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
+        }
         ProviderKind::Cursor => {
             vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
         }

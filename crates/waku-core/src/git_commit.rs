@@ -354,6 +354,18 @@ pub(crate) fn agent_arguments(
             push(&mut args, "-c");
             push(&mut args, CODEX_COMMIT_EFFORT);
         }
+        // Copilot's single-shot mode is `-p`; `--silent` keeps stdout to the
+        // answer alone and custom instructions stay off so a repo's own
+        // guidance cannot steer the commit format. The prompt forbids tools.
+        ProviderKind::Copilot => {
+            push(&mut args, "--silent");
+            push(&mut args, "--no-custom-instructions");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            push(&mut args, "-p");
+        }
         ProviderKind::Cursor => {
             push(&mut args, "--print");
             push(&mut args, "--output-format");
@@ -1010,6 +1022,12 @@ mod tests {
                     assert!(has_pair(&args, "--permission-mode", "plan"));
                     assert!(has_pair(&args, "--tools", ""));
                     assert!(has(&args, "--no-session-persistence"));
+                }
+                ProviderKind::Copilot => {
+                    assert!(has(&args, "--silent"));
+                    assert!(has(&args, "--no-custom-instructions"));
+                    assert!(has_pair(&args, "-p", prompt));
+                    assert!(has_pair(&args, "--model", "model"));
                 }
                 ProviderKind::Cursor => {
                     assert!(has(&args, "--print"));
