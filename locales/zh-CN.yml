@@ -379,6 +379,8 @@ session.mark_unread: 标记为未读
 archive.confirm_title: 归档此任务？
 archive.confirm_title_named: "归档 %{name}？"
 archive.confirm_description: 该检出中仍有进行中的工作。归档会将其快照并移除工作树；取消归档可恢复。
+archive.confirm_description_busy: 该任务仍有进行中的回合。归档会停止该回合；取消归档可恢复任务。
+archive.confirm_description_busy_worktree: 该任务仍有进行中的回合，且检出中还有未完成的工作。归档会停止回合、快照检出并移除工作树；取消归档可恢复。
 archive.uncommitted: "%{count} 个未提交的文件"
 archive.unpushed: "%{count} 个未推送的提交"
 sidebar.today: 今天

@@ -1,7 +1,8 @@
-//! Confirmation shown before archiving a task whose checkout still holds
+//! Confirmation shown before archiving a task that still has something to
+//! lose: a turn in progress that archiving would stop, or a checkout holding
 //! uncommitted files or unpushed commits — the work the archive snapshot is
-//! about to carry away. Clean and fully pushed checkouts archive directly;
-//! this dialog never opens for them.
+//! about to carry away. Settled sessions with clean, fully pushed checkouts
+//! archive directly; this dialog never opens for them.
 
 use gpui::{KeyBinding, actions};
 
@@ -29,6 +30,9 @@ pub(super) struct ArchiveDialogState {
     /// neighbor. `None` for every other archive entry point.
     sidebar_position: Option<usize>,
     title: String,
+    /// Whether the session still had a live turn when the dialog opened —
+    /// confirming stops it.
+    active_turn: bool,
     preview: crate::git_commit::ArchivePreview,
     scroll: ScrollHandle,
     archive_focus: FocusHandle,
@@ -37,11 +41,13 @@ pub(super) struct ArchiveDialogState {
 
 impl Waku {
     /// Opens the confirmation for a session whose archive preview reported
-    /// work in flight. The caller owns the pending-preview bookkeeping.
+    /// work in flight or whose turn is still running. The caller owns the
+    /// pending-preview bookkeeping.
     pub(super) fn open_archive_dialog(
         &mut self,
         session_id: Uuid,
         preview: crate::git_commit::ArchivePreview,
+        active_turn: bool,
         sidebar_position: Option<usize>,
         cx: &mut Context<Self>,
     ) -> FocusHandle {
@@ -57,6 +63,7 @@ impl Waku {
             session_id,
             sidebar_position,
             title,
+            active_turn,
             preview,
             scroll: ScrollHandle::new(),
             cancel_focus: cx.focus_handle(),
@@ -89,6 +96,12 @@ impl Waku {
         let weak = cx.entity().downgrade();
         let files = dialog.preview.files.clone();
         let commits = dialog.preview.unpushed_commits.clone();
+        let has_checkout_work = !files.is_empty() || !commits.is_empty();
+        let description = match (dialog.active_turn, has_checkout_work) {
+            (true, true) => tr!("archive.confirm_description_busy_worktree"),
+            (true, false) => tr!("archive.confirm_description_busy"),
+            (false, _) => tr!("archive.confirm_description"),
+        };
         let title = if dialog.title.trim().is_empty() {
             tr!("archive.confirm_title")
         } else {
@@ -241,7 +254,7 @@ impl Waku {
                             .text_size(sp(12.5))
                             .line_height(sp(17.0))
                             .text_color(theme.text_secondary)
-                            .child(tr!("archive.confirm_description")),
+                            .child(description),
                     ),
             )
             .child(

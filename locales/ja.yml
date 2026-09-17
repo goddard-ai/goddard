@@ -383,6 +383,8 @@ session.mark_unread: 未読にする
 archive.confirm_title: このタスクをアーカイブしますか？
 archive.confirm_title_named: "%{name} をアーカイブしますか？"
 archive.confirm_description: チェックアウトに作業中の内容が残っています。アーカイブするとスナップショットを保存してワークツリーを削除します。解除で元に戻せます。
+archive.confirm_description_busy: 進行中のターンがあります。アーカイブするとターンを停止します。解除でタスクを元に戻せます。
+archive.confirm_description_busy_worktree: 進行中のターンがあり、チェックアウトにも作業中の内容が残っています。アーカイブするとターンを停止し、チェックアウトをスナップショットに保存してワークツリーを削除します。解除で元に戻せます。
 archive.uncommitted: "未コミットのファイル %{count} 件"
 archive.unpushed: "未プッシュのコミット %{count} 件"
 

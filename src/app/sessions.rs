@@ -779,9 +779,10 @@ impl Waku {
 
     /// Hides a task from the sidebar and search without deleting it.
     ///
-    /// A worktree still holding uncommitted or unpushed work gets a
-    /// confirmation first — inspected on the background executor — so the
-    /// user sees what the archive snapshot is about to carry. A local
+    /// A task with a turn still running gets a confirmation first — archiving
+    /// stops the turn — and so does a worktree still holding uncommitted or
+    /// unpushed work — inspected on the background executor — so the user
+    /// sees what the archive snapshot is about to carry. A settled local
     /// checkout skips it: its git state is the user's own and archive
     /// leaves it untouched. Inspection
     /// failures archive anyway: the snapshot ref keeps the state regardless.
@@ -814,15 +815,32 @@ impl Waku {
         else {
             return;
         };
+        let busy = session.is_busy();
         // Only a worktree gets a preview: archiving snapshots its checkout
         // into the archive ref and removes the directory. A local checkout
         // is the user's own git state — archive never touches it, so dirty
-        // files and unpushed commits are nothing to warn about.
+        // files and unpushed commits are nothing to warn about. An active
+        // turn is still worth confirming: archiving stops it.
         let Some(workspace) = (match &session.workspace {
             SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
             _ => None,
         }) else {
-            self.finish_archive_session(session_id, sidebar_position, window, cx);
+            if busy && self.archive_dialog.is_none() {
+                let focus = self.open_archive_dialog(
+                    session_id,
+                    crate::git_commit::ArchivePreview::default(),
+                    true,
+                    sidebar_position,
+                    cx,
+                );
+                // Like the other deferred surfaces, focus lands two frames
+                // after the modal joins the dispatch tree.
+                window.on_next_frame(move |window, _| {
+                    window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                });
+            } else if !busy {
+                self.finish_archive_session(session_id, sidebar_position, window, cx);
+            }
             return;
         };
         if self.archive_dialog.is_some() || !self.archive_preview_pending.insert(session_id) {
@@ -849,16 +867,26 @@ impl Waku {
             let finish = waku
                 .update(cx, |waku, cx| {
                     waku.archive_preview_pending.remove(&session_id);
-                    match preview {
-                        Some(preview)
-                            if !preview.files.is_empty()
-                                || !preview.unpushed_commits.is_empty() =>
-                        {
-                            let focus =
-                                waku.open_archive_dialog(session_id, preview, sidebar_position, cx);
-                            Some(focus)
-                        }
-                        _ => None,
+                    // The turn may have settled while the preview was being
+                    // inspected — warn only about what is still true now.
+                    let busy = waku
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| session.is_busy());
+                    let preview = preview.unwrap_or_default();
+                    if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
+                        let focus = waku.open_archive_dialog(
+                            session_id,
+                            preview,
+                            busy,
+                            sidebar_position,
+                            cx,
+                        );
+                        Some(focus)
+                    } else {
+                        None
                     }
                 })
                 .unwrap_or(None);
