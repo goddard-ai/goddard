@@ -4,7 +4,7 @@ use super::composer::{
     visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
-use super::sessions::{next_idle_session, next_unread_completion};
+use super::sessions::{next_idle_session, next_non_busy_session, next_unread_completion};
 use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::sidebar::SidebarRow;
 use super::transcript_view::changed_files_diff_file_lines;
@@ -636,7 +636,7 @@ fn pinned_session(id: Uuid, timestamp: u64) -> AgentSession {
 }
 
 #[test]
-fn next_unread_completion_scans_below_the_anchor_and_wraps_to_the_top() {
+fn next_unread_completion_returns_the_topmost_unread_row() {
     let first = Uuid::new_v4();
     let second = Uuid::new_v4();
     let third = Uuid::new_v4();
@@ -654,92 +654,34 @@ fn next_unread_completion_scans_below_the_anchor_and_wraps_to_the_top() {
     ];
     let unseen = HashMap::from([(first, 100), (third, 300)]);
 
-    // The scan starts at the row passed — the one below the anchor — and
-    // skips non-session rows. Position decides, not the stamp's recency.
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(second),
-            None,
-            Some(second),
-            Some(3)
-        ),
-        Some(third)
-    );
-    // It wraps to the top of the sidebar.
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(third),
-            None,
-            Some(third),
-            Some(5)
-        ),
-        Some(first)
-    );
+    // Sidebar order is the importance order: the topmost unread row wins
+    // regardless of where the current session sits, and non-session rows
+    // never matter.
+    for selected in [None, Some(second), Some(third)] {
+        assert_eq!(
+            next_unread_completion(&sessions, &unseen, &rows, selected, None),
+            Some(first)
+        );
+    }
     // The selected session never targets itself, even while unread.
     assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(first),
-            None,
-            Some(first),
-            Some(2)
-        ),
+        next_unread_completion(&sessions, &unseen, &rows, Some(first), None),
         Some(third)
     );
     // A pending activation is treated as on-screen too.
     assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(third),
-            Some(first),
-            Some(third),
-            Some(5)
-        ),
+        next_unread_completion(&sessions, &unseen, &rows, Some(third), Some(first)),
         None
     );
-    // With no anchor — the New task page — the scan starts at the top.
+    // No candidates: the caller falls to the idle rotation.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None, None, None),
-        Some(first)
-    );
-    // An anchor outside the rows still scans positionally — index 2 is where
-    // the third row slid in once the second row was gone.
-    let departed_rows = vec![
-        SidebarRow::Search,
-        SidebarRow::Session(first),
-        SidebarRow::Session(third),
-    ];
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &departed_rows,
-            None,
-            None,
-            Some(second),
-            Some(2)
-        ),
-        Some(third)
-    );
-    // No candidates: the caller lands on the New task page.
-    assert_eq!(
-        next_unread_completion(&sessions, &HashMap::new(), &rows, None, None, None, None),
+        next_unread_completion(&sessions, &HashMap::new(), &rows, None, None),
         None
     );
 }
 
 #[test]
-fn next_unread_completion_prefers_pinned_sessions_for_an_unpinned_anchor() {
+fn next_unread_completion_lets_pinned_rows_lead_by_position() {
     let pinned_top = Uuid::new_v4();
     let pinned_bottom = Uuid::new_v4();
     let current = Uuid::new_v4();
@@ -758,131 +700,27 @@ fn next_unread_completion_prefers_pinned_sessions_for_an_unpinned_anchor() {
         SidebarRow::Session(below),
     ];
 
-    // Any unread pinned task wins over an unread row right below the anchor.
+    // Pinned rows sit at the top of the sidebar, so an unread one leads
+    // without any special-casing — even over an unread row at the anchor.
     let unseen = HashMap::from([(pinned_bottom, 100), (below, 400)]);
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(current),
-            None,
-            Some(current),
-            Some(3)
-        ),
-        Some(pinned_bottom)
-    );
+    for selected in [None, Some(current), Some(below)] {
+        assert_eq!(
+            next_unread_completion(&sessions, &unseen, &rows, selected, None),
+            Some(pinned_bottom)
+        );
+    }
     // Two unread pinned tasks take their sidebar order.
     let both_pinned = HashMap::from([(pinned_top, 50), (pinned_bottom, 500)]);
     assert_eq!(
-        next_unread_completion(&sessions, &both_pinned, &rows, None, None, None, None),
+        next_unread_completion(&sessions, &both_pinned, &rows, None, None),
         Some(pinned_top)
     );
     // A blocked pinned task counts as unread too.
     let mut sessions = sessions;
     sessions[0].status = SessionStatus::Waiting;
     assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &HashMap::new(),
-            &rows,
-            Some(current),
-            None,
-            Some(current),
-            Some(3)
-        ),
+        next_unread_completion(&sessions, &HashMap::new(), &rows, Some(current), None),
         Some(pinned_top)
-    );
-}
-
-#[test]
-fn next_unread_completion_scans_the_pinned_section_for_a_pinned_anchor() {
-    let top = Uuid::new_v4();
-    let middle = Uuid::new_v4();
-    let bottom = Uuid::new_v4();
-    let unpinned = Uuid::new_v4();
-    let sessions = vec![
-        pinned_session(top, 300),
-        pinned_session(middle, 200),
-        pinned_session(bottom, 100),
-        started_session(unpinned),
-    ];
-    let rows = vec![
-        SidebarRow::Session(top),
-        SidebarRow::Session(middle),
-        SidebarRow::Session(bottom),
-        SidebarRow::Session(unpinned),
-    ];
-
-    // Below the anchor inside the pinned section first. A pinned anchor
-    // scans by rank, so the row index only matters for the unpinned tail.
-    let unseen = HashMap::from([(middle, 100), (bottom, 200)]);
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(top),
-            None,
-            Some(top),
-            Some(1)
-        ),
-        Some(middle)
-    );
-    // At the section's end the scan wraps within pinned — above the anchor —
-    // before it would move into unpinned territory.
-    let above = HashMap::from([(top, 100), (unpinned, 200)]);
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &above,
-            &rows,
-            Some(middle),
-            None,
-            Some(middle),
-            Some(2)
-        ),
-        Some(top)
-    );
-    // Anchored at the section's last row the wrap covers all of pinned.
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &above,
-            &rows,
-            Some(bottom),
-            None,
-            Some(bottom),
-            Some(3)
-        ),
-        Some(top)
-    );
-    // Only once the whole pinned section is read does an unpinned row win.
-    let only_unpinned = HashMap::from([(unpinned, 200)]);
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &only_unpinned,
-            &rows,
-            Some(bottom),
-            None,
-            Some(bottom),
-            Some(3)
-        ),
-        Some(unpinned)
-    );
-    // The pinned anchor never targets itself.
-    assert_eq!(
-        next_unread_completion(
-            &sessions,
-            &unseen,
-            &rows,
-            Some(middle),
-            None,
-            Some(middle),
-            Some(2)
-        ),
-        Some(bottom)
     );
 }
 
@@ -911,7 +749,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
         (settled_id, 100),
     ]);
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None, None, None),
+        next_unread_completion(&sessions, &unseen, &rows, None, None),
         Some(settled_id)
     );
 
@@ -932,7 +770,59 @@ fn next_unread_completion_skips_ineligible_sessions() {
     ];
     let queued_only = HashMap::from([(queued_id, 300), (blocked_id, 400)]);
     assert_eq!(
-        next_unread_completion(&sessions, &queued_only, &rows, None, None, None, None),
+        next_unread_completion(&sessions, &queued_only, &rows, None, None),
+        None
+    );
+}
+
+#[test]
+fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
+    let top = Uuid::new_v4();
+    let busy = Uuid::new_v4();
+    let middle = Uuid::new_v4();
+    let bottom = Uuid::new_v4();
+    let mut busy_session = started_session(busy);
+    busy_session.status = SessionStatus::Working;
+    let sessions = vec![
+        started_session(top),
+        busy_session,
+        started_session(middle),
+        started_session(bottom),
+    ];
+    let rows = vec![
+        SidebarRow::Session(top),
+        SidebarRow::Session(busy),
+        SidebarRow::Session(middle),
+        SidebarRow::Session(bottom),
+    ];
+
+    // ⌘⇧D's jump: below the marked session's row, busy rows skipped.
+    assert_eq!(
+        next_non_busy_session(&sessions, &rows, Some(top), None, 1),
+        Some(middle)
+    );
+    // It wraps to the top at the bottom of the list — including rows above
+    // the anchor — but never lands on the selected session itself.
+    assert_eq!(
+        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4),
+        Some(top)
+    );
+    assert_eq!(
+        next_non_busy_session(&sessions, &rows, Some(top), None, 4),
+        Some(middle)
+    );
+    // A pending activation counts as on-screen.
+    assert_eq!(
+        next_non_busy_session(&sessions, &rows, Some(top), Some(middle), 1),
+        Some(bottom)
+    );
+    // Everything busy or claimed: no target, the caller lands on New task.
+    let mut all_busy = sessions;
+    for session in &mut all_busy {
+        session.status = SessionStatus::Working;
+    }
+    assert_eq!(
+        next_non_busy_session(&all_busy, &rows, Some(top), None, 1),
         None
     );
 }

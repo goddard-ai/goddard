@@ -858,8 +858,6 @@ impl Waku {
             selected,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
-            None,
-            None,
         );
         let enabled = target.is_some();
         // A blocked task outranks plain completions, so the target being one

@@ -601,7 +601,7 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | Navigate back / forward | ⌘[ / ⌘] |
 | Previous / next turn | ⌘⌥↑ / ⌘⌥↓ |
 | Next unread completion (idle tasks once drained) | ⌘D or Ctrl+` |
-| Mark unread, go to next unread | ⌘⇧D |
+| Mark unread, go to next idle task | ⌘⇧D |
 | Task switcher | Ctrl+Tab / Ctrl+Shift+Tab |
 | Project switcher (in a New Task draft) | hold ⌘, tap N |
 | Toggle sidebar / right panel | ⌘B / ⌘⌥B |

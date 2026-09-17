@@ -194,7 +194,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 ),
                 bound(
                     tr!("shortcuts.mark_unread_next"),
-                    MarkUnreadAndGoToNextUnread,
+                    MarkUnreadAndGoToNextIdle,
                     Some("Waku"),
                 ),
                 bound(

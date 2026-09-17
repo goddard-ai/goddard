@@ -48,40 +48,30 @@ pub(super) enum ArchiveLanding {
     NextUnread,
 }
 
-/// The next unread target shared by GoToNextUnreadCompletion (⌘D /
-/// ctrl-backtick), ⌘⇧D, and the session-departure fallbacks. "Unread" is the
+/// The topmost unread target in the sidebar — shared by
+/// GoToNextUnreadCompletion (⌘D / ctrl-backtick), the unseen-completion
+/// bell, and the session-departure fallbacks. "Unread" is the
 /// unseen-completion set plus a task blocked on its user — a pending
 /// permission or question cannot make progress until someone answers.
 /// Sessions with queued prompts are about to be busy again, so they are
 /// skipped, and the on-screen or pending-activation session is never a
-/// candidate — a lone unread task falls through to the caller's fallback
-/// rather than reselecting itself.
+/// candidate.
 ///
-/// Sidebar order is the importance order, so an anchorless call returns the
-/// topmost unread row outright — pinned tasks sort to the top of the
-/// sidebar, which makes them lead automatically. Landing on a session clears
-/// its stamp, so repeated presses drain the queue top-down.
-///
-/// Only ⌘⇧D passes an anchor — the just-marked session — because it must
-/// not land back on the task it just stamped. While the anchor is unpinned
-/// or absent the first unread pinned task still wins; a pinned anchor scans
-/// its own section — below its row, then back above it — before the unpinned
-/// rows, and the unpinned scan runs down the sidebar's displayed order from
-/// `anchor_row` (the row after the anchor's) and wraps to the top.
+/// Sidebar order is the importance order — pinned tasks sort to the top of
+/// the sidebar and lead automatically — and landing on a session clears its
+/// stamp, so repeated presses drain the queue top-down.
 pub(super) fn next_unread_completion(
     sessions: &[AgentSession],
     unseen_completions: &HashMap<Uuid, u64>,
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
-    anchor_session: Option<Uuid>,
-    anchor_row: Option<usize>,
 ) -> Option<Uuid> {
     let by_id = sessions
         .iter()
         .map(|session| (session.id, session))
         .collect::<HashMap<_, _>>();
-    let eligible = |session_id: Uuid| {
+    sidebar::next_sidebar_session_in_rows(rows, 0, |session_id| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
             && by_id.get(&session_id).is_some_and(|session| {
@@ -91,42 +81,31 @@ pub(super) fn next_unread_completion(
                     && (session.status == SessionStatus::Waiting
                         || unseen_completions.contains_key(&session_id))
             })
-    };
-    // Pinned order matches the sidebar's pinned group — most recent activity
-    // first. Archived pins stay in the ordering so a just-departed anchor
-    // still ranks; eligibility keeps them out of the results.
-    let mut pinned = sessions
-        .iter()
-        .filter(|session| session.pinned_at.is_some())
-        .collect::<Vec<_>>();
-    pinned.sort_by_key(|session| std::cmp::Reverse(sidebar::sidebar_session_timestamp(session)));
-    let pinned_ids = pinned
-        .iter()
-        .map(|session| session.id)
-        .collect::<Vec<Uuid>>();
-    let pinned_set = pinned_ids.iter().copied().collect::<HashSet<Uuid>>();
+    })
+}
 
-    if anchor_session.is_some_and(|id| pinned_set.contains(&id)) {
-        let rank = pinned_ids
-            .iter()
-            .position(|id| Some(*id) == anchor_session)
-            .unwrap_or(pinned_ids.len());
-        return pinned_ids[rank + 1..]
-            .iter()
-            .chain(&pinned_ids[..rank])
-            .copied()
-            .find(|session_id| eligible(*session_id))
-            .or_else(|| {
-                sidebar::next_sidebar_session_in_rows(rows, 0, |session_id| {
-                    !pinned_set.contains(&session_id) && eligible(session_id)
-                })
-            });
-    }
-    pinned_ids
+/// The next non-busy session at-or-below `start_row` in the sidebar's
+/// displayed order, wrapping to the top — the shared walk behind the idle
+/// rotation and ⌘⇧D's park-and-move-down jump. The selected or
+/// pending-activation session is never a candidate.
+pub(super) fn next_non_busy_session(
+    sessions: &[AgentSession],
+    rows: &[sidebar::SidebarRow],
+    selected_session: Option<Uuid>,
+    pending_activation: Option<Uuid>,
+    start_row: usize,
+) -> Option<Uuid> {
+    let by_id = sessions
         .iter()
-        .copied()
-        .find(|session_id| eligible(*session_id))
-        .or_else(|| sidebar::next_sidebar_session_in_rows(rows, anchor_row.unwrap_or(0), eligible))
+        .map(|session| (session.id, session))
+        .collect::<HashMap<_, _>>();
+    sidebar::next_sidebar_session_in_rows(rows, start_row, |session_id| {
+        Some(session_id) != selected_session
+            && Some(session_id) != pending_activation
+            && by_id
+                .get(&session_id)
+                .is_some_and(|session| !session.is_busy())
+    })
 }
 
 /// The drained-queue landing for the unread jumps: when nothing is unread a
@@ -141,25 +120,15 @@ pub(super) fn next_idle_session(
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
 ) -> Option<Uuid> {
-    let by_id = sessions
-        .iter()
-        .map(|session| (session.id, session))
-        .collect::<HashMap<_, _>>();
-    let non_busy = |session_id: Uuid| {
-        by_id
-            .get(&session_id)
-            .is_some_and(|session| !session.is_busy())
-    };
-    let eligible = |session_id: Uuid| {
-        Some(session_id) != selected_session
-            && Some(session_id) != pending_activation
-            && non_busy(session_id)
-    };
     let start = selected_session
-        .filter(|session_id| non_busy(*session_id))
+        .filter(|session_id| {
+            sessions
+                .iter()
+                .any(|session| session.id == *session_id && !session.is_busy())
+        })
         .and_then(|session_id| sidebar::sidebar_session_row_index(rows, session_id))
         .map_or(0, |index| index + 1);
-    sidebar::next_sidebar_session_in_rows(rows, start, eligible)
+    next_non_busy_session(sessions, rows, selected_session, pending_activation, start)
 }
 
 impl Waku {
@@ -810,8 +779,6 @@ impl Waku {
             &rows,
             self.state.selected_session,
             pending,
-            None,
-            None,
         )
         .or_else(|| next_idle_session(&self.state.sessions, &rows, None, pending))
         {
@@ -1610,8 +1577,6 @@ impl Waku {
             &rows,
             selected,
             pending,
-            None,
-            None,
         )
         .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending));
         match target {
@@ -1659,13 +1624,14 @@ impl Waku {
     }
 
     /// ⌘⇧D: mark the viewed task unread — it stays a GoToNextUnreadCompletion
-    /// candidate for a later ⌘D — then jump to the next unread session per
-    /// the shared scan. The just-marked session is the anchor but never a
-    /// candidate, so a drained queue moves into the idle rotation below it
-    /// and only a list with nothing navigable lands on the New task page.
-    pub(super) fn mark_unread_and_go_to_next_unread_action(
+    /// candidate for a later ⌘D — then move to the next non-busy session
+    /// below its row, wrapping to the top. The jump is positional rather
+    /// than next-unread: the command is a sweep down the sidebar, and a
+    /// topmost-unread jump would bounce between the top two stamped tasks on
+    /// repeated presses.
+    pub(super) fn mark_unread_and_go_to_next_idle_action(
         &mut self,
-        _: &MarkUnreadAndGoToNextUnread,
+        _: &MarkUnreadAndGoToNextIdle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1677,19 +1643,10 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
-        let target = next_unread_completion(
-            &self.state.sessions,
-            &self.state.unseen_completions,
-            &rows,
-            selected,
-            pending,
-            selected,
-            selected
-                .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
-                .map(|index| index + 1),
-        )
-        .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending));
-        match target {
+        let start = selected
+            .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
+            .map_or(0, |index| index + 1);
+        match next_non_busy_session(&self.state.sessions, &rows, selected, pending, start) {
             Some(target) => self.go_to_unread_target(target, window, cx),
             None => self.new_session_action(&NewSession, window, cx),
         }

@@ -3106,7 +3106,7 @@ shortcuts.next_unread_completion:
 shortcuts.mark_unread:
   en: Mark Current Task Unread
 shortcuts.mark_unread_next:
-  en: Mark Unread & Go to Next Unread
+  en: Mark Unread & Go to Next Idle Task
 shortcuts.task_switcher:
   en: Cycle Forward Through Tasks
 shortcuts.task_switcher_back:

@@ -77,7 +77,7 @@ use crate::{
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
     DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
     FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
-    MarkSessionUnread, MarkUnreadAndGoToNextUnread, NavigateBack, NavigateForward, NewProject,
+    MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
     NewSession, NewTerminal, OpenFind, OpenFindReplace, OpenResumePicker, OpenSettings,
     ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows, SelectFirstProject,
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
