@@ -19,7 +19,7 @@ use waku_protocol::friends::{
 use waku_share::friends::{
     self, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
 };
-use waku_share::{EndpointId, RelayMode, ShareNode};
+use waku_share::{EndpointId, RelayMode, ShareNode, TempTag};
 
 /// How long a probe verdict stays fresh before a surface should re-dial.
 const PROBE_CACHE_MS: u64 = 30_000;
@@ -29,6 +29,19 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// those complete asynchronously and the command returns after the offer is
 /// accepted, not after the bytes land.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+/// Bound on dialing a friend and delivering an offer — iroh's internal
+/// retries can otherwise pin the command loop far past the caller's wait.
+const OFFER_TIMEOUT: Duration = Duration::from_secs(60);
+/// Bound on waiting for a relay address before minting a ticket — the send
+/// must still proceed for LAN/discovery-only peers when no relay answers.
+const ONLINE_WAIT: Duration = Duration::from_secs(10);
+/// Bound on the receiver's done receipt — it is courtesy bookkeeping, not
+/// part of the verified download.
+const NOTIFY_TIMEOUT: Duration = Duration::from_secs(30);
+/// An outgoing transfer's only completion signal is the receiver's
+/// TransferDone receipt; past this it is declared stalled. A late receipt
+/// still flips the row back to Done.
+const TRANSFER_STALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Installed by the server so async share events (incoming request, offer,
 /// progress) reach every subscribed client.
@@ -86,6 +99,9 @@ struct ShareInner {
     pending: HashMap<String, tokio::sync::oneshot::Sender<RequestDecision>>,
     /// ticket string → outgoing transfer id, so `TransferDone` can match.
     outgoing_tickets: HashMap<String, Uuid>,
+    /// transfer id → temp tag keeping the offered blob pinned against GC
+    /// for the transfer's lifetime.
+    outgoing_tags: HashMap<Uuid, TempTag>,
     transfer_hook: Option<TransferHook>,
     task_notifier: Option<TaskNotifier>,
     friend_code: String,
@@ -163,6 +179,7 @@ impl ShareService {
                 probes: HashMap::new(),
                 pending: HashMap::new(),
                 outgoing_tickets: HashMap::new(),
+                outgoing_tags: HashMap::new(),
                 transfer_hook: None,
                 task_notifier: None,
                 friend_code: String::new(),
@@ -427,7 +444,25 @@ fn run_runtime(
                             });
                         }
                         publish(&state, &sink);
-                        let node = node.lock().await.clone().expect("share node up");
+                        let node = match node.lock().await.clone() {
+                            Some(node) => node,
+                            None => {
+                                // Runtime gone — fail the row instead of
+                                // panicking the task and stranding it.
+                                {
+                                    let mut s = state.lock();
+                                    if let Some(t) = s
+                                        .transfers
+                                        .iter_mut()
+                                        .find(|t| t.id == id)
+                                    {
+                                        t.status = TransferStatus::Failed;
+                                    }
+                                }
+                                publish(&state, &sink);
+                                return;
+                            }
+                        };
                         let progress = {
                             let state = state.clone();
                             let sink = sink.clone();
@@ -457,24 +492,46 @@ fn run_runtime(
                             std::fs::create_dir_all(&dest_dir)?;
                             let dest = dest_dir.join(&offer.file_name);
                             node.export(hash, &dest).await?;
-                            friends::notify_transfer_done(
-                                node.endpoint(),
-                                ticket.addr().clone(),
-                                &offer.ticket,
+                            // The done receipt is courtesy bookkeeping for
+                            // the sender — the bytes are already verified on
+                            // disk, so a missed callback must not fail the
+                            // transfer or hide the file.
+                            let notified = tokio::time::timeout(
+                                NOTIFY_TIMEOUT,
+                                friends::notify_transfer_done(
+                                    node.endpoint(),
+                                    ticket.addr().clone(),
+                                    &offer.ticket,
+                                ),
                             )
-                            .await?;
+                            .await;
+                            match notified {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => eprintln!(
+                                    "share: done-notify for transfer {id} failed: {error:#}"
+                                ),
+                                Err(_) => eprintln!(
+                                    "share: done-notify for transfer {id} timed out"
+                                ),
+                            }
                             anyhow::Ok(dest_dir)
                         }
                         .await;
                         let (hook, notifier) = {
                             let mut s = state.lock();
                             if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
-                                match result {
+                                match &result {
                                     Ok(dest) => {
                                         t.status = TransferStatus::Done;
-                                        t.dest_dir = Some(dest);
+                                        t.dest_dir = Some(dest.clone());
                                     }
-                                    Err(_) => t.status = TransferStatus::Failed,
+                                    Err(error) => {
+                                        eprintln!(
+                                            "share: incoming transfer {id} from {} failed: {error:#}",
+                                            offer.name
+                                        );
+                                        t.status = TransferStatus::Failed;
+                                    }
                                 }
                             }
                             let transfer = s.transfers.iter().find(|t| t.id == id).cloned();
@@ -512,11 +569,12 @@ fn run_runtime(
                         let mut s = state.lock();
                         s.store.lock().mark_seen(&from);
                         let _ = s.store.lock().save();
-                        if let Some(id) = s.outgoing_tickets.get(&ticket).copied()
-                            && let Some(t) = s.transfers.iter_mut().find(|t| t.id == id)
-                        {
-                            t.status = TransferStatus::Done;
-                            t.bytes_done = t.bytes_total;
+                        if let Some(id) = s.outgoing_tickets.remove(&ticket) {
+                            if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
+                                t.status = TransferStatus::Done;
+                                t.bytes_done = t.bytes_total;
+                            }
+                            s.outgoing_tags.remove(&id);
                         }
                     }
                     publish(&state, &sink);
@@ -654,7 +712,16 @@ fn run_runtime(
                 } => {
                     let result = async {
                         let id: EndpointId = node_id.parse()?;
-                        let (ticket, _tag) = share_node.provide(&path).await?;
+                        // Mint the ticket once the endpoint reports a
+                        // dialable address — an early ticket can carry no
+                        // relay path. Bounded so LAN/discovery-only sends
+                        // still proceed when no relay answers.
+                        let _ = tokio::time::timeout(
+                            ONLINE_WAIT,
+                            share_node.wait_online(),
+                        )
+                        .await;
+                        let (ticket, tag) = share_node.provide(&path).await?;
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         let title = path
                             .file_name()
@@ -672,6 +739,7 @@ fn run_runtime(
                                 .map(|f| f.name.clone())
                                 .unwrap_or_default();
                             s.outgoing_tickets.insert(ticket_str.clone(), transfer_id);
+                            s.outgoing_tags.insert(transfer_id, tag);
                             s.transfers.push(TransferInfo {
                                 id: transfer_id,
                                 direction: TransferDirection::Outgoing,
@@ -687,22 +755,50 @@ fn run_runtime(
                             });
                         }
                         publish(&state, &sink);
-                        friends::send_offer(
-                            share_node.endpoint(),
-                            id,
-                            &our_name,
-                            &title,
-                            size,
-                            note,
-                            &ticket_str,
+                        tokio::time::timeout(
+                            OFFER_TIMEOUT,
+                            friends::send_offer(
+                                share_node.endpoint(),
+                                id,
+                                &our_name,
+                                &title,
+                                size,
+                                note,
+                                &ticket_str,
+                            ),
                         )
-                        .await?;
+                        .await
+                        .map_err(|_| anyhow::anyhow!("offer timed out"))??;
+                        // The receiver's TransferDone is the only completion
+                        // signal an outgoing transfer gets — if it never
+                        // lands, fail the row instead of leaving it at "0 B"
+                        // forever. A late receipt still flips it to Done.
+                        {
+                            let state = state.clone();
+                            let sink = sink.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(TRANSFER_STALL_TIMEOUT).await;
+                                {
+                                    let mut s = state.lock();
+                                    if let Some(t) =
+                                        s.transfers.iter_mut().find(|t| {
+                                            t.id == transfer_id
+                                                && t.status == TransferStatus::Transferring
+                                        })
+                                    {
+                                        t.status = TransferStatus::Failed;
+                                    }
+                                }
+                                publish(&state, &sink);
+                            });
+                        }
                         anyhow::Ok(())
                     }
                     .await;
-                    if result.is_err() {
+                    if let Err(error) = &result {
+                        eprintln!("share: send to {node_id} failed: {error:#}");
                         let mut s = state.lock();
-                        if let Some(t) = s
+                        let failed_id = s
                             .transfers
                             .iter_mut()
                             .rev()
@@ -711,8 +807,12 @@ fn run_runtime(
                                     && t.peer_id == node_id
                                     && t.status == TransferStatus::Transferring
                             })
-                        {
-                            t.status = TransferStatus::Failed;
+                            .map(|t| {
+                                t.status = TransferStatus::Failed;
+                                t.id
+                            });
+                        if let Some(failed_id) = failed_id {
+                            s.outgoing_tags.remove(&failed_id);
                         }
                     }
                     publish(&state, &sink);
@@ -724,6 +824,7 @@ fn run_runtime(
                         if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
                             t.status = TransferStatus::Cancelled;
                         }
+                        s.outgoing_tags.remove(&id);
                     }
                     publish(&state, &sink);
                     let _ = reply.send(Ok(()));

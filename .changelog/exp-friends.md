@@ -1,1 +1,2 @@
 - Move Friends — the friend-to-friend file transfer page — behind a Settings → Experiments toggle, off by default in release builds
+- Harden friend transfers against lost control messages: a missed done receipt no longer fails a completed download or hides the received file, sends dial with timeouts and stall to Failed instead of sitting at 0 B, and failures log their cause

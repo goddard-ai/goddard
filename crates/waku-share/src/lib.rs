@@ -10,6 +10,7 @@ pub mod friends;
 pub mod identity;
 
 pub use iroh::{EndpointId, RelayMode};
+pub use iroh_blobs::api::TempTag;
 
 use std::path::Path;
 
@@ -18,7 +19,7 @@ use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
 use iroh::protocol::Router;
 use iroh_blobs::{
     BlobFormat, BlobsProtocol, Hash,
-    api::{Store, TempTag},
+    api::Store,
     api::blobs::{AddPathOptions, AddProgressItem, ExportProgressItem, ImportMode},
     api::remote::GetProgressItem,
     store::fs::FsStore,
@@ -29,6 +30,10 @@ use n0_future::StreamExt;
 /// The blake3 hash of the shared content plus the sender's dialable address.
 /// Serializes to a sendme-compatible ticket string.
 pub type Ticket = BlobTicket;
+
+/// Bound on dialing the sender for a fetch — an unreachable peer must fail
+/// the transfer instead of hanging it.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// One peer: endpoint + blob store + protocol router. In the daemon this is
 /// a singleton; the spike runs two in one process.
@@ -116,23 +121,31 @@ impl ShareNode {
         mut on_progress: impl FnMut(u64),
     ) -> anyhow::Result<Hash> {
         let hash_and_format = ticket.hash_and_format();
-        let connection = self
-            .endpoint()
-            .connect(ticket.addr().clone(), iroh_blobs::protocol::ALPN)
-            .await
-            .context("connecting to sender")?;
+        let connection = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            self.endpoint()
+                .connect(ticket.addr().clone(), iroh_blobs::protocol::ALPN),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out connecting to sender"))?
+        .context("connecting to sender")?;
         let local = self.store.remote().local(hash_and_format).await?;
         let get = self.store.remote().execute_get(connection, local.missing());
         let mut stream = get.stream();
+        let mut completed = false;
         while let Some(item) = stream.next().await {
             match item {
                 GetProgressItem::Progress(done) => on_progress(done),
                 GetProgressItem::Done(stats) => {
                     on_progress(stats.payload_bytes_read);
+                    completed = true;
                     break;
                 }
                 GetProgressItem::Error(cause) => bail!("download failed: {cause}"),
             }
+        }
+        if !completed {
+            bail!("download stream ended before completion");
         }
         Ok(hash_and_format.hash)
     }
@@ -141,12 +154,19 @@ impl ShareNode {
     /// sparse-aware).
     pub async fn export(&self, hash: Hash, target: &Path) -> anyhow::Result<()> {
         let mut stream = self.store.blobs().export(hash, target).stream().await;
+        let mut completed = false;
         while let Some(item) = stream.next().await {
             match item {
                 ExportProgressItem::Error(cause) => bail!("exporting: {cause}"),
-                ExportProgressItem::Done => break,
+                ExportProgressItem::Done => {
+                    completed = true;
+                    break;
+                }
                 _ => {}
             }
+        }
+        if !completed {
+            bail!("export stream ended before completion");
         }
         Ok(())
     }
