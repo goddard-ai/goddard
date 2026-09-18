@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `temporary` integer DEFAULT false NOT NULL;
