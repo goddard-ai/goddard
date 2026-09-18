@@ -175,6 +175,7 @@ enum PaletteAction {
     ToggleUsage,
     CollapseSidebarGroups,
     GoToNextUnreadCompletion,
+    MarkAllSessionsRead,
     ToggleSidebar,
     ToggleRightPanel,
     OpenSettings(SettingsPage),
@@ -1132,6 +1133,17 @@ impl Waku {
                 Some(ShortcutHint::action(&GoToNextUnreadCompletion)),
                 PaletteAction::GoToNextUnreadCompletion,
                 "go to next unseen unread blocked waiting completed finished failed turn task session jump navigate",
+                next(),
+            ));
+        }
+        if !self.state.unseen_completions.is_empty() {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.mark_all_tasks_read"),
+                "icons/check.svg",
+                None,
+                PaletteAction::MarkAllSessionsRead,
+                "mark all tasks sessions read seen clear unseen unread completions dots inbox zero dismiss",
                 next(),
             ));
         }
@@ -2246,6 +2258,7 @@ impl Waku {
             PaletteAction::GoToNextUnreadCompletion => {
                 self.go_to_next_unread_completion_action(&GoToNextUnreadCompletion, window, cx)
             }
+            PaletteAction::MarkAllSessionsRead => self.mark_all_sessions_read(cx),
             PaletteAction::ToggleSidebar => self.toggle_sidebar_action(&ToggleSidebar, window, cx),
             PaletteAction::ToggleRightPanel => {
                 self.toggle_right_panel_action(&ToggleRightPanel, window, cx)

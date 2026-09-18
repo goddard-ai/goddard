@@ -77,6 +77,7 @@ command_palette.task_id_copied: 已复制任务 ID
 command_palette.agent_cli_thread_id_copied: 已复制智能体 CLI 线程 ID
 command_palette.collapse_sidebar_groups: 折叠所有侧边栏分组
 command_palette.go_to_next_unread_completion: 前往下一个未读完成的任务
+command_palette.mark_all_tasks_read: 将所有任务标记为已读
 command_palette.show_sidebar: 显示侧边栏
 command_palette.hide_sidebar: 隐藏侧边栏
 command_palette.show_right_panel: 显示右侧面板
