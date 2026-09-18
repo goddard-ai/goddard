@@ -3299,7 +3299,6 @@ impl Waku {
                 ComposerEvent::SubmitSteer(prompt) => {
                     this.submit_message_edit_prompt(prompt.clone(), cx)
                 }
-                ComposerEvent::SteerQueued => {}
                 ComposerEvent::Edited => cx.notify(),
                 ComposerEvent::Focus => {}
                 ComposerEvent::BackspaceOnEmpty => {}

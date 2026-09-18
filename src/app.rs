@@ -3859,10 +3859,16 @@ impl Waku {
                         }
                     }
                     ComposerEvent::SubmitSteer(prompt) => {
-                        if this.big_picture.is_open() {
-                            if !(prompt.trim().is_empty() && this.composer_pasted_blocks.is_empty())
-                                && let Some(submission) =
-                                    this.submission_with_attachments(prompt, cx)
+                        // An empty field is only an empty draft when nothing
+                        // is staged alongside it — attachments, pasted
+                        // blocks, and annotations all steer as a submission.
+                        let empty_draft = prompt.trim().is_empty()
+                            && this.composer_attachments.is_empty()
+                            && this.composer_pasted_blocks.is_empty()
+                            && !this.has_annotations();
+                        if this.big_picture.is_open() && !empty_draft {
+                            if let Some(submission) =
+                                this.submission_with_attachments(prompt, cx)
                             {
                                 this.steer_big_picture_submission(submission, cx);
                             }
@@ -3870,6 +3876,20 @@ impl Waku {
                             // Nothing on the page can be steered — a steered
                             // draft is a send there.
                             this.projects_submit(prompt, cx);
+                        } else if empty_draft {
+                            if this
+                                .composer_session()
+                                .is_some_and(composer::session_awaits_continue)
+                            {
+                                // Cmd+Enter on an empty composer continues a
+                                // stopped turn too; its queued follow-ups
+                                // still drain once that turn settles.
+                                this.continue_interrupted_session(cx);
+                            } else {
+                                // A truly empty composer activates the
+                                // oldest queued follow-up's Steer control.
+                                this.steer_oldest_queued_message(cx);
+                            }
                         } else if let Some(session_id) =
                             this.selected_session().and_then(|session| {
                                 this.response_fork_preparations
@@ -3882,31 +3902,6 @@ impl Waku {
                             this.submission_with_attachments(prompt, cx)
                         {
                             this.steer_composer_submission(submission, cx);
-                        }
-                    }
-                    ComposerEvent::SteerQueued => {
-                        // Staged attachments, pasted blocks, and annotations
-                        // make this a real draft even when the text field is
-                        // empty. Preserve the shortcut's previous no-op
-                        // behavior until that draft is sent or cleared.
-                        if this.projects_page.is_some() {
-                            let prompt = this.composer.read(cx).content(cx).to_owned();
-                            this.projects_submit(&prompt, cx);
-                        } else if this.composer_attachments.is_empty()
-                            && this.composer_pasted_blocks.is_empty()
-                            && !this.has_annotations()
-                        {
-                            if this
-                                .composer_session()
-                                .is_some_and(composer::session_awaits_continue)
-                            {
-                                // Cmd+Enter on an empty composer continues a
-                                // stopped turn too; its queued follow-ups
-                                // still drain once that turn settles.
-                                this.continue_interrupted_session(cx);
-                            } else {
-                                this.steer_oldest_queued_message(cx);
-                            }
                         }
                     }
                     ComposerEvent::Edited => {
