@@ -2257,6 +2257,25 @@ pub struct Waku {
     /// keyed by the provider they set up. They live outside the right panel
     /// surfaces because Settings covers the workspace while they run.
     provider_setup_terminals: HashMap<ProviderKind, Entity<TerminalView>>,
+    /// The PTY running an Antigravity session's TUI, keyed by session id.
+    /// It is the session's main surface — not a right-panel tab — and it
+    /// exists only while the process does.
+    agy_terminals: HashMap<Uuid, Entity<TerminalView>>,
+    /// The last time each live Antigravity terminal was on screen. The idle
+    /// sweep frees a process only once this exceeds the grace window while
+    /// the session is deselected and idle.
+    agy_last_visible: HashMap<Uuid, Instant>,
+    /// Spawn time per live Antigravity terminal — the bound conversation-id
+    /// discovery compares summary rows against.
+    agy_spawned_at: HashMap<Uuid, u64>,
+    /// Sessions whose TUI spawn ran before provider detection finished and
+    /// found no `agy` probe yet; the poll tick retries them once probes land.
+    agy_pending_spawns: HashSet<Uuid>,
+    /// Poller results land here like every other background queue; a single
+    /// `agy_poll_pending` flag keeps one poll in flight at a time.
+    agy_poll_tx: Sender<agy::AgyPollUpdate>,
+    agy_poll_events: Receiver<agy::AgyPollUpdate>,
+    agy_poll_pending: bool,
     right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
@@ -2647,6 +2666,7 @@ pub struct Waku {
 }
 
 mod activity_diff;
+mod agy;
 mod annotations;
 mod archive_dialog;
 mod autocomplete;
@@ -3734,6 +3754,7 @@ impl Waku {
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
+        let (agy_poll_tx, agy_poll_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
@@ -4425,6 +4446,24 @@ impl Waku {
             })
             .detach();
 
+            // Antigravity's TUI owns its sessions, so the CLI's own
+            // summaries db is the only status source. The poll early-outs
+            // while no Antigravity session needs it.
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(agy::AGY_POLL_INTERVAL)
+                        .await;
+                    if this
+                        .update(cx, |this, cx| this.maybe_poll_agy_sessions(cx))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+
             let markdown_link_handler: md::render::LinkHandler = {
                 let waku = cx.entity().downgrade();
                 Rc::new(move |target, _, cx| {
@@ -4752,6 +4791,13 @@ impl Waku {
                 right_panel_terminal_commands: HashMap::new(),
                 custom_command_runs: HashMap::new(),
                 provider_setup_terminals: HashMap::new(),
+                agy_terminals: HashMap::new(),
+                agy_last_visible: HashMap::new(),
+                agy_spawned_at: HashMap::new(),
+                agy_poll_tx,
+                agy_poll_events,
+                agy_pending_spawns: HashSet::new(),
+                agy_poll_pending: false,
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
@@ -4936,7 +4982,24 @@ impl Waku {
             this.start_task_state_sync(waku_client::DaemonKey::Local, this.daemon.clone());
             this.connect_remote_hosts(cx);
             for session_id in startup_live_session_ids {
-                this.start_runtime_attachment(session_id, cx);
+                // Antigravity's runtime is the app-local TUI terminal, not a
+                // daemon attachment. It respawns lazily — only the selected
+                // session's surface exists at launch.
+                let is_agy = this
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|session| {
+                        session.id == session_id
+                            && session.provider == ProviderKind::Antigravity
+                    });
+                if is_agy {
+                    if this.state.selected_session == Some(session_id) {
+                        this.ensure_agy_terminal(session_id, cx);
+                    }
+                } else {
+                    this.start_runtime_attachment(session_id, cx);
+                }
             }
             this.start_pending_checkpoint_captures(cx);
             // The autocomplete indexes prefetch alongside, so typing `/` or

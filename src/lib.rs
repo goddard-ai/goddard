@@ -28,6 +28,7 @@ macro_rules! tr_cow {
     };
 }
 
+mod agy;
 mod analytics;
 mod app;
 mod assets;

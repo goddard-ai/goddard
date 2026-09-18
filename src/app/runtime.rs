@@ -237,7 +237,7 @@ pub(super) fn merge_remote_session_catalog(
 /// Perform every blocking operation between accepting a submission and
 /// starting its provider. This function is called only from the background
 /// executor; the UI thread owns applying the returned workspace afterward.
-fn prepare_submission(
+pub(super) fn prepare_submission(
     workspace_client: waku_client::WorkspaceClient,
     project: Project,
     workspace: SessionWorkspace,
@@ -2787,6 +2787,7 @@ impl Waku {
             &self.probes,
             &self.state.disabled_providers,
             locked_provider,
+            self.daemon.is_remote(),
             self.provider_detection_checked_at.is_some(),
         )
     }
@@ -3915,6 +3916,7 @@ impl Waku {
                 runtime.driver.close();
             }
         }
+        self.reap_idle_agy_terminals();
     }
 
     /// Applies a changed model, effort, tier, or mode to a session. Transports
@@ -4376,7 +4378,7 @@ impl Waku {
 
     /// Resolve presentation-preserving composer syntax immediately before a
     /// prompt crosses into a provider transport.
-    fn resolve_provider_submission(&self, provider: ProviderKind, prompt: &str) -> String {
+    pub(super) fn resolve_provider_submission(&self, provider: ProviderKind, prompt: &str) -> String {
         crate::composer_complete::resolved_submission(provider, prompt, &self.slash_command_index)
             .unwrap_or_else(|| prompt.to_owned())
     }
@@ -4616,6 +4618,12 @@ impl Waku {
         }
         if session.status.is_busy() {
             self.enqueue_follow_up_submission(session_id, submission, cx);
+            return;
+        }
+        // Antigravity sessions have no driver: the prompt launches the
+        // CLI's own TUI in the session's terminal instead.
+        if session.provider == ProviderKind::Antigravity {
+            self.submit_agy_submission(session_id, submission, cx);
             return;
         }
         let prompt = submission.prompt.clone();
@@ -5137,6 +5145,7 @@ impl Waku {
             | self.drain_provider_detection_events()
             | self.drain_computer_permission_events()
             | self.drain_plan_usage_events()
+            | self.drain_agy_poll_events()
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)

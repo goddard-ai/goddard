@@ -558,6 +558,11 @@ impl Render for Waku {
         let empty = should_render_empty_state(self.selected_session());
         let projects_page = self.projects_page;
         let permission = self.render_permission(cx);
+        // A started Antigravity session shows its TUI terminal as the whole
+        // surface — no transcript, no composer.
+        let agy_surface = self.selected_session().is_some_and(|session| {
+            session.provider == ProviderKind::Antigravity && session.has_started()
+        });
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
@@ -701,7 +706,8 @@ impl Render for Waku {
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
                             && self.projects_page.is_none()
-                            && !self.notifications.open,
+                            && !self.notifications.open
+                            && !agy_surface,
                         |element| {
                             element
                                 .group(composer::SESSION_DROP_GROUP)
@@ -737,6 +743,8 @@ impl Render for Waku {
                             self.render_projects_page(window, cx)
                         } else if self.notifications.open {
                             self.render_inbox_page(window, cx)
+                        } else if agy_surface {
+                            self.render_agy_surface(self.chat_viewport_width(window), cx)
                         } else if empty {
                             self.render_empty_state(cx).into_any_element()
                         } else {
@@ -757,7 +765,8 @@ impl Render for Waku {
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
                             && self.projects_page.is_none()
-                            && !self.notifications.open,
+                            && !self.notifications.open
+                            && !agy_surface,
                         |element| {
                             if self.big_picture.is_open() {
                                 element

@@ -406,11 +406,24 @@ impl Waku {
         self.reset_transcript_rows(self.transcript_row_count());
         self.apply_transcript_landing(transition, cx);
         self.save();
-        if self
-            .selected_session()
-            .is_some_and(AgentSession::has_started)
+        if let Some(session) = self.selected_session()
+            && session.has_started()
         {
-            self.start_runtime_attachment(session_id, cx);
+            // Antigravity has no daemon runtime to attach to — its surface
+            // is the TUI terminal, ensured and focused instead.
+            if session.provider == ProviderKind::Antigravity {
+                self.agy_last_visible.insert(session_id, Instant::now());
+                self.ensure_agy_terminal(session_id, cx);
+                if let Some(terminal) = self.agy_terminal(session_id) {
+                    let focus = terminal.read(cx).focus_handle(cx);
+                    let window_handle = self.window_handle;
+                    let _ = window_handle.update(cx, move |_, window, cx| {
+                        window.focus(&focus, cx);
+                    });
+                }
+            } else {
+                self.start_runtime_attachment(session_id, cx);
+            }
         }
         cx.notify();
     }
@@ -907,6 +920,10 @@ impl Waku {
         self.pending_workspace_cleanups.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
+        self.agy_terminals.remove(&session_id);
+        self.agy_last_visible.remove(&session_id);
+        self.agy_spawned_at.remove(&session_id);
+        self.agy_pending_spawns.remove(&session_id);
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         self.state.sessions.remove(index);
@@ -2067,6 +2084,11 @@ impl Waku {
             || self.settings_page.is_some()
             || self.selected_terminal.is_some()
             || self.projects_page.is_some()
+            // A started Antigravity session has no composer — keystrokes
+            // belong to its TUI terminal or nowhere.
+            || self.selected_session().is_some_and(|session| {
+                session.provider == ProviderKind::Antigravity && session.has_started()
+            })
         {
             return;
         }

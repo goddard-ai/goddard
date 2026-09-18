@@ -10671,6 +10671,7 @@ dependencies = [
  "reqwest_client",
  "ropey",
  "rquickjs",
+ "rusqlite",
  "rust-i18n",
  "rust-umami",
  "serde",

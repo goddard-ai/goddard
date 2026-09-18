@@ -2278,6 +2278,8 @@ errors.provider_not_installed:
   en: "%{provider} is not installed"
 errors.provider_not_found:
   en: "%{provider} is not installed or could not be found"
+errors.provider_terminal_sessions_local_only:
+  en: "%{provider} sessions need the local daemon — this workspace is on a remote host"
 errors.claude_fork_checkpoint_missing:
   en: Claude omitted the fork checkpoint
 errors.claude_turn_checkpoint_unavailable:
@@ -2445,6 +2447,10 @@ session.view_now:
   en: View now
 session.worktree_recreated:
   en: The worktree was missing, so it was recreated — uncommitted changes may be gone
+session.agy_ended:
+  en: The Antigravity session has ended
+session.agy_relaunch:
+  en: Relaunch session
 session.moved_to_worktree:
   en: "Moved to worktree %{name}"
 

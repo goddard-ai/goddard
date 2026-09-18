@@ -1179,6 +1179,7 @@ impl Waku {
         let searching = !normalized_query.is_empty();
         let probes = self.probes.clone();
         let disabled_providers = self.state.disabled_providers.clone();
+        let remote = self.daemon.is_remote();
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
         let favorites = self.state.favorite_models.clone();
         let recents = self.state.recent_model_uses.clone();
@@ -1212,6 +1213,7 @@ impl Waku {
                                 &this.probes,
                                 &this.state.disabled_providers,
                                 locked_provider,
+                                this.daemon.is_remote(),
                                 kind,
                             ) {
                                 this.refresh_provider_model_discovery(kind);
@@ -1432,6 +1434,7 @@ impl Waku {
                                 &probes,
                                 &disabled_providers,
                                 locked_provider,
+                                remote,
                                 kind,
                             )
                     }) {
@@ -5910,8 +5913,14 @@ pub(super) fn picker_lists_provider(
     probes: &[ProviderProbe],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
+    remote: bool,
     kind: ProviderKind,
 ) -> bool {
+    // Antigravity's surface is a local PTY running the CLI's TUI — a remote
+    // daemon cannot host it, so the tab does not exist there.
+    if remote && kind == ProviderKind::Antigravity {
+        return false;
+    }
     let installed = probes
         .iter()
         .any(|probe| probe.provider == kind && probe.installed);
@@ -5947,12 +5956,13 @@ pub(super) fn picker_has_no_providers(
     probes: &[ProviderProbe],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
+    remote: bool,
     detection_settled: bool,
 ) -> bool {
     detection_settled
-        && !ProviderKind::ALL
-            .into_iter()
-            .any(|kind| picker_lists_provider(probes, disabled_providers, locked_provider, kind))
+        && !ProviderKind::ALL.into_iter().any(|kind| {
+            picker_lists_provider(probes, disabled_providers, locked_provider, remote, kind)
+        })
 }
 
 /// A rail button's destination in the merged picker: one of the two

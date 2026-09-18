@@ -220,11 +220,14 @@ pub fn init_command_bar_keys(cx: &mut App) {
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
 /// `CustomCommand` sources the command's materialized script inside an
-/// interactive shell of the command's choosing.
+/// interactive shell of the command's choosing. `Program` execs a binary
+/// directly — no shell beneath it — for a program that owns the whole
+/// surface, like a terminal-backed agent's TUI.
 #[derive(Clone)]
 pub enum TerminalLaunch {
     Shell,
     CustomCommand(crate::persistence::CustomCommand),
+    Program { program: PathBuf, args: Vec<String> },
 }
 
 #[derive(Clone)]
@@ -377,11 +380,11 @@ impl TerminalSession {
             proxy.clone(),
         )));
 
-        let (shell, startup_line, shell_integration) = match launch {
+        let (shell, startup_line, shell_integration, program_args) = match launch {
             TerminalLaunch::Shell => {
                 let shell = crate::command_env::default_terminal_shell();
                 let installed = crate::shell_integration::install(&shell);
-                (shell, None, installed)
+                (shell, None, installed, None)
             }
             TerminalLaunch::CustomCommand(command) => {
                 let shell = crate::custom_commands::command_shell(command);
@@ -392,10 +395,14 @@ impl TerminalSession {
                     &script_path,
                     command.close_on_success,
                 );
-                (shell, Some(line), false)
+                (shell, Some(line), false, None)
+            }
+            TerminalLaunch::Program { program, args } => {
+                (program.clone(), None, false, Some(args.clone()))
             }
         };
-        let shell_args = crate::command_env::default_terminal_shell_args(&shell);
+        let shell_args = program_args
+            .unwrap_or_else(|| crate::command_env::default_terminal_shell_args(&shell));
         let mut options = tty::Options {
             shell: Some(Shell::new(shell.to_string_lossy().into_owned(), shell_args)),
             working_directory: Some(working_directory.to_path_buf()),
@@ -913,12 +920,18 @@ impl TerminalView {
         let default_title = match &launch {
             TerminalLaunch::Shell => tr!("right_panel.terminal"),
             TerminalLaunch::CustomCommand(command) => command.display_name().to_owned(),
+            TerminalLaunch::Program { program, .. } => program
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned(),
         };
         let shell = match &launch {
             TerminalLaunch::Shell => crate::command_env::default_terminal_shell(),
             TerminalLaunch::CustomCommand(command) => {
                 crate::custom_commands::command_shell(command)
             }
+            TerminalLaunch::Program { program, .. } => program.clone(),
         };
         let shell_name = shell
             .file_name()
