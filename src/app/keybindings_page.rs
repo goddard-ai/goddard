@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, ListAlignment, ListState, SharedString, Task,
-    Window, div, list, px, prelude::*,
+    AnyElement, App, Context, Entity, FocusHandle, ListAlignment, ListState, MouseButton,
+    SharedString, Task, Window, div, list, px, prelude::*,
 };
 
 use crate::input::{InputEvent, TextInput};
@@ -23,8 +23,13 @@ use crate::keybindings::{
 };
 use std::collections::HashMap;
 use crate::theme::{Theme, sp};
+use crate::ui::motion;
 
 const ROW_HEIGHT: f32 = 34.0;
+/// Table columns (VS Code layout): Command | Keybinding | When | Category.
+const KEYBINDING_COL: f32 = 260.0;
+const WHEN_COL: f32 = 160.0;
+const CATEGORY_COL: f32 = 110.0;
 const KEY_UNIT: f32 = 30.0;
 const KEY_GAP: f32 = 3.0;
 /// How long capture waits for the next stroke before committing — long
@@ -797,70 +802,6 @@ impl super::Waku {
 
         page = page.child(render_keyboard_stage(ui, layout, &codes, preview_row, theme));
 
-        // While recording, a banner shows the strokes captured so far and
-        // the keys that cancel or commit.
-        if let Some(capture) = &ui.capture {
-            let command_title = ui
-                .snapshot
-                .rows
-                .iter()
-                .find(|row| row.descriptor.id == capture.command)
-                .map(|row| row.descriptor.title().to_string())
-                .unwrap_or_else(|| capture.command.to_string());
-            let chord = capture
-                .strokes
-                .iter()
-                .map(|stroke| {
-                    crate::ui::shortcut::sequence_label(&stroke.join("-"))
-                })
-                .collect::<Vec<_>>()
-                .join("  ");
-            page = page.child(
-                div()
-                    .id("keybindings-capture")
-                    .track_focus(&ui.capture_focus)
-                    .px(px(20.0))
-                    .py(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .bg(theme.canvas)
-                    .child(
-                        div()
-                            .text_size(sp(12.0))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(format!("{command_title}:")),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text)
-                            .child(if chord.is_empty() {
-                                tr!("keybind.capture.waiting")
-                            } else {
-                                chord
-                            }),
-                    )
-                    .children(capture.warning.iter().map(|warning| {
-                        div()
-                            .text_size(sp(11.5))
-                            .text_color(theme.warning)
-                            .child(warning.clone())
-                            .into_any_element()
-                    }))
-                    .child(
-                        div()
-                            .ml_auto()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("keybind.capture.hint")),
-                    ),
-            );
-        }
-
         if let Some(error) = &ui.commit_error {
             page = page.child(
                 div()
@@ -892,6 +833,42 @@ impl super::Waku {
                     )),
             )
             .child(
+                // Column labels aligned with the rows below (row padding
+                // 20 + 8) — same layout as VS Code's keybinding editor.
+                div()
+                    .px(px(28.0))
+                    .h(px(26.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(tr!("keybind.column.command")),
+                    )
+                    .child(
+                        div()
+                            .w(px(KEYBINDING_COL))
+                            .flex_none()
+                            .child(tr!("keybind.column.keybinding")),
+                    )
+                    .child(
+                        div()
+                            .w(px(WHEN_COL))
+                            .flex_none()
+                            .child(tr!("keybind.column.when")),
+                    )
+                    .child(
+                        div()
+                            .w(px(CATEGORY_COL))
+                            .flex_none()
+                            .child(tr!("keybind.column.category")),
+                    ),
+            )
+            .child(
                 div().flex_1().min_h_0().px(px(20.0)).child(
                     list(ui.list_state.clone(), move |index, _window, cx| {
                         let theme = Theme::current(cx);
@@ -914,6 +891,106 @@ impl super::Waku {
                     .size_full(),
                 ),
             );
+
+        // While recording, a VS Code-style modal holds the one input that
+        // captures the chord — Esc cancels, Enter commits, clicking the
+        // scrim dismisses. The keyboard stage keeps lighting the strokes.
+        if let Some(capture) = &ui.capture {
+            let command_title = ui
+                .snapshot
+                .rows
+                .iter()
+                .find(|row| row.descriptor.id == capture.command)
+                .map(|row| row.descriptor.title().to_string())
+                .unwrap_or_else(|| capture.command.to_string());
+            let chord = capture
+                .strokes
+                .iter()
+                .map(|stroke| crate::ui::shortcut::sequence_label(&stroke.join("-")))
+                .collect::<Vec<_>>()
+                .join("  ");
+            let scrim = if theme.is_dark {
+                gpui::hsla(0.0, 0.0, 0.0, 0.34)
+            } else {
+                gpui::hsla(0.0, 0.0, 0.0, 0.16)
+            };
+            let card = div()
+                .id("keybindings-capture-card")
+                .track_focus(&ui.capture_focus)
+                .w(px(420.0))
+                .p(px(16.0))
+                .rounded(px(12.0))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.canvas)
+                .shadow_xl()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(command_title),
+                )
+                .child(
+                    div()
+                        .h(px(32.0))
+                        .px(px(10.0))
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(theme.accent)
+                        .flex()
+                        .items_center()
+                        .text_size(sp(13.0))
+                        .text_color(if chord.is_empty() {
+                            theme.text_tertiary
+                        } else {
+                            theme.text
+                        })
+                        .child(if chord.is_empty() {
+                            tr!("keybind.capture.waiting")
+                        } else {
+                            chord
+                        }),
+                )
+                .children(capture.warning.iter().map(|warning| {
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.warning)
+                        .child(warning.clone())
+                        .into_any_element()
+                }))
+                .child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("keybind.capture.hint")),
+                );
+            let layer = div()
+                .id("keybindings-capture-layer")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .bg(scrim)
+                .p(px(24.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.keybindings_cancel_capture(window, cx);
+                    }),
+                )
+                .child(motion::modal_enter("keybindings-capture-enter", card));
+            page = page.child(
+                gpui::deferred(motion::fade_in("keybindings-capture-layer-enter", layer))
+                    .into_any_element(),
+            );
+        }
         page.into_any_element()
     }
 }
@@ -1035,13 +1112,6 @@ fn render_row(
         })
         .child(
             div()
-                .w(px(110.0))
-                .text_size(sp(11.0))
-                .text_color(theme.text_tertiary)
-                .child(category),
-        )
-        .child(
-            div()
                 .flex_1()
                 .min_w_0()
                 .text_size(sp(12.5))
@@ -1050,19 +1120,11 @@ fn render_row(
         )
         .child(
             div()
-                .w(px(160.0))
-                .text_size(sp(11.0))
-                .text_color(theme.text_secondary)
-                .child(
-                    row.bindings
-                        .first()
-                        .and_then(|binding| binding.context.clone())
-                        .unwrap_or_default(),
-                ),
-        )
-        .child(
-            div()
+                .w(px(KEYBINDING_COL))
+                .flex_none()
                 .flex()
+                .flex_wrap()
+                .items_center()
                 .gap(px(4.0))
                 .children(
                     row.bindings
@@ -1215,6 +1277,27 @@ fn render_row(
                         .child(format!("{label} · built in"))
                         .into_any_element()
                 })),
+        )
+        .child(
+            div()
+                .w(px(WHEN_COL))
+                .flex_none()
+                .text_size(sp(11.0))
+                .text_color(theme.text_secondary)
+                .child(
+                    row.bindings
+                        .first()
+                        .and_then(|binding| binding.context.clone())
+                        .unwrap_or_default(),
+                ),
+        )
+        .child(
+            div()
+                .w(px(CATEGORY_COL))
+                .flex_none()
+                .text_size(sp(11.0))
+                .text_color(theme.text_tertiary)
+                .child(category),
         )
         .into_any_element()
 }

@@ -3553,6 +3553,14 @@ keybind.conflict.banner:
   en: Conflicts with %{other}
 keybind.conflict.confirm:
   en: Enter to save anyway
+keybind.column.command:
+  en: Command
+keybind.column.keybinding:
+  en: Keybinding
+keybind.column.when:
+  en: When
+keybind.column.category:
+  en: Category
 keybind.keywords:
   en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:
