@@ -1953,6 +1953,9 @@ pub struct Waku {
     session_navigation: SessionNavigation,
     /// Sidebar task currently showing its inline rename field.
     session_rename: Option<Uuid>,
+    /// Sidebar terminal currently showing its inline rename field — the
+    /// same `session_rename_input` editor serves both rows.
+    terminal_rename: Option<Uuid>,
     /// One stable field reused across sidebar rows so virtualization never
     /// replaces the focused editor while a rename is in progress.
     session_rename_input: Entity<TextInput>,
@@ -4093,8 +4096,15 @@ impl Waku {
             cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
-                    InputEvent::Submit(_) => this.commit_session_rename(cx),
-                    InputEvent::Edited if this.session_rename.is_some() => cx.notify(),
+                    InputEvent::Submit(_) => {
+                        this.commit_session_rename(cx);
+                        this.commit_terminal_rename(cx);
+                    }
+                    InputEvent::Edited
+                        if this.session_rename.is_some() || this.terminal_rename.is_some() =>
+                    {
+                        cx.notify()
+                    }
                     _ => {}
                 },
             )
@@ -4417,6 +4427,7 @@ impl Waku {
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,
                 session_rename: None,
+                terminal_rename: None,
                 session_rename_input,
                 // The Terminals group starts folded every launch — its rows
                 // are opt-in, unlike the session history below them.

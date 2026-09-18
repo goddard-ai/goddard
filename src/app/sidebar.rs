@@ -7,7 +7,7 @@ use waku_client::friends::TransferStatus;
 
 actions!(waku_sidebar, [CancelSessionRename]);
 
-const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
+pub(super) const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
 
 /// Keep Escape inside the focused inline editor so it cancels the rename,
@@ -2106,6 +2106,9 @@ impl Waku {
         if self.session_rename.is_some() {
             self.commit_session_rename(cx);
         }
+        if self.terminal_rename.is_some() {
+            self.commit_terminal_rename(cx);
+        }
         self.settings_page = None;
         self.select_session(session_id, cx);
     }
@@ -2994,6 +2997,7 @@ impl Waku {
             return;
         };
 
+        self.terminal_rename = None;
         self.session_rename = Some(session_id);
         self.session_rename_input.update(cx, |input, cx| {
             input.set_content(title, cx);
@@ -3796,10 +3800,15 @@ impl Waku {
         // badge does; the sidebar's own ensure never runs while it is hidden.
         self.ensure_sidebar_pull_requests(cx);
         let title = if let Some(terminal_id) = self.selected_terminal {
-            self.right_panel_terminals
+            self.terminal_records
                 .get(&terminal_id)
-                .map(|terminal| single_line_label(terminal.read(cx).title()))
-                .filter(|title| !title.is_empty())
+                .and_then(|record| record.custom_title.clone())
+                .or_else(|| {
+                    self.right_panel_terminals
+                        .get(&terminal_id)
+                        .map(|terminal| single_line_label(terminal.read(cx).title()))
+                        .filter(|title| !title.is_empty())
+                })
                 .unwrap_or_else(|| tr!("right_panel.terminal"))
         } else if self.projects_page.is_some() {
             tr!("projects.title")
