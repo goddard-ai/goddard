@@ -1408,12 +1408,17 @@ impl Waku {
                     git_panel::transcript_commit_hit_at(&selection, event.position)
                 {
                     let _ = waku.update(cx, |this, _| {
-                        this.transcript_commit_press = Some(git_panel::TranscriptCommitPress {
-                            key: hit.key,
-                            range: hit.range,
-                            sha: hit.sha,
-                            position: event.position,
-                        });
+                        // Without the Git panel opt-in a SHA click has nowhere
+                        // to go — leave the gesture to text selection.
+                        if this.state.git_panel_enabled {
+                            this.transcript_commit_press =
+                                Some(git_panel::TranscriptCommitPress {
+                                    key: hit.key,
+                                    range: hit.range,
+                                    sha: hit.sha,
+                                    position: event.position,
+                                });
+                        }
                     });
                 }
             }
@@ -1504,6 +1509,7 @@ impl Waku {
                                     range: press.range,
                                     sha: press.sha,
                                 },
+                                window,
                                 cx,
                             );
                         });
