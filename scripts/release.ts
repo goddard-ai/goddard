@@ -423,6 +423,14 @@ try {
   await mkdir(dirname(outputPath), { recursive: true });
   await rm(outputPath, { force: true });
 
+  // Finder draws a DMG background at one point per pixel, so a single PNG
+  // would clip on Retina displays. tiffutil packs the 1x and 2x sources into
+  // one multi-representation TIFF and Finder picks per display. The window
+  // is sized to the artwork's logical size, 700x425, and the icon positions
+  // below are laid out against it.
+  const dmgBackground = join(temporaryDirectory, "dmg-background.tiff");
+  await $`tiffutil -cathidpicheck resources/dmg-background.png resources/dmg-background@2x.png -out ${dmgBackground}`;
+
   logStep(`Creating the styled DMG at ${outputPath}`);
   // APFS mounting races create-dmg: hdiutil attach can return before the
   // synthesized volume device exists, so create-dmg picks the APFS container
@@ -431,7 +439,7 @@ try {
   // leaked image, drop its rw.*.dmg temp file, and retry.
   for (let attempt = 1; ; attempt++) {
     const result =
-      await $`create-dmg --volname ${volumeName} --window-pos 200 120 --window-size 660 400 --text-size 13 --icon-size 128 --icon ${`${appName}.app`} 180 178 --hide-extension ${`${appName}.app`} --app-drop-link 480 178 --filesystem APFS --format ULFO --no-internet-enable --overwrite ${outputPath} ${stagingDirectory}`
+      await $`create-dmg --volname ${volumeName} --window-pos 200 120 --window-size 700 425 --text-size 13 --icon-size 128 --icon ${`${appName}.app`} 190 189 --hide-extension ${`${appName}.app`} --app-drop-link 510 189 --background ${dmgBackground} --filesystem APFS --format ULFO --no-internet-enable --overwrite ${outputPath} ${stagingDirectory}`
         .quiet()
         .nothrow();
     if (result.exitCode === 0) {
@@ -505,6 +513,7 @@ try {
     await access(artifact);
   }
   await access(join(mountDirectory, ".DS_Store"));
+  await access(join(mountDirectory, ".background", "dmg-background.tiff"));
   const applicationsTarget = await readlink(
     join(mountDirectory, "Applications"),
   );

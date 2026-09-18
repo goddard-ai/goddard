@@ -52,6 +52,18 @@ SetupIconFile=AppIcon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Optional wizard branding — the Windows counterpart to the DMG background.
+; WizardImageFile paints the welcome/finish page's left panel (~164x314 px at
+; 100% DPI under WizardStyle=modern); WizardSmallImageFile is the ~55x55 badge
+; at the top-right of the inner pages. Both take comma-separated BMPs for
+; extra DPI steps. Drop the assets next to this script to enable; absent files
+; leave the stock wizard look.
+#ifexist "wizard-image.bmp"
+WizardImageFile=wizard-image.bmp
+#endif
+#ifexist "wizard-small-image.bmp"
+WizardSmallImageFile=wizard-small-image.bmp
+#endif
 ArchitecturesAllowed={#Architectures}
 ArchitecturesInstallIn64BitMode={#Architectures}
 ; What docs/windows.md promises. Enforcing it here beats installing onto a
