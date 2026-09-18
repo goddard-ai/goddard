@@ -1269,6 +1269,7 @@ impl Waku {
                 locked_provider,
                 &normalized_query,
                 self.auto_route_available(),
+                PickerGranularity::Combos,
             )
         } else {
             Vec::new()
@@ -1380,7 +1381,7 @@ impl Waku {
                     );
                 }
                 for kind in ProviderKind::ALL {
-                    if !picker_lists_provider(&probes, &disabled_providers, locked_provider, kind) {
+                    if !picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, kind) {
                         continue;
                     }
                     rail = rail.child(
@@ -1891,6 +1892,7 @@ impl Waku {
             locked_provider,
             "",
             self.auto_route_available(),
+            PickerGranularity::Combos,
         );
         let selection = session.and_then(|session| {
             self.session_model_combo(session)
@@ -1924,6 +1926,8 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             "",
+            self.auto_route_available(),
+            PickerGranularity::Combos,
         );
         let first = rows
             .iter()
@@ -1954,6 +1958,8 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             "",
+            self.auto_route_available(),
+            PickerGranularity::Combos,
         );
         let mut sections = Vec::new();
         let mut previous = None;
@@ -1975,7 +1981,12 @@ impl Waku {
                 self.session_model_combo(session)
                     .map(|(model, effort, fast)| (session.provider, model, effort, fast))
             });
-            picker_selected_row_index(selection.as_ref(), &rows).unwrap_or(0)
+            picker_selected_row_index(
+                selection.as_ref(),
+                session.is_some_and(|session| session.auto_route),
+                &rows,
+            )
+            .unwrap_or(0)
         });
         let current_section = sections
             .iter()
@@ -5969,15 +5980,20 @@ pub(super) fn picker_has_no_providers(
 /// leading sections or the first row of a provider's block.
 #[derive(Clone, Copy, PartialEq)]
 enum ModelPickerSection {
+    /// The router row — its provider field is a placeholder, so it cannot
+    /// borrow a provider's section.
+    Auto,
     Favorites,
     Recents,
     Provider(ProviderKind),
 }
 
-/// A row's jump section in the merged list: favorites and recents each
-/// form one block ahead of the provider blocks.
+/// A row's jump section in the merged list: Auto leads alone, then
+/// favorites and recents each form one block ahead of the provider blocks.
 fn picker_row_section(row: &ModelPickerRow) -> ModelPickerSection {
-    if row.favorite_index.is_some() {
+    if row.auto {
+        ModelPickerSection::Auto
+    } else if row.favorite_index.is_some() {
         ModelPickerSection::Favorites
     } else if row.recent_rank.is_some() {
         ModelPickerSection::Recents
@@ -6058,6 +6074,15 @@ pub(super) fn favorite_matches_row(
     }
 }
 
+/// How much of a model each picker row names: the composer's full combos, or
+/// one row per model for pickers whose value is a bare `provider:model`
+/// target — the routing policy cannot encode an effort or a tier.
+#[derive(Clone, Copy)]
+pub(super) enum PickerGranularity {
+    Combos,
+    Models,
+}
+
 /// Every (effort, tier) combination a catalog model expands into: one row per
 /// advertised effort — a single row when the model has none — crossed with
 /// the standard/fast pair when the provider offers a fast tier.
@@ -6130,6 +6155,7 @@ pub(super) fn visible_picker_rows(
     locked_provider: Option<ProviderKind>,
     normalized_query: &str,
     auto_route: bool,
+    granularity: PickerGranularity,
 ) -> Vec<ModelPickerRow> {
     let searching = !normalized_query.is_empty();
     let mut rows: Vec<ModelPickerRow> = probes
@@ -6140,7 +6166,18 @@ pub(super) fn visible_picker_rows(
                 .models
                 .iter()
                 .cloned()
-                .flat_map(move |model| picker_model_rows(probe.provider, model))
+                .flat_map(move |model| match granularity {
+                    PickerGranularity::Combos => picker_model_rows(probe.provider, model),
+                    PickerGranularity::Models => vec![ModelPickerRow {
+                        provider: probe.provider,
+                        model,
+                        effort: None,
+                        fast: false,
+                        favorite_index: None,
+                        recent_rank: None,
+                        auto: false,
+                    }],
+                })
         })
         .filter(|row| locked_provider.is_none() || locked_provider == Some(row.provider))
         // Switched-off providers keep serving the session already locked to

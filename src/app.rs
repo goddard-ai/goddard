@@ -75,7 +75,7 @@ use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
     file_icon, goddard_logo, icon, icon_button, motion, progress_ring, provider_color,
-    provider_icon, provider_mark, rem_scale, status_color, thinking, toggle_switch,
+    provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
@@ -1688,6 +1688,9 @@ pub struct Waku {
     project_switcher: project_switcher::ProjectSwitcherUi,
     big_picture: big_picture::BigPictureUi,
     model_search: Entity<TextInput>,
+    /// The routing class picker's filter field — one shared set serves all
+    /// three class menus; only one can be open at a time.
+    route_class_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     /// The Appearance page's two font pickers — one per configurable face.
     ui_font_selector: settings::FontSelector,
@@ -1837,6 +1840,14 @@ pub struct Waku {
     model_picker_highlight: Option<usize>,
     model_picker_scroll: ScrollHandle,
     model_picker_scrollbar: Rc<ScrollbarState>,
+    /// The class-target picker's drawn selection and list state — same shape
+    /// as the model picker's, shared by the three class menus.
+    route_class_highlight: Option<usize>,
+    route_class_scroll: ScrollHandle,
+    route_class_scrollbar: Rc<ScrollbarState>,
+    /// The class whose target picker is open — routes `enter` and the
+    /// empty-query reveal to the right policy slot.
+    route_class_picker: Option<waku_protocol::routing::TaskClass>,
     /// Focus for the picker's no-providers state. The panel takes focus on
     /// open so `escape` has a focused descendant to dispatch up from, and
     /// normally that is the filter field — which the empty state does not
@@ -3427,6 +3438,12 @@ impl Waku {
                 .accessibility_label(tr!("input.search_models"))
                 .placeholder(tr!("input.search_models"))
         });
+        let route_class_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("input.search_models"))
+                .placeholder(tr!("input.search_models"))
+        });
         let branch_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -4173,6 +4190,29 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
+                &route_class_search,
+                |this: &mut Self, search, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        // Same contract as the model picker: a live filter
+                        // pins the cursor to the first row so `enter` has a
+                        // visible target; clearing returns to the opening
+                        // state — nothing highlighted, the class's target
+                        // row back in view.
+                        if search.read(cx).content().trim().is_empty() {
+                            this.route_class_highlight = None;
+                            if let Some(class) = this.route_class_picker {
+                                this.reveal_route_class_target(class);
+                            }
+                        } else {
+                            this.route_class_highlight = Some(0);
+                            this.route_class_scroll.scroll_to_item(0);
+                        }
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &command_palette_search,
                 |this: &mut Self, search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -4510,6 +4550,7 @@ impl Waku {
                 project_switcher,
                 big_picture,
                 model_search,
+                route_class_search,
                 branch_search,
                 branch_create_input,
                 worktree_name_input,
@@ -4601,6 +4642,10 @@ impl Waku {
                 model_picker_highlight: None,
                 model_picker_scroll: ScrollHandle::new(),
                 model_picker_scrollbar: ScrollbarState::new(),
+                route_class_highlight: None,
+                route_class_scroll: ScrollHandle::new(),
+                route_class_scrollbar: ScrollbarState::new(),
+                route_class_picker: None,
                 model_picker_empty_focus,
                 branch_picker_mode: BranchPickerMode::Browse,
                 branch_picker_highlight: None,

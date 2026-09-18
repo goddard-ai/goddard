@@ -182,6 +182,7 @@ impl Waku {
             checkpoint_warning,
             worktree_restored,
             driver: _,
+            route_decision: _,
         } = prepared;
         let workspace_changed = self.state.session_mut(session_id).is_some_and(|session| {
             let changed = session.workspace != workspace;

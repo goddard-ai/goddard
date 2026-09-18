@@ -2851,14 +2851,14 @@ fn model_picker_highlight_wraps_at_both_ends() {
 
 #[test]
 fn model_picker_highlight_seeds_from_the_selected_model() {
-    use super::composer::{picker_selected_row_index, visible_picker_rows};
+    use super::composer::{PickerGranularity, picker_selected_row_index, visible_picker_rows};
 
     let probes = [
         picker_probe(ProviderKind::Claude, "claude-a", &[], false),
         picker_probe(ProviderKind::Claude, "claude-b", &[], false),
         picker_probe(ProviderKind::Claude, "claude-c", &[], false),
     ];
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false, PickerGranularity::Combos);
 
     // The first arrow moves relative to the session's combo — the row the
     // reveal scrolled into view — rather than jumping to an end.
@@ -2877,7 +2877,7 @@ fn model_picker_highlight_seeds_from_the_selected_model() {
 
 #[test]
 fn auto_route_seed_and_filter_follow_the_picker_row() {
-    use super::composer::{picker_selected_row_index, visible_picker_rows};
+    use super::composer::{PickerGranularity, picker_selected_row_index, visible_picker_rows};
     use crate::model::ProviderModel;
     use crate::model::ProviderProbe;
 
@@ -2892,22 +2892,22 @@ fn auto_route_seed_and_filter_follow_the_picker_row() {
 
     // Auto heads the unfiltered list when the draft may route, and the
     // routed selection seeds on it — never on a concrete model row.
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", true);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", true, PickerGranularity::Combos);
     assert!(rows[0].auto);
     assert_eq!(rows.len(), 2);
     assert_eq!(picker_selected_row_index(None, true, &rows), Some(0));
 
     // The same query rules as models: "auto" or "jev" keeps the row,
     // "sonnet" drops it.
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "aut", true);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "aut", true, PickerGranularity::Combos);
     assert!(rows[0].auto);
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "jev", true);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "jev", true, PickerGranularity::Combos);
     assert!(rows[0].auto);
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "sonnet", true);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "sonnet", true, PickerGranularity::Combos);
     assert!(rows.iter().all(|row| !row.auto));
 
     // Without the flag the list is only concrete models.
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false, PickerGranularity::Combos);
     assert!(rows.iter().all(|row| !row.auto));
 }
 
@@ -2925,6 +2925,44 @@ fn only_opencode_providers_offer_an_explicit_reasoning_default_reset() {
             }
         );
     }
+}
+
+#[test]
+fn route_class_rows_lead_with_aliases_then_providers_then_models() {
+    use super::settings::route_class_rows;
+    use crate::model::{ProviderModel, ProviderProbe};
+
+    let probe = ProviderProbe {
+        provider: ProviderKind::Claude,
+        installed: true,
+        path: Some(std::path::PathBuf::from("/bin/claude")),
+        models: vec![ProviderModel::new("claude-sonnet-5", "Claude Sonnet 5")],
+        agent_presets: Vec::new(),
+    };
+    let targets = |query: &str| {
+        route_class_rows(&[probe.clone()], &[], query)
+            .iter()
+            .map(|row| row.target())
+            .collect::<Vec<_>>()
+    };
+
+    // Tiers lead — the aliases the shipped defaults use — then the provider's
+    // own default, then its catalog models at `provider:model` granularity.
+    assert_eq!(
+        targets(""),
+        [
+            "tier:fast",
+            "tier:default",
+            "tier:heavy",
+            "claude",
+            "claude:claude-sonnet-5",
+        ]
+    );
+
+    // The same token rule as the model picker: "claude" keeps the provider's
+    // rows and drops the tiers.
+    assert_eq!(targets("claude"), ["claude", "claude:claude-sonnet-5"]);
+    assert_eq!(targets("sonnet"), ["claude:claude-sonnet-5"]);
 }
 
 #[test]
@@ -3041,7 +3079,7 @@ fn computer_use_navigation_follows_the_experiment_opt_in() {
 
 #[test]
 fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
-    use super::composer::visible_picker_rows;
+    use super::composer::{PickerGranularity, visible_picker_rows};
     use crate::model::{FavoriteModel, ProviderModel, ProviderProbe};
 
     let probe = |provider: ProviderKind, model: &str| ProviderProbe {
@@ -3065,10 +3103,10 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
 
     // The merged list offers only the provider left switched on — its star
     // or its search index cannot resurface the other one's rows.
-    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "", false);
+    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "", false, PickerGranularity::Combos);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].provider, ProviderKind::Codex);
-    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "claude", false);
+    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "claude", false, PickerGranularity::Combos);
     assert!(rows.is_empty());
 
     // A session already locked to the provider keeps its models.
@@ -3080,6 +3118,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         Some(ProviderKind::Claude),
         "",
         false,
+        PickerGranularity::Combos,
     );
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].provider, ProviderKind::Claude);
@@ -3137,7 +3176,7 @@ fn picker_probe(
 
 #[test]
 fn picker_rows_expand_models_into_effort_and_fast_combos() {
-    use super::composer::visible_picker_rows;
+    use super::composer::{PickerGranularity, visible_picker_rows};
 
     let probes = [
         picker_probe(ProviderKind::Codex, "gpt", &["low", "high"], true),
@@ -3145,7 +3184,7 @@ fn picker_rows_expand_models_into_effort_and_fast_combos() {
         // A model with no effort metadata contributes exactly one row.
         picker_probe(ProviderKind::Cursor, "auto", &[], false),
     ];
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false, PickerGranularity::Combos);
 
     assert_eq!(rows.len(), 6);
     // Provider order first (Claude before Codex in `ProviderKind::ALL`),
@@ -3171,16 +3210,16 @@ fn picker_rows_expand_models_into_effort_and_fast_combos() {
     );
 
     // Effort ids and the fast flag are searchable.
-    let fast_rows = visible_picker_rows(&probes, &[], &[], &[], None, "fast", false);
+    let fast_rows = visible_picker_rows(&probes, &[], &[], &[], None, "fast", false, PickerGranularity::Combos);
     assert_eq!(fast_rows.len(), 2);
     assert!(fast_rows.iter().all(|row| row.fast));
-    let high_rows = visible_picker_rows(&probes, &[], &[], &[], None, "high", false);
+    let high_rows = visible_picker_rows(&probes, &[], &[], &[], None, "high", false, PickerGranularity::Combos);
     assert_eq!(high_rows.len(), 2);
 }
 
 #[test]
 fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
-    use super::composer::visible_picker_rows;
+    use super::composer::{PickerGranularity, visible_picker_rows};
     use crate::model::FavoriteModel;
     use crate::persistence::RecentModelUse;
 
@@ -3212,7 +3251,7 @@ fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
         used_at: 0,
     }];
 
-    let rows = visible_picker_rows(&probes, &favorites, &recents, &[], None, "", false);
+    let rows = visible_picker_rows(&probes, &favorites, &recents, &[], None, "", false, PickerGranularity::Combos);
     let order: Vec<ProviderKind> = rows.iter().map(|row| row.provider).collect();
     // Favorites lead in their stored order, then the recent, then the rest.
     assert_eq!(
@@ -3230,7 +3269,7 @@ fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
 
 #[test]
 fn picker_rows_give_recency_to_the_fast_variant_last_started() {
-    use super::composer::visible_picker_rows;
+    use super::composer::{PickerGranularity, visible_picker_rows};
     use crate::persistence::RecentModelUse;
 
     let probes = [picker_probe(ProviderKind::Codex, "gpt", &["high"], true)];
@@ -3244,7 +3283,7 @@ fn picker_rows_give_recency_to_the_fast_variant_last_started() {
         used_at: 0,
     }];
 
-    let rows = visible_picker_rows(&probes, &[], &recents, &[], None, "", false);
+    let rows = visible_picker_rows(&probes, &[], &recents, &[], None, "", false, PickerGranularity::Combos);
     assert_eq!(rows.len(), 2);
     assert!(rows[0].fast);
     assert_eq!(rows[0].recent_rank, Some(0));
@@ -3253,7 +3292,7 @@ fn picker_rows_give_recency_to_the_fast_variant_last_started() {
 
 #[test]
 fn picker_rows_match_a_bare_legacy_favorite_to_the_default_effort_row() {
-    use super::composer::visible_picker_rows;
+    use super::composer::{PickerGranularity, visible_picker_rows};
     use crate::model::FavoriteModel;
 
     let mut probe = picker_probe(ProviderKind::Codex, "gpt", &["low", "high"], true);
@@ -3268,7 +3307,7 @@ fn picker_rows_match_a_bare_legacy_favorite_to_the_default_effort_row() {
         fast: false,
     }];
 
-    let rows = visible_picker_rows(&probes, &favorites, &[], &[], None, "", false);
+    let rows = visible_picker_rows(&probes, &favorites, &[], &[], None, "", false, PickerGranularity::Combos);
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].favorite_index, Some(0));
     assert_eq!(rows[0].effort.as_deref(), Some("high"));

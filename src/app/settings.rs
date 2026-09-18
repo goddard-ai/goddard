@@ -1,4 +1,6 @@
-use super::composer::next_picker_highlight;
+use super::composer::{
+    PickerGranularity, model_picker_subtitle, next_picker_highlight, visible_picker_rows,
+};
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
@@ -3644,20 +3646,61 @@ impl Waku {
         div().child(credentials).child(classes).into_any_element()
     }
 
-    /// One class-level target picker: tier aliases first, then every
-    /// installed provider's default and catalog models. Selecting writes the
-    /// raw target string into the policy document — same grammar hand edits
-    /// use.
+    /// One class-level target picker: the composer's searchable model list at
+    /// model granularity — a policy target names no effort or tier — with the
+    /// policy's tier aliases and provider defaults on top. Selecting writes
+    /// the raw target string into the policy document — same grammar hand
+    /// edits use.
     fn route_class_selector(
         &self,
         class: TaskClass,
         current: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = Theme::current(cx);
         let weak = cx.entity().downgrade();
         let menu_id = format!("route-class-{}", class.id());
-        let handle = self.menu_handle(menu_id.clone(), cx);
-        let label = route_target_label(current, &self.probes);
+        let search = self.route_class_search.clone();
+        let scroll = self.route_class_scroll.clone();
+        let scrollbar_state = self.route_class_scrollbar.clone();
+        let handle = {
+            let reset_weak = weak.clone();
+            let reset_search = search.clone();
+            self.menu_handle_with(menu_id.clone(), cx, move |open, window, cx| {
+                let _ = reset_weak.update(cx, |this, cx| {
+                    if open {
+                        this.route_class_picker = Some(class);
+                        this.route_class_highlight = None;
+                        reset_search.update(cx, |search, cx| search.clear(cx));
+                        this.reveal_route_class_target(class);
+                    } else {
+                        this.route_class_picker = None;
+                        let focus = this.settings_focus.clone();
+                        window.focus(&focus, cx);
+                    }
+                    cx.notify();
+                });
+                if open {
+                    // The panel is deferred, so its input joins the dispatch
+                    // tree only after the deferred draw — the same two-frame
+                    // wait the model picker needs before it can take focus.
+                    // The reveal is re-issued here too: a parked scroll
+                    // request resolves against the previous paint's bounds,
+                    // so on the container's first-ever paint it lands wrong.
+                    let focus_weak = reset_weak.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| {
+                            let _ = focus_weak.update(cx, |this, cx| {
+                                let focus = this.route_class_search.read(cx).focus_handle(cx);
+                                window.focus(&focus, cx);
+                                this.reveal_route_class_target(class);
+                            });
+                        });
+                    });
+                }
+            })
+        };
+
         // The same set Auto may pick between — a class target naming an
         // uninstalled provider would resolve but could never start.
         let probes: Vec<ProviderProbe> = self
@@ -3668,68 +3711,270 @@ impl Waku {
             })
             .cloned()
             .collect();
+        let normalized_query = self
+            .route_class_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_ascii_lowercase();
         let current = current.to_owned();
-        dropdown_menu(
+        let label = route_target_label(&current, &self.probes);
+        // One ordering shared by the rendered rows and `enter`'s handler —
+        // the same rule the composer documents for its own list. Only built
+        // while the panel is open: it clones every provider's model list.
+        let available_rows = Rc::new(if handle.is_open() {
+            route_class_rows(&probes, &self.state.disabled_providers, &normalized_query)
+        } else {
+            Vec::new()
+        });
+        let highlight = self
+            .route_class_highlight
+            .filter(|index| *index < available_rows.len());
+
+        popover(
             MenuChip::new(format!("route-class-selector-{}", class.id()))
                 .label(label)
                 .outlined()
                 .selected(handle.is_open())
                 .w(px(240.0))
                 .justify_between(),
-            format!("{menu_id}-menu"),
             &handle,
             MenuAlign::BelowRight,
-            move |_| {
-                let mut items = vec![
-                    MenuItem::Header(tr!("routing.tiers").into()),
-                    route_target_item(
-                        &weak,
-                        class,
-                        "tier:fast",
-                        tr!("routing.tier_fast"),
-                        &current,
-                    ),
-                    route_target_item(
-                        &weak,
-                        class,
-                        "tier:default",
-                        tr!("routing.tier_default"),
-                        &current,
-                    ),
-                    route_target_item(
-                        &weak,
-                        class,
-                        "tier:heavy",
-                        tr!("routing.tier_heavy"),
-                        &current,
-                    ),
-                    MenuItem::Separator,
-                    MenuItem::Header(tr!("routing.providers").into()),
-                ];
-                for probe in &probes {
-                    let provider = probe.provider;
-                    let provider_label = format!(
-                        "{} ({})",
-                        provider.short_name(),
-                        tr!("routing.provider_default")
+            move |popover, _window, _cx| {
+                let popover = popover.clone();
+                let available_rows = available_rows.clone();
+
+                let search_input = div()
+                    .h(px(52.0))
+                    .px(px(12.0))
+                    .pt(px(10.0))
+                    .pb(px(8.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(34.0))
+                            .px(px(10.0))
+                            .rounded(px(11.0))
+                            .bg(theme.raised)
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                            .child(div().flex_1().min_w_0().child(search.clone())),
                     );
-                    items.push(
-                        route_target_item(&weak, class, provider.id(), provider_label, &current)
-                            .icon(provider_icon(provider)),
+
+                let mut rows = div()
+                    .id("route-class-list")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .p(px(9.0));
+                if available_rows.is_empty() {
+                    rows = rows.child(
+                        div()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("models.none_found")),
                     );
-                    for model in &probe.models {
-                        let target = format!("{}:{}", provider.id(), model.id);
-                        let label = format!("{} · {}", model.name, provider.short_name());
-                        items.push(
-                            route_target_item(&weak, class, target, label, &current)
-                                .icon(provider_icon(provider)),
-                        );
-                    }
                 }
-                items
+
+                for (row_index, row) in available_rows.iter().enumerate() {
+                    let is_highlighted = highlight == Some(row_index);
+                    let is_selected = row.target() == current;
+                    let (mark, title, subtitle) = row.render_parts(&theme);
+                    let row_target = row.target();
+                    let select_weak = weak.clone();
+                    let select_popover = popover.clone();
+                    rows = rows.child(
+                        div()
+                            .id(SharedString::from(format!("route-class-row-{row_index}")))
+                            .h(px(58.0))
+                            .px(px(12.0))
+                            .rounded(px(11.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .cursor_default()
+                            // Reserved on every row so highlighting one cannot
+                            // resize it and shift the list by a pixel.
+                            .border(hairline())
+                            .border_color(gpui::transparent_black())
+                            .when(is_selected, |element| element.bg(theme.overlay_strong))
+                            .when(is_highlighted, |element| {
+                                element.bg(theme.overlay).border_color(theme.accent)
+                            })
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.opacity(0.85))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(mark)
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_size(sp(13.0))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(theme.text)
+                                                    .child(SharedString::from(title)),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(4.0))
+                                            .truncate()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_tertiary)
+                                            .child(SharedString::from(subtitle)),
+                                    ),
+                            )
+                            .when(is_selected, |element| {
+                                element.child(icon("icons/check.svg", 13.0, theme.accent))
+                            })
+                            .on_click(move |_, window, cx| {
+                                let _ = select_weak.update(cx, |this, cx| {
+                                    this.set_route_class_target(class, row_target.clone(), cx);
+                                });
+                                select_popover.close(window, cx);
+                            }),
+                    );
+                }
+
+                let next_rows = available_rows.clone();
+                let previous_rows = available_rows.clone();
+                let confirm_rows = available_rows.clone();
+                let next_weak = weak.clone();
+                let previous_weak = weak.clone();
+                let confirm_weak = weak.clone();
+                let confirm_popover = popover.clone();
+                div()
+                    .w(px(340.0))
+                    .h(px(390.0))
+                    .rounded(px(16.0))
+                    .overflow_hidden()
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.surface)
+                    .shadow_lg()
+                    .flex()
+                    .flex_col()
+                    // The filter field keeps focus and the selected row is
+                    // only drawn, never focused — the same split the model
+                    // picker uses. These arrive as actions bound to
+                    // `WakuMenu > TextInput`, the only way to claim a key out
+                    // from under a focused text field.
+                    .on_action(move |_: &SelectNextEntry, _, cx| {
+                        let _ = next_weak.update(cx, |this, cx| {
+                            this.move_route_class_highlight("down", &next_rows, cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                        let _ = previous_weak.update(cx, |this, cx| {
+                            this.move_route_class_highlight("up", &previous_rows, cx);
+                        });
+                    })
+                    .on_action(move |_: &ConfirmEntry, window, cx| {
+                        let _ = confirm_weak.update(cx, |this, cx| {
+                            this.choose_route_class_row(class, &confirm_rows, cx);
+                        });
+                        confirm_popover.close(window, cx);
+                        window.refresh();
+                    })
+                    .child(search_input)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .relative()
+                            .child(rows)
+                            .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                    )
+                    .into_any_element()
             },
         )
         .into_any_element()
+    }
+
+    /// Move the class picker's drawn selection. Nothing is focused: the
+    /// filter field keeps focus so typing continues to narrow the list.
+    /// Unmoved, the cursor seeds on the class's current target.
+    fn move_route_class_highlight(
+        &mut self,
+        key: &str,
+        rows: &[RouteClassRow],
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .route_class_highlight
+            .filter(|index| *index < rows.len())
+            .or_else(|| {
+                let class = self.route_class_picker?;
+                let current = self.route_class_target(class);
+                rows.iter().position(|row| row.target() == current)
+            });
+        let Some(next) = next_picker_highlight(current, rows.len(), key) else {
+            return;
+        };
+        self.route_class_highlight = Some(next);
+        self.route_class_scroll.scroll_to_item(next);
+        cx.notify();
+    }
+
+    /// Write the highlighted row's target into the class's policy slot —
+    /// the highlight when the keyboard moved, else the first row.
+    fn choose_route_class_row(
+        &mut self,
+        class: TaskClass,
+        rows: &[RouteClassRow],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = rows.get(self.route_class_highlight.unwrap_or(0)) else {
+            return;
+        };
+        let target = row.target();
+        self.set_route_class_target(class, target, cx);
+    }
+
+    /// Bring the class's current target row into view — the same reveal the
+    /// model picker does for the session's combo.
+    pub(super) fn reveal_route_class_target(&self, class: TaskClass) {
+        let current = self.route_class_target(class);
+        let probes: Vec<ProviderProbe> = self
+            .probes
+            .iter()
+            .filter(|probe| {
+                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
+            })
+            .cloned()
+            .collect();
+        let rows = route_class_rows(&probes, &self.state.disabled_providers, "");
+        let index = rows
+            .iter()
+            .position(|row| row.target() == current)
+            .unwrap_or(0);
+        self.route_class_scroll.scroll_to_item(index);
+    }
+
+    /// The class's effective target — the policy's entry when a view has
+    /// landed, else the shipped default.
+    fn route_class_target(&self, class: TaskClass) -> String {
+        self.route_policy
+            .as_ref()
+            .and_then(|view| view.classes.get(class.id()).cloned())
+            .unwrap_or_else(|| default_route_class_target(class).to_owned())
     }
 
     fn daemon_exposure_from_fields(
@@ -7399,23 +7644,117 @@ fn route_target_label(target: &str, probes: &[ProviderProbe]) -> String {
     }
 }
 
-/// One dropdown row writing `target` into `class`'s policy slot.
-fn route_target_item(
-    weak: &WeakEntity<Waku>,
-    class: TaskClass,
-    target: impl Into<String>,
-    label: impl Into<SharedString>,
-    current: &str,
-) -> MenuItem {
-    let target = target.into();
-    let selected = target == current;
-    let weak = weak.clone();
-    MenuItem::new(label, move |_, cx| {
-        let _ = weak.update(cx, |this, cx| {
-            this.set_route_class_target(class, target.clone(), cx);
-        });
-    })
-    .selected(selected)
+/// One row in a class-target picker: a policy alias, a provider default, or
+/// a concrete model — the same list the composer's model picker draws, at
+/// model granularity because a policy target names no effort or tier.
+pub(super) enum RouteClassRow {
+    /// `tier:*` — resolves through the policy's tier table at route time.
+    Tier(&'static str),
+    /// `provider` — the provider's own default model.
+    ProviderDefault(ProviderKind),
+    /// `provider:model` — a concrete catalog model.
+    Model(ProviderKind, ProviderModel),
+}
+
+impl RouteClassRow {
+    /// The raw policy target the row writes — same grammar hand edits use.
+    pub(super) fn target(&self) -> String {
+        match self {
+            RouteClassRow::Tier(target) => (*target).to_owned(),
+            RouteClassRow::ProviderDefault(provider) => provider.id().to_owned(),
+            RouteClassRow::Model(provider, model) => {
+                format!("{}:{}", provider.id(), model.id)
+            }
+        }
+    }
+
+    /// The row's mark, title, and subtitle — the composer's two-line shape.
+    fn render_parts(&self, theme: &Theme) -> (AnyElement, String, String) {
+        match self {
+            RouteClassRow::Tier(target) => (
+                icon("icons/chart-column.svg", 14.0, theme.accent.opacity(0.9))
+                    .into_any_element(),
+                route_target_label(target, &[]),
+                (*target).to_owned(),
+            ),
+            RouteClassRow::ProviderDefault(provider) => (
+                provider_mark(
+                    theme,
+                    *provider,
+                    14.0,
+                    provider_color(theme, *provider).opacity(0.9),
+                )
+                .into_any_element(),
+                provider.short_name().to_owned(),
+                tr!("routing.provider_default"),
+            ),
+            RouteClassRow::Model(provider, model) => (
+                provider_mark(
+                    theme,
+                    *provider,
+                    14.0,
+                    provider_color(theme, *provider).opacity(0.9),
+                )
+                .into_any_element(),
+                model
+                    .name_i18n
+                    .as_ref()
+                    .map(waku_client::WireTranslation::render)
+                    .unwrap_or_else(|| model.name.clone()),
+                model_picker_subtitle(*provider, model.sub_provider.as_deref()),
+            ),
+        }
+    }
+}
+
+/// The class picker's full list: tier aliases first, then each provider's
+/// default, then every catalog model — flat, matching how a hand-edited
+/// policy reads. All rows share the picker's token-filter rule.
+pub(super) fn route_class_rows(
+    probes: &[ProviderProbe],
+    disabled_providers: &[ProviderKind],
+    normalized_query: &str,
+) -> Vec<RouteClassRow> {
+    let searching = !normalized_query.is_empty();
+    let matches = |searchable: String| {
+        !searching
+            || normalized_query
+                .split_whitespace()
+                .all(|token| searchable.to_ascii_lowercase().contains(token))
+    };
+    let mut rows = Vec::new();
+    // The policy's own vocabulary first — the tier aliases the shipped
+    // defaults resolve through.
+    for target in ["tier:fast", "tier:default", "tier:heavy"] {
+        if matches(format!("{target} {}", route_target_label(target, &[]))) {
+            rows.push(RouteClassRow::Tier(target));
+        }
+    }
+    for probe in probes {
+        if matches(format!(
+            "{} {} {}",
+            probe.provider.id(),
+            probe.provider.short_name(),
+            tr!("routing.provider_default")
+        )) {
+            rows.push(RouteClassRow::ProviderDefault(probe.provider));
+        }
+    }
+    rows.extend(
+        visible_picker_rows(
+            probes,
+            &[],
+            &[],
+            disabled_providers,
+            None,
+            normalized_query,
+            false,
+            PickerGranularity::Models,
+        )
+        .into_iter()
+        .map(|row| RouteClassRow::Model(row.provider, row.model)),
+    );
+    rows
 }
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
