@@ -52,7 +52,8 @@ pub struct DaemonSettings {
     pub custom_commands: Vec<CustomCommand>,
     pub disabled_providers: Vec<ProviderKind>,
     /// Experimental: inject named subagents into every session's harness.
-    /// Off by default; toggling affects only sessions started afterwards.
+    /// Off by default in release builds, on in debug builds (`bun run dev`);
+    /// toggling affects only sessions started afterwards.
     pub subagents_enabled: bool,
     /// Named subagent tiers injected into every session's harness, keyed by
     /// tier name ("explore", "fast", "medium", "heavy"). Empty → only the
@@ -66,6 +67,12 @@ pub struct DaemonSettings {
     pub extra: BTreeMap<String, Value>,
 }
 
+/// Experiments default on in development builds (`bun run dev`); release
+/// builds keep them opt-in. An explicit `false` in the document still wins.
+fn default_experiment_enabled() -> bool {
+    cfg!(debug_assertions)
+}
+
 impl Default for DaemonSettings {
     fn default() -> Self {
         Self {
@@ -75,7 +82,7 @@ impl Default for DaemonSettings {
             agent_settings_enabled: true,
             custom_commands: Vec::new(),
             disabled_providers: Vec::new(),
-            subagents_enabled: false,
+            subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
             provider_binary_overrides: HashMap::new(),
             extra: BTreeMap::new(),

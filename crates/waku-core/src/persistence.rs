@@ -63,6 +63,12 @@ fn default_computer_use_enabled() -> bool {
     false
 }
 
+/// Experiments default on in development builds (`bun run dev`); release
+/// builds keep them opt-in. An explicit `false` in the file wins either way.
+fn default_experiment_enabled() -> bool {
+    cfg!(debug_assertions)
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -305,7 +311,7 @@ pub struct PersistedState {
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental: whether sessions get named subagents injected, mirrored
     /// from the settings document.
-    #[serde(default)]
+    #[serde(default = "default_experiment_enabled")]
     pub subagents_enabled: bool,
     /// Named subagent tiers injected into every session's harness, mirrored
     /// from the settings document.
@@ -418,7 +424,7 @@ impl PersistedState {
             agent_tools_enabled: false,
             agent_settings_enabled: true,
             custom_commands: Vec::new(),
-            subagents_enabled: false,
+            subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),

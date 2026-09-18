@@ -108,6 +108,12 @@ fn default_computer_use_enabled() -> bool {
     false
 }
 
+/// Experiments default on in development builds (`bun run dev`); release
+/// builds keep them opt-in. An explicit `false` in the file wins either way.
+fn default_experiment_enabled() -> bool {
+    cfg!(debug_assertions)
+}
+
 fn default_ui_font_size() -> f32 {
     DEFAULT_UI_FONT_SIZE
 }
@@ -582,15 +588,17 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental: ⌘0 full-window grid of session cards with live
-    /// transcripts.
+    /// transcripts. Defaults on in debug builds.
     pub big_picture_enabled: bool,
-    /// Experimental: the Git panel (⌘⌥G) commit graph and diffs.
+    /// Experimental: the Git panel (⌘⌥G) commit graph and diffs. Defaults on
+    /// in debug builds.
     pub git_panel_enabled: bool,
     /// Experimental: GitHub issues and pull requests on the Projects page,
-    /// sidebar rows, and the right panel.
+    /// sidebar rows, and the right panel. Defaults on in debug builds.
     pub github_enabled: bool,
     /// Experimental: the Projects page (⌘⇧P) — a project's worktrees,
-    /// branches, issues, and pull requests in one place.
+    /// branches, issues, and pull requests in one place. Defaults on in
+    /// debug builds.
     pub projects_page_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -627,10 +635,10 @@ impl Default for AppSettings {
             completion_sound: CompletionSound::default(),
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             custom_commands: Vec::new(),
-            big_picture_enabled: false,
-            git_panel_enabled: false,
-            github_enabled: false,
-            projects_page_enabled: false,
+            big_picture_enabled: default_experiment_enabled(),
+            git_panel_enabled: default_experiment_enabled(),
+            github_enabled: default_experiment_enabled(),
+            projects_page_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -872,13 +880,14 @@ pub struct PersistedState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page.
-    #[serde(default)]
+    /// Each defaults on in debug builds; an explicit `false` still wins.
+    #[serde(default = "default_experiment_enabled")]
     pub big_picture_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_experiment_enabled")]
     pub git_panel_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_experiment_enabled")]
     pub github_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_experiment_enabled")]
     pub projects_page_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
@@ -939,7 +948,7 @@ pub struct PersistedState {
     pub agent_settings_enabled: bool,
     /// Experimental: whether sessions get named subagents injected. Daemon-
     /// owned; mirrored here so clients can render the toggle.
-    #[serde(default)]
+    #[serde(default = "default_experiment_enabled")]
     pub subagents_enabled: bool,
     /// Named subagent tiers injected into every session's harness. Daemon-
     /// owned; mirrored here so clients can render what will be injected.
@@ -1018,10 +1027,10 @@ impl PersistedState {
             completion_sound: CompletionSound::default(),
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             custom_commands: Vec::new(),
-            big_picture_enabled: false,
-            git_panel_enabled: false,
-            github_enabled: false,
-            projects_page_enabled: false,
+            big_picture_enabled: default_experiment_enabled(),
+            git_panel_enabled: default_experiment_enabled(),
+            github_enabled: default_experiment_enabled(),
+            projects_page_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1046,7 +1055,7 @@ impl PersistedState {
             provider_binary_overrides: HashMap::new(),
             agent_tools_enabled: false,
             agent_settings_enabled: true,
-            subagents_enabled: false,
+            subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
