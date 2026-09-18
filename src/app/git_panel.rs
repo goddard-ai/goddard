@@ -68,6 +68,12 @@ const GIT_PANEL_COMMIT_ROW_HEIGHT: f32 = 26.0;
 const GIT_PANEL_DIFF_OVERLAP: f32 = 2.0;
 const GIT_PANEL_DIFF_WIDTH: f32 = 560.0;
 const GIT_PANEL_DIFF_MAX_HEIGHT: f32 = 360.0;
+/// The diff card's corner radius — also the body's bottom inset.
+/// `overflow_hidden` clips to a rectangle, not the card's corner curve, so a
+/// full-bleed row fill painted to the card's bottom edge would overrun the
+/// rounded corners; the scroll viewport and its scrollbar stop short of the
+/// corner curve instead.
+const GIT_PANEL_DIFF_CARD_RADIUS: f32 = 12.0;
 const GIT_PANEL_HOVER_OPEN_DELAY: Duration = Duration::from_millis(350);
 const GIT_PANEL_HOVER_CLOSE_DELAY: Duration = Duration::from_millis(150);
 const GIT_PANEL_MODAL_HEIGHT: f32 = 520.0;
@@ -3158,18 +3164,28 @@ impl Waku {
                         .min_h_0()
                         .relative()
                         .max_h(px(GIT_PANEL_DIFF_MAX_HEIGHT))
+                        .pb(px(GIT_PANEL_DIFF_CARD_RADIUS))
                         .child(
                             div()
                                 .id("git-panel-file-diff-scroll")
                                 .w_full()
                                 .min_h_0()
-                                .max_h(px(GIT_PANEL_DIFF_MAX_HEIGHT))
+                                .max_h(px(GIT_PANEL_DIFF_MAX_HEIGHT - GIT_PANEL_DIFF_CARD_RADIUS))
                                 .overflow_y_scroll()
                                 .track_scroll(&scroll)
                                 .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
                                 .child(rows),
                         )
-                        .child(scrollbar::vertical(&scroll, &hover.scrollbar))
+                        // The bar rides a layer that ends at the scroll
+                        // viewport's bottom edge, so its thumb cannot paint
+                        // into the card's corner curve either.
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .bottom(px(GIT_PANEL_DIFF_CARD_RADIUS))
+                                .child(scrollbar::vertical(&scroll, &hover.scrollbar)),
+                        )
                         .into_any_element()
                 }
             }
@@ -3193,7 +3209,7 @@ impl Waku {
                 this.git_panel_file_card_hovered(*hovering, cx);
             }))
             .overflow_hidden()
-            .rounded(px(12.0))
+            .rounded(px(GIT_PANEL_DIFF_CARD_RADIUS))
             .border(hairline())
             .border_color(theme.border)
             .bg(theme.surface)
