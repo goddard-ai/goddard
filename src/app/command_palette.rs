@@ -42,6 +42,12 @@ const RESULT_ROW_HEIGHT: f32 = 44.0;
 const CONTENT_RESULT_ROW_HEIGHT: f32 = 60.0;
 const EMPTY_RESULTS_HEIGHT: f32 = 180.0;
 const RESULTS_BOTTOM_PADDING: f32 = 8.0;
+/// How far below each search root the "New task in…" scan descends — deep
+/// enough for `~/dev/group/repo`, shallow enough to stay out of dependency
+/// and generated trees.
+const DIRECTORY_SEARCH_DEPTH: usize = 4;
+const DIRECTORY_SEARCH_CAP: usize = 5_000;
+const MAX_DIRECTORY_RESULTS: usize = 50;
 const FOOTER_HEIGHT: f32 = 30.0;
 const MAX_CARD_HEIGHT: f32 = 480.0;
 
@@ -80,6 +86,8 @@ enum PaletteSection {
     // Run-script drill-in sections; they never appear in Commands view.
     Projects,
     Scripts,
+    // The "New task in…" picker's directory listing; never in Commands view.
+    Directories,
 }
 
 impl PaletteSection {
@@ -94,6 +102,7 @@ impl PaletteSection {
             Self::Settings => "command_palette.settings",
             Self::Projects => "command_palette.projects",
             Self::Scripts => "command_palette.scripts",
+            Self::Directories => "command_palette.directories",
         })
     }
 
@@ -103,7 +112,7 @@ impl PaletteSection {
             Self::CustomCommands => 1,
             Self::Tasks => 2,
             Self::Settings => 3,
-            Self::Projects | Self::Scripts => 4,
+            Self::Projects | Self::Scripts | Self::Directories => 4,
         }
     }
 }
@@ -158,6 +167,8 @@ impl PaletteIdentifier {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PaletteAction {
     NewTask,
+    NewTaskIn,
+    NewTaskInDirectory(PathBuf),
     NewTaskInSameWorktree,
     Resume,
     ChooseResumeProvider,
@@ -201,6 +212,8 @@ enum CommandPaletteView {
     ResumeProviders,
     RunScriptProjects,
     RunScripts,
+    /// The "New task in…" directory picker.
+    NewTaskIn,
 }
 
 #[derive(Clone, Debug)]
@@ -433,6 +446,11 @@ pub(super) struct CommandPaletteUi {
     run_scripts: Vec<run_script::ProjectScript>,
     run_scripts_pending: bool,
     run_script_generation: u64,
+    /// The daemon's directory scan behind the "New task in…" picker, fetched
+    /// once per view entry and filtered per keystroke.
+    new_task_directories: Vec<PathBuf>,
+    new_task_directories_pending: bool,
+    new_task_directories_generation: u64,
     selected: usize,
     scroll: ScrollHandle,
     matcher: Matcher,
@@ -462,6 +480,9 @@ impl CommandPaletteUi {
             run_scripts: Vec::new(),
             run_scripts_pending: false,
             run_script_generation: 0,
+            new_task_directories: Vec::new(),
+            new_task_directories_pending: false,
+            new_task_directories_generation: 0,
             selected: 0,
             scroll: ScrollHandle::new(),
             // Plain config: `match_paths` biases toward path basenames, which
@@ -512,6 +533,21 @@ impl Waku {
             self.open_command_palette(window, cx);
         }
         self.open_command_palette_run_script_projects_view(cx);
+    }
+
+    /// ⌘⇧N — the "New task in…" drill-in opens straight onto its directory
+    /// picker: fuzzy-search a directory, and the new task gets a temporary
+    /// project there.
+    pub(super) fn new_task_in_action(
+        &mut self,
+        _: &NewTaskIn,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.open_command_palette_new_task_view(cx);
     }
 
     pub(super) fn toggle_command_palette_action(
@@ -572,6 +608,12 @@ impl Waku {
         self.command_palette.run_scripts_pending = false;
         self.command_palette.run_script_generation =
             self.command_palette.run_script_generation.wrapping_add(1);
+        self.command_palette.new_task_directories.clear();
+        self.command_palette.new_task_directories_pending = false;
+        self.command_palette.new_task_directories_generation = self
+            .command_palette
+            .new_task_directories_generation
+            .wrapping_add(1);
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
@@ -625,6 +667,11 @@ impl Waku {
         self.command_palette.run_scripts_pending = false;
         self.command_palette.run_script_generation =
             self.command_palette.run_script_generation.wrapping_add(1);
+        self.command_palette.new_task_directories_pending = false;
+        self.command_palette.new_task_directories_generation = self
+            .command_palette
+            .new_task_directories_generation
+            .wrapping_add(1);
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -736,6 +783,96 @@ impl Waku {
         cx.notify();
     }
 
+    /// Entering "New task in…" starts one directory scan — the daemon walks
+    /// the search roots, the picker fuzzy-filters the result per keystroke.
+    /// The generation guard keeps a superseded scan from landing after Esc
+    /// or a re-entry.
+    fn open_command_palette_new_task_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::NewTaskIn;
+        self.command_palette.new_task_directories.clear();
+        self.command_palette.new_task_directories_pending = true;
+        self.command_palette.new_task_directories_generation = self
+            .command_palette
+            .new_task_directories_generation
+            .wrapping_add(1);
+        let generation = self.command_palette.new_task_directories_generation;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.new_task_in_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+
+        // Home covers the usual layouts (~/dev/repo, ~/repos/x); each known
+        // project's parent adds whatever lives outside it.
+        let mut roots = self.home_directory.iter().cloned().collect::<Vec<_>>();
+        roots.extend(
+            self.state
+                .projects
+                .iter()
+                .filter(|project| !project.is_projectless())
+                .filter_map(|project| project.path.parent().map(Path::to_path_buf)),
+        );
+        roots.sort();
+        roots.dedup();
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace.request(waku_client::WorkspaceOperation::SearchDirectories {
+                        roots,
+                        max_depth: DIRECTORY_SEARCH_DEPTH,
+                        cap: DIRECTORY_SEARCH_CAP,
+                    })? {
+                        waku_client::WorkspaceResult::Directories { paths } => Ok(paths),
+                        _ => anyhow::bail!("the daemon returned an invalid directory response"),
+                    }
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open
+                    || waku.command_palette.new_task_directories_generation != generation
+                {
+                    return;
+                }
+                waku.command_palette.new_task_directories_pending = false;
+                match result {
+                    Ok(paths) => waku.command_palette.new_task_directories = paths,
+                    Err(error) => {
+                        waku.show_toast(tr!(
+                            "command_palette.directory_search_failed",
+                            error = error
+                        ));
+                    }
+                }
+                if waku.command_palette.view == CommandPaletteView::NewTaskIn {
+                    let query = waku.command_palette.search.read(cx).content().to_owned();
+                    waku.refresh_command_palette_results(&query, false, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Esc on the directory step lands on the regular palette, matching the
+    /// run-script drill-out.
+    fn leave_command_palette_new_task_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Commands;
+        self.command_palette.new_task_directories_pending = false;
+        self.command_palette.new_task_directories_generation = self
+            .command_palette
+            .new_task_directories_generation
+            .wrapping_add(1);
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.command_palette.view {
             CommandPaletteView::Commands => self.close_command_palette(window, cx),
@@ -748,6 +885,7 @@ impl Waku {
             CommandPaletteView::RunScripts => {
                 self.open_command_palette_run_script_projects_view(cx)
             }
+            CommandPaletteView::NewTaskIn => self.leave_command_palette_new_task_view(cx),
         }
     }
 
@@ -762,6 +900,7 @@ impl Waku {
                 tr!("command_palette.run_script_project_placeholder")
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
+            CommandPaletteView::NewTaskIn => tr!("command_palette.new_task_in_placeholder"),
         };
         self.command_palette.search.update(cx, |input, cx| {
             input.set_accessibility_label(tr!("a11y.command_palette"), cx);
@@ -783,6 +922,7 @@ impl Waku {
                 | CommandPaletteView::ResumeProviders
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
+                | CommandPaletteView::NewTaskIn
         ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
@@ -903,6 +1043,15 @@ impl Waku {
                 ),
                 PaletteAction::NewTask,
                 "new task session chat conversation start",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_task_in"),
+                "icons/folder-search.svg",
+                Some(ShortcutHint::action(&NewTaskIn)),
+                PaletteAction::NewTaskIn,
+                "new task in directory folder temporary project search",
                 next(),
             ),
             CommandPaletteItem::command(
@@ -1689,6 +1838,90 @@ impl Waku {
         self.finish_run_script_refresh(selected_action.flatten(), false);
     }
 
+    /// "New task in…" rows: every registered project first (a pick reuses
+    /// it rather than duplicating it), then the daemon's directory scan
+    /// minus those same paths. Both resolve through `NewTaskInDirectory`;
+    /// the handler decides whether the directory becomes a temporary
+    /// project or joins an existing one.
+    fn command_palette_new_task_candidates(&self) -> Vec<CommandPaletteItem> {
+        let mut order = 0usize;
+        let home = self.home_directory.as_deref();
+        let directory_item = |order: &mut usize, path: PathBuf, project: Option<&Project>| {
+            let current = *order;
+            *order += 1;
+            let name = project
+                .map(|project| project.display_name())
+                .unwrap_or_else(|| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+                });
+            let path_label = settings::abbreviate_home_path(&path, home);
+            let detail = match project {
+                Some(_) => format!("{} · {}", path_label, tr!("command_palette.project")),
+                None => path_label.clone(),
+            };
+            let icon = match project {
+                Some(project) if project.temporary => "icons/folder-clock.svg",
+                _ => "icons/folder.svg",
+            };
+            CommandPaletteItem {
+                section: PaletteSection::Directories,
+                label: name.clone(),
+                detail: Some(detail),
+                icon: PaletteIcon::Asset(icon),
+                shortcut: None,
+                action: PaletteAction::NewTaskInDirectory(path.clone()),
+                content_match: None,
+                search_text: format!("{name} {path_label} directory folder project"),
+                order: current,
+                recency: 0,
+            }
+        };
+        let mut items = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .map(|project| directory_item(&mut order, project.path.clone(), Some(project)))
+            .collect::<Vec<_>>();
+        let project_paths: HashSet<PathBuf> = self
+            .state
+            .projects
+            .iter()
+            .map(|project| project.path.clone())
+            .collect();
+        items.extend(
+            self.command_palette
+                .new_task_directories
+                .iter()
+                .filter(|path| !project_paths.contains(*path))
+                .map(|path| directory_item(&mut order, path.clone(), None)),
+        );
+        items
+    }
+
+    fn refresh_command_palette_new_task_results(&mut self, query: &str, preserve_selection: bool) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_new_task_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        // The daemon scan can return thousands of directories; rows are
+        // built eagerly, so the list is capped whether or not a query
+        // already narrowed it.
+        candidates.truncate(MAX_DIRECTORY_RESULTS);
+        self.command_palette.results = candidates;
+        self.finish_run_script_refresh(selected_action.flatten(), false);
+    }
+
     fn refresh_command_palette_resume_results(&mut self, query: &str, preserve_selection: bool) {
         let query = query.trim();
         let selected_action = preserve_selection.then(|| {
@@ -1817,6 +2050,10 @@ impl Waku {
             }
             CommandPaletteView::RunScripts => {
                 self.refresh_command_palette_run_script_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::NewTaskIn => {
+                self.refresh_command_palette_new_task_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::Commands => {}
@@ -2234,6 +2471,10 @@ impl Waku {
                 self.open_command_palette_run_script_projects_view(cx);
                 return;
             }
+            PaletteAction::NewTaskIn => {
+                self.open_command_palette_new_task_view(cx);
+                return;
+            }
             PaletteAction::ChooseRunScriptProject(project_id) => {
                 self.open_command_palette_run_scripts_view(project_id, cx);
                 return;
@@ -2244,6 +2485,9 @@ impl Waku {
         self.close_command_palette(window, cx);
         match action {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
+            PaletteAction::NewTaskInDirectory(path) => {
+                self.create_task_in_directory(path, window, cx)
+            }
             PaletteAction::NewTaskInSameWorktree => self.new_task_in_same_worktree(window, cx),
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
@@ -2359,7 +2603,8 @@ impl Waku {
             | PaletteAction::SelectResumeProvider(_)
             | PaletteAction::ResumeProviderSession(..)
             | PaletteAction::OpenRunScript
-            | PaletteAction::ChooseRunScriptProject(_) => {
+            | PaletteAction::ChooseRunScriptProject(_)
+            | PaletteAction::NewTaskIn => {
                 unreachable!("view-navigation actions are handled before closing the palette")
             }
         }
@@ -2421,6 +2666,7 @@ impl Waku {
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
+            CommandPaletteView::NewTaskIn => self.command_palette.new_task_directories_pending,
             CommandPaletteView::ResumeProviders | CommandPaletteView::RunScriptProjects => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
@@ -2436,7 +2682,10 @@ impl Waku {
             && self.command_palette.provider_sessions_pending)
             || (run_scripts_view
                 && self.command_palette.results.is_empty()
-                && self.command_palette.run_scripts_pending);
+                && self.command_palette.run_scripts_pending)
+            || (view == CommandPaletteView::NewTaskIn
+                && self.command_palette.results.is_empty()
+                && self.command_palette.new_task_directories_pending);
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
@@ -2461,6 +2710,8 @@ impl Waku {
                     "icons/loader-circle.svg",
                     if run_scripts_view {
                         tr!("command_palette.loading_scripts")
+                    } else if view == CommandPaletteView::NewTaskIn {
+                        tr!("command_palette.loading_directories")
                     } else {
                         tr!("command_palette.loading_sessions")
                     },
@@ -2493,6 +2744,13 @@ impl Waku {
                     "icons/terminal.svg",
                     tr!("command_palette.no_scripts"),
                     Some(tr!("command_palette.no_scripts_hint")),
+                    false,
+                )
+            } else if view == CommandPaletteView::NewTaskIn {
+                (
+                    "icons/folder-search.svg",
+                    tr!("command_palette.no_directories"),
+                    Some(tr!("command_palette.no_directories_hint")),
                     false,
                 )
             } else {

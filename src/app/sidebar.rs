@@ -2558,6 +2558,18 @@ impl Waku {
         let group_icon = match group {
             SidebarGroup::Projectless => "icons/chat.svg",
             SidebarGroup::Terminals => "icons/terminal-prompt.svg",
+            SidebarGroup::Project(project_id)
+                if self
+                    .state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id && project.temporary) =>
+            {
+                // A temporary project keeps the clock badge whether the
+                // group is expanded or not — the ephemeral mark outranks
+                // the folder's open state.
+                "icons/folder-clock.svg"
+            }
             _ if collapsed => "icons/folder.svg",
             _ => "icons/folder-open.svg",
         };
@@ -4456,6 +4468,7 @@ mod tests {
             path: root.join("2026-08-23/task"),
             bookmark: None,
             created_at: 0,
+            temporary: false,
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
@@ -4463,6 +4476,7 @@ mod tests {
             path: PathBuf::from("/tmp/dev/ordinary"),
             bookmark: None,
             created_at: 0,
+            temporary: false,
         };
 
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));

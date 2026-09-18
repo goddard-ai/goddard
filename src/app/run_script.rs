@@ -417,6 +417,7 @@ mod tests {
             path: PathBuf::new(),
             bookmark: None,
             created_at,
+            temporary: false,
         };
         let current = project(0);
         let recent_a = project(0);

@@ -680,6 +680,7 @@ mod tests {
             path: PathBuf::new(),
             bookmark: None,
             created_at,
+            temporary: false,
         };
         let current = project(0);
         let recent = (0..12).map(|_| project(0)).collect::<Vec<_>>();
@@ -710,6 +711,7 @@ mod tests {
             path: PathBuf::new(),
             bookmark: None,
             created_at,
+            temporary: false,
         };
         let current = project(10);
         let recent = [project(20), project(30)];
@@ -747,6 +749,7 @@ mod tests {
             path: root.join("2026-08-08").join(name),
             bookmark: None,
             created_at,
+            temporary: false,
         };
         let first = projectless("first", 10);
         let second = projectless("second", 20);
@@ -756,6 +759,7 @@ mod tests {
             path: PathBuf::from("/tmp/dev/ordinary"),
             bookmark: None,
             created_at: 30,
+            temporary: false,
         };
         let projects = vec![first.clone(), second.clone(), ordinary.clone()];
 

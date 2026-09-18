@@ -18,6 +18,8 @@ menu.file:
   en: File
 menu.new_task:
   en: New Task
+menu.new_task_in:
+  en: New Task in…
 menu.new_project:
   en: New Project…
 menu.run_project_script:
@@ -104,6 +106,22 @@ command_palette.settings:
   en: Settings
 command_palette.new_task:
   en: New task
+command_palette.new_task_in:
+  en: New task in…
+command_palette.new_task_in_placeholder:
+  en: Search directories for the task's project…
+command_palette.directories:
+  en: Directories
+command_palette.project:
+  en: Project
+command_palette.loading_directories:
+  en: Scanning directories…
+command_palette.no_directories:
+  en: No directories found
+command_palette.no_directories_hint:
+  en: Directories under your home folder and next to known projects appear here
+command_palette.directory_search_failed:
+  en: "Directory search failed: %{error}"
 command_palette.new_task_in_same_worktree:
   en: New task in same worktree
 command_palette.resume:

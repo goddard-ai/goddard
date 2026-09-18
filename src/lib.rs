@@ -74,6 +74,7 @@ actions!(
         ShowAll,
         CloseWindow,
         NewSession,
+        NewTaskIn,
         NewProject,
         OpenSettings,
         CheckForUpdates,
@@ -494,6 +495,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("secondary-w", CloseWindow, None),
         KeyBinding::new("secondary-n", NewSession, None),
+        // ⌘⇧N opens the "New task in…" directory picker in the palette; the
+        // project switcher keeps backward cycling on the chord while its
+        // overlay owns focus.
+        KeyBinding::new("secondary-shift-n", NewTaskIn, None),
         KeyBinding::new("secondary-o", NewProject, None),
         KeyBinding::new("secondary-,", OpenSettings, None),
         KeyBinding::new("secondary-b", ToggleSidebar, None),
@@ -869,6 +874,7 @@ pub(crate) fn set_app_menus(cx: &mut App, updater_available: bool) {
             disabled: false,
             items: vec![
                 MenuItem::action(tr!("menu.new_task"), NewSession),
+                MenuItem::action(tr!("menu.new_task_in"), NewTaskIn),
                 MenuItem::action(tr!("menu.new_project"), NewProject),
                 MenuItem::action(tr!("menu.run_project_script"), RunProjectScript),
             ],

@@ -9,4 +9,11 @@ bookmark?: Array<number> | null,
 /**
  * When the project was added, unix seconds.
  */
-created_at: number, };
+created_at: number,
+/**
+ * Picked ad hoc for one task ("New task in…") rather than registered as
+ * a project. Temporary projects leave the catalog once no live session
+ * references them; `false` for every project persisted before the flag
+ * existed.
+ */
+temporary: boolean, };

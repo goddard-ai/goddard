@@ -29,7 +29,8 @@ agent_settings_enabled: boolean,
 custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
 /**
  * Experimental: inject named subagents into every session's harness.
- * Off by default; toggling affects only sessions started afterwards.
+ * Off by default in release builds, on in debug builds (`bun run dev`);
+ * toggling affects only sessions started afterwards.
  */
 subagents_enabled: boolean,
 /**

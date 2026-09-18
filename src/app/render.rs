@@ -551,6 +551,7 @@ impl Render for Waku {
             .key_context("Waku")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(cx.listener(Self::new_session_action))
+            .on_action(cx.listener(Self::new_task_in_action))
             .on_action(cx.listener(Self::new_project_action))
             .on_action(cx.listener(Self::open_settings_action))
             .on_action(cx.listener(Self::toggle_sidebar_action))

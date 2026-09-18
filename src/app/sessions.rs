@@ -865,6 +865,14 @@ impl Waku {
             .iter()
             .find(|project| project.id == project_id)
             .is_some_and(Project::is_projectless);
+        // Temporary projects share the projectless lifecycle: the catalog
+        // entry exists for its tasks and dies with the last one.
+        let temporary = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .is_some_and(|project| project.temporary);
         // Checkpoint refs live in the repository's shared namespace, so
         // delete them from the project checkout — the task's worktree may
         // already be gone, and a missing cwd would silently leave the
@@ -927,7 +935,7 @@ impl Waku {
             .sessions
             .iter()
             .any(|session| session.project_id == project_id);
-        if projectless && !project_still_used {
+        if (projectless || temporary) && !project_still_used {
             self.remove_composer_draft(
                 crate::persistence::ComposerDraftKey::NewSession(project_id),
                 cx,
@@ -957,7 +965,7 @@ impl Waku {
         self.invalidate_checkpoint_refs();
 
         if was_selected {
-            self.select_session_fallback(project_id, projectless, window, cx);
+            self.select_session_fallback(project_id, projectless || temporary, window, cx);
         } else {
             self.save();
             cx.notify();
@@ -1409,6 +1417,37 @@ impl Waku {
             return;
         };
         self.bind_new_draft_to_worktree(project_id, workspace, window, cx);
+    }
+
+    /// "New task in…": a task draft in the picked directory. An existing
+    /// project at that path is reused; anything else becomes a temporary
+    /// project — in the catalog while it has tasks, swept once none do.
+    pub(super) fn create_task_in_directory(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        let project_id = match self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.path == path)
+        {
+            Some(project) => project.id,
+            None => {
+                let mut project = Project::from_path(path);
+                project.temporary = true;
+                project.bookmark = crate::bookmarks::create(&project.path);
+                let project_id = project.id;
+                self.state.projects.push(project);
+                project_id
+            }
+        };
+        self.create_session_for(project_id, self.state.last_provider, cx);
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
     }
 
     /// The project's new-task draft — an unstarted one it already had, or a
