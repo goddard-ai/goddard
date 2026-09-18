@@ -520,6 +520,14 @@ impl Backend for WakuBackend {
                 self.share.probe_friend(node_id)?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::SetFriendDisplayName { name } => {
+                self.share.set_display_name(name)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SetFriendNickname { node_id, nickname } => {
+                self.share.set_friend_nickname(node_id, nickname)?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
                 events.settings_changed(self.settings.get());
@@ -3027,7 +3035,9 @@ fn handle_driver_command(
         | Command::RemoveFriend { .. }
         | Command::SendFileToFriend { .. }
         | Command::CancelTransfer { .. }
-        | Command::ProbeFriend { .. } => {
+        | Command::ProbeFriend { .. }
+        | Command::SetFriendDisplayName { .. }
+        | Command::SetFriendNickname { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

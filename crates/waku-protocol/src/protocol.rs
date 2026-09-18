@@ -450,6 +450,18 @@ pub enum Command {
     ProbeFriend {
         node_id: String,
     },
+    /// Set the display name friends see on our requests and offers. Blank
+    /// resets to the default (account name).
+    SetFriendDisplayName {
+        name: String,
+    },
+    /// Set a local-only nickname for a friend — overrides their
+    /// self-reported name in this install's UI and transfer links.
+    /// `None` or blank clears the override.
+    SetFriendNickname {
+        node_id: String,
+        nickname: Option<String>,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace

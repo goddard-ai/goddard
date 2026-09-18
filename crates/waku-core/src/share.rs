@@ -112,6 +112,7 @@ impl ShareInner {
         let store = self.store.lock();
         FriendsState {
             friend_code: self.friend_code.clone(),
+            display_name: store.display_name.clone(),
             friends: store
                 .friends
                 .values()
@@ -126,6 +127,7 @@ impl ShareInner {
                     FriendInfo {
                         node_id: id,
                         name: f.name.clone(),
+                        nickname: f.nickname.clone(),
                         last_seen_ms: f.last_seen_ms,
                         online,
                     }
@@ -169,12 +171,19 @@ impl ShareService {
     /// Does not bind sockets — the runtime starts lazily on the first
     /// command so tests and headless runs pay nothing.
     pub fn new(dir: PathBuf, our_name: String) -> Self {
+        // Load eagerly so store-level commands (nicknames, display name)
+        // work before the endpoint has ever started, and so pre-runtime
+        // mutations land in the file the runtime will reload.
+        let mut store = FriendStore::load(&dir).unwrap_or_default();
+        if store.display_name.is_empty() {
+            store.display_name = our_name.clone();
+        }
         Self {
             dir,
             our_name,
             cmd: Mutex::new(None),
             state: Arc::new(Mutex::new(ShareInner {
-                store: Arc::new(Mutex::new(FriendStore::default())),
+                store: Arc::new(Mutex::new(store)),
                 transfers: Vec::new(),
                 probes: HashMap::new(),
                 pending: HashMap::new(),
@@ -300,6 +309,45 @@ impl ShareService {
         Ok(())
     }
 
+    /// Store-level mutation like `withdraw_friend_request` — no endpoint
+    /// needed. A blank name resets to the default the service was built
+    /// with.
+    pub fn set_display_name(&self, name: String) -> anyhow::Result<()> {
+        {
+            let inner = self.state.lock();
+            let mut store = inner.store.lock();
+            store.display_name = name.trim().to_string();
+            if store.display_name.is_empty() {
+                store.display_name = self.our_name.clone();
+            }
+            let _ = store.save();
+        }
+        publish(&self.state, &self.sink);
+        Ok(())
+    }
+
+    /// Store a local nickname override for a friend and re-point any
+    /// transfer links that carried the old name.
+    pub fn set_friend_nickname(
+        &self,
+        node_id: String,
+        nickname: Option<String>,
+    ) -> anyhow::Result<()> {
+        let id = node_id.parse::<EndpointId>()?;
+        {
+            let inner = self.state.lock();
+            let mut store = inner.store.lock();
+            if !store.friends.contains_key(&id) {
+                anyhow::bail!("no friend with that code");
+            }
+            store.set_nickname(&id, nickname);
+            let _ = store.save();
+        }
+        publish(&self.state, &self.sink);
+        relink_peer_transfers(&self.state, &id);
+        Ok(())
+    }
+
     pub fn remove_friend(&self, node_id: String) -> anyhow::Result<()> {
         self.call(|reply| ShareCommand::Remove { node_id, reply })
     }
@@ -348,6 +396,125 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// `~/Documents/Goddard/From Friends` — the human-readable mirror of the
+/// real `transfers/<uuid>` folders. Links are cosmetic: the canonical path
+/// stays on the transfer, a missing or stale link costs nothing.
+fn friends_links_dir() -> Option<PathBuf> {
+    dirs::document_dir().map(|d| d.join("Goddard").join("From Friends"))
+}
+
+/// Make a wire-supplied name safe as a single path component: no
+/// separators, control characters, leading dots, or unbounded length.
+fn sanitize_link_component(raw: &str, fallback: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if c == '/' || c.is_control() { '-' } else { c })
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').trim_end();
+    let cleaned: String = cleaned.chars().take(60).collect();
+    let cleaned = cleaned.trim_end();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// Ensure `base` has a `<peer>-<title>` symlink to the transfer's
+/// `dest_dir` — suffixing with the transfer id on a name collision and
+/// removing stale links to the same folder left by an older name.
+fn sync_transfer_link(base: &std::path::Path, peer: &str, transfer: &TransferInfo) {
+    let Some(dest) = &transfer.dest_dir else { return };
+    let peer = sanitize_link_component(peer, "friend");
+    let title = sanitize_link_component(&transfer.title, "files");
+    let mut name = format!("{peer}-{title}");
+    // True when `name` is already taken by something that isn't this
+    // transfer's destination — a real file or a link to another folder.
+    let occupied = |name: &str| {
+        let path = base.join(name);
+        match std::fs::read_link(&path) {
+            Ok(target) => target != *dest,
+            Err(_) => path.symlink_metadata().is_ok(),
+        }
+    };
+    if occupied(&name) {
+        let short: String = transfer.id.simple().to_string().chars().take(4).collect();
+        name = format!("{peer}-{title}-{short}");
+        if occupied(&name) {
+            return;
+        }
+    }
+    // Drop stale links pointing at this destination under other names —
+    // a rename leaves the old label behind otherwise.
+    if let Ok(entries) = std::fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_name() == name.as_str() {
+                continue;
+            }
+            if std::fs::read_link(&path).is_ok_and(|t| t == *dest) {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    let link = base.join(&name);
+    if std::fs::read_link(&link).is_ok_and(|t| t == *dest) {
+        return;
+    }
+    let _ = crate::fs_ext::symlink(dest, &link);
+}
+
+/// The name this install renders for `peer_id`: nickname, else the
+/// friend's self-reported name, else the transfer's recorded name.
+fn resolved_peer_name(inner: &ShareInner, peer_id: &str, fallback: &str) -> String {
+    let store = inner.store.lock();
+    peer_id
+        .parse::<EndpointId>()
+        .map(|id| store.resolved_name(&id, fallback))
+        .unwrap_or_else(|_| {
+            if fallback.is_empty() {
+                "friend".to_string()
+            } else {
+                fallback.to_string()
+            }
+        })
+}
+
+/// Publish a finished incoming transfer into `~/Documents/Goddard/From
+/// Friends` so the files are findable by name, not just by UUID.
+fn link_transfer(state: &Arc<Mutex<ShareInner>>, transfer: &TransferInfo) {
+    let Some(base) = friends_links_dir() else { return };
+    if std::fs::create_dir_all(&base).is_err() {
+        return;
+    }
+    let peer = {
+        let inner = state.lock();
+        resolved_peer_name(&inner, &transfer.peer_id, &transfer.peer_name)
+    };
+    sync_transfer_link(&base, &peer, transfer);
+}
+
+/// Re-point this friend's transfer links after a nickname change. Only
+/// runs when the links directory already exists — no side effects for
+/// users who never received a file.
+fn relink_peer_transfers(state: &Arc<Mutex<ShareInner>>, peer: &EndpointId) {
+    let Some(base) = friends_links_dir() else { return };
+    if std::fs::read_dir(&base).is_err() {
+        return;
+    }
+    let inner = state.lock();
+    let peer_id = peer.to_string();
+    let peer_name = resolved_peer_name(&inner, &peer_id, "");
+    for transfer in inner.transfers.iter().filter(|t| {
+        t.direction == TransferDirection::Incoming
+            && t.status == TransferStatus::Done
+            && t.dest_dir.is_some()
+            && t.peer_id == peer_id
+    }) {
+        sync_transfer_link(&base, &peer_name, transfer);
+    }
+}
+
 fn run_runtime(
     dir: PathBuf,
     our_name: String,
@@ -377,6 +544,13 @@ fn run_runtime(
         let friend_code = waku_share::identity::friend_code(secret.public());
         let store = state.lock().store.clone();
         *store.lock() = FriendStore::load(&dir)?;
+        {
+            let mut store = store.lock();
+            if store.display_name.is_empty() {
+                store.display_name = our_name.clone();
+                let _ = store.save();
+            }
+        }
         state.lock().friend_code = friend_code;
         publish(&state, &sink);
 
@@ -389,16 +563,14 @@ fn run_runtime(
             {
                 let state = state.clone();
                 let sink = sink.clone();
-                let our_name = our_name.clone();
                 Arc::new(move |id: EndpointId, name: String| {
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     {
                         let mut s = state.lock();
                         if s.store.lock().is_friend(&id) {
                             // Re-adding an existing friend: accept silently.
-                            let _ = tx.send(RequestDecision::Accept {
-                                our_name: our_name.clone(),
-                            });
+                            let our_name = s.store.lock().display_name.clone();
+                            let _ = tx.send(RequestDecision::Accept { our_name });
                             return rx;
                         }
                         s.store.lock().requests.push(PendingRequest {
@@ -542,6 +714,9 @@ fn run_runtime(
                                 s.task_notifier.clone(),
                             )
                         };
+                        if let Some((transfer, _)) = &hook {
+                            link_transfer(&state, transfer);
+                        }
                         if let Some((transfer, hook)) = hook {
                             let session_id = hook(&transfer);
                             if let Some(session_id) = session_id {
@@ -669,6 +844,7 @@ fn run_runtime(
                     reply,
                 } => {
                     let decision = state.lock().pending.remove(&node_id);
+                    let our_name = state.lock().store.lock().display_name.clone();
                     let result = match decision {
                         Some(tx) => {
                             let _ = tx.send(if accept {
@@ -701,6 +877,7 @@ fn run_runtime(
                                             node_id: id,
                                             added_at_ms: now_ms(),
                                             last_seen_ms: Some(now_ms()),
+                                            nickname: None,
                                         },
                                     );
                                 }
@@ -793,6 +970,7 @@ fn run_runtime(
                             });
                         }
                         publish(&state, &sink);
+                        let our_name = state.lock().store.lock().display_name.clone();
                         tokio::time::timeout(
                             OFFER_TIMEOUT,
                             friends::send_offer(

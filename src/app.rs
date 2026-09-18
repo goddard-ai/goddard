@@ -1975,6 +1975,14 @@ pub struct Waku {
     friends_events: Receiver<waku_client::friends::FriendsState>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
+    /// The Settings → Friends display-name field — the name friends see on
+    /// our requests and offers.
+    friend_name_input: Entity<TextInput>,
+    /// Shared single-line editor for a friend's local nickname; one friend
+    /// row borrows it at a time.
+    friend_nickname_input: Entity<TextInput>,
+    /// Node id of the friend whose nickname is being edited, if any.
+    editing_friend_nickname: Option<String>,
     /// Generation guard for the while-open presence re-probe loop — a new
     /// loop (or leaving the page) retires the previous one.
     friends_probe_generation: Cell<u64>,
@@ -3530,6 +3538,17 @@ impl Waku {
                 .accessibility_label(tr!("friends.code_placeholder"))
                 .placeholder(tr!("friends.code_placeholder"))
         });
+        let friend_name_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("friends.display_name"))
+                .placeholder(tr!("friends.display_name_placeholder"))
+        });
+        let friend_nickname_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("friends.nickname"))
+                .placeholder(tr!("friends.nickname_placeholder"))
+        });
         let archived_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -4361,6 +4380,24 @@ impl Waku {
                 },
             )
             .detach();
+            cx.subscribe(
+                &friend_name_input,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Submit(_)) {
+                        this.save_friend_display_name(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &friend_nickname_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.commit_friend_nickname(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
+            .detach();
             for (target, search) in [
                 (settings::FontTarget::Ui, ui_font_selector.search.clone()),
                 (
@@ -4640,6 +4677,9 @@ impl Waku {
                 worktree_move_pending: HashSet::new(),
                 settings_search,
                 friend_code_input,
+                friend_name_input,
+                friend_nickname_input,
+                editing_friend_nickname: None,
                 ui_font_selector,
                 code_font_selector,
                 daemon_port_input,

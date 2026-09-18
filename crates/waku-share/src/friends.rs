@@ -31,6 +31,22 @@ pub struct Friend {
     /// derived from this — there is no heartbeat.
     #[serde(default)]
     pub last_seen_ms: Option<u64>,
+    /// Local-only override for `name` — never leaves this install. The
+    /// friend still reports their own display name; the nickname is what
+    /// this side renders and names transfer links with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+}
+
+impl Friend {
+    /// What the local user sees: nickname override, else the self-reported
+    /// name.
+    pub fn display_name(&self) -> &str {
+        self.nickname
+            .as_deref()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&self.name)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +62,9 @@ pub struct PendingRequest {
 /// written atomically like the rest of the app's JSON state.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct FriendStore {
+    /// The name friends see on our requests and offers.
+    #[serde(default)]
+    pub display_name: String,
     pub friends: BTreeMap<EndpointId, Friend>,
     pub requests: Vec<PendingRequest>,
     #[serde(skip)]
@@ -67,6 +86,9 @@ impl FriendStore {
 
     pub fn save(&self) -> anyhow::Result<()> {
         let Some(path) = &self.path else { return Ok(()) };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let data = serde_json::to_vec_pretty(self)?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, data)?;
@@ -84,6 +106,31 @@ impl FriendStore {
         if let Some(friend) = self.friends.get_mut(node) {
             friend.last_seen_ms = Some(now_ms());
         }
+    }
+
+    /// Store a local nickname override; `None` or blank clears it.
+    pub fn set_nickname(&mut self, node: &EndpointId, nickname: Option<String>) {
+        if let Some(friend) = self.friends.get_mut(node) {
+            friend.nickname = nickname
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty());
+        }
+    }
+
+    /// The name this install shows for `node`: nickname, else the
+    /// self-reported name, else `fallback` (or "friend" when that's empty).
+    pub fn resolved_name(&self, node: &EndpointId, fallback: &str) -> String {
+        self.friends
+            .get(node)
+            .map(|f| f.display_name().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| {
+                if fallback.is_empty() {
+                    "friend".to_string()
+                } else {
+                    fallback.to_string()
+                }
+            })
     }
 }
 
@@ -220,6 +267,7 @@ impl ProtocolHandler for FriendsProtocol {
                                     node_id: remote,
                                     added_at_ms: now_ms(),
                                     last_seen_ms: Some(now_ms()),
+                                    nickname: None,
                                 },
                             );
                             store.requests.retain(|r| r.node_id != remote);
@@ -323,6 +371,7 @@ pub async fn send_friend_request(
                     node_id: remote,
                     added_at_ms: now_ms(),
                     last_seen_ms: Some(now_ms()),
+                    nickname: None,
                 },
             );
             store.requests.retain(|r| r.node_id != remote);
