@@ -22,7 +22,7 @@ use crate::keybindings::{
     snapshot_key_bindings,
 };
 use std::collections::HashMap;
-use crate::theme::{Theme, sp};
+use crate::theme::{Theme, hairline, sp};
 use crate::ui::tooltip::Tooltip;
 use crate::ui::{icon, motion};
 
@@ -117,6 +117,18 @@ fn current_platform_label() -> &'static str {
     }
 }
 
+/// Whether this command has a hard conflict — the same chord under the
+/// same context, where registration order decides silently and one binding
+/// is unreachable. Shadowed and partial overlaps are not conflicts the
+/// table marks.
+fn has_hard_conflict(conflicts: &HashMap<String, Vec<Conflict>>, command: &str) -> bool {
+    conflicts.get(command).is_some_and(|conflicts| {
+        conflicts
+            .iter()
+            .any(|conflict| conflict.kind == ConflictKind::Hard)
+    })
+}
+
 /// Worst-collision analysis over the resolved keymap, keyed by command.
 fn compute_conflicts(snapshot: &KeymapSnapshot) -> HashMap<String, Vec<Conflict>> {
     let facts: Vec<BindingFact> = snapshot
@@ -162,6 +174,10 @@ pub(super) struct KeybindingsUi {
     commit_error: Option<String>,
     /// Conflicts across the effective keymap, recomputed with the snapshot.
     conflicts: HashMap<String, Vec<Conflict>>,
+    /// Cycling position for the conflicts label: the next conflicting row a
+    /// click reveals.
+    conflict_cursor: usize,
+    conflicts_focus: FocusHandle,
     _search_subscription: gpui::Subscription,
 }
 
@@ -213,6 +229,8 @@ impl KeybindingsUi {
             layout_source,
             commit_error: None,
             conflicts,
+            conflict_cursor: 0,
+            conflicts_focus: cx.focus_handle(),
             _search_subscription: subscription,
         }
     }
@@ -584,6 +602,42 @@ impl super::Waku {
         self.keybindings_begin_capture(row.descriptor.id, binding, window, cx);
     }
 
+    /// Reveal the next hard-conflicting row, cycling back to the first.
+    /// The row is marked the way a pointer hover marks it, so the keyboard
+    /// stage previews the colliding chord too. Only rows the current search
+    /// leaves visible can be revealed.
+    fn keybindings_cycle_conflicts(&mut self, cx: &mut Context<Self>) {
+        let Some(ui) = self.keybindings.as_ref() else {
+            return;
+        };
+        // Positions in the filtered list, in table order.
+        let targets: Vec<usize> = ui
+            .filtered
+            .iter()
+            .enumerate()
+            .filter(|(_, row_index)| {
+                ui.snapshot
+                    .rows
+                    .get(**row_index)
+                    .is_some_and(|row| has_hard_conflict(&ui.conflicts, row.descriptor.id))
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let Some(ui) = self.keybindings.as_mut() else {
+            return;
+        };
+        if targets.is_empty() {
+            return;
+        }
+        let cursor = ui.conflict_cursor % targets.len();
+        ui.conflict_cursor = (cursor + 1) % targets.len();
+        if let Some(&index) = targets.get(cursor) {
+            ui.hovered = Some(index);
+            ui.list_state.scroll_to_reveal_item(index);
+        }
+        cx.notify();
+    }
+
     /// Arrow-key navigation over the filtered table.
     fn keybindings_move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
         let Some(ui) = self.keybindings.as_mut() else {
@@ -663,6 +717,7 @@ impl super::Waku {
         let rows = ui.snapshot.rows.clone();
         let filtered = ui.filtered.clone();
         let selected = ui.selected;
+        let hovered = ui.hovered;
         let this = cx.weak_entity();
         // Hard conflicts only — same chord under the same context, so one
         // binding is silently unreachable. Shadowed and partial overlaps
@@ -792,25 +847,51 @@ impl super::Waku {
             );
         }
 
-        page = page
-            .child(
-                // Counts strip between stage and table.
+        // Counts strip between stage and table. The conflict count is a
+        // control: each activation reveals the next conflicting row.
+        let mut strip = div()
+            .px(px(TABLE_INSET))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .text_size(sp(11.5))
+            .text_color(theme.text_tertiary)
+            .child(format!(
+                "{} · {}",
+                tr!("keybind.counts", n = ui.filtered.len()),
+                tr!("keybind.modified", n = modified),
+            ));
+        if hard_conflict_count > 0 {
+            strip = strip.child("·").child(
                 div()
-                    .px(px(20.0))
-                    .py(px(6.0))
-                    .text_size(sp(11.5))
-                    .text_color(theme.text_tertiary)
-                    .child(format!(
-                        "{} · {}{}",
-                        tr!("keybind.counts", n = ui.filtered.len()),
-                        tr!("keybind.modified", n = modified),
-                        if hard_conflict_count > 0 {
-                            format!(" · {}", tr!("keybind.conflicts", n = hard_conflict_count))
-                        } else {
-                            String::new()
+                    .id("keybindings-conflicts")
+                    .track_focus(&ui.conflicts_focus)
+                    .tab_index(0)
+                    .px(px(4.0))
+                    .rounded(px(4.0))
+                    .text_color(theme.danger)
+                    .cursor_pointer()
+                    .hover(|style| style.bg(theme.overlay))
+                    .focus_visible(|style| {
+                        style.border(hairline()).border_color(theme.accent)
+                    })
+                    .tooltip(Tooltip::text(tr!("keybind.conflicts.cycle")))
+                    .child(tr!("keybind.conflicts", n = hard_conflict_count))
+                    .on_click(cx.listener(|this, _, _window, cx| {
+                        this.keybindings_cycle_conflicts(cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.keybindings_cycle_conflicts(cx);
+                            cx.stop_propagation();
                         }
-                    )),
-            )
+                    })),
+            );
+        }
+
+        page = page
+            .child(strip)
             .child(render_column_header(theme))
             .child(
                 div().flex_1().min_h_0().px(px(TABLE_INSET)).child(
@@ -827,6 +908,7 @@ impl super::Waku {
                             row,
                             index,
                             selected == Some(index),
+                            hovered == Some(index),
                             hard_conflicts.get(row.descriptor.id).cloned(),
                             this.clone(),
                             theme,
@@ -1157,6 +1239,10 @@ fn render_row(
     row: &CommandRow,
     index: usize,
     selected: bool,
+    // The page's own hover state, which the pointer sets and the conflicts
+    // label sets when it reveals a row. Painted here so a revealed row
+    // looks exactly like a hovered one.
+    hovered: bool,
     // Tooltip text naming the commands this row's chord collides with,
     // when the collision is a hard one.
     conflict: Option<SharedString>,
@@ -1178,6 +1264,7 @@ fn render_row(
         .px(px(ROW_PAD))
         .rounded(px(6.0))
         .when(selected, |element| element.bg(theme.sidebar_item_background))
+        .when(hovered, |element| element.bg(theme.overlay))
         .hover(|element| element.bg(theme.overlay))
         .on_hover(move |hovered, _window, app| {
             let hovered = *hovered;

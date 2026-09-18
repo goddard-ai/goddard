@@ -3555,6 +3555,8 @@ keybind.conflict.banner:
   en: Conflicts with %{other}
 keybind.conflict.confirm:
   en: Enter to save anyway
+keybind.conflicts.cycle:
+  en: Show each conflict
 keybind.column.command:
   en: Command
 keybind.column.keybinding:
