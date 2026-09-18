@@ -2,7 +2,13 @@
 
 import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
-import { readFileSync, watch, type FSWatcher } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  watch,
+  writeFileSync,
+  type FSWatcher,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import readline from "node:readline";
 import { WakuClient } from "../packages/waku-client/src/client";
@@ -22,13 +28,45 @@ const daemonPath = join(
 const appExecutablePath = isMacOS
   ? join(appPath, "Contents/MacOS", appName)
   : appPath;
-const daemonToken =
-  process.env.GODDARD_DAEMON_TOKEN ?? crypto.randomUUID().replaceAll("-", "");
 // The app's "auto-restart" command palette toggle lands here; the app only
 // offers it when the watcher hands it this path.
 const devStatePath = join(targetDir, "debug", "goddard-dev.json");
+// The daemon token is stable across watcher restarts so mobile and external
+// clients keep working: GODDARD_DAEMON_TOKEN wins, then a persisted token
+// file, then a fresh random one.
+const daemonTokenPath = join(targetDir, "debug", "goddard-daemon-token");
+// Written next to the token so scripts (and humans) can read the current
+// daemon address + token after the watcher log has scrolled away.
+const daemonInfoPath = join(targetDir, "debug", "goddard-daemon.json");
 const externalDaemonAddress = process.env.GODDARD_DAEMON_ADDRESS;
+// Bind host for the spawned daemon. Default loopback; set to 0.0.0.0 (or a
+// Tailscale/LAN address) to make the dev daemon reachable from a phone.
+const daemonBindHost = process.env.GODDARD_DAEMON_BIND ?? "127.0.0.1";
+const daemonBindIsLoopback = ["127.0.0.1", "localhost", "::1"].includes(
+  daemonBindHost,
+);
 const interactive = process.stdin.isTTY === true;
+
+function resolveDaemonToken(): string {
+  if (process.env.GODDARD_DAEMON_TOKEN)
+    return process.env.GODDARD_DAEMON_TOKEN;
+  try {
+    const existing = readFileSync(daemonTokenPath, "utf8").trim();
+    if (existing) return existing;
+  } catch {
+    // No persisted token yet; generate and persist one below.
+  }
+  const generated = crypto.randomUUID().replaceAll("-", "");
+  try {
+    mkdirSync(dirname(daemonTokenPath), { recursive: true });
+    writeFileSync(daemonTokenPath, `${generated}\n`, { mode: 0o600 });
+  } catch {
+    // A transient target dir problem only means the token stays per-run.
+  }
+  return generated;
+}
+
+const daemonToken = resolveDaemonToken();
 const stdoutIsTTY = process.stdout.isTTY === true;
 
 // Bun's `$` pipes child stdio even when it echoes to a TTY parent, so cargo's
@@ -410,10 +448,30 @@ async function buildDaemon(): Promise<boolean> {
 // re-attach to live sessions and reconnect on its own after a daemon restart.
 type DaemonReady = { address: string };
 
+function writeDaemonInfo(): void {
+  if (daemonAddress === undefined) return;
+  try {
+    mkdirSync(dirname(daemonInfoPath), { recursive: true });
+    writeFileSync(
+      daemonInfoPath,
+      `${JSON.stringify({ address: daemonAddress, token: daemonToken }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  } catch {
+    // The info file is a convenience; a failed write changes nothing.
+  }
+}
+
 async function spawnDaemon(bind: string): Promise<void> {
-  const child = Bun.spawn(
-    [daemonPath, "--bind", bind, "--parent-pid", String(process.pid)],
-    {
+  const command = [
+    daemonPath,
+    "--bind",
+    bind,
+    "--parent-pid",
+    String(process.pid),
+  ];
+  if (!daemonBindIsLoopback) command.push("--allow-non-loopback");
+  const child = Bun.spawn(command, {
       cwd: root,
       env: {
         ...process.env,
@@ -422,8 +480,7 @@ async function spawnDaemon(bind: string): Promise<void> {
       },
       stdout: "pipe",
       stderr: "inherit",
-    },
-  );
+    });
   let ready: DaemonReady;
   try {
     ready = await readDaemonReady(child);
@@ -434,6 +491,7 @@ async function spawnDaemon(bind: string): Promise<void> {
   daemon = child;
   daemonBind = bind;
   daemonAddress = ready.address;
+  writeDaemonInfo();
   // A freshly spawned daemon runs the just-built binary, so its protocol is
   // never behind the sources on disk.
   protocolDirty = false;
@@ -522,6 +580,7 @@ async function ensureDaemon(): Promise<void> {
       );
     }
     daemonAddress = externalDaemonAddress;
+    writeDaemonInfo();
     console.log(
       `[goddard-dev] Using external daemon at ${externalDaemonAddress}; the watcher will not restart it.`,
     );
@@ -530,7 +589,7 @@ async function ensureDaemon(): Promise<void> {
   let lastError: unknown;
   for (let offset = 0; offset < daemonPortScanLimit; offset++) {
     try {
-      await spawnDaemon(`127.0.0.1:${daemonPortBase + offset}`);
+      await spawnDaemon(`${daemonBindHost}:${daemonPortBase + offset}`);
       console.log(
         `[goddard-dev] Daemon listening on ${daemonAddress}; it stays up across app relaunches.`,
       );
@@ -667,6 +726,59 @@ async function pollForDaemonIdle(): Promise<void> {
   daemonRestartWhenIdle = false;
 }
 
+async function commandStdout(command: string[]): Promise<string | undefined> {
+  const result = await $`${command}`.quiet().nothrow();
+  if (result.exitCode !== 0) return undefined;
+  const output = result.stdout.toString().trim();
+  return output || undefined;
+}
+
+// Everything the mobile app needs to reach this daemon: the ws:// address to
+// paste into a daemon profile, plus the token. Loopback daemons are reachable
+// over USB via adb reverse; Tailscale needs GODDARD_DAEMON_BIND=0.0.0.0.
+async function printMobileInfo(): Promise<void> {
+  if (daemonAddress === undefined) {
+    console.log("[goddard-dev] The daemon is not running yet.");
+    return;
+  }
+  const port = daemonAddress.split(":").pop();
+  const lines = [`  ${green("➜")}  ${dim("token")}   ${bold(daemonToken)}`];
+  if (daemonBindIsLoopback && externalDaemonAddress === undefined) {
+    if (port !== undefined) {
+      const adb = await $`adb reverse ${`tcp:${port}`} ${`tcp:${port}`}`
+        .quiet()
+        .nothrow();
+      lines.push(
+        adb.exitCode === 0
+          ? `  ${green("➜")}  ${dim("usb")}     ws://127.0.0.1:${port} ${dim("(adb reverse set up — connect the phone over USB)")}`
+          : `  ${green("➜")}  ${dim("usb")}     ws://127.0.0.1:${port} ${dim("(run `adb reverse tcp:" + port + " tcp:" + port + "` first)")}`,
+      );
+    }
+    lines.push(
+      `  ${dim("tailscale/lan")}  restart the watcher with GODDARD_DAEMON_BIND=0.0.0.0`,
+    );
+  } else {
+    const tailscaleIp = await commandStdout(["tailscale", "ip", "-4"]);
+    const lanIp = isMacOS
+      ? await commandStdout(["ipconfig", "getifaddr", "en0"])
+      : (await commandStdout(["hostname", "-I"]))?.split(" ")[0];
+    if (tailscaleIp !== undefined) {
+      lines.push(
+        `  ${green("➜")}  ${dim("tailscale")} ws://${tailscaleIp}:${port}`,
+      );
+    }
+    if (lanIp !== undefined) {
+      lines.push(`  ${green("➜")}  ${dim("lan")}      ws://${lanIp}:${port}`);
+    }
+    if (tailscaleIp === undefined && lanIp === undefined) {
+      lines.push(
+        `  ${green("➜")}  ${dim("address")}  ws://<this machine's ip>:${port}`,
+      );
+    }
+  }
+  console.log(`\n  ${bold("mobile daemon profile")}\n${lines.join("\n")}\n`);
+}
+
 function shortcutLine(key: string, description: string): string {
   return `  ${green("➜")}  ${dim("press")} ${bold(key)} ${dim(`+ enter to ${description}`)}`;
 }
@@ -680,6 +792,7 @@ function printShortcuts(): void {
       shortcutLine("b", "restart the daemon, then relaunch the app"),
       shortcutLine("d", "restart the daemon now"),
       shortcutLine("D", "restart the daemon once sessions go idle"),
+      shortcutLine("m", "show mobile daemon address and token"),
       shortcutLine("q", "quit the watcher, app, and daemon"),
       shortcutLine("h", "show this help"),
       "",
@@ -714,6 +827,9 @@ async function handleCommand(command: string): Promise<void> {
       return;
     case "D":
       armDaemonRestartWhenIdle();
+      return;
+    case "m":
+      await printMobileInfo();
       return;
     case "a":
       if (protocolDirty) {
