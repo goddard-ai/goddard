@@ -534,45 +534,6 @@ impl super::Waku {
         cx.notify();
     }
 
-    /// Remove one binding slot outright (the row's context menu action).
-    pub(super) fn keybindings_unbind(
-        &mut self,
-        command: CommandId,
-        binding_index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(ui) = self.keybindings.as_mut() else {
-            return;
-        };
-        let context = ui
-            .snapshot
-            .rows
-            .iter()
-            .find(|row| row.descriptor.id == command)
-            .and_then(|row| row.bindings.get(binding_index))
-            .and_then(|binding| binding.context.clone());
-        let override_record = UserOverride {
-            command_id: command.to_string(),
-            platforms: vec![current_platform_label().to_string()],
-            context,
-            operation: BindingOperation::Unbind,
-            semantics: "logical".to_string(),
-            sequence: None,
-            extra: Default::default(),
-        };
-        let revision = ui.snapshot.revision;
-        if ui.service.commit(revision, vec![override_record]).is_ok() {
-            ui.snapshot = ui.service.snapshot();
-            ui.conflicts = compute_conflicts(&ui.snapshot);
-            ui.commit_error = None;
-            let bindings = snapshot_key_bindings(&ui.snapshot);
-            cx.clear_key_bindings();
-            cx.bind_keys(bindings);
-            ui.refilter(cx);
-        }
-        cx.notify();
-    }
-
     /// Restore a command's default bindings (drops its overrides).
     pub(super) fn keybindings_reset(&mut self, command: CommandId, cx: &mut Context<Self>) {
         let Some(ui) = self.keybindings.as_mut() else {
@@ -660,8 +621,10 @@ impl super::Waku {
                     .find(|row| row.descriptor.id == capture.command)
             })
             .or_else(|| {
-                ui.selected
-                    .or(ui.hovered)
+                // The pointer leads the keyboard preview; selection is the
+                // fallback once the pointer leaves the table.
+                ui.hovered
+                    .or(ui.selected)
                     .and_then(|index| ui.filtered.get(index))
                     .and_then(|row| ui.snapshot.rows.get(*row))
             });
@@ -670,10 +633,10 @@ impl super::Waku {
             for stroke in &capture.strokes {
                 codes.extend(highlight_codes(&stroke.join("-"), layout));
             }
-        } else if let Some(row) = preview_row {
-            for binding in &row.bindings {
-                codes.extend(highlight_codes(&binding.sequence, layout));
-            }
+        } else if let Some(binding) = preview_row.and_then(|row| row.bindings.first()) {
+            // The table shows one binding per command, so the keyboard
+            // lights that same chord rather than a union of all of them.
+            codes.extend(highlight_codes(&binding.sequence, layout));
         }
 
         let modified = ui
@@ -1030,7 +993,13 @@ fn render_keyboard_stage(
                     } else {
                         theme.text_secondary
                     })
-                    .child(capdef.unshifted.to_string()),
+                    // Modifier and named caps wear their platform glyph
+                    // (⇧⌃⌥⌘⇪⇥⌫⎋↵) rather than a spelled-out name.
+                    .child(
+                        crate::ui::shortcut::key_glyph(capdef.unshifted)
+                            .unwrap_or(capdef.unshifted)
+                            .to_string(),
+                    ),
             );
         }
         stage = stage.child(line);
@@ -1073,6 +1042,99 @@ fn render_column_header(theme: Theme) -> gpui::Div {
     )
 }
 
+/// One command's keybinding column: a single slot holding the chord, the
+/// whole cell being the click target that opens the capture modal. A
+/// command with no binding shows an empty slot that assigns one; a
+/// non-editable command shows its chord or built-in label, inert.
+fn keybinding_cell(
+    row: &CommandRow,
+    conflict: Option<ConflictKind>,
+    this: gpui::WeakEntity<super::Waku>,
+    theme: Theme,
+) -> AnyElement {
+    let binding = row.bindings.first();
+    let editable = matches!(row.descriptor.editability, Editability::Editable);
+    let customized = row
+        .bindings
+        .iter()
+        .any(|binding| binding.source == BindingSource::User);
+    // Hard conflicts read as danger; shadowed and unknown overlaps as
+    // warning.
+    let conflict_color = match conflict {
+        Some(ConflictKind::Hard) => Some(theme.danger),
+        Some(_) => Some(theme.warning),
+        None => None,
+    };
+    let label = binding
+        .map(|binding| crate::ui::shortcut::sequence_label(&binding.sequence))
+        .or_else(|| row.descriptor.builtin_label.map(str::to_string));
+    let cell = div()
+        .id(SharedString::from(format!("{}:binding", row.descriptor.id)))
+        .w(px(KEYBINDING_COL))
+        .h(px(24.0))
+        .flex_none()
+        .overflow_hidden()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .children(label.map(|label| {
+            div()
+                .flex_none()
+                .whitespace_nowrap()
+                .px(px(6.0))
+                .py(px(2.0))
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(conflict_color.unwrap_or(theme.border))
+                .text_size(sp(11.0))
+                .text_color(theme.text)
+                .child(label)
+        }))
+        // Customized rows keep a way back to the default chord.
+        .children(
+            (customized && editable)
+                .then(|| {
+                    let command = row.descriptor.id;
+                    let reset_this = this.clone();
+                    div()
+                        .id(SharedString::from(format!("{}:reset", row.descriptor.id)))
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .px(px(4.0))
+                        .rounded(px(4.0))
+                        .text_size(sp(10.0))
+                        .text_color(theme.text_tertiary)
+                        .cursor_pointer()
+                        .hover(|element| element.text_color(theme.text))
+                        .child(tr!("keybind.reset"))
+                        .on_click(move |_, _window, app| {
+                            // Stop the cell's own click from reopening
+                            // capture on the freshly restored default.
+                            app.stop_propagation();
+                            let _ = reset_this.update(app, |this, cx| {
+                                this.keybindings_reset(command, cx);
+                            });
+                        })
+                })
+                .into_iter(),
+        );
+    if !editable {
+        return cell.into_any_element();
+    }
+    let command = row.descriptor.id;
+    // Replace the existing chord, or record the first one when unbound.
+    let slot = row.bindings.first().map(|_| 0);
+    cell.cursor_pointer()
+        .hover(|element| element.bg(theme.overlay_strong))
+        .rounded(px(5.0))
+        .on_click(move |_, window, app| {
+            let _ = this.update(app, |this, cx| {
+                this.keybindings_begin_capture(command, slot, window, cx);
+            });
+        })
+        .into_any_element()
+}
+
 fn render_row(
     row: &CommandRow,
     index: usize,
@@ -1098,12 +1160,17 @@ fn render_row(
         .when(selected, |element| element.bg(theme.sidebar_item_background))
         .hover(|element| element.bg(theme.overlay))
         .on_hover(move |hovered, _window, app| {
-            if !*hovered {
-                return;
-            }
+            let hovered = *hovered;
             let _ = hover_this.update(app, |this, cx| {
                 if let Some(ui) = this.keybindings.as_mut() {
-                    ui.hovered = Some(index);
+                    // Leaving only clears the pointer when this row is
+                    // still the one recorded — a newer row's enter can
+                    // arrive before the old row's leave.
+                    if hovered {
+                        ui.hovered = Some(index);
+                    } else if ui.hovered == Some(index) {
+                        ui.hovered = None;
+                    }
                 }
                 cx.notify();
             });
@@ -1129,172 +1196,10 @@ fn render_row(
                 .child(title),
         )
         .child(
-            div()
-                .w(px(KEYBINDING_COL))
-                .flex_none()
-                .overflow_hidden()
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .children(
-                    row.bindings
-                        .iter()
-                        .enumerate()
-                        .map(|(binding_index, binding)| {
-                            let editable = matches!(
-                                row.descriptor.editability,
-                                Editability::Editable
-                            );
-                            let command = row.descriptor.id;
-                            // Hard conflicts read as danger; shadowed and
-                            // unknown overlaps as warning.
-                            let conflict_color = match conflict {
-                                Some(ConflictKind::Hard) => Some(theme.danger),
-                                Some(_) => Some(theme.warning),
-                                None => None,
-                            };
-                            let chip = div()
-                                .id(SharedString::from(format!(
-                                    "{}:{binding_index}",
-                                    row.descriptor.id
-                                )))
-                                .flex_none()
-                                .whitespace_nowrap()
-                                .px(px(6.0))
-                                .py(px(2.0))
-                                .rounded(px(4.0))
-                                .border_1()
-                                .border_color(conflict_color.unwrap_or(theme.border))
-                                .text_size(sp(11.0))
-                                .text_color(theme.text)
-                                .child(crate::ui::shortcut::sequence_label(
-                                    &binding.sequence,
-                                ));
-                            // The chip is the edit control: clicking an
-                            // editable binding records a replacement chord.
-                            if editable {
-                                let this = this.clone();
-                                let remove_this = this.clone();
-                                div()
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .child(
-                                        chip.cursor_pointer()
-                                            .hover(|element| {
-                                                element.border_color(theme.border_strong)
-                                            })
-                                            .on_click(move |_, window, app| {
-                                                let _ = this.update(app, |this, cx| {
-                                                    this.keybindings_begin_capture(
-                                                        command,
-                                                        Some(binding_index),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }),
-                                    )
-                                    .child(
-                                        // Remove just this binding slot.
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "{}:{binding_index}:rm",
-                                                row.descriptor.id
-                                            )))
-                                            .px(px(3.0))
-                                            .text_size(sp(10.0))
-                                            .text_color(theme.text_tertiary)
-                                            .cursor_pointer()
-                                            .hover(|element| {
-                                                element.text_color(theme.danger)
-                                            })
-                                            .child("×")
-                                            .on_click(move |_, _window, app| {
-                                                let _ = remove_this.update(app, |this, cx| {
-                                                    this.keybindings_unbind(
-                                                        command,
-                                                        binding_index,
-                                                        cx,
-                                                    );
-                                                });
-                                            }),
-                                    )
-                                    .into_any_element()
-                            } else {
-                                chip.into_any_element()
-                            }
-                        }),
-                )
-                .children(
-                    matches!(row.descriptor.editability, Editability::Editable)
-                        .then(|| {
-                            let command = row.descriptor.id;
-                            let this = this.clone();
-                            div()
-                                .id(SharedString::from(format!("{}:add", row.descriptor.id)))
-                                .flex_none()
-                                .px(px(5.0))
-                                .py(px(2.0))
-                                .rounded(px(4.0))
-                                .text_size(sp(11.0))
-                                .text_color(theme.text_tertiary)
-                                .cursor_pointer()
-                                .hover(|element| element.text_color(theme.text))
-                                .child("+")
-                                .on_click(move |_, window, app| {
-                                    let _ = this.update(app, |this, cx| {
-                                        this.keybindings_begin_capture(
-                                            command, None, window, cx,
-                                        );
-                                    });
-                                })
-                                .into_any_element()
-                        })
-                        .into_iter(),
-                )
-                .children(
-                    // Restore-defaults affordance once the command carries a
-                    // user override.
-                    (row.bindings
-                        .iter()
-                        .any(|binding| binding.source == BindingSource::User))
-                    .then(|| {
-                        let command = row.descriptor.id;
-                        let this = this.clone();
-                        div()
-                            .id(SharedString::from(format!("{}:reset", row.descriptor.id)))
-                            .flex_none()
-                            .whitespace_nowrap()
-                            .px(px(5.0))
-                            .py(px(2.0))
-                            .rounded(px(4.0))
-                            .text_size(sp(10.0))
-                            .text_color(theme.text_tertiary)
-                            .cursor_pointer()
-                            .hover(|element| element.text_color(theme.text))
-                            .child(tr!("keybind.reset"))
-                            .on_click(move |_, _window, app| {
-                                let _ = this.update(app, |this, cx| {
-                                    this.keybindings_reset(command, cx);
-                                });
-                            })
-                            .into_any_element()
-                    })
-                    .into_iter(),
-                )
-                .children(row.descriptor.builtin_label.iter().map(|label| {
-                    div()
-                        .flex_none()
-                        .whitespace_nowrap()
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .rounded(px(4.0))
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(format!("{label} · built in"))
-                        .into_any_element()
-                })),
+            // The one keybinding slot: clicking it anywhere opens the
+            // capture modal, which replaces the chord in place. Commands
+            // with no binding show an empty slot that assigns one.
+            keybinding_cell(row, conflict, this.clone(), theme),
         )
         .child(
             div()
