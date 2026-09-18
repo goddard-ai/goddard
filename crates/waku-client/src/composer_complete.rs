@@ -100,6 +100,26 @@ pub fn is_land_submission(prompt: &str) -> bool {
     prompt.trim() == "/land"
 }
 
+/// Whether the catalog advertises a compact path: the reserved Waku builtin
+/// (Codex, OpenCode 2) or a provider-reported builtin (Pi, Claude, OpenCode,
+/// DeepSeek, an ACP agent). A project or user command that deliberately owns
+/// `/compact` doesn't count — resolution precedence keeps it.
+pub fn has_compact_path(commands: &[SlashCommand]) -> bool {
+    commands.iter().any(|command| {
+        command.name == "compact"
+            && matches!(command.scope, CommandScope::Waku | CommandScope::Builtin)
+            && command.template.is_none()
+    })
+}
+
+/// Whether the composer submitted a `/compact` invocation that routes
+/// through the daemon's compact command rather than to the provider as
+/// prompt text. A bare typed `/compact` on a provider that never advertised
+/// it stays an ordinary prompt.
+pub fn is_compact_submission(prompt: &str, commands: &[SlashCommand]) -> bool {
+    prompt.trim() == "/compact" && has_compact_path(commands)
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Goddard bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -437,6 +457,32 @@ mod tests {
             "/fast",
             &[command("fast", CommandScope::Project)],
         ));
+    }
+
+    #[test]
+    fn compact_submission_needs_a_waku_or_builtin_entry() {
+        let waku = command("compact", CommandScope::Waku);
+        let builtin = command("compact", CommandScope::Builtin);
+        assert!(is_compact_submission("/compact", std::slice::from_ref(&waku)));
+        assert!(is_compact_submission(
+            "  /compact  ",
+            std::slice::from_ref(&builtin)
+        ));
+        // A project/user command that owns /compact keeps precedence, and a
+        // provider that never advertised it gets the text as an ordinary
+        // prompt.
+        assert!(!is_compact_submission(
+            "/compact",
+            &[command("compact", CommandScope::Project)]
+        ));
+        assert!(!is_compact_submission("/compact", &[]));
+        let mut templated = command("compact", CommandScope::Builtin);
+        templated.template = Some("shrink $ARGUMENTS".into());
+        assert!(!is_compact_submission(
+            "/compact",
+            std::slice::from_ref(&templated)
+        ));
+        assert!(!is_compact_submission("/compact now", std::slice::from_ref(&waku)));
     }
 
     #[test]

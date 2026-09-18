@@ -315,6 +315,16 @@ impl ProviderKind {
                 | Self::Pi
         )
     }
+
+    /// Transports with a dedicated compact RPC the daemon calls directly —
+    /// Codex's `thread/compact/start` and OpenCode 2's
+    /// `POST /api/session/{id}/compact`. For every other provider a compact
+    /// path exists only when the provider's own command catalog reports one,
+    /// so this predicate marks the transports whose composer `/compact` entry
+    /// is a Waku-reserved builtin that shadows any provider-reported command.
+    pub fn supports_compact(self) -> bool {
+        matches!(self, Self::Codex | Self::OpenCode2)
+    }
 }
 
 /// Vendor-documented setup for a provider's CLI — see

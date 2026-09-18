@@ -393,6 +393,20 @@ fn assemble_slash_commands(
         argument_hint: None,
         template: None,
     });
+    // `/compact` is reserved on the transports with a dedicated daemon RPC —
+    // the Waku entry shadows any provider-reported `compact` so submission
+    // always routes through `Command::Compact`. Every other provider keeps
+    // its own reported builtin when one exists.
+    if provider.supports_compact() {
+        commands.retain(|command| command.name != "compact");
+        commands.push(SlashCommand {
+            name: "compact".to_owned(),
+            description: crate::i18n::translate("commands.compact_description"),
+            scope: CommandScope::Waku,
+            argument_hint: None,
+            template: None,
+        });
+    }
     sort_commands_for_display(&mut commands);
     commands
 }
@@ -1498,6 +1512,41 @@ mod tests {
                 resume[0].description,
                 crate::i18n::translate("commands.resume_description")
             );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn waku_compact_is_reserved_only_on_dedicated_rpc_transports() {
+        let root = std::env::temp_dir().join(format!("waku-compact-command-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".waku/commands")).unwrap();
+        std::fs::write(root.join(".waku/commands/compact.md"), "Project override").unwrap();
+
+        for provider in ProviderKind::ALL {
+            let commands = assemble_slash_commands(provider, &root, Vec::new());
+            let compact = commands
+                .iter()
+                .filter(|command| command.name == "compact")
+                .collect::<Vec<_>>();
+            if provider.supports_compact() {
+                assert_eq!(
+                    compact.len(),
+                    1,
+                    "{provider:?} has duplicate Compact commands",
+                );
+                assert_eq!(compact[0].scope, CommandScope::Waku);
+                assert_eq!(compact[0].template, None);
+            } else {
+                // Other providers keep whatever owns the name — here the
+                // project command — and get no injected entry when nothing
+                // reports one.
+                assert!(
+                    compact.iter().all(|command| command.scope != CommandScope::Waku),
+                    "{provider:?} must not reserve compact"
+                );
+            }
         }
 
         let _ = std::fs::remove_dir_all(&root);

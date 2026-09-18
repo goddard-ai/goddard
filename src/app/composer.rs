@@ -2750,6 +2750,7 @@ impl Waku {
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
             || self.execute_land_composer_command(prompt, cx)
+            || self.execute_compact_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
     }
@@ -2776,6 +2777,60 @@ impl Waku {
         self.composer.update(cx, |input, cx| input.clear(cx));
         self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
         true
+    }
+
+    /// `/compact` — asks the provider to compact the session's context
+    /// through the daemon's control path. No user message is written: the
+    /// compaction activity card is the transcript record.
+    fn execute_compact_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        if !crate::composer_complete::is_compact_submission(prompt, &self.slash_command_index) {
+            return false;
+        }
+        let Some(session_id) = self.composer_session_id() else {
+            return false;
+        };
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        self.compact_session(session_id, cx);
+        true
+    }
+
+    /// Ask the provider to compact `session_id`'s context — the shared entry
+    /// point for `/compact`, the usage panel's compact action, and the
+    /// command palette. Compaction is never queued behind live work and
+    /// there is nothing to shrink on a session that has not started, so both
+    /// cases refuse with a toast rather than reaching the provider.
+    pub(super) fn compact_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if session.is_busy() {
+            self.show_toast(tr!("commands.compact_turn_running"));
+            return;
+        }
+        if !session.has_started() {
+            self.show_toast(tr!("commands.compact_nothing_to_compact"));
+            return;
+        }
+        // Interception already proved a path exists; the affordances gate on
+        // the same check, so this only guards a stale catalog. The reserved
+        // providers count unconditionally — their RPC exists whether or not
+        // discovery has landed yet.
+        if !session.provider.supports_compact()
+            && !crate::composer_complete::has_compact_path(&self.slash_command_index)
+        {
+            return;
+        }
+        let Some(runtime) = self.runtimes.get(&session_id) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            return;
+        };
+        runtime.driver.compact();
+        cx.notify();
     }
 
     /// Bridge Codex's native `/goal` command without starting a turn. Reads run

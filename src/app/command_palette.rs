@@ -171,6 +171,7 @@ enum PaletteAction {
     OpenOnGitHub,
     MoveToWorktree,
     LandChanges,
+    CompactContext,
     ToggleUsage,
     CollapseSidebarGroups,
     GoToNextUnreadCompletion,
@@ -1029,6 +1030,26 @@ impl Waku {
                     _ => None,
                 });
             commands.push(item);
+        }
+
+        // Same gate as the composer's `/compact`: the session has a compact
+        // path — the reserved Waku entry or a provider-reported builtin.
+        if self
+            .composer_session()
+            .is_some_and(|session| {
+                session.provider.supports_compact()
+                    || crate::composer_complete::has_compact_path(&self.slash_command_index)
+            })
+        {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("commands.compact_context"),
+                "icons/minimize.svg",
+                None,
+                PaletteAction::CompactContext,
+                "compact compress context window tokens reduce shrink summarize",
+                next(),
+            ));
         }
 
         if self
@@ -2270,6 +2291,12 @@ impl Waku {
             PaletteAction::LandChanges => {
                 self.settings_page = None;
                 self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
+            }
+            PaletteAction::CompactContext => {
+                self.settings_page = None;
+                if let Some(session_id) = self.composer_session_id() {
+                    self.compact_session(session_id, cx);
+                }
             }
             PaletteAction::RunCustomCommand(command_id) => {
                 if let Some(command) = self
