@@ -2693,6 +2693,90 @@ impl Waku {
         self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
+    /// "New task in…" rows: every registered project first (a pick reuses
+    /// it rather than duplicating it), then the daemon's directory scan
+    /// minus those same paths. Both resolve through `NewTaskInDirectory`;
+    /// the handler decides whether the directory becomes a temporary
+    /// project or joins an existing one.
+    fn command_palette_new_task_candidates(&self) -> Vec<CommandPaletteItem> {
+        let mut order = 0usize;
+        let home = self.home_directory.as_deref();
+        let directory_item = |order: &mut usize, path: PathBuf, project: Option<&Project>| {
+            let current = *order;
+            *order += 1;
+            let name = project
+                .map(|project| project.display_name())
+                .unwrap_or_else(|| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+                });
+            let path_label = settings::abbreviate_home_path(&path, home);
+            let detail = match project {
+                Some(_) => format!("{} · {}", path_label, tr!("command_palette.project")),
+                None => path_label.clone(),
+            };
+            let icon = match project {
+                Some(project) if project.temporary => "icons/folder-clock.svg",
+                _ => "icons/folder.svg",
+            };
+            CommandPaletteItem {
+                section: PaletteSection::Directories,
+                label: name.clone(),
+                detail: Some(detail),
+                icon: PaletteIcon::Asset(icon),
+                shortcut: None,
+                action: PaletteAction::NewTaskInDirectory(path.clone()),
+                content_match: None,
+                search_text: format!("{name} {path_label} directory folder project"),
+                order: current,
+                recency: 0,
+            }
+        };
+        let mut items = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .map(|project| directory_item(&mut order, project.path.clone(), Some(project)))
+            .collect::<Vec<_>>();
+        let project_paths: HashSet<PathBuf> = self
+            .state
+            .projects
+            .iter()
+            .map(|project| project.path.clone())
+            .collect();
+        items.extend(
+            self.command_palette
+                .new_task_directories
+                .iter()
+                .filter(|path| !project_paths.contains(*path))
+                .map(|path| directory_item(&mut order, path.clone(), None)),
+        );
+        items
+    }
+
+    fn refresh_command_palette_new_task_results(&mut self, query: &str, preserve_selection: bool) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_new_task_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        // The daemon scan can return thousands of directories; rows are
+        // built eagerly, so the list is capped whether or not a query
+        // already narrowed it.
+        candidates.truncate(MAX_DIRECTORY_RESULTS);
+        self.command_palette.results = candidates;
+        self.finish_run_script_refresh(selected_action.flatten(), false);
+    }
+
     fn refresh_command_palette_resume_results(&mut self, query: &str, preserve_selection: bool) {
         let query = query.trim();
         let selected_action = preserve_selection.then(|| {
