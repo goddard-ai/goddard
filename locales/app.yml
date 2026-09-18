@@ -3455,6 +3455,8 @@ friends.wants_to_add:
   en: wants to add you as a friend
 friends.pending:
   en: pending
+friends.withdraw:
+  en: Withdraw
 friends.accept:
   en: Accept
 friends.decline:

@@ -380,6 +380,9 @@ pub enum Command {
     SendFriendRequest { code: String, name: String },
     /// Accept or decline an incoming friend request.
     RespondFriendRequest { node_id: String, accept: bool },
+    /// Withdraw a pending outgoing friend request. Local removal only —
+    /// the peer's incoming card lingers until they decline it.
+    WithdrawFriendRequest { node_id: String },
     RemoveFriend { node_id: String },
     /// Offer a file or directory to a friend. Spawns a transfer; progress
     /// arrives through `FriendsChanged` broadcasts.

@@ -491,6 +491,10 @@ impl Backend for WakuBackend {
                 self.share.respond_friend_request(node_id, accept)?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::WithdrawFriendRequest { node_id } => {
+                self.share.withdraw_friend_request(node_id)?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::RemoveFriend { node_id } => {
                 self.share.remove_friend(node_id)?;
                 Ok(ResponsePayload::Ack)
@@ -2910,6 +2914,7 @@ fn handle_driver_command(
         | Command::GetFriends
         | Command::SendFriendRequest { .. }
         | Command::RespondFriendRequest { .. }
+        | Command::WithdrawFriendRequest { .. }
         | Command::RemoveFriend { .. }
         | Command::SendFileToFriend { .. }
         | Command::CancelTransfer { .. }

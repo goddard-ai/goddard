@@ -222,6 +222,7 @@ impl Waku {
             );
         }
         for request in &friends.outgoing_requests {
+            let withdraw_id = request.node_id.clone();
             request_cards.push(
                 div()
                     .mt(px(10.0))
@@ -241,6 +242,20 @@ impl Waku {
                                 )),
                         ),
                     )
+                    .child(self.friends_button(
+                        SharedString::from(format!("friend-withdraw-{}", request.node_id)),
+                        tr!("friends.withdraw"),
+                        &theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::WithdrawFriendRequest {
+                                    node_id: withdraw_id.clone(),
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
                     .into_any_element(),
             );
         }

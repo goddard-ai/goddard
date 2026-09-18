@@ -263,6 +263,26 @@ impl ShareService {
         })
     }
 
+    /// Drop a pending outgoing request. Store mutation only, so it works
+    /// without the endpoint and before the runtime has ever started.
+    pub fn withdraw_friend_request(&self, node_id: String) -> anyhow::Result<()> {
+        let id = node_id.parse::<EndpointId>()?;
+        let inner = self.state.lock();
+        let mut store = inner.store.lock();
+        let before = store.requests.len();
+        store
+            .requests
+            .retain(|r| !(r.node_id == id && !r.incoming));
+        if store.requests.len() == before {
+            anyhow::bail!("no outgoing request to that code");
+        }
+        let _ = store.save();
+        drop(store);
+        drop(inner);
+        publish(&self.state, &self.sink);
+        Ok(())
+    }
+
     pub fn remove_friend(&self, node_id: String) -> anyhow::Result<()> {
         self.call(|reply| ShareCommand::Remove { node_id, reply })
     }
@@ -539,25 +559,46 @@ fn run_runtime(
                 ShareCommand::SendRequest { code, name, reply } => {
                     let result = async {
                         let id = waku_share::identity::parse_friend_code(&code)?;
+                        if id == share_node.endpoint().id() {
+                            anyhow::bail!("that's your own friend code");
+                        }
                         // Record the outgoing request.
                         {
                             let s = state.lock();
-                            s.store.lock().requests.push(PendingRequest {
-                                name: name.clone(),
-                                node_id: id,
-                                incoming: false,
-                                at_ms: now_ms(),
-                            });
-                            let _ = s.store.lock().save();
+                            let mut store = s.store.lock();
+                            if !store
+                                .requests
+                                .iter()
+                                .any(|r| r.node_id == id && !r.incoming)
+                            {
+                                store.requests.push(PendingRequest {
+                                    name: name.clone(),
+                                    node_id: id,
+                                    incoming: false,
+                                    at_ms: now_ms(),
+                                });
+                                let _ = store.save();
+                            }
                         }
                         publish(&state, &sink);
-                        friends::send_friend_request(
+                        if let Err(e) = friends::send_friend_request(
                             share_node.endpoint(),
                             id,
                             &name,
                             &store,
                         )
-                        .await?;
+                        .await
+                        {
+                            // A failed send must not strand a pending row —
+                            // there is no peer who could resolve it.
+                            let s = state.lock();
+                            s.store
+                                .lock()
+                                .requests
+                                .retain(|r| !(r.node_id == id && !r.incoming));
+                            let _ = s.store.lock().save();
+                            return Err(e);
+                        }
                         anyhow::Ok(())
                     }
                     .await;
