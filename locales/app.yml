@@ -58,6 +58,8 @@ menu.toggle_branch_picker:
   en: Toggle Branch Picker
 menu.toggle_runtime_mode_picker:
   en: Toggle Mode Picker
+menu.toggle_environment:
+  en: Toggle Environment
 menu.toggle_workspace:
   en: Toggle Workspace
 menu.toggle_usage_panel:

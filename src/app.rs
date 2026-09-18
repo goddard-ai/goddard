@@ -89,7 +89,7 @@ use crate::{
     RunProjectScript, SaveFile, SelectAllProjectsRows, SelectFavoriteModel, SelectFirstProject,
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
-    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder,
+    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder,
     ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
     ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
     ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,

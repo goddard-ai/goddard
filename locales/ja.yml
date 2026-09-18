@@ -28,6 +28,7 @@ menu.focus_terminal: ターミナルにフォーカスを移動
 menu.toggle_model_picker: モデル選択の表示を切り替える
 menu.toggle_branch_picker: ブランチ選択の表示を切り替える
 menu.toggle_runtime_mode_picker: モード選択の表示を切り替える
+menu.toggle_environment: 環境を切り替える
 menu.toggle_workspace: 作業場所を切り替える
 menu.toggle_usage_panel: 使用状況パネルの表示を切り替える
 menu.window: ウインドウ

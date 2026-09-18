@@ -117,6 +117,7 @@ actions!(
         ToggleModelPicker,
         ToggleBranchPicker,
         ToggleRuntimeModePicker,
+        ToggleEnvironment,
         ToggleUsagePanel,
         ToggleWorkspace,
         SaveFile,
@@ -755,6 +756,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
         KeyBinding::new("secondary-alt-shift-n", ToggleBranchPicker, None),
         KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
+        // ⌘⇧. flips the draft between this Mac and the sandbox VM — the
+        // Environment section of the same menu, without opening it.
+        KeyBinding::new("secondary-shift-.", ToggleEnvironment, None),
         // ⌘⇧T is the Terminals group chord: it expands the sidebar
         // section (selecting the last-shown terminal, or spawning one
         // in ~ when none exists), and once a full-width terminal is

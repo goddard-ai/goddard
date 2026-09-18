@@ -28,6 +28,7 @@ menu.focus_terminal: 将焦点移到终端
 menu.toggle_model_picker: 打开或关闭模型选择器
 menu.toggle_branch_picker: 打开或关闭分支选择器
 menu.toggle_runtime_mode_picker: 打开或关闭模式选择器
+menu.toggle_environment: 切换环境
 menu.toggle_workspace: 切换工作位置
 menu.toggle_usage_panel: 打开或关闭用量面板
 menu.window: 窗口

@@ -2699,6 +2699,25 @@ impl Waku {
         );
     }
 
+    /// Primary modifier + Shift + .: flip the draft between this Mac and
+    /// the sandbox VM — the two rows the mode menu's Environment section
+    /// offers. `set_sandboxed` carries the guards: no session to retarget,
+    /// or a task already started, leaves the flag untouched.
+    pub(super) fn toggle_environment_action(
+        &mut self,
+        _: &ToggleEnvironment,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(sandboxed) = self.composer_session().map(|session| session.sandboxed) else {
+            return;
+        };
+        self.set_sandboxed(!sandboxed, cx);
+    }
+
     /// A keyboard toggle produces no mouse-down for another open menu's
     /// dismiss-on-down-out to see, so close the rest here. The pickers' toggle
     /// observers update this entity, so the toggle itself has to run after
