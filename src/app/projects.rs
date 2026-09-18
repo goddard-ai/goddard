@@ -249,6 +249,9 @@ const PROJECTS_PR_COL: f32 = 56.0;
 const PROJECTS_DIVERGENCE_COL: f32 = 96.0;
 const PROJECTS_COUNT_COL: f32 = 64.0;
 const PROJECTS_UPDATED_COL: f32 = 76.0;
+/// Scrollable padding below the last table row, so the list can scroll up
+/// off the bottom edge of the window.
+const PROJECTS_LIST_BOTTOM_PADDING: f32 = 78.0;
 
 /// Per-project page state: tabs, per-tab filters, fetched tables,
 /// selection, and the Projects page's docked composer. Kept in
@@ -2024,10 +2027,16 @@ impl Waku {
                                 })
                                 .unwrap_or_else(|| div().into_any_element())
                         })
-                        .pb(px(32.0))
+                        .pb(px(PROJECTS_LIST_BOTTOM_PADDING))
                         .size_full(),
                     )
-                    .child(scrollbar::vertical(&list_state, &scrollbar)),
+                    .child(scrollbar::vertical(
+                        &PaddedListScroll {
+                            state: list_state,
+                            bottom: px(PROJECTS_LIST_BOTTOM_PADDING),
+                        },
+                        &scrollbar,
+                    )),
             )
             .into_any_element()
     }
@@ -3252,6 +3261,35 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
             )
             .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
         _ => row,
+    }
+}
+
+/// A `list()`'s own padding joins its scroll extent, but
+/// `ListState::max_offset_for_scrollbar` reports only the measured items —
+/// a padded list would bottom out its thumb early. This wraps the state so
+/// the scrollbar's travel covers the padded bottom too.
+#[derive(Clone)]
+struct PaddedListScroll {
+    state: ListState,
+    bottom: Pixels,
+}
+
+impl scrollbar::Scrollable for PaddedListScroll {
+    fn viewport_height(&self) -> Pixels {
+        self.state.viewport_bounds().size.height
+    }
+
+    fn max_offset(&self) -> Pixels {
+        self.state.max_offset_for_scrollbar().y + self.bottom
+    }
+
+    fn scrolled(&self) -> Pixels {
+        -self.state.scroll_px_offset_for_scrollbar().y
+    }
+
+    fn scroll_to(&self, offset: Pixels) {
+        self.state
+            .set_offset_from_scrollbar(point(Pixels::ZERO, -offset));
     }
 }
 
