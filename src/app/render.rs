@@ -248,16 +248,20 @@ impl Waku {
         self.sidebar_peek = SidebarPeek::Shown {
             entered: Instant::now(),
         };
+        self.sidebar_peek_action_hold = false;
         cx.notify();
     }
 
-    /// Whether a menu card is up over the workspace. While one is, the
-    /// pointer leaving the peek overlay is it moving *into the menu* — the
-    /// card is a deferred layer outside the overlay's element tree — not a
-    /// real exit, so the overlay must not dismiss underneath it.
+    /// Whether a menu card is up over the workspace — or an inline rename
+    /// editor is holding the sidebar. While one is, the pointer leaving the
+    /// peek overlay is it moving *into the menu* — the card is a deferred
+    /// layer outside the overlay's element tree — or simply away from the
+    /// editor it is typing in, not a real exit, so the overlay must not
+    /// dismiss underneath it.
     fn any_menu_open(&self, cx: &App) -> bool {
         self.menus.borrow().values().any(ContextMenuHandle::is_open)
             || self.composer.read(cx).context_menu_open(cx)
+            || self.session_rename.is_some()
     }
 
     /// The overlay is the hover surface once it is up — it covers the strip —
@@ -270,6 +274,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if *hovered {
+            // The pointer is back on the panel — a row action's hold is
+            // spent, and a mid-exit return settles the overlay back.
+            self.sidebar_peek_action_hold = false;
             if matches!(self.sidebar_peek, SidebarPeek::Exiting { .. }) {
                 self.sidebar_peek = SidebarPeek::Shown {
                     entered: Instant::now(),
@@ -286,6 +293,18 @@ impl Waku {
         }
         self.begin_sidebar_peek_exit(cx);
         cx.notify();
+    }
+
+    /// A row action run from the peek-mounted sidebar (pin, archive) keeps
+    /// the overlay after its menu closes; the hold releases the next time
+    /// the pointer enters the panel.
+    pub(super) fn hold_sidebar_peek(&mut self) {
+        if matches!(
+            self.sidebar_peek,
+            SidebarPeek::Shown { .. } | SidebarPeek::Exiting { .. }
+        ) {
+            self.sidebar_peek_action_hold = true;
+        }
     }
 
     /// Start the overlay's nudge-out when it is on screen.
@@ -311,15 +330,18 @@ impl Waku {
         if self.settings_page.is_some() || !self.sidebar_peek_allowed() {
             self.sidebar_peek = SidebarPeek::Hidden;
             self.sidebar_peek_menu_hold = false;
+            self.sidebar_peek_action_hold = false;
             return None;
         }
         // Settle a hover exit a menu card claimed: once no menu is open, a
         // pointer that ended up outside the panel dismisses it here rather
-        // than waiting for the next mouse move to resend the hover.
+        // than waiting for the next mouse move to resend the hover. A row
+        // action run from that menu keeps the overlay instead — the action
+        // hold releases the next time the pointer enters the panel.
         if self.sidebar_peek_menu_hold && !self.any_menu_open(cx) {
             self.sidebar_peek_menu_hold = false;
             let right_edge = px(self.sidebar_peek_width(window));
-            if window.mouse_position().x > right_edge {
+            if window.mouse_position().x > right_edge && !self.sidebar_peek_action_hold {
                 self.begin_sidebar_peek_exit(cx);
             }
         }
@@ -343,6 +365,7 @@ impl Waku {
                 let progress = started.elapsed().as_secs_f32() / SIDEBAR_PEEK_SLIDE.as_secs_f32();
                 if progress >= 1.0 {
                     self.sidebar_peek = SidebarPeek::Hidden;
+                    self.sidebar_peek_action_hold = false;
                     return None;
                 }
                 window.request_animation_frame();

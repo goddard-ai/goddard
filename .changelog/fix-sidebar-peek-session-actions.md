@@ -1,0 +1,1 @@
+- The sidebar peek no longer dismisses when archiving, pinning, or renaming a session from the hover-revealed sidebar

@@ -2048,6 +2048,10 @@ pub struct Waku {
     /// A hover exit the peek overlay deferred because a menu card was open
     /// above it. Settled once no menu is open by re-checking the pointer.
     sidebar_peek_menu_hold: bool,
+    /// A row action (pin, archive) ran from the peek-mounted sidebar, so the
+    /// deferred exit at menu close is suppressed — the overlay stays until
+    /// the pointer next enters and leaves it.
+    sidebar_peek_action_hold: bool,
     /// The right-panel surface currently maximized over the window, if any —
     /// runtime-only; the docked layout it covers comes back exactly as it
     /// was. The path of the file shown at entry rides alongside so a
@@ -4466,6 +4470,7 @@ impl Waku {
                 },
                 sidebar_peek: SidebarPeek::Hidden,
                 sidebar_peek_menu_hold: false,
+                sidebar_peek_action_hold: false,
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {
