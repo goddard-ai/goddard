@@ -6241,11 +6241,72 @@ pub(super) fn visible_picker_rows(
         })
         .collect();
 
+    // Stored selections may name a packed Cursor alias (`grok-4.6-xhigh-fast`)
+    // from before the catalog folded aliases into base models — resolve each
+    // back to base plus the traits its suffix carries so stars and recents
+    // still land on their combo row.
+    let cursor_ids: Vec<&str> = probes
+        .iter()
+        .find(|probe| probe.provider == ProviderKind::Cursor)
+        .map(|probe| {
+            probe
+                .models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    let cursor_combo = |provider: ProviderKind,
+                        stored: &str,
+                        effort: &Option<String>,
+                        fast: bool,
+                        model: &ProviderModel|
+     -> (String, Option<String>, bool) {
+        let Some(selection) = (provider == ProviderKind::Cursor)
+            .then(|| {
+                waku_protocol::model_catalog::resolve_cursor_model(
+                    cursor_ids.iter().copied(),
+                    stored,
+                )
+            })
+            .flatten()
+            .filter(|selection| !selection.suffix.is_empty())
+        else {
+            return (stored.to_owned(), effort.clone(), fast);
+        };
+        (
+            selection.value,
+            effort.clone().or_else(|| {
+                waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
+                    &selection.suffix,
+                    &model.reasoning_efforts,
+                )
+            }),
+            fast || waku_protocol::model_catalog::cursor_suffix_service_tier(
+                &selection.suffix,
+                &model.service_tiers,
+            )
+            .is_some(),
+        )
+    };
     for row in &mut rows {
         let default_effort = model_default_effort(&row.model);
         row.favorite_index = favorites.iter().position(|favorite| {
+            let (model, effort, fast) = cursor_combo(
+                favorite.provider,
+                &favorite.model,
+                &favorite.effort,
+                favorite.fast,
+                &row.model,
+            );
+            let normalized = FavoriteModel {
+                provider: favorite.provider,
+                model,
+                effort,
+                fast,
+            };
             favorite_matches_row(
-                favorite,
+                &normalized,
                 row.provider,
                 &row.model.id,
                 row.effort.as_deref(),
@@ -6254,10 +6315,17 @@ pub(super) fn visible_picker_rows(
             )
         });
         row.recent_rank = recents.iter().position(|use_| {
+            let (model, effort, fast) = cursor_combo(
+                use_.provider,
+                &use_.model,
+                &use_.effort,
+                use_.fast,
+                &row.model,
+            );
             use_.provider == row.provider
-                && use_.model == row.model.id
-                && use_.effort == row.effort
-                && use_.fast == row.fast
+                && model == row.model.id
+                && effort == row.effort
+                && fast == row.fast
         });
     }
     rows.sort_by_key(|row| {
