@@ -56,15 +56,6 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
     "FileEditorPane",
 ];
 
-/// How selection moves once an archived session's row departs. A sidebar-row
-/// archive tries the not-busy neighbor that slid into the row's slot before
-/// the unread fallback; ⌘⇧A goes straight to the shared next-unread scan.
-#[derive(Clone, Copy)]
-pub(super) enum ArchiveLanding {
-    Neighbor(usize),
-    NextUnread,
-}
-
 /// The topmost unread target in the sidebar — shared by
 /// GoToNextUnreadCompletion (⌘D / ctrl-backtick), the unseen-completion
 /// bell, and the session-departure fallbacks. "Unread" is the
@@ -1000,14 +991,26 @@ impl Waku {
         {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
-            if projectless {
-                self.create_projectless_session(cx);
-            } else {
-                self.create_session_for(project_id, self.state.last_provider, cx);
-            }
-            let focus_handle = self.composer_focus(cx);
-            window.focus(&focus_handle, cx);
+            self.compose_new_task(project_id, projectless, window, cx);
         }
+    }
+
+    /// Opens the project's New task composer — the drained-queue landing for
+    /// departures with nowhere left to navigate.
+    fn compose_new_task(
+        &mut self,
+        project_id: Uuid,
+        projectless: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if projectless {
+            self.create_projectless_session(cx);
+        } else {
+            self.create_session_for(project_id, self.state.last_provider, cx);
+        }
+        let focus_handle = self.composer_focus(cx);
+        window.focus(&focus_handle, cx);
     }
 
     /// Hides a task from the sidebar and search without deleting it.
@@ -1028,13 +1031,12 @@ impl Waku {
     /// daemon purges archives once they outlive the retention window.
     /// Terminals that ran inside the directory are closed once the removal
     /// lands.
-    /// `landing` describes where selection moves once the row departs — a
-    /// positional neighbor for sidebar-initiated archives, the shared
-    /// next-unread scan for ⌘⇧A. See [`ArchiveLanding`].
+    /// `landing_row` is the sidebar position the session's row occupied, so a
+    /// [`ArchiveNavigation::NextSession`] landing can hand selection to the
+    /// neighbor that slid into its slot. `None` when the row is not on screen.
     pub(super) fn archive_session(
         &mut self,
         session_id: Uuid,
-        landing: ArchiveLanding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1047,6 +1049,10 @@ impl Waku {
         else {
             return;
         };
+        let landing_row = sidebar::sidebar_session_row_index(
+            &self.sidebar_rows_cached(Local::now().date_naive()),
+            session_id,
+        );
         let busy = session.is_busy();
         // Only a worktree gets a preview: archiving snapshots its checkout
         // into the archive ref and removes the directory. A local checkout
@@ -1062,7 +1068,7 @@ impl Waku {
                     session_id,
                     crate::git_commit::ArchivePreview::default(),
                     true,
-                    landing,
+                    landing_row,
                     cx,
                 );
                 // Like the other deferred surfaces, focus lands two frames
@@ -1071,7 +1077,7 @@ impl Waku {
                     window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                 });
             } else if !busy {
-                self.finish_archive_session(session_id, landing, window, cx);
+                self.finish_archive_session(session_id, landing_row, window, cx);
             }
             return;
         };
@@ -1080,7 +1086,7 @@ impl Waku {
         }
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
             self.archive_preview_pending.remove(&session_id);
-            self.finish_archive_session(session_id, landing, window, cx);
+            self.finish_archive_session(session_id, landing_row, window, cx);
             return;
         };
         let window_handle = window.window_handle();
@@ -1113,7 +1119,7 @@ impl Waku {
                             session_id,
                             preview,
                             busy,
-                            landing,
+                            landing_row,
                             cx,
                         );
                         Some(focus)
@@ -1133,7 +1139,7 @@ impl Waku {
                     }
                     None => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_archive_session(session_id, landing, window, cx)
+                            waku.finish_archive_session(session_id, landing_row, window, cx)
                         });
                     }
                 }
@@ -1145,13 +1151,14 @@ impl Waku {
     /// Hides the task outright — the point every archive path reaches once
     /// the checkout proved clean or the user confirmed.
     ///
-    /// `landing` is [`ArchiveLanding::Neighbor`] only for archives initiated
-    /// from a sidebar row; it selects the next not-busy session at-or-below
-    /// the departed row's slot before falling back to the unread-based path.
+    /// Where selection moves is the `archive_navigation` setting's call;
+    /// `landing_row` is the sidebar position the departed row occupied, so a
+    /// [`ArchiveNavigation::NextSession`] landing can pick the neighbor that
+    /// slid into its slot.
     pub(super) fn finish_archive_session(
         &mut self,
         session_id: Uuid,
-        landing: ArchiveLanding,
+        landing_row: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1201,16 +1208,29 @@ impl Waku {
         }
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
-            let neighbor = match landing {
-                ArchiveLanding::Neighbor(row) => self.next_sidebar_session_from_row(row),
-                ArchiveLanding::NextUnread => None,
-            };
-            if let Some(next_id) = neighbor {
-                self.state.selected_session = None;
-                self.settings_page = None;
-                self.request_session_activation(next_id, SessionActivationTransition::Visit, cx);
-            } else {
-                self.select_session_fallback(project_id, projectless, window, cx);
+            self.state.selected_session = None;
+            self.settings_page = None;
+            match self.state.archive_navigation {
+                ArchiveNavigation::NextSession => {
+                    // The row that followed the departed one now sits at its
+                    // index; without a position the scan enters at the top.
+                    let next = self.next_sidebar_session_from_row(landing_row.unwrap_or(0));
+                    if let Some(next_id) = next {
+                        self.request_session_activation(
+                            next_id,
+                            SessionActivationTransition::Visit,
+                            cx,
+                        );
+                    } else {
+                        self.compose_new_task(project_id, projectless, window, cx);
+                    }
+                }
+                ArchiveNavigation::NewTask => {
+                    self.compose_new_task(project_id, projectless, window, cx);
+                }
+                ArchiveNavigation::NextUnread => {
+                    self.select_session_fallback(project_id, projectless, window, cx);
+                }
             }
         } else {
             self.save();
@@ -1268,7 +1288,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if let Some(session_id) = self.composer_session_id() {
-            self.archive_session(session_id, ArchiveLanding::NextUnread, window, cx);
+            self.archive_session(session_id, window, cx);
         }
     }
 

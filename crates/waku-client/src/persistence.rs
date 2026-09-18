@@ -62,6 +62,35 @@ pub enum SidebarOrdering {
     LastCreated,
 }
 
+/// Where selection moves after the viewed task is archived.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveNavigation {
+    /// The topmost unread completion, then the idle rotation, then a fresh
+    /// task — the same landing GoToNextUnreadCompletion drains to.
+    #[default]
+    NextUnread,
+    /// The next non-busy session at-or-below the departed row's slot in
+    /// sidebar order, wrapping to the top.
+    NextSession,
+    /// The project's New task composer.
+    NewTask,
+}
+
+impl ArchiveNavigation {
+    pub const ALL: [Self; 3] = [Self::NextUnread, Self::NextSession, Self::NewTask];
+
+    /// The option names are sentences, so they localize like the setting's
+    /// own label.
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::NextUnread => "settings.archive_navigation_next_unread",
+            Self::NextSession => "settings.archive_navigation_next_session",
+            Self::NewTask => "settings.archive_navigation_new_task",
+        }
+    }
+}
+
 /// One of the bundled sounds the desktop can play when a task the user is
 /// not looking at finishes its turn.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -571,6 +600,8 @@ pub struct AppSettings {
     /// Tag the sidebar's first tasks with their ⌘n chords while the shortcut
     /// modifier is held. The chords keep working with the tags off.
     pub sidebar_shortcut_tags: bool,
+    /// Where selection lands after the viewed task is archived.
+    pub archive_navigation: ArchiveNavigation,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -629,6 +660,7 @@ impl Default for AppSettings {
             high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
+            archive_navigation: ArchiveNavigation::default(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -867,6 +899,9 @@ pub struct PersistedState {
     /// with their ⌘n chords. The chords keep working with the tags off.
     #[serde(default = "default_sidebar_shortcut_tags")]
     pub sidebar_shortcut_tags: bool,
+    /// Where selection lands after the viewed task is archived.
+    #[serde(default)]
+    pub archive_navigation: ArchiveNavigation,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1021,6 +1056,7 @@ impl PersistedState {
             high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
+            archive_navigation: ArchiveNavigation::default(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1255,6 +1291,7 @@ impl PersistedState {
             high_contrast: self.high_contrast,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
+            archive_navigation: self.archive_navigation,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1332,6 +1369,7 @@ impl PersistedState {
         self.high_contrast = settings.high_contrast;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
+        self.archive_navigation = settings.archive_navigation;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;

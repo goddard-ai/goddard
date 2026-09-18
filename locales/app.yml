@@ -649,6 +649,16 @@ settings.open_at_last_prompt:
   en: Open finished tasks at the last prompt
 settings.open_at_last_prompt_description:
   en: Start reading at your latest message instead of the end of the transcript
+settings.archive_navigation:
+  en: After archiving a task
+settings.archive_navigation_description:
+  en: Choose where to go when the task you are viewing is archived
+settings.archive_navigation_next_unread:
+  en: Go to next unread completion
+settings.archive_navigation_next_session:
+  en: Go to next session in the sidebar
+settings.archive_navigation_new_task:
+  en: Compose a new task
 settings.sync_with_merge:
   en: Merge when syncing changes
 settings.sync_with_merge_description:

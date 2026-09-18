@@ -845,6 +845,68 @@ impl Waku {
                         },
                     )),
             )
+            .child({
+                let navigation = self.state.archive_navigation;
+                let weak = cx.entity().downgrade();
+                let navigation_handle = self.menu_handle("archive-navigation-selector", cx);
+                let navigation_selector = dropdown_menu(
+                    MenuChip::new("archive-navigation-selector")
+                        .label(tr!(navigation.label_key()))
+                        .outlined()
+                        .selected(navigation_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "archive-navigation-selector-menu",
+                    &navigation_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        ArchiveNavigation::ALL
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(tr!(option.label_key()), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_archive_navigation(option, cx);
+                                    });
+                                })
+                                .selected(option == navigation)
+                            })
+                            .collect()
+                    },
+                );
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.archive_navigation")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.archive_navigation_description")),
+                            ),
+                    )
+                    .child(navigation_selector)
+            })
             .child(
                 div()
                     .mt(px(15.0))
@@ -4708,6 +4770,15 @@ impl Waku {
             return;
         }
         self.state.open_at_last_prompt = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_archive_navigation(&mut self, navigation: ArchiveNavigation, cx: &mut Context<Self>) {
+        if self.state.archive_navigation == navigation {
+            return;
+        }
+        self.state.archive_navigation = navigation;
         self.save();
         cx.notify();
     }

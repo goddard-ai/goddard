@@ -2443,23 +2443,6 @@ impl Waku {
         }
     }
 
-    /// Archives a session from its sidebar row — the hover button or the row
-    /// context menu — remembering the row's position so an archived active
-    /// surface hands selection to the next not-busy session below it.
-    fn archive_session_from_sidebar(
-        &mut self,
-        session_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
-        let landing = match sidebar_session_row_index(&rows, session_id) {
-            Some(position) => sessions::ArchiveLanding::Neighbor(position),
-            None => sessions::ArchiveLanding::NextUnread,
-        };
-        self.archive_session(session_id, landing, window, cx);
-    }
-
     /// The first not-busy session at or below `position` in the current
     /// sidebar order, wrapping to the top. `position` is the row index the
     /// just-archived session occupied, so the row that followed it now sits
@@ -3221,7 +3204,7 @@ impl Waku {
                     items.extend([
                         MenuItem::new(tr!("session.archive"), move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
-                                waku.archive_session_from_sidebar(session_id, window, cx)
+                                waku.archive_session(session_id, window, cx)
                             });
                         })
                         .shortcut_action(&ArchiveSession)
@@ -3546,11 +3529,11 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
-                this.archive_session_from_sidebar(session_id, window, cx);
+                this.archive_session(session_id, window, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.archive_session_from_sidebar(session_id, window, cx);
+                    this.archive_session(session_id, window, cx);
                     cx.stop_propagation();
                 }
             }));

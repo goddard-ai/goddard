@@ -290,6 +290,11 @@ settings.markdown_preview: 预览 Markdown 文件
 settings.markdown_preview_description: 以渲染后的预览而非源码形式打开 Markdown 文件
 settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提问
 settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
+settings.archive_navigation: 归档任务后
+settings.archive_navigation_description: 选择归档正在查看的任务后跳转的位置
+settings.archive_navigation_next_unread: 前往下一个未读完成
+settings.archive_navigation_next_session: 前往侧栏中的下一个会话
+settings.archive_navigation_new_task: 撰写新任务
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
 settings.new_worktree_default_branch: 新工作树始终基于默认分支
