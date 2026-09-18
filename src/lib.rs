@@ -523,9 +523,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("secondary-w", CloseWindow, None),
         KeyBinding::new("secondary-n", NewSession, None),
-        // ⌘⇧N opens the "New task in…" directory picker in the palette; the
-        // project switcher keeps backward cycling on the chord while its
-        // overlay owns focus.
+        // ⌘⇧N opens the "New task in…" directory picker in the palette when
+        // no draft can host the project switcher — the same fall-through
+        // ⌘N gives New Session.
         KeyBinding::new("secondary-shift-n", NewTaskIn, None),
         KeyBinding::new("secondary-o", NewProject, None),
         KeyBinding::new("secondary-,", OpenSettings, None),
@@ -567,7 +567,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // the recent-project cycle the modifier release commits.
         KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),
         // ⌘⇧I opens the notification inbox — the same page contract the
-        // Projects page has. ⌘⇧N stays on ToggleWorkspace.
+        // Projects page has.
         KeyBinding::new("secondary-shift-i", ToggleInboxPage, None),
         // ⌘⌥1–2 switch the page's tabs while it is open. The chords used
         // to deep-link to a tab from anywhere; the model picker's
@@ -705,19 +705,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // the same depth, the chord wins the tie and only falls
         // through to creating a task when no draft can take it.
         KeyBinding::new("secondary-n", SwitchProjectForward, None),
-        // ⌘⇧N is "New task in…" at the root context; the switcher
-        // keeps backward cycling on the chord only while an overlay
-        // that consumes it owns focus.
-        KeyBinding::new(
-            "secondary-shift-n",
-            SwitchProjectBackward,
-            Some("ProjectSwitcher"),
-        ),
-        KeyBinding::new(
-            "secondary-shift-n",
-            SwitchProjectBackward,
-            Some("BigPicture"),
-        ),
+        // ⌘⇧N mirrors the forward chord at the root: the overlay's focus
+        // lands on a two-frame defer, so only a root binding keeps a fast
+        // ⌘N-then-⌘⇧N from slipping to "New task in…" — which still gets
+        // the keystroke when no draft can take the switcher.
+        KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
         KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
         KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
         // Re-bound on the overlay context so the chord cancels when

@@ -227,7 +227,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 bound(
                     tr!("shortcuts.project_switcher_back"),
                     SwitchProjectBackward,
-                    Some("ProjectSwitcher"),
+                    None,
                 ),
                 bound(
                     tr!("shortcuts.stop_turn"),

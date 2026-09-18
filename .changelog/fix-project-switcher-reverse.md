@@ -1,0 +1,1 @@
+- ⌘⇧N now reliably cycles the ⌘N project switcher backward — a fast press can no longer slip through to the draft's workspace toggle, and the chord opens the switcher in reverse on a draft too
