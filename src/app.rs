@@ -2317,6 +2317,8 @@ pub struct Waku {
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
+    /// The sidebar-transparency slider's in-flight drag, same reason.
+    sidebar_transparency_slider: Rc<SliderState>,
     /// Set while a settings menu is previewing a theme it has not committed;
     /// the persisted settings go back on screen when the menu dismisses.
     theme_preview_active: bool,
@@ -3499,7 +3501,13 @@ impl Waku {
         }
         crate::theme::set_thick_borders(state.thick_borders);
         crate::theme::set_high_contrast(state.high_contrast);
-        crate::theme::apply_theme_preference(state.theme, state.sidebar_transparency, window, cx);
+        crate::theme::apply_theme_preference(
+            state.theme,
+            state.sidebar_transparency,
+            state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         crate::platform::set_trackpad_navigation_swipe_enabled(
             window,
@@ -3801,6 +3809,7 @@ impl Waku {
                     crate::theme::apply_theme_preference(
                         this.state.theme,
                         this.state.sidebar_transparency,
+                        this.state.sidebar_transparency_amount,
                         window,
                         cx,
                     );
@@ -4662,6 +4671,7 @@ impl Waku {
                 archived_sessions_scrollbar: ScrollbarState::new(),
                 archived_session_rows: RefCell::new(Vec::new()),
                 completion_volume_slider: SliderState::new(),
+                sidebar_transparency_slider: SliderState::new(),
                 theme_preview_active: false,
                 theme_preview_expanded: false,
                 header_drag_armed: false,

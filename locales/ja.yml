@@ -269,6 +269,7 @@ settings.preview_user_message: 挨拶する関数を修正してもらえます�
 settings.preview_assistant_reply: 完了です — 関数が挨拶を返すようになりました。
 settings.sidebar_transparency: サイドバーの透明化
 settings.sidebar_transparency_description: サイドバーの背後にデスクトップを透かして表示します。オフにすると単色の背景になります。
+settings.sidebar_transparency_amount: 透過量
 settings.ui_font: UI のフォント
 settings.ui_font_description: インターフェース全体とメッセージで使うフォント
 settings.code_font: コードのフォント

@@ -166,6 +166,10 @@ fn default_sidebar_transparency() -> bool {
     cfg!(target_os = "macos")
 }
 
+fn default_sidebar_transparency_amount() -> f32 {
+    DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
+}
+
 fn default_sidebar_shortcut_tags() -> bool {
     true
 }
@@ -614,6 +618,11 @@ pub struct AppSettings {
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
+    /// How much of the vibrancy shows through the sidebar's tint when
+    /// `sidebar_transparency` is on: 0.0 is a solid fill, higher values let
+    /// more of the desktop blur through. Hand-edited values are clamped to
+    /// `MAX_SIDEBAR_TRANSPARENCY` when applied.
+    pub sidebar_transparency_amount: f32,
     /// Draw borders and separators a full pixel thick instead of the default
     /// half-pixel hairline.
     pub thick_borders: bool,
@@ -685,6 +694,7 @@ impl Default for AppSettings {
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
             sidebar_transparency: default_sidebar_transparency(),
+            sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
             high_contrast: false,
             three_finger_swipe_navigation: false,
@@ -711,6 +721,12 @@ pub const DEFAULT_CODE_FONT_SIZE: f32 = 13.0;
 pub const DEFAULT_COMPLETION_SOUND_VOLUME: f32 = 1.0;
 /// The completion sound's relative volume tops out at twice its recorded level.
 pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
+/// Fraction of the Sidebar vibrancy let through the sidebar's tint by
+/// default — visible without competing with row text.
+pub const DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT: f32 = 0.25;
+/// The vibrancy past ~60% of the mix starts losing text legibility on busy
+/// backdrops, so the slider stops there.
+pub const MAX_SIDEBAR_TRANSPARENCY: f32 = 0.6;
 
 /// Bounds a possibly hand-edited font size to something the layout survives.
 fn sanitized_font_size(size: f32, fallback: f32) -> f32 {
@@ -741,6 +757,15 @@ pub fn sanitized_completion_sound_volume(volume: f32) -> f32 {
         volume.clamp(0.0, MAX_COMPLETION_SOUND_VOLUME)
     } else {
         DEFAULT_COMPLETION_SOUND_VOLUME
+    }
+}
+
+/// Bounds a possibly hand-edited amount to the slider's range.
+pub fn sanitized_sidebar_transparency_amount(amount: f32) -> f32 {
+    if amount.is_finite() {
+        amount.clamp(0.0, MAX_SIDEBAR_TRANSPARENCY)
+    } else {
+        DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
     }
 }
 
@@ -917,6 +942,10 @@ pub struct PersistedState {
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
     pub sidebar_transparency: bool,
+    /// How much of the vibrancy shows through the sidebar's tint when
+    /// `sidebar_transparency` is on.
+    #[serde(default = "default_sidebar_transparency_amount")]
+    pub sidebar_transparency_amount: f32,
     /// Draw borders and separators a full pixel thick instead of the default
     /// half-pixel hairline.
     #[serde(default)]
@@ -1097,6 +1126,7 @@ impl PersistedState {
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
             sidebar_transparency: default_sidebar_transparency(),
+            sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
             high_contrast: false,
             three_finger_swipe_navigation: false,
@@ -1379,6 +1409,7 @@ impl PersistedState {
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
             new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
             sidebar_transparency: self.sidebar_transparency,
+            sidebar_transparency_amount: self.sidebar_transparency_amount,
             thick_borders: self.thick_borders,
             high_contrast: self.high_contrast,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
@@ -1459,6 +1490,8 @@ impl PersistedState {
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
         self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
         self.sidebar_transparency = settings.sidebar_transparency;
+        self.sidebar_transparency_amount =
+            sanitized_sidebar_transparency_amount(settings.sidebar_transparency_amount);
         self.thick_borders = settings.thick_borders;
         self.high_contrast = settings.high_contrast;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
@@ -2197,6 +2230,40 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.sidebar_transparency);
+    }
+
+    #[test]
+    fn sidebar_transparency_amount_defaults_persists_and_clamps() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            defaults.sidebar_transparency_amount,
+            DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
+        );
+        let mut state = PersistedState::empty();
+        state.sidebar_transparency_amount = 0.4;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(
+            settings["sidebar_transparency_amount"].as_f64().unwrap() as f32,
+            0.4
+        );
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_transparency_amount")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.sidebar_transparency_amount, 0.4);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(AppSettings {
+            sidebar_transparency_amount: 9.0,
+            ..Default::default()
+        });
+        assert_eq!(
+            restored.sidebar_transparency_amount,
+            MAX_SIDEBAR_TRANSPARENCY
+        );
     }
 
     #[test]

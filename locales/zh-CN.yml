@@ -273,6 +273,7 @@ settings.preview_user_message: 能帮我修一下问候函数吗？
 settings.preview_assistant_reply: 已完成——函数现在会返回问候语。
 settings.sidebar_transparency: 侧边栏透明
 settings.sidebar_transparency_description: 在侧边栏后方透出桌面。关闭后使用纯色背景。
+settings.sidebar_transparency_amount: 透明程度
 settings.ui_font: 界面字体
 settings.ui_font_description: 整个界面与消息使用的字体
 settings.code_font: 代码字体

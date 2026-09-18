@@ -110,6 +110,7 @@ impl DaemonSettings {
             "theme",
             "language",
             "sidebar_transparency",
+            "sidebar_transparency_amount",
         ] {
             self.extra.remove(key);
         }

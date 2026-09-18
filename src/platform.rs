@@ -651,15 +651,18 @@ pub fn titlebar_double_click(window: &Window) {
 /// Metal target to blend two translucent quads. The semantic tint is a native
 /// view above active Sidebar vibrancy, painted with the active theme's solid
 /// sidebar color; GPUI paints clear sidebar chrome and one translucent
-/// interaction layer above it. With `transparent` off the effect view stops
-/// rendering and the tint view hides; GPUI's sidebar fill is opaque by then
-/// and covers the strip itself.
+/// interaction layer above it. `transparency_amount` is the fraction of
+/// vibrancy the tint lets through — 0 repaints the sidebar's solid color at
+/// full strength. With `transparent` off the effect view stops rendering and
+/// the tint view hides; GPUI's sidebar fill is opaque by then and covers the
+/// strip itself.
 #[cfg(target_os = "macos")]
 pub fn configure_sidebar_material(
     window: &Window,
     sidebar: gpui::Hsla,
     dark: bool,
     transparent: bool,
+    transparency_amount: f32,
 ) {
     use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
@@ -728,7 +731,10 @@ pub fn configure_sidebar_material(
             return;
         }
 
-        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 0.92);
+        // `transparency_amount` is the fraction of vibrancy let through the
+        // tint; the settings slider clamps it to MAX_SIDEBAR_TRANSPARENCY.
+        let tint_opacity = 1.0 - f64::from(transparency_amount.clamp(0.0, 1.0));
+        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, tint_opacity);
 
         SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
@@ -762,7 +768,7 @@ pub fn configure_sidebar_material(
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool) {}
+pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool, _: f32) {}
 
 #[cfg(target_os = "macos")]
 pub fn set_sidebar_material_width(window: &Window, width: f32) {

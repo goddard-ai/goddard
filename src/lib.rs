@@ -457,6 +457,7 @@ pub fn run() {
                         theme.sidebar_drag_background,
                         theme.is_dark,
                         waku.sidebar_transparency(),
+                        waku.sidebar_transparency_amount(),
                     );
                     cx.activate(true);
                 })

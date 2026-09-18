@@ -1427,6 +1427,7 @@ pub fn init(cx: &mut App) {
 pub fn apply_theme_preference(
     settings: ThemeSettings,
     sidebar_transparent: bool,
+    sidebar_transparency_amount: f32,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -1451,6 +1452,7 @@ pub fn apply_theme_preference(
         theme.sidebar_drag_background,
         is_dark,
         sidebar_transparent,
+        sidebar_transparency_amount,
     );
     window.refresh();
 }

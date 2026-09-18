@@ -63,6 +63,7 @@ fn value_at(bounds: Bounds<Pixels>, x: Pixels, max: f32) -> f32 {
 /// A focusable slider. Pointer drags move the drawn thumb continuously and
 /// `commit` fires once per gesture, on release, and once per arrow/Home/End
 /// key — so `commit` is where the value is stored, persisted, and previewed.
+/// The owning `Window` is passed so commits can touch native window state.
 #[track_caller]
 pub fn slider<E>(
     id: impl Into<ElementId>,
@@ -70,7 +71,7 @@ pub fn slider<E>(
     max: f32,
     value: f32,
     cx: &mut Context<E>,
-    commit: impl Fn(&mut E, f32, &mut Context<E>) + 'static,
+    commit: impl Fn(&mut E, f32, &mut Window, &mut Context<E>) + 'static,
 ) -> Stateful<Div>
 where
     E: 'static,
@@ -177,7 +178,7 @@ where
                             let Some(value) = state.drag_value.take() else {
                                 return;
                             };
-                            let _ = weak.update(cx, |this, cx| commit(this, value, cx));
+                            let _ = weak.update(cx, |this, cx| commit(this, value, window, cx));
                             window.refresh();
                         }
                     });
@@ -187,7 +188,7 @@ where
         )
         .on_key_down(cx.listener({
             let commit = commit.clone();
-            move |this, event: &KeyDownEvent, _, cx| {
+            move |this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.modifiers.modified() {
                     return;
                 }
@@ -199,7 +200,7 @@ where
                     _ => None,
                 };
                 if let Some(next) = next {
-                    commit(this, next.clamp(0.0, max), cx);
+                    commit(this, next.clamp(0.0, max), window, cx);
                     cx.stop_propagation();
                 }
             }

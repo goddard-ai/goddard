@@ -637,6 +637,8 @@ settings.sidebar_transparency:
   en: Sidebar transparency
 settings.sidebar_transparency_description:
   en: Blend the desktop behind the sidebar. Turn off for a solid background.
+settings.sidebar_transparency_amount:
+  en: Amount
 settings.ui_font:
   en: UI font
 settings.ui_font_description:

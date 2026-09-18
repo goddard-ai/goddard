@@ -1194,7 +1194,7 @@ impl Waku {
                     crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
                     volume,
                     cx,
-                    |this, volume, cx| this.set_completion_sound_volume(volume, cx),
+                    |this, volume, _, cx| this.set_completion_sound_volume(volume, cx),
                 );
                 let weak = cx.entity().downgrade();
                 let sound_handle = self.menu_handle("completion-sound-selector", cx);
@@ -4183,6 +4183,18 @@ impl Waku {
                 // sidebar is already a solid fill and there is nothing to
                 // switch.
                 let transparent = self.state.sidebar_transparency;
+                let amount = self.state.sidebar_transparency_amount;
+                let amount_shown = self.sidebar_transparency_slider.shown(amount);
+                let amount_slider = slider::slider(
+                    "sidebar-transparency-slider",
+                    &self.sidebar_transparency_slider,
+                    crate::persistence::MAX_SIDEBAR_TRANSPARENCY,
+                    amount,
+                    cx,
+                    |this, amount, window, cx| {
+                        this.set_sidebar_transparency_amount(amount, window, cx)
+                    },
+                );
                 element
                     .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
                     .child(
@@ -4227,6 +4239,46 @@ impl Waku {
                                 },
                             )),
                     )
+                    // Same shape as the completion-volume row: the slider only
+                    // exists while the feature is on, so an in-flight drag
+                    // cannot outlive it — `set_sidebar_transparency` cancels
+                    // the drag state on the way off.
+                    .when(transparent, |card| {
+                        card.child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_h(px(52.0))
+                                    .px(px(20.0))
+                                    .py(px(10.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(12.0))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("settings.sidebar_transparency_amount")),
+                                    )
+                                    .child(amount_slider.w(px(140.0)).flex_none())
+                                    .child(
+                                        div()
+                                            .w(px(32.0))
+                                            .flex_none()
+                                            .flex()
+                                            .justify_end()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_secondary)
+                                            .child(format!(
+                                                "{}%",
+                                                (amount_shown * 100.0).round() as i32
+                                            )),
+                                    ),
+                            )
+                    })
             })
             .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(
@@ -6428,7 +6480,13 @@ impl Waku {
             return;
         }
         self.state.theme = settings;
-        crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
+        crate::theme::apply_theme_preference(
+            settings,
+            self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }
@@ -6448,7 +6506,13 @@ impl Waku {
             return;
         }
         self.theme_preview_active = true;
-        crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
+        crate::theme::apply_theme_preference(
+            settings,
+            self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
     }
 
     /// Re-apply the persisted theme after a previewed choice is dismissed
@@ -6463,6 +6527,7 @@ impl Waku {
         crate::theme::apply_theme_preference(
             self.state.theme,
             self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
             window,
             cx,
         );
@@ -6509,6 +6574,10 @@ impl Waku {
         self.state.sidebar_transparency
     }
 
+    pub(crate) fn sidebar_transparency_amount(&self) -> f32 {
+        self.state.sidebar_transparency_amount
+    }
+
     fn set_thick_borders(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.thick_borders == enabled {
             return;
@@ -6532,6 +6601,7 @@ impl Waku {
         crate::theme::apply_theme_preference(
             self.state.theme,
             self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
             window,
             cx,
         );
@@ -6548,8 +6618,41 @@ impl Waku {
         if self.state.sidebar_transparency == transparent {
             return;
         }
+        if !transparent {
+            self.sidebar_transparency_slider.cancel();
+        }
         self.state.sidebar_transparency = transparent;
-        crate::theme::apply_theme_preference(self.state.theme, transparent, window, cx);
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            transparent,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
+        self.save();
+        cx.notify();
+    }
+
+    /// The transparency slider commits once per gesture; each commit retints
+    /// the native vibrancy stack and persists like the toggle does.
+    fn set_sidebar_transparency_amount(
+        &mut self,
+        amount: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let amount = crate::persistence::sanitized_sidebar_transparency_amount(amount);
+        if self.state.sidebar_transparency_amount == amount {
+            return;
+        }
+        self.state.sidebar_transparency_amount = amount;
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            self.state.sidebar_transparency,
+            amount,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }
