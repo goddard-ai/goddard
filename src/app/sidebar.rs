@@ -1526,14 +1526,14 @@ impl Waku {
                 .active(|element| element.bg(theme.overlay_strong))
                 .tooltip(Tooltip::text(tr!("friends.transfers_active", count = count)))
                 .child(glyph)
-                .on_click(cx.listener(|this, _, _window, cx| {
-                    this.open_settings_page(SettingsPage::Friends, cx);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_settings_page(SettingsPage::Friends, window, cx);
                 }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                     if !event.keystroke.modifiers.modified()
                         && matches!(event.keystroke.key.as_str(), "enter" | "space")
                     {
-                        this.open_settings_page(SettingsPage::Friends, cx);
+                        this.open_settings_page(SettingsPage::Friends, window, cx);
                         cx.stop_propagation();
                     }
                 }))
