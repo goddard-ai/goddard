@@ -292,7 +292,7 @@ fn completion_sound_data(sound: waku_client::persistence::CompletionSound) -> &'
 #[cfg(target_os = "macos")]
 fn completion_sound_gain(sound: waku_client::persistence::CompletionSound) -> f32 {
     match sound {
-        waku_client::persistence::CompletionSound::Retro => 0.8,
+        waku_client::persistence::CompletionSound::Retro => 0.5,
         _ => 1.0,
     }
 }
