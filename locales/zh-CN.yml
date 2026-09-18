@@ -955,7 +955,8 @@ sync.behind_one: "落后 %{upstream} 1 个提交"
 sync.behind_many: "落后 %{upstream} %{count} 个提交"
 sync.ahead_one: 领先 1 个提交
 sync.ahead_many: "领先 %{count} 个提交"
-sync.action: 同步更改
+sync.pull: 拉取更改
+sync.push: 推送更改
 sync.command_hint: "在终端中运行 %{command}"
 
 terminal.starting: 正在启动终端…

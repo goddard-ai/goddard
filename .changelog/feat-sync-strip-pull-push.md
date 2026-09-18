@@ -1,0 +1,1 @@
+- The new-task sync strip now reads Pull changes when the checkout trails upstream and offers Push changes when it only leads, instead of always saying Sync changes
