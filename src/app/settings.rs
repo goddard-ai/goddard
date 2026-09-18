@@ -3217,6 +3217,9 @@ impl Waku {
     }
 
     fn set_github_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.notifications.reset();
+        }
         self.state.github_enabled = enabled;
         self.save();
         cx.notify();

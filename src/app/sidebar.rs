@@ -2215,6 +2215,7 @@ impl Waku {
             },
         );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
+        fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
         for session in &self.state.sessions {
             if !session.has_started() || session.archived_at.is_some() {
                 continue;
@@ -2288,7 +2289,10 @@ impl Waku {
         if self.state.projects_page_enabled {
             rows.push(SidebarRow::Projects);
         }
-        rows.push(SidebarRow::Inbox);
+        // The Inbox row rides the GitHub integration opt-in.
+        if self.state.github_enabled {
+            rows.push(SidebarRow::Inbox);
+        }
 
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an
