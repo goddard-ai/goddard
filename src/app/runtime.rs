@@ -1450,7 +1450,7 @@ impl Waku {
                 .err()
                 .map(|error| error.to_string());
             if let Some(error) = error {
-                let _ = this.update(cx, |this, cx| {
+                let _ = this.update(cx, |this, _cx| {
                     this.show_toast(tr!("friends.command_failed", error = error));
                 });
             }

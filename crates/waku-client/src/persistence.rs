@@ -1537,6 +1537,14 @@ pub struct StateStore {
 impl StateStore {
     pub fn default_path() -> PathBuf {
         if cfg!(debug_assertions) {
+            // `GODDARD_DATA_DIR` lets a second debug instance run beside the
+            // first (friend-sharing smoke tests, isolated experiments)
+            // without colliding on `temp/`.
+            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR")
+                .filter(|dir| !dir.is_empty())
+            {
+                return PathBuf::from(dir).join("app.db");
+            }
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .and_then(Path::parent)
