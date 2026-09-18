@@ -208,6 +208,63 @@ pub struct IssueDetail {
     pub comments: Vec<WorkItemComment>,
 }
 
+/// Which `.github/ISSUE_TEMPLATE` entry a picker row represents: a Markdown
+/// template whose body prefills the form, a YAML form only github.com can
+/// render, or a `config.yml` contact link that opens externally.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueTemplateKind {
+    Markdown,
+    YamlForm,
+    ContactLink,
+}
+
+/// One row in the new-issue template picker.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueTemplate {
+    /// Frontmatter `name`, or the filename stem when absent.
+    pub name: String,
+    /// Frontmatter `about`/`description` — the picker's detail line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    /// Frontmatter `title` — the title field's starting text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_prefix: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    /// The Markdown template's body minus its frontmatter.
+    #[serde(default)]
+    pub body: String,
+    /// The file's name inside `.github/ISSUE_TEMPLATE` — the `?template=`
+    /// parameter a YAML form's web fallback needs.
+    pub filename: String,
+    /// Contact links carry the URL they open; templates leave it `None` —
+    /// theirs is built from the repo's web URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub kind: IssueTemplateKind,
+}
+
+/// The new-issue form's submission — empty `body`/`labels`/`assignees`
+/// omit the corresponding `gh` flags.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateIssueInput {
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    /// `gh` matches the milestone by exact title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<String>,
+}
+
 /// One file changed by a pull request.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -868,6 +925,22 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         number: u64,
     },
+    /// The repo's `.github/ISSUE_TEMPLATE` entries — Markdown templates,
+    /// YAML form stubs, and `config.yml` contact links — read from the
+    /// checkout so a linked worktree's own templates apply. Returns
+    /// `IssueTemplates`.
+    ListIssueTemplates {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// `gh issue create`: the GitHub surface's second write after
+    /// `PostWorkItemComment`, with the same contract — a failure is an
+    /// error carrying the CLI's own wording. Returns `IssueCreated`.
+    CreateIssue {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        input: CreateIssueInput,
+    },
     /// Repo-wide pull-request list for the GitHub browser. The branch-scoped
     /// sidebar scan keeps using `ListPullRequests`.
     ListRepoPullRequests {
@@ -1057,6 +1130,19 @@ pub enum WorkspaceResult {
     },
     Issue {
         detail: Option<IssueDetail>,
+    },
+    /// `entries` is empty for a checkout without templates — and outside a
+    /// checkout entirely; `blank_issues_enabled` reports `config.yml`'s
+    /// flag, `true` when the file is absent.
+    IssueTemplates {
+        entries: Vec<IssueTemplate>,
+        blank_issues_enabled: bool,
+    },
+    /// The URL `gh issue create` printed; `number` is parsed from its last
+    /// path segment — `None` when stdout was not a recognizable issue URL.
+    IssueCreated {
+        number: Option<u64>,
+        url: String,
     },
     PullRequest {
         detail: Option<PullRequestDetail>,

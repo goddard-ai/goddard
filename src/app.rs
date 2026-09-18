@@ -396,6 +396,13 @@ enum ToastActionKind {
     LocalhostUrl,
     /// A missing project folder's "Locate Folder…" picker.
     RelocateProject(Uuid),
+    /// Open the created issue — the in-app GitHub browser when its project
+    /// and number are known, the URL otherwise. `project` keys the browser.
+    GitHubIssue {
+        project: Option<Uuid>,
+        number: Option<u64>,
+        url: SharedString,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1860,6 +1867,12 @@ pub struct Waku {
     /// Window-modal Git commit/push UI. Its repository snapshot is filled
     /// off-thread; frames only read this in-memory value.
     commit_dialog: Option<commit_dialog::CommitDialogState>,
+    /// Window-modal new-GitHub-issue UI opened from the command palette.
+    /// The template scan runs in the palette; this is just the form.
+    issue_dialog: Option<issue_dialog::IssueDialogState>,
+    /// The issue the last `gh issue create` landed — what the success
+    /// toast's "View" and ⌘⌥I open.
+    last_created_issue: Option<issue_dialog::CreatedIssue>,
     /// The archive confirmation shown when a checkout still holds
     /// uncommitted or unpushed work; `archive_preview_pending` dedupes the
     /// background inspection that decides whether it opens.
@@ -2645,6 +2658,7 @@ mod go_to_line;
 mod goal_dialog;
 mod keybindings_page;
 mod image_preview;
+mod issue_dialog;
 mod notifications;
 mod project_switcher;
 mod projects;
@@ -2684,6 +2698,7 @@ pub use file_finder::init as init_file_finder;
 pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
+pub use issue_dialog::init as init_issue_dialog_keys;
 pub use settings::init as init_settings_keys;
 pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -2875,6 +2890,27 @@ impl Waku {
             Some(ToastAction {
                 label: tr!("session.view_now").into(),
                 kind: ToastActionKind::Session(session_id),
+            }),
+        );
+    }
+
+    /// Confirms a `gh issue create` — "View" deep-links into the in-app
+    /// GitHub browser, matching what ⌘⌥I does while the toast is up.
+    pub(super) fn show_issue_created_toast(&mut self, created: &issue_dialog::CreatedIssue) {
+        let message = match created.number {
+            Some(number) => tr!("issue.created_numbered", number = number),
+            None => tr!("issue.created"),
+        };
+        self.show_toast_with_tone(
+            message,
+            ToastTone::Success,
+            Some(ToastAction {
+                label: tr!("issue.view").into(),
+                kind: ToastActionKind::GitHubIssue {
+                    project: created.project,
+                    number: created.number,
+                    url: created.url.clone().into(),
+                },
             }),
         );
     }
@@ -4462,6 +4498,8 @@ impl Waku {
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,
+                issue_dialog: None,
+                last_created_issue: None,
                 archive_dialog: None,
                 archive_preview_pending: HashSet::new(),
                 shortcuts_dialog: None,

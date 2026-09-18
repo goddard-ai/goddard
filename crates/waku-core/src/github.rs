@@ -31,6 +31,12 @@ pub(crate) fn gh_output(cwd: &Path, args: &[&OsStr]) -> Option<Output> {
 /// The reads' `None` "host could not answer" contract does not apply here —
 /// a post the user is waiting on must say why it did not land.
 pub(crate) fn gh_write(cwd: &Path, args: &[&OsStr]) -> anyhow::Result<()> {
+    gh_write_output(cwd, args).map(|_| ())
+}
+
+/// `gh_write` for writes that answer on stdout — `gh issue create` prints
+/// the new issue's URL.
+pub(crate) fn gh_write_output(cwd: &Path, args: &[&OsStr]) -> anyhow::Result<String> {
     let output = crate::command_env::plain_command("gh")
         .args(args)
         .current_dir(cwd)
@@ -44,7 +50,7 @@ pub(crate) fn gh_write(cwd: &Path, args: &[&OsStr]) -> anyhow::Result<()> {
         }
         anyhow::bail!("{stderr}");
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 /// `gh` timestamps arrive RFC 3339; the wire and everything reading it speaks

@@ -154,6 +154,28 @@ command_palette.no_scripts:
   en: No scripts found
 command_palette.no_scripts_hint:
   en: No package.json, makefile, or justfile at the project root
+command_palette.templates:
+  en: Templates
+command_palette.new_github_issue:
+  en: New GitHub issue
+command_palette.issue_project_placeholder:
+  en: Select a project for the issue…
+command_palette.issue_template_placeholder:
+  en: Select an issue template…
+command_palette.loading_issue_templates:
+  en: Loading issue templates…
+command_palette.blank_issue:
+  en: Blank issue
+command_palette.blank_issue_search:
+  en: blank issue new no template
+command_palette.opens_on_web:
+  en: Opens on GitHub
+command_palette.no_issue_projects_hint:
+  en: Open a project to file an issue
+command_palette.no_issue_templates:
+  en: No issue templates
+command_palette.no_issue_templates_hint:
+  en: File a blank issue instead
 command_palette.open_on_github:
   en: Open on GitHub
 command_palette.land_changes:
@@ -1176,6 +1198,41 @@ github.post_comment:
   en: Post comment
 github.loading_media:
   en: Loading media…
+
+issue.new:
+  en: New issue
+issue.title:
+  en: Title
+issue.title_placeholder:
+  en: Issue title
+issue.title_required:
+  en: Give the issue a title
+issue.body:
+  en: Body
+issue.body_placeholder:
+  en: Markdown body — template text is already filled in
+issue.labels:
+  en: Labels
+issue.labels_placeholder:
+  en: bug, help wanted
+issue.assignees:
+  en: Assignees
+issue.assignees_placeholder:
+  en: octocat, hubot
+issue.milestone:
+  en: Milestone
+issue.milestone_placeholder:
+  en: Milestone name or number
+issue.create:
+  en: Create issue
+issue.creating:
+  en: Creating issue…
+issue.created:
+  en: Issue created
+issue.created_numbered:
+  en: "Issue #%{number} created"
+issue.view:
+  en: View
 
 project.new_project:
   en: New project…
@@ -3242,6 +3299,8 @@ shortcuts.open_localhost:
   en: Open Localhost URL
 shortcuts.open_localhost_tab:
   en: Open Localhost URL in Tab
+shortcuts.open_created_issue:
+  en: Open Created GitHub Issue
 shortcuts.open_settings:
   en: Open Settings
 shortcuts.fps_counter:

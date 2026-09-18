@@ -377,6 +377,17 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::GetIssue { cwd, number } => WorkspaceResult::Issue {
             detail: crate::issues::view(&cwd, number)?,
         },
+        WorkspaceOperation::ListIssueTemplates { cwd } => {
+            let (entries, blank_issues_enabled) = crate::issue_templates::list(&cwd);
+            WorkspaceResult::IssueTemplates {
+                entries,
+                blank_issues_enabled,
+            }
+        }
+        WorkspaceOperation::CreateIssue { cwd, input } => {
+            let (number, url) = crate::issues::create(&cwd, &input)?;
+            WorkspaceResult::IssueCreated { number, url }
+        }
         WorkspaceOperation::ListRepoPullRequests { cwd, state, query } => {
             WorkspaceResult::PullRequests {
                 entries: crate::pull_requests::list_for_repo(&cwd, state, query.as_deref())?,

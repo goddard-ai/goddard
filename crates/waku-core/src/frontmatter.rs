@@ -26,7 +26,7 @@ pub(crate) fn parse_frontmatter_fields<'a>(
     body.trim_start_matches(['-']).trim_start()
 }
 
-fn frontmatter_value(value: serde_json::Value) -> Option<String> {
+pub(crate) fn frontmatter_value(value: serde_json::Value) -> Option<String> {
     let value = match value {
         serde_json::Value::String(value) => value,
         // Preserve the bracket notation historically accepted by command

@@ -493,6 +493,7 @@ impl Render for Waku {
             let command_palette = self.render_command_palette(window, cx);
             let file_finder = self.render_file_finder(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
+            let issue_dialog = self.render_issue_dialog(cx);
             let archive_dialog = self.render_archive_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
@@ -523,6 +524,7 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::open_localhost_url_action))
                 .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
                 .on_action(cx.listener(Self::new_terminal_action))
+                .on_action(cx.listener(Self::open_created_issue_in_github_action))
                 .on_action(cx.listener(Self::toggle_terminals_action))
                 .on_action(cx.listener(Self::toggle_projects_page_action))
                 .on_action(cx.listener(Self::toggle_inbox_page_action))
@@ -536,6 +538,7 @@ impl Render for Waku {
                 .children(command_palette)
                 .children(file_finder)
                 .children(commit_dialog)
+                .children(issue_dialog)
                 .children(archive_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
@@ -559,6 +562,7 @@ impl Render for Waku {
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
+        let issue_dialog = self.render_issue_dialog(cx);
         let archive_dialog = self.render_archive_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
@@ -631,6 +635,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_localhost_url_action))
             .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
             .on_action(cx.listener(Self::new_terminal_action))
+            .on_action(cx.listener(Self::open_created_issue_in_github_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
             .on_action(cx.listener(Self::toggle_projects_page_action))
             .on_action(cx.listener(Self::toggle_inbox_page_action))
@@ -904,6 +909,7 @@ impl Render for Waku {
             .children(command_palette)
             .children(file_finder)
             .children(commit_dialog)
+            .children(issue_dialog)
             .children(archive_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
@@ -1068,6 +1074,14 @@ impl Waku {
                     )));
                 }
             }
+            if matches!(kind, ToastActionKind::GitHubIssue { .. }) {
+                if let Some(open) =
+                    crate::ui::shortcut::ShortcutHint::action(&crate::OpenCreatedIssueInGitHub)
+                        .resolve(window, cx)
+                {
+                    label = format!("{label} {open}");
+                }
+            }
             div()
                 .id(SharedString::from(format!("toast-action-{generation}")))
                 .tab_index(0)
@@ -1102,6 +1116,17 @@ impl Waku {
                                 this.hide_toast();
                                 this.relocate_project(*project_id, cx);
                             }
+                            ToastActionKind::GitHubIssue {
+                                project,
+                                number,
+                                url,
+                            } => this.open_created_issue(
+                                *project,
+                                *number,
+                                url.as_ref(),
+                                window,
+                                cx,
+                            ),
                         }
                         cx.stop_propagation();
                     }
@@ -1121,6 +1146,17 @@ impl Waku {
                                 this.hide_toast();
                                 this.relocate_project(*project_id, cx);
                             }
+                            ToastActionKind::GitHubIssue {
+                                project,
+                                number,
+                                url,
+                            } => this.open_created_issue(
+                                *project,
+                                *number,
+                                url.as_ref(),
+                                window,
+                                cx,
+                            ),
                         }
                         cx.stop_propagation();
                     }

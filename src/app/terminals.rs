@@ -28,7 +28,7 @@ pub(super) const SIDEBAR_TERMINAL_ROW_HEIGHT: f32 =
 
 /// The nearest enclosing repository's root — `.git` may be a file in a
 /// linked worktree, so existence rather than `is_dir` is the test.
-fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
+pub(super) fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
     directory
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
@@ -104,7 +104,7 @@ impl Waku {
 
     /// The directory a row reports — the live PTY cwd once the view is up,
     /// the recorded spawn directory otherwise.
-    fn terminal_cwd(&self, terminal_id: Uuid, cx: &App) -> Option<PathBuf> {
+    pub(super) fn terminal_cwd(&self, terminal_id: Uuid, cx: &App) -> Option<PathBuf> {
         self.right_panel_terminals
             .get(&terminal_id)
             .map(|terminal| terminal.read(cx).working_directory().to_path_buf())

@@ -69,6 +69,17 @@ command_palette.no_projects: プロジェクトがありません
 command_palette.no_projects_hint: プロジェクトを開くとそのスクリプトを実行できます
 command_palette.no_scripts: スクリプトが見つかりません
 command_palette.no_scripts_hint: プロジェクトのルートに package.json、makefile、justfile がありません
+command_palette.templates: テンプレート
+command_palette.new_github_issue: 新規 GitHub Issue
+command_palette.issue_project_placeholder: Issue を作成するプロジェクトを選択…
+command_palette.issue_template_placeholder: Issue テンプレートを選択…
+command_palette.loading_issue_templates: Issue テンプレートを読み込み中…
+command_palette.blank_issue: 空の Issue
+command_palette.blank_issue_search: blank issue new no template 空の Issue
+command_palette.opens_on_web: GitHub で開く
+command_palette.no_issue_projects_hint: プロジェクトを開くと Issue を作成できます
+command_palette.no_issue_templates: Issue テンプレートがありません
+command_palette.no_issue_templates_hint: 代わりに空の Issue を作成してください
 command_palette.open_on_github: GitHub で開く
 command_palette.land_changes: 変更を取り込む
 command_palette.new_custom_command: 新規カスタムコマンド…
@@ -499,6 +510,24 @@ github.more_commits: "… ほか {count} 件"
 github.comment_placeholder: コメントを書く
 github.post_comment: コメントを送信
 github.loading_media: メディアを読み込み中…
+
+issue.new: 新規 Issue
+issue.title: タイトル
+issue.title_placeholder: Issue のタイトル
+issue.title_required: Issue のタイトルを入力してください
+issue.body: 本文
+issue.body_placeholder: Markdown 本文 — テンプレートの内容は入力済みです
+issue.labels: ラベル
+issue.labels_placeholder: bug, help wanted
+issue.assignees: アサイン
+issue.assignees_placeholder: octocat, hubot
+issue.milestone: マイルストーン
+issue.milestone_placeholder: マイルストーン名または番号
+issue.create: Issue を作成
+issue.creating: Issue を作成中…
+issue.created: Issue を作成しました
+issue.created_numbered: "Issue #%{number} を作成しました"
+issue.view: 表示
 
 project.new_project: 新規プロジェクト…
 project.no_project: プロジェクトを使用しない

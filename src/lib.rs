@@ -152,7 +152,8 @@ actions!(
         WebviewPaste,
         WebviewSelectAll,
         OpenLocalhostUrl,
-        OpenLocalhostUrlInTab
+        OpenLocalhostUrlInTab,
+        OpenCreatedIssueInGitHub
     ]
 );
 
@@ -334,6 +335,7 @@ pub fn run() {
             crate::app::init_element_inspector(cx);
             crate::app::init_file_finder(cx);
             crate::app::init_commit_dialog_keys(cx);
+            crate::app::init_issue_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
@@ -904,6 +906,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // adding shift opens it in a built-in browser tab instead.
         KeyBinding::new("secondary-alt-o", OpenLocalhostUrl, None),
         KeyBinding::new("secondary-alt-shift-o", OpenLocalhostUrlInTab, None),
+        // The last-created GitHub issue — the toast's "View" without the
+        // mouse. Deep-links the GitHub browser when its project and
+        // number are known, falls back to the external URL.
+        KeyBinding::new("secondary-alt-i", OpenCreatedIssueInGitHub, None),
     ]);
 
     #[cfg(target_os = "macos")]

@@ -9,6 +9,7 @@
 use gpui::{KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
+use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef};
 
 use super::*;
 use crate::ui::shortcut::ShortcutHint;
@@ -83,11 +84,12 @@ enum PaletteSection {
     Commands,
     CustomCommands,
     Settings,
-    // Run-script drill-in sections; they never appear in Commands view.
+    // Drill-in sections; they never appear in Commands view.
     Projects,
     Scripts,
     // The "New task in…" picker's directory listing; never in Commands view.
     Directories,
+    Templates,
 }
 
 impl PaletteSection {
@@ -103,6 +105,7 @@ impl PaletteSection {
             Self::Projects => "command_palette.projects",
             Self::Scripts => "command_palette.scripts",
             Self::Directories => "command_palette.directories",
+            Self::Templates => "command_palette.templates",
         })
     }
 
@@ -112,7 +115,7 @@ impl PaletteSection {
             Self::CustomCommands => 1,
             Self::Tasks => 2,
             Self::Settings => 3,
-            Self::Projects | Self::Scripts | Self::Directories => 4,
+            Self::Projects | Self::Scripts | Self::Directories | Self::Templates => 4,
         }
     }
 }
@@ -202,6 +205,10 @@ enum PaletteAction {
         project: Uuid,
         script: run_script::ProjectScript,
     },
+    CreateGitHubIssue,
+    ChooseIssueProject(Uuid),
+    ChooseIssueTemplate(waku_protocol::workspace::IssueTemplate),
+    NewBlankIssue,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -214,6 +221,17 @@ enum CommandPaletteView {
     RunScripts,
     /// The "New task in…" directory picker.
     NewTaskIn,
+    IssueProjects,
+    IssueTemplates,
+}
+
+/// What a resolved template fetch does next: a repo with templates shows
+/// the picker, a templateless one opens the form directly, and a repo
+/// `gh` cannot talk to stops the flow with its reason.
+enum IssueTemplateFetch {
+    ShowTemplates,
+    OpenDialog,
+    Toast(String),
 }
 
 #[derive(Clone, Debug)]
@@ -451,6 +469,15 @@ pub(super) struct CommandPaletteUi {
     new_task_directories: Vec<PathBuf>,
     new_task_directories_pending: bool,
     new_task_directories_generation: u64,
+    /// The new-issue flow's resolved repository and the template scan it
+    /// kicked off. `issue_repo` doubles as the availability gate: the
+    /// dialog only opens once the host answered a repo.
+    issue_target: Option<issue_dialog::IssueTarget>,
+    issue_repo: Option<(Option<GitHubRepoRef>, GitHubAvailability)>,
+    issue_templates: Vec<waku_protocol::workspace::IssueTemplate>,
+    issue_templates_pending: bool,
+    issue_blank_enabled: bool,
+    issue_generation: u64,
     selected: usize,
     scroll: ScrollHandle,
     matcher: Matcher,
@@ -483,6 +510,12 @@ impl CommandPaletteUi {
             new_task_directories: Vec::new(),
             new_task_directories_pending: false,
             new_task_directories_generation: 0,
+            issue_target: None,
+            issue_repo: None,
+            issue_templates: Vec::new(),
+            issue_templates_pending: false,
+            issue_blank_enabled: true,
+            issue_generation: 0,
             selected: 0,
             scroll: ScrollHandle::new(),
             // Plain config: `match_paths` biases toward path basenames, which
@@ -614,6 +647,13 @@ impl Waku {
             .command_palette
             .new_task_directories_generation
             .wrapping_add(1);
+        self.command_palette.issue_target = None;
+        self.command_palette.issue_repo = None;
+        self.command_palette.issue_templates.clear();
+        self.command_palette.issue_templates_pending = false;
+        self.command_palette.issue_blank_enabled = true;
+        self.command_palette.issue_generation =
+            self.command_palette.issue_generation.wrapping_add(1);
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
@@ -672,6 +712,9 @@ impl Waku {
             .command_palette
             .new_task_directories_generation
             .wrapping_add(1);
+        self.command_palette.issue_templates_pending = false;
+        self.command_palette.issue_generation =
+            self.command_palette.issue_generation.wrapping_add(1);
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -771,9 +814,9 @@ impl Waku {
         .detach();
     }
 
-    /// Esc on the entry step lands on the regular palette, matching the
-    /// resume picker's drill-out.
-    fn leave_command_palette_run_script_view(&mut self, cx: &mut Context<Self>) {
+    /// Esc on a drill-in's entry step lands on the regular palette,
+    /// matching the resume picker's drill-out.
+    fn leave_command_palette_drill_in_view(&mut self, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::Commands;
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("command_palette.placeholder"), cx);
@@ -856,6 +899,224 @@ impl Waku {
         .detach();
     }
 
+    /// "New GitHub Issue": infer the repository from the active surface and
+    /// go straight to the template step; only when nothing maps to a repo
+    /// does the project step show.
+    fn start_issue_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.infer_issue_target(cx) {
+            Some(target) => self.begin_issue_template_fetch(target, window, cx),
+            None => self.open_command_palette_issue_projects_view(cx),
+        }
+    }
+
+    /// Where a new issue lands, decided by what the user is looking at: the
+    /// selected terminal first, then the selected session, then the
+    /// selected project. A local candidate that is not inside a git
+    /// repository does not count as an inference; a remote project's
+    /// repo-ness is its daemon's to confirm during the fetch.
+    fn infer_issue_target(&self, cx: &App) -> Option<issue_dialog::IssueTarget> {
+        if let Some(terminal_id) = self.selected_terminal {
+            // Session-owned terminals file under their task's workspace.
+            let session_id = self
+                .terminal_records
+                .get(&terminal_id)
+                .and_then(|record| record.session);
+            if let Some(target) = session_id
+                .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
+                .and_then(|session| self.issue_target_for_session(session))
+            {
+                return Some(target);
+            }
+            if let Some(target) = self
+                .terminal_cwd(terminal_id, cx)
+                .and_then(|cwd| self.issue_target_for_path(&cwd, None))
+            {
+                return Some(target);
+            }
+        }
+        if let Some(target) = self
+            .selected_session()
+            .and_then(|session| self.issue_target_for_session(session))
+        {
+            return Some(target);
+        }
+        self.selected_project()
+            .filter(|project| !project.is_projectless())
+            .and_then(|project| self.issue_target_for_path(&project.path, Some(project.id)))
+    }
+
+    /// A session's workspace — its worktree checkout when it has one —
+    /// rooted at the enclosing repository. The project id comes along so
+    /// the created issue can deep-link into the GitHub browser.
+    fn issue_target_for_session(&self, session: &AgentSession) -> Option<issue_dialog::IssueTarget> {
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)?;
+        if project.is_projectless() {
+            return None;
+        }
+        let workspace = self.workspace_path_for_session(session)?;
+        // A remote project's repository lives on its host's filesystem —
+        // `nearest_repo_root` cannot see it, so the workspace path goes
+        // straight to the daemon and the fetch validates the repo there.
+        let cwd = if self.is_remote_project(project.id) {
+            workspace.to_path_buf()
+        } else {
+            terminals::nearest_repo_root(workspace)?
+        };
+        Some(issue_dialog::IssueTarget {
+            cwd,
+            project: Some(project.id),
+        })
+    }
+
+    /// `path`'s enclosing repository, plus the project that owns it when
+    /// one's root contains — or is contained by — the repo root. A checkout
+    /// outside every project still works; the "View" toast then falls back
+    /// to the browser.
+    fn issue_target_for_path(
+        &self,
+        path: &Path,
+        project: Option<Uuid>,
+    ) -> Option<issue_dialog::IssueTarget> {
+        let remote = project.is_some_and(|id| self.is_remote_project(id));
+        let root = if remote {
+            path.to_path_buf()
+        } else {
+            terminals::nearest_repo_root(path)?
+        };
+        let project = project.or_else(|| {
+            self.state
+                .projects
+                .iter()
+                .filter(|project| !project.is_projectless())
+                .filter(|project| {
+                    root.starts_with(&project.path) || project.path.starts_with(&root)
+                })
+                .max_by_key(|project| project.path.components().count())
+                .map(|project| project.id)
+        });
+        Some(issue_dialog::IssueTarget {
+            cwd: root,
+            project,
+        })
+    }
+
+    /// The template step doubles as the availability gate: the repo
+    /// resolve and the template scan land together, and only a real
+    /// GitHub repo reaches the picker or the dialog.
+    fn begin_issue_template_fetch(
+        &mut self,
+        target: issue_dialog::IssueTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.command_palette.issue_target = Some(target.clone());
+        self.command_palette.issue_repo = None;
+        self.command_palette.issue_templates.clear();
+        self.command_palette.issue_templates_pending = true;
+        self.command_palette.issue_blank_enabled = true;
+        self.command_palette.issue_generation =
+            self.command_palette.issue_generation.wrapping_add(1);
+        let generation = self.command_palette.issue_generation;
+        self.command_palette.view = CommandPaletteView::IssueTemplates;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.issue_template_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+
+        // The request routes to the daemon that owns the path — an offline
+        // remote owner gets the disconnected treatment, never the local
+        // daemon's filesystem.
+        let Some(workspace) = self.workspace_client_for_path(&target.cwd) else {
+            self.close_command_palette(window, cx);
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        let window_handle = window.window_handle();
+        let cwd = target.cwd.clone();
+        cx.spawn(async move |waku, cx| {
+            let (templates, repo, availability) = cx
+                .background_executor()
+                .spawn(async move {
+                    let templates = match workspace.request(
+                        waku_client::WorkspaceOperation::ListIssueTemplates {
+                            cwd: cwd.clone(),
+                        },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::IssueTemplates {
+                            entries,
+                            blank_issues_enabled,
+                        }) => Some((entries, blank_issues_enabled)),
+                        _ => None,
+                    };
+                    let (repo, availability) = match workspace.request(
+                        waku_client::WorkspaceOperation::ResolveGitHubRepo { cwd },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::GitHubRepo { repo, availability }) => {
+                            (repo, availability)
+                        }
+                        _ => (None, GitHubAvailability::Ready),
+                    };
+                    (templates, repo, availability)
+                })
+                .await;
+            let outcome = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open || waku.command_palette.issue_generation != generation
+                {
+                    return None;
+                }
+                waku.command_palette.issue_templates_pending = false;
+                match availability {
+                    GitHubAvailability::MissingCli => {
+                        return Some(IssueTemplateFetch::Toast(tr!("github.install_gh")));
+                    }
+                    GitHubAvailability::Unauthenticated => {
+                        return Some(IssueTemplateFetch::Toast(tr!("github.auth_gh")));
+                    }
+                    GitHubAvailability::Ready => {}
+                }
+                let Some(repo) = repo else {
+                    return Some(IssueTemplateFetch::Toast(tr!("github.not_a_repo")));
+                };
+                waku.command_palette.issue_repo = Some((Some(repo), availability));
+                // A template-read failure degrades to the plain form — the
+                // create submit surfaces real errors itself.
+                let (entries, blank_issues_enabled) = templates.unwrap_or_default();
+                waku.command_palette.issue_blank_enabled = blank_issues_enabled;
+                if entries.is_empty() {
+                    return Some(IssueTemplateFetch::OpenDialog);
+                }
+                waku.command_palette.issue_templates = entries;
+                if waku.command_palette.view == CommandPaletteView::IssueTemplates {
+                    let query = waku.command_palette.search.read(cx).content().to_owned();
+                    waku.refresh_command_palette_results(&query, false, cx);
+                }
+                Some(IssueTemplateFetch::ShowTemplates)
+            });
+            let _ = window_handle.update(cx, |_, window, cx| {
+                let _ = waku.update(cx, |waku, cx| match outcome.ok().flatten() {
+                    Some(IssueTemplateFetch::Toast(message)) => {
+                        waku.close_command_palette(window, cx);
+                        waku.show_toast(message);
+                        cx.notify();
+                    }
+                    Some(IssueTemplateFetch::OpenDialog) => {
+                        waku.close_command_palette(window, cx);
+                        waku.open_issue_dialog_from_palette(None, window, cx);
+                    }
+                    Some(IssueTemplateFetch::ShowTemplates) | None => {}
+                });
+            });
+        })
+        .detach();
+    }
+
     /// Esc on the directory step lands on the regular palette, matching the
     /// run-script drill-out.
     fn leave_command_palette_new_task_view(&mut self, cx: &mut Context<Self>) {
@@ -873,6 +1134,52 @@ impl Waku {
         cx.notify();
     }
 
+    fn open_command_palette_issue_projects_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::IssueProjects;
+        self.command_palette.issue_target = None;
+        self.command_palette.issue_templates.clear();
+        self.command_palette.issue_templates_pending = false;
+        self.command_palette.issue_generation =
+            self.command_palette.issue_generation.wrapping_add(1);
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.issue_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    /// The picker picked — or skipped — a template; the dialog is a
+    /// separate surface, so the palette hands it the resolved target and
+    /// repo after closing.
+    fn open_issue_dialog_from_palette(
+        &mut self,
+        template: Option<waku_protocol::workspace::IssueTemplate>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self.command_palette.issue_target.clone() else {
+            return;
+        };
+        let repo = self
+            .command_palette
+            .issue_repo
+            .as_ref()
+            .and_then(|(repo, _)| repo.clone());
+        self.open_issue_dialog(target, repo, template, window, cx);
+    }
+
+    /// A YAML form template's only path — `gh` cannot render GitHub's form
+    /// schema — is `issues/new?template=` on the repo's host.
+    fn issue_template_web_url(&self, template: &waku_protocol::workspace::IssueTemplate) -> Option<String> {
+        let repo = self.command_palette.issue_repo.as_ref()?.0.as_ref()?;
+        Some(format!(
+            "{}/issues/new?template={}",
+            repo.web_url.trim_end_matches('/'),
+            template.filename
+        ))
+    }
+
     fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.command_palette.view {
             CommandPaletteView::Commands => self.close_command_palette(window, cx),
@@ -880,12 +1187,18 @@ impl Waku {
             CommandPaletteView::ResumeProviders => {
                 self.leave_command_palette_resume_provider_view(cx)
             }
-            CommandPaletteView::RunScriptProjects => self.leave_command_palette_run_script_view(cx),
+            CommandPaletteView::RunScriptProjects => self.leave_command_palette_drill_in_view(cx),
             // Esc on the scripts step backs up to the project step.
             CommandPaletteView::RunScripts => {
                 self.open_command_palette_run_script_projects_view(cx)
             }
             CommandPaletteView::NewTaskIn => self.leave_command_palette_new_task_view(cx),
+            CommandPaletteView::IssueProjects => self.leave_command_palette_drill_in_view(cx),
+            // Esc on the templates step backs up to the project step —
+            // also the way to override an inferred repository.
+            CommandPaletteView::IssueTemplates => {
+                self.open_command_palette_issue_projects_view(cx)
+            }
         }
     }
 
@@ -901,6 +1214,12 @@ impl Waku {
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
             CommandPaletteView::NewTaskIn => tr!("command_palette.new_task_in_placeholder"),
+            CommandPaletteView::IssueProjects => {
+                tr!("command_palette.issue_project_placeholder")
+            }
+            CommandPaletteView::IssueTemplates => {
+                tr!("command_palette.issue_template_placeholder")
+            }
         };
         self.command_palette.search.update(cx, |input, cx| {
             input.set_accessibility_label(tr!("a11y.command_palette"), cx);
@@ -923,6 +1242,8 @@ impl Waku {
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
                 | CommandPaletteView::NewTaskIn
+                | CommandPaletteView::IssueProjects
+                | CommandPaletteView::IssueTemplates
         ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
@@ -1079,6 +1400,15 @@ impl Waku {
                 Some(ShortcutHint::action(&RunProjectScript)),
                 PaletteAction::OpenRunScript,
                 "run project script npm make just package makefile build dev test target recipe",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_github_issue"),
+                "icons/github.svg",
+                None,
+                PaletteAction::CreateGitHubIssue,
+                "new create file github issue bug report ticket template",
                 next(),
             ),
         ];
@@ -1770,13 +2100,14 @@ impl Waku {
         scored.into_iter().map(|scored| scored.item).collect()
     }
 
-    /// Keep the selection the same action occupied. On the project step the
-    /// fallback is the selected task's project so Enter needs no extra step;
-    /// on the scripts step it is simply the first row.
-    fn finish_run_script_refresh(
+    /// Keep the selection the same action occupied. On a project step the
+    /// fallback is the selected task's project so Enter needs no extra
+    /// step — `project_fallback` is that step's pick action; a `None`
+    /// fallback selects the first row.
+    fn finish_drill_in_refresh(
         &mut self,
         selected_action: Option<PaletteAction>,
-        default_to_current_project: bool,
+        project_fallback: Option<fn(Uuid) -> PaletteAction>,
     ) {
         self.command_palette.selected = selected_action
             .and_then(|action| {
@@ -1786,14 +2117,12 @@ impl Waku {
                     .position(|item| item.action == action)
             })
             .or_else(|| {
-                if !default_to_current_project {
-                    return None;
-                }
+                let project_action = project_fallback?;
                 let current = self.selected_session().map(|session| session.project_id)?;
                 self.command_palette
                     .results
                     .iter()
-                    .position(|item| item.action == PaletteAction::ChooseRunScriptProject(current))
+                    .position(|item| item.action == project_action(current))
             })
             .unwrap_or(0);
         self.command_palette
@@ -1818,7 +2147,10 @@ impl Waku {
             candidates = self.score_run_script_items(candidates, query);
         }
         self.command_palette.results = candidates;
-        self.finish_run_script_refresh(selected_action.flatten(), true);
+        self.finish_drill_in_refresh(
+            selected_action.flatten(),
+            Some(PaletteAction::ChooseRunScriptProject),
+        );
     }
 
     fn refresh_command_palette_run_script_results(
@@ -1838,7 +2170,169 @@ impl Waku {
             candidates = self.score_run_script_items(candidates, query);
         }
         self.command_palette.results = candidates;
-        self.finish_run_script_refresh(selected_action.flatten(), false);
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
+    /// Same ordering as the run-script step — current, then recent, then
+    /// newly added — minus projects that cannot host an issue at all.
+    /// A remote project's repo check is its daemon's, not this filesystem's,
+    /// so remote rows always make the list and the fetch validates them.
+    fn command_palette_issue_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        let projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .filter(|project| {
+                self.is_remote_project(project.id)
+                    || terminals::nearest_repo_root(&project.path).is_some()
+            })
+            .collect::<Vec<_>>();
+        let current = self
+            .selected_session()
+            .map(|session| session.project_id)
+            .filter(|id| projects.iter().any(|project| project.id == *id));
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        run_script::run_script_project_order(current, &recent, &projects)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(order, project_id)| {
+                let project = projects.iter().find(|project| project.id == project_id)?;
+                let mut detail =
+                    settings::abbreviate_home_path(&project.path, self.home_directory.as_deref());
+                if current == Some(project_id) {
+                    detail = format!("{detail} · {}", tr!("command_palette.current"));
+                }
+                let label = project.display_name();
+                Some(CommandPaletteItem {
+                    section: PaletteSection::Projects,
+                    search_text: format!(
+                        "{label} {} project github issue",
+                        project.path.to_string_lossy()
+                    ),
+                    label,
+                    detail: Some(detail),
+                    icon: PaletteIcon::Asset("icons/folder.svg"),
+                    shortcut: None,
+                    action: PaletteAction::ChooseIssueProject(project_id),
+                    content_match: None,
+                    order,
+                    recency: 0,
+                })
+            })
+            .collect()
+    }
+
+    /// The template step's rows: "Blank issue" first when `config.yml`
+    /// allows it, then Markdown templates, YAML forms, and contact links
+    /// — the last two badged as web handoffs. Pending replies give no
+    /// rows at all: the loading state doubles as the repo gate, so a
+    /// fast Enter cannot reach the form before `gh` answers.
+    fn command_palette_issue_template_candidates(&self) -> Vec<CommandPaletteItem> {
+        if self.command_palette.issue_templates_pending {
+            return Vec::new();
+        }
+        let mut items = Vec::new();
+        if self.command_palette.issue_blank_enabled {
+            items.push(CommandPaletteItem {
+                section: PaletteSection::Templates,
+                label: tr!("command_palette.blank_issue"),
+                detail: None,
+                icon: PaletteIcon::Asset("icons/file.svg"),
+                shortcut: None,
+                action: PaletteAction::NewBlankIssue,
+                content_match: None,
+                search_text: tr!("command_palette.blank_issue_search"),
+                order: 0,
+                recency: 0,
+            });
+        }
+        let web_hint = tr!("command_palette.opens_on_web");
+        let base = items.len();
+        items.extend(
+            self.command_palette
+                .issue_templates
+                .iter()
+                .enumerate()
+                .map(|(index, template)| {
+                    let web = !matches!(
+                        template.kind,
+                        waku_protocol::workspace::IssueTemplateKind::Markdown
+                    );
+                    let icon = if web {
+                        "icons/external-link.svg"
+                    } else {
+                        "icons/file.svg"
+                    };
+                    let detail = match (&template.about, web) {
+                        (Some(about), true) => Some(format!("{about} · {web_hint}")),
+                        (Some(about), false) => Some(about.clone()),
+                        (None, true) => Some(web_hint.clone()),
+                        (None, false) => None,
+                    };
+                    CommandPaletteItem {
+                        section: PaletteSection::Templates,
+                        label: template.name.clone(),
+                        detail,
+                        icon: PaletteIcon::Asset(icon),
+                        shortcut: None,
+                        action: PaletteAction::ChooseIssueTemplate(template.clone()),
+                        content_match: None,
+                        search_text: format!(
+                            "{} {} {} issue template",
+                            template.name,
+                            template.about.as_deref().unwrap_or(""),
+                            template.filename
+                        ),
+                        order: base + index,
+                        recency: 0,
+                    }
+                }),
+        );
+        items
+    }
+
+    fn refresh_command_palette_issue_project_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_issue_project_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(
+            selected_action.flatten(),
+            Some(PaletteAction::ChooseIssueProject),
+        );
+    }
+
+    fn refresh_command_palette_issue_template_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_issue_template_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
     /// "New task in…" rows: every registered project first (a pick reuses
@@ -1922,7 +2416,7 @@ impl Waku {
         // already narrowed it.
         candidates.truncate(MAX_DIRECTORY_RESULTS);
         self.command_palette.results = candidates;
-        self.finish_run_script_refresh(selected_action.flatten(), false);
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
     fn refresh_command_palette_resume_results(&mut self, query: &str, preserve_selection: bool) {
@@ -2057,6 +2551,14 @@ impl Waku {
             }
             CommandPaletteView::NewTaskIn => {
                 self.refresh_command_palette_new_task_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::IssueProjects => {
+                self.refresh_command_palette_issue_project_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::IssueTemplates => {
+                self.refresh_command_palette_issue_template_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::Commands => {}
@@ -2482,6 +2984,25 @@ impl Waku {
                 self.open_command_palette_run_scripts_view(project_id, cx);
                 return;
             }
+            PaletteAction::CreateGitHubIssue => {
+                self.start_issue_flow(window, cx);
+                return;
+            }
+            PaletteAction::ChooseIssueProject(project_id) => {
+                if let Some(project) = self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+                {
+                    let target = issue_dialog::IssueTarget {
+                        cwd: project.path.clone(),
+                        project: Some(project.id),
+                    };
+                    self.begin_issue_template_fetch(target, window, cx);
+                }
+                return;
+            }
             _ => {}
         }
 
@@ -2601,13 +3122,35 @@ impl Waku {
                 self.settings_page = None;
                 self.run_project_script(project, script, window, cx);
             }
+            PaletteAction::ChooseIssueTemplate(template) => {
+                match template.kind {
+                    waku_protocol::workspace::IssueTemplateKind::Markdown => {
+                        self.open_issue_dialog_from_palette(Some(template), window, cx)
+                    }
+                    waku_protocol::workspace::IssueTemplateKind::YamlForm => {
+                        if let Some(url) = self.issue_template_web_url(&template) {
+                            cx.open_url(&url);
+                        }
+                    }
+                    waku_protocol::workspace::IssueTemplateKind::ContactLink => {
+                        if let Some(url) = &template.url {
+                            cx.open_url(url);
+                        }
+                    }
+                }
+            }
+            PaletteAction::NewBlankIssue => {
+                self.open_issue_dialog_from_palette(None, window, cx);
+            }
             PaletteAction::Resume
             | PaletteAction::ChooseResumeProvider
             | PaletteAction::SelectResumeProvider(_)
             | PaletteAction::ResumeProviderSession(..)
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
-            | PaletteAction::NewTaskIn => {
+            | PaletteAction::NewTaskIn
+            | PaletteAction::CreateGitHubIssue
+            | PaletteAction::ChooseIssueProject(_) => {
                 unreachable!("view-navigation actions are handled before closing the palette")
             }
         }
@@ -2659,6 +3202,7 @@ impl Waku {
         let view = self.command_palette.view;
         let resume_view = view == CommandPaletteView::Resume;
         let run_scripts_view = view == CommandPaletteView::RunScripts;
+        let issue_templates_view = view == CommandPaletteView::IssueTemplates;
         let resume_session_count = self
             .command_palette
             .results
@@ -2670,7 +3214,12 @@ impl Waku {
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
             CommandPaletteView::NewTaskIn => self.command_palette.new_task_directories_pending,
-            CommandPaletteView::ResumeProviders | CommandPaletteView::RunScriptProjects => false,
+            CommandPaletteView::IssueTemplates => {
+                self.command_palette.issue_templates_pending
+            }
+            CommandPaletteView::ResumeProviders
+            | CommandPaletteView::RunScriptProjects
+            | CommandPaletteView::IssueProjects => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
             if resume_view {
@@ -2688,7 +3237,10 @@ impl Waku {
                 && self.command_palette.run_scripts_pending)
             || (view == CommandPaletteView::NewTaskIn
                 && self.command_palette.results.is_empty()
-                && self.command_palette.new_task_directories_pending);
+                && self.command_palette.new_task_directories_pending)
+            || (issue_templates_view
+                && self.command_palette.results.is_empty()
+                && self.command_palette.issue_templates_pending);
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
@@ -2715,6 +3267,8 @@ impl Waku {
                         tr!("command_palette.loading_scripts")
                     } else if view == CommandPaletteView::NewTaskIn {
                         tr!("command_palette.loading_directories")
+                    } else if issue_templates_view {
+                        tr!("command_palette.loading_issue_templates")
                     } else {
                         tr!("command_palette.loading_sessions")
                     },
@@ -2740,6 +3294,20 @@ impl Waku {
                     "icons/folder.svg",
                     tr!("command_palette.no_projects"),
                     Some(tr!("command_palette.no_projects_hint")),
+                    false,
+                )
+            } else if view == CommandPaletteView::IssueProjects {
+                (
+                    "icons/folder.svg",
+                    tr!("command_palette.no_projects"),
+                    Some(tr!("command_palette.no_issue_projects_hint")),
+                    false,
+                )
+            } else if issue_templates_view {
+                (
+                    "icons/github.svg",
+                    tr!("command_palette.no_issue_templates"),
+                    Some(tr!("command_palette.no_issue_templates_hint")),
                     false,
                 )
             } else if run_scripts_view {
