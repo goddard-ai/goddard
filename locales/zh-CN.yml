@@ -267,6 +267,10 @@ settings.light_theme: 浅色主题
 settings.light_theme_description: 浅色外观下使用的主题
 settings.dark_theme: 深色主题
 settings.dark_theme_description: 深色外观下使用的主题
+settings.preview: 预览
+settings.preview_description: 所选主题下的聊天与代码示例
+settings.preview_user_message: 能帮我修一下问候函数吗？
+settings.preview_assistant_reply: 已完成——函数现在会返回问候语。
 settings.sidebar_transparency: 侧边栏透明
 settings.sidebar_transparency_description: 在侧边栏后方透出桌面。关闭后使用纯色背景。
 settings.ui_font: 界面字体

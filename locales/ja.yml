@@ -263,6 +263,10 @@ settings.light_theme: ライトテーマ
 settings.light_theme_description: ライトの外観で使うテーマ
 settings.dark_theme: ダークテーマ
 settings.dark_theme_description: ダークの外観で使うテーマ
+settings.preview: プレビュー
+settings.preview_description: 選択したテーマでのチャットとコードの表示例
+settings.preview_user_message: 挨拶する関数を修正してもらえますか？
+settings.preview_assistant_reply: 完了です — 関数が挨拶を返すようになりました。
 settings.sidebar_transparency: サイドバーの透明化
 settings.sidebar_transparency_description: サイドバーの背後にデスクトップを透かして表示します。オフにすると単色の背景になります。
 settings.ui_font: UI のフォント

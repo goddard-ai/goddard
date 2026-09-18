@@ -4139,6 +4139,16 @@ impl Waku {
                 dark_theme_selector,
                 theme,
             ))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+            .child(self.render_theme_preview(
+                // A pick in any theme selector is exactly when the sample
+                // matters, so an open menu holds it open.
+                self.theme_preview_expanded
+                    || mode_handle.is_open()
+                    || light_handle.is_open()
+                    || dark_handle.is_open(),
+                cx,
+            ))
             .when(cfg!(target_os = "macos"), |element| {
                 // Vibrancy is a macOS-only effect; on other platforms the
                 // sidebar is already a solid fill and there is nothing to
@@ -4365,6 +4375,199 @@ impl Waku {
                 ),
                 theme,
             ))
+            .into_any_element()
+    }
+
+    /// The Appearance page's collapsible sample: a miniature transcript —
+    /// user bubble, assistant reply, code block — painted on the transcript's
+    /// `surface` so a previewed palette reads exactly as it will in chat.
+    /// `open` also comes in held by an open theme selector, so the sample
+    /// appears for the duration of a pick.
+    fn render_theme_preview(&self, open: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let metrics = self.scaled_markdown_metrics(MarkdownMetrics::BODY);
+        let syntax = theme.syntax;
+
+        let disclosure = div()
+            .id("theme-preview-disclosure")
+            .tab_index(0)
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .cursor_default()
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.preview")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.preview_description")),
+                    ),
+            )
+            .child(icon(
+                if open {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                10.5,
+                theme.text_tertiary,
+            ))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.theme_preview_expanded = !this.theme_preview_expanded;
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.theme_preview_expanded = !this.theme_preview_expanded;
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }));
+
+        if !open {
+            return disclosure.into_any_element();
+        }
+
+        let code_line = |spans: &[(&'static str, Hsla)]| {
+            div()
+                .flex()
+                .children(spans.iter().map(|&(text, color)| {
+                    div().text_color(color).child(text).into_any_element()
+                }))
+                .into_any_element()
+        };
+        let plain = theme.text_secondary;
+        let code_block = div()
+            .w_full()
+            .min_w_0()
+            .rounded(px(10.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.inset)
+            .overflow_hidden()
+            .child(
+                div()
+                    .w_full()
+                    .h(px(28.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .border_b(hairline())
+                    .border_color(theme.separator)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(12.5))
+                            .line_height(px(14.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_ghost)
+                            .child("rust"),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px(px(10.0))
+                    .py(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(px(metrics.code_text_size))
+                    .line_height(px(metrics.code_line_height))
+                    .whitespace_nowrap()
+                    .child(code_line(&[
+                        ("fn ", syntax.keyword),
+                        ("greet", syntax.function),
+                        ("(name: ", plain),
+                        ("&str", syntax.ty),
+                        (") -> ", plain),
+                        ("String", syntax.ty),
+                        (" {", plain),
+                    ]))
+                    .child(code_line(&[(
+                        "    // Return a greeting for the given name.",
+                        syntax.comment,
+                    )]))
+                    .child(code_line(&[
+                        ("    ", plain),
+                        ("format!", syntax.meta),
+                        ("(", plain),
+                        ("\"Hello, {name}!\"", syntax.string),
+                        (");", plain),
+                    ]))
+                    .child(code_line(&[("}", plain)])),
+            );
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(disclosure)
+            .child(
+                div()
+                    .px(px(20.0))
+                    .pb(px(16.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .rounded(px(12.0))
+                            .border(hairline())
+                            .border_color(theme.border_subtle)
+                            .bg(theme.surface)
+                            .px(px(16.0))
+                            .py(px(14.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(10.0))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .justify_end()
+                                    .child(
+                                        div()
+                                            .rounded(px(15.0))
+                                            .border(hairline())
+                                            .border_color(theme.raised)
+                                            .bg(theme.raised)
+                                            .px(px(11.0))
+                                            .py(px(7.0))
+                                            .text_size(px(metrics.text_size))
+                                            .line_height(px(metrics.line_height))
+                                            .text_color(theme.text)
+                                            .child(tr!("settings.preview_user_message")),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(metrics.text_size))
+                                    .line_height(px(metrics.line_height))
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.preview_assistant_reply")),
+                            )
+                            .child(code_block),
+                    ),
+            )
             .into_any_element()
     }
 

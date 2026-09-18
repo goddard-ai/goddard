@@ -2284,6 +2284,9 @@ pub struct Waku {
     /// Set while a settings menu is previewing a theme it has not committed;
     /// the persisted settings go back on screen when the menu dismisses.
     theme_preview_active: bool,
+    /// The Appearance page's code/chat sample, opened on demand; a theme
+    /// selector opening also reveals it for the duration of the pick.
+    theme_preview_expanded: bool,
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
@@ -4622,6 +4625,7 @@ impl Waku {
                 archived_session_rows: RefCell::new(Vec::new()),
                 completion_volume_slider: SliderState::new(),
                 theme_preview_active: false,
+                theme_preview_expanded: false,
                 header_drag_armed: false,
                 toast: startup_toast.map(|message| ToastState {
                     message,

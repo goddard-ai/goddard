@@ -621,6 +621,14 @@ settings.dark_theme:
   en: Dark theme
 settings.dark_theme_description:
   en: Palette used while in dark appearance
+settings.preview:
+  en: Preview
+settings.preview_description:
+  en: Sample chat and code in the selected theme
+settings.preview_user_message:
+  en: Can you fix the greeting function?
+settings.preview_assistant_reply:
+  en: Done — the function now returns a greeting.
 settings.sidebar_transparency:
   en: Sidebar transparency
 settings.sidebar_transparency_description:
