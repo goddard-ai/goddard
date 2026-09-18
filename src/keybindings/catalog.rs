@@ -217,6 +217,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "app.save_file", action: || Box::new(crate::SaveFile), title_key: "shortcuts.save_file", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_localhost", action: || Box::new(crate::OpenLocalhostUrl), title_key: "shortcuts.open_localhost", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_localhost_tab", action: || Box::new(crate::OpenLocalhostUrlInTab), title_key: "shortcuts.open_localhost_tab", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.open_created_issue", action: || Box::new(crate::OpenCreatedIssueInGitHub), title_key: "shortcuts.open_created_issue", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.navigate_back", action: || Box::new(crate::NavigateBack), title_key: "shortcuts.navigate_back", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.navigate_forward", action: || Box::new(crate::NavigateForward), title_key: "shortcuts.navigate_forward", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.previous_turn", action: || Box::new(crate::GoToPreviousTurn), title_key: "shortcuts.previous_turn", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
@@ -639,6 +640,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("browser.address_cancel", All, "escape", BrowserAddress),
     e("app.open_localhost", All, "secondary-alt-o", ""),
     e("app.open_localhost_tab", All, "secondary-alt-shift-o", ""),
+    e("app.open_created_issue", All, "secondary-alt-i", ""),
     // === crate::bind_keys — macOS only ==========================================
     e("app.hide", MacOS, "cmd-h", ""),
     e("app.hide_others", MacOS, "alt-cmd-h", ""),
