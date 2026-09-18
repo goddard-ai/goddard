@@ -1321,6 +1321,9 @@ impl StateStore {
         session.context_window = stored.context_window;
         session.context_usage = stored.context_usage;
         session.runtime_event_cursor = stored.runtime_event_cursor;
+        // Quarantine is detail, not a list column — the skeleton's flag is a
+        // placeholder and the stored blob carries the real value.
+        session.quarantined = stored.quarantined;
 
         let mut statement = connection
             .prepare(
@@ -1627,9 +1630,11 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at: last_reply_at.map(|at| at as u64),
         archived_at: archived_at.map(|at| at as u64),
         pinned_at: pinned_at.map(|at| at as u64),
-        // Skeletons err toward locked: hydration replaces the flag, and a
-        // transfer session must never look trusted before its detail loads.
-        quarantined: true,
+        // Skeletons must not look quarantined: clients echo list projections
+        // back through SaveTaskState, and a `true` here would poison real
+        // sessions. The daemon gate reads full task_state; the UI card
+        // requires detail_loaded.
+        quarantined: false,
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,
@@ -2350,6 +2355,9 @@ mod tests {
         // A skeleton still counts as started, since only started sessions
         // are stored at all.
         assert!(session.has_started());
+        // Quarantine is detail, not a list column: ordinary sessions must
+        // never list as quarantined (the Trust card keys off this).
+        assert!(!session.quarantined);
 
         reopened.hydrate(&mut restored.sessions[0]).unwrap();
         let session = &restored.sessions[0];
@@ -2370,6 +2378,7 @@ mod tests {
                 .iter()
                 .any(|message| message.content == "an answer")
         );
+        assert!(!session.quarantined);
 
         fs::remove_dir_all(directory).ok();
     }

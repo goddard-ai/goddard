@@ -2368,11 +2368,20 @@ impl WakuBackend {
     /// user trusts the transfer. Checked against `task_state`, not the
     /// running-driver map, so it holds for sessions that aren't running.
     fn session_quarantined(&self, session_id: Uuid) -> bool {
-        self.task_state
-            .lock()
+        let mut state = self.task_state.lock();
+        let Some(index) = state
             .sessions
             .iter()
-            .any(|session| session.id == session_id && session.quarantined)
+            .position(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        // Quarantine lives in the session detail, not the list row — a
+        // skeleton answers false until hydrated, so load before judging.
+        if !state.sessions[index].detail_loaded {
+            let _ = self.task_store.hydrate(&mut state.sessions[index]);
+        }
+        state.sessions[index].quarantined
     }
 
     /// `agent prompt`: deliver a message to an existing task, by Waku task
@@ -3554,14 +3563,20 @@ mod tests {
         );
 
         // The flag survives a reload — quarantine isn't a runtime accident.
-        let reloaded = StateStore::daemon(root.join("app.db")).load().unwrap();
-        assert!(
-            reloaded
-                .sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .is_some_and(|session| session.quarantined)
-        );
+        // It lives in the session detail, so the list skeleton reads false
+        // and hydrate restores the persisted value.
+        let reload_store = StateStore::daemon(root.join("app.db"));
+        let mut reloaded = reload_store.load().unwrap();
+        let index = reloaded
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .unwrap();
+        assert!(!reloaded.sessions[index].quarantined);
+        reload_store
+            .hydrate(&mut reloaded.sessions[index])
+            .unwrap();
+        assert!(reloaded.sessions[index].quarantined);
 
         std::fs::remove_dir_all(root).ok();
     }
