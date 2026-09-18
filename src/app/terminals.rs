@@ -7,8 +7,9 @@ pub(super) struct TerminalRecord {
     pub session: Option<Uuid>,
     /// Pinned terminals keep a sidebar row while the group is collapsed.
     pub pinned: bool,
-    /// Where the PTY starts — resolved at creation from the owning
-    /// session's workspace or the requested directory for global ones.
+    /// Where the PTY starts — `None` resolves to the owning session's
+    /// workspace at spawn time, so the terminal follows the workspace
+    /// when it moves; `Some` pins the terminal to a chosen directory.
     pub working_directory: Option<PathBuf>,
     /// When the terminal opened (unix seconds) — the row's "…ago" label
     /// until the view reports a command's start.
@@ -84,6 +85,23 @@ impl Waku {
             .filter(|id| self.terminal_records.contains_key(id))
     }
 
+    /// The directory a terminal spawns into — the record's own directory,
+    /// or the owning session's workspace when the record tracks it.
+    pub(super) fn terminal_spawn_directory(&self, record: &TerminalRecord) -> Option<PathBuf> {
+        record.working_directory.clone().or_else(|| {
+            record
+                .session
+                .and_then(|session_id| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                })
+                .and_then(|session| self.workspace_path_for_session(session))
+                .map(Path::to_path_buf)
+        })
+    }
+
     /// The directory a row reports — the live PTY cwd once the view is up,
     /// the recorded spawn directory otherwise.
     fn terminal_cwd(&self, terminal_id: Uuid, cx: &App) -> Option<PathBuf> {
@@ -93,7 +111,7 @@ impl Waku {
             .or_else(|| {
                 self.terminal_records
                     .get(&terminal_id)
-                    .and_then(|record| record.working_directory.clone())
+                    .and_then(|record| self.terminal_spawn_directory(record))
             })
     }
 
@@ -421,8 +439,24 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == *session_id)
         });
+        // A terminal created at its owning session's workspace tracks the
+        // workspace (`None` resolves to it at spawn); any other directory
+        // is the caller's deliberate choice and the record keeps it.
+        let workspace_bound = session
+            .and_then(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+            })
+            .and_then(|session| self.workspace_path_for_session(session))
+            .is_some_and(|workspace| workspace == working_directory.as_path());
         let terminal_id = Uuid::new_v4();
-        self.register_terminal(terminal_id, session, Some(working_directory.clone()));
+        self.register_terminal(
+            terminal_id,
+            session,
+            (!workspace_bound).then(|| working_directory.clone()),
+        );
         if let Some(command) = command {
             self.right_panel_terminal_commands
                 .insert(terminal_id, command);
@@ -550,18 +584,7 @@ impl Waku {
             return;
         };
         if !self.right_panel_terminals.contains_key(&terminal_id) {
-            let working_directory = record.working_directory.clone().or_else(|| {
-                record
-                    .session
-                    .and_then(|session_id| {
-                        self.state
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                    })
-                    .and_then(|session| self.workspace_path_for_session(session))
-                    .map(Path::to_path_buf)
-            });
+            let working_directory = self.terminal_spawn_directory(record);
             let Some(working_directory) =
                 working_directory.filter(|directory| !self.is_remote_path(directory))
             else {
@@ -680,15 +703,7 @@ impl Waku {
     ) {
         self.settings_page = None;
         if let Some(terminal_id) = self.selected_terminal {
-            let working_directory = self
-                .right_panel_terminals
-                .get(&terminal_id)
-                .map(|terminal| terminal.read(cx).working_directory().to_path_buf())
-                .or_else(|| {
-                    self.terminal_records
-                        .get(&terminal_id)
-                        .and_then(|record| record.working_directory.clone())
-                });
+            let working_directory = self.terminal_cwd(terminal_id, cx);
             let session = self
                 .terminal_records
                 .get(&terminal_id)

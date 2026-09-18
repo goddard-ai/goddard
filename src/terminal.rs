@@ -857,6 +857,10 @@ pub struct TerminalView {
     error: Option<String>,
     focus_handle: FocusHandle,
     working_directory: PathBuf,
+    /// The directory the PTY launched in — `working_directory` drifts
+    /// from it as soon as the shell reports a `cd`, so "where this
+    /// terminal was spawned" reads here instead.
+    spawn_directory: PathBuf,
     /// Basename of the PTY's shell — "zsh", "bash" — what a sidebar row
     /// reports when the terminal sits outside any repository.
     shell_name: String,
@@ -976,6 +980,7 @@ impl TerminalView {
             title: default_title.clone(),
             default_title,
             custom_title: None,
+            spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
             // A custom command's launch line is the terminal's first
@@ -1015,6 +1020,12 @@ impl TerminalView {
 
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
+    }
+
+    /// The directory the PTY spawned in — unlike `working_directory`,
+    /// which follows the shell's cwd reports, this never moves.
+    pub fn spawn_directory(&self) -> &Path {
+        &self.spawn_directory
     }
 
     /// Basename of the shell the PTY runs — the row label for a terminal

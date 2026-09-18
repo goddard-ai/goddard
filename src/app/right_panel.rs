@@ -2296,12 +2296,10 @@ impl Waku {
         }
         if let Some(terminal_id) = surface.terminal_id() {
             self.ensure_right_panel_terminal(terminal_id, cx);
-            self.register_terminal(
-                terminal_id,
-                self.state.selected_session,
-                self.selected_workspace_path()
-                    .map(std::path::Path::to_path_buf),
-            );
+            // A strip terminal carries no directory of its own — `None`
+            // resolves to the owning session's workspace at spawn, and the
+            // terminal follows the workspace when it moves.
+            self.register_terminal(terminal_id, self.state.selected_session, None);
         }
         // Browser views are created on the surface's first render, which has
         // the `Window` their webview must attach to.
@@ -2918,9 +2916,22 @@ impl Waku {
     }
 
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        // Where the terminal belongs: the directory its record carries — a
+        // cwd the caller chose — or the workspace it tracks. `None` falls
+        // through to the selected session's workspace, which also covers a
+        // surface not registered yet.
+        let workspace_bound = self
+            .terminal_records
+            .get(&terminal_id)
+            .is_some_and(|record| record.working_directory.is_none());
         let Some(working_directory) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
+            .terminal_records
+            .get(&terminal_id)
+            .and_then(|record| self.terminal_spawn_directory(record))
+            .or_else(|| {
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf)
+            })
         else {
             self.right_panel_terminals.remove(&terminal_id);
             return;
@@ -2933,20 +2944,29 @@ impl Waku {
             return;
         }
         if !working_directory.is_dir() {
-            // The workspace is gone — typically an archived session's
+            // The directory is gone — typically an archived session's
             // worktree awaiting restore. A PTY launched now would fall back
             // to the filesystem root and, once the directory returns, look
-            // current to `matches_project` while its shell sits in the
+            // current to the spawn check while its shell sits in the
             // wrong place. The restore's completion re-runs this ensure.
             self.right_panel_terminals.remove(&terminal_id);
             return;
         }
-        let matches_project = self
+        let spawned_at = self
             .right_panel_terminals
             .get(&terminal_id)
-            .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
-        if !matches_project {
-            self.spawn_terminal_entity(terminal_id, working_directory, cx);
+            .map(|terminal| terminal.read(cx).spawn_directory().to_path_buf());
+        match spawned_at {
+            None => self.spawn_terminal_entity(terminal_id, working_directory, cx),
+            // A workspace-tracking terminal follows the workspace when it
+            // moves — the spawn directory is the test, never the live cwd,
+            // so a `cd` inside the shell can't read as a move and kill the
+            // PTY. A terminal spawned at a recorded directory stays where
+            // it was put.
+            Some(spawned_at) if workspace_bound && spawned_at != working_directory => {
+                self.spawn_terminal_entity(terminal_id, working_directory, cx)
+            }
+            Some(_) => {}
         }
     }
 
