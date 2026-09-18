@@ -637,6 +637,14 @@ impl Waku {
             self.store_selected_right_panel_state();
             self.store_transcript_scroll_position();
             self.state.selected_session = None;
+            // The session's strip is parked; the terminal context's own
+            // panel state — its tabs and visibility — comes back rather
+            // than inheriting what the session had open.
+            let detached = std::mem::replace(
+                &mut self.right_panel_detached_state,
+                RightPanelSessionState::empty(false),
+            );
+            self.restore_right_panel_state(detached, cx);
         }
         self.pending_session_activation = None;
         // A terminal claims the main area too: an open Projects page folds,
@@ -777,7 +785,11 @@ impl Waku {
             self.close_right_panel_surface(index, cx);
             return;
         }
-        for state in self.right_panel_session_states.values_mut() {
+        for state in self
+            .right_panel_session_states
+            .values_mut()
+            .chain(std::iter::once(&mut self.right_panel_detached_state))
+        {
             let Some(index) = state
                 .surfaces
                 .iter()

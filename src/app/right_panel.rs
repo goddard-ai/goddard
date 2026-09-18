@@ -1950,18 +1950,22 @@ impl Waku {
     }
 
     pub(super) fn store_selected_right_panel_state(&mut self) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
         let state = self.take_active_right_panel_state();
-        self.right_panel_session_states.insert(session_id, state);
+        // A session parks under its id; with none selected the active strip
+        // belongs to the detached context — a full-width terminal or the
+        // Projects page — and parks in its own slot.
+        if let Some(session_id) = self.state.selected_session {
+            self.right_panel_session_states.insert(session_id, state);
+        } else {
+            self.right_panel_detached_state = state;
+        }
     }
 
-    pub(super) fn restore_right_panel_state(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let state = RightPanelSessionState::take_or_closed(
-            &mut self.right_panel_session_states,
-            session_id,
-        );
+    pub(super) fn restore_right_panel_state(
+        &mut self,
+        state: RightPanelSessionState,
+        cx: &mut Context<Self>,
+    ) {
         self.replace_active_right_panel_state(state);
         // The draft restored ahead of this swap holds the session's file
         // annotations. Hand each returning editor its share; an editor whose
@@ -2114,7 +2118,11 @@ impl Waku {
     /// another session's strip would show the same item. The active strip's
     /// copy — if any — is the caller's to handle.
     pub(super) fn remove_parked_github_surfaces(&mut self, project_id: Uuid) {
-        for state in self.right_panel_session_states.values_mut() {
+        for state in self
+            .right_panel_session_states
+            .values_mut()
+            .chain(std::iter::once(&mut self.right_panel_detached_state))
+        {
             let Some(index) = state.surfaces.iter().position(
                 |surface| matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id),
             ) else {
@@ -2647,6 +2655,12 @@ impl Waku {
                     .iter()
                     .filter_map(RightPanelSurface::browser_id)
             }))
+            .chain(
+                self.right_panel_detached_state
+                    .surfaces
+                    .iter()
+                    .filter_map(RightPanelSurface::browser_id),
+            )
             .collect::<HashSet<_>>();
         self.right_panel_browsers
             .retain(|browser_id, _| retained_browser_ids.contains(browser_id));

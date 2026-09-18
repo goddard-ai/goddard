@@ -2101,6 +2101,10 @@ pub struct Waku {
     /// Window-relative PiP position, independent of incoming preview frames.
     computer_use_preview_position: Option<gpui::Point<Pixels>>,
     right_panel_session_states: HashMap<Uuid, RightPanelSessionState>,
+    /// Panel state parked while no task owns the strip — a full-width
+    /// terminal or the Projects page. Swapped in and out exactly like a
+    /// session's, so the detached context keeps its own tabs and visibility.
+    right_panel_detached_state: RightPanelSessionState,
     right_panel_surfaces: Vec<RightPanelSurface>,
     right_panel_active_surface: Option<usize>,
     right_panel_tabs_scroll_handle: ScrollHandle,
@@ -4540,6 +4544,7 @@ impl Waku {
                 panel_resize_drag: None,
                 computer_use_preview_position: None,
                 right_panel_session_states: HashMap::new(),
+                right_panel_detached_state: RightPanelSessionState::empty(false),
                 right_panel_surfaces: Vec::new(),
                 right_panel_active_surface: None,
                 right_panel_tabs_scroll_handle: ScrollHandle::new(),

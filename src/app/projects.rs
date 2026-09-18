@@ -477,6 +477,17 @@ impl Waku {
             self.store_selected_right_panel_state();
             self.store_transcript_scroll_position();
             self.state.selected_session = None;
+            // The session's strip is parked; the no-task context's own panel
+            // state comes back rather than inheriting the session's. Its
+            // focus requests are dropped — the page's filter takes the
+            // keyboard below.
+            let detached = std::mem::replace(
+                &mut self.right_panel_detached_state,
+                RightPanelSessionState::empty(false),
+            );
+            self.restore_right_panel_state(detached, cx);
+            self.right_panel_pending_terminal_focus = None;
+            self.right_panel_pending_browser_focus = None;
             self.save();
         }
         self.pending_session_activation = None;

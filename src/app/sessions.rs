@@ -384,7 +384,11 @@ impl Waku {
         if session_changed {
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
-            self.restore_right_panel_state(session_id, cx);
+            let panel_state = RightPanelSessionState::take_or_closed(
+                &mut self.right_panel_session_states,
+                session_id,
+            );
+            self.restore_right_panel_state(panel_state, cx);
             self.restore_missing_worktree(session_id, cx);
             // An open Git panel follows the newly selected session's checkout.
             self.sync_git_panel_workspace(cx);
@@ -543,7 +547,11 @@ impl Waku {
             .map(|(id, state)| (*id, right_panel_state_from_persisted(state)))
             .collect();
         if let Some(session_id) = self.state.selected_session {
-            self.restore_right_panel_state(session_id, cx);
+            let panel_state = RightPanelSessionState::take_or_closed(
+                &mut self.right_panel_session_states,
+                session_id,
+            );
+            self.restore_right_panel_state(panel_state, cx);
             if let Some(offset) = self.transcript_scroll_positions.get(&session_id).copied() {
                 let landing = TranscriptLanding::Position(offset);
                 // The runtime attach that lands after this resets the rows
