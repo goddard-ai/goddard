@@ -2139,14 +2139,19 @@ impl Waku {
         cx.notify();
     }
 
-    /// A transcript SHA's click: reuse the commit modal path, using the
-    /// fetched entry when it is already known and patching its title when the
-    /// lookup lands otherwise.
+    /// A transcript SHA's click: reveal the Git panel and open the commit in
+    /// it, using the fetched entry when it is already known and patching its
+    /// title when the lookup lands otherwise.
     pub(super) fn open_transcript_commit_diff(
         &mut self,
         hit: TranscriptCommitHit,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.git_panel_enabled {
+            return;
+        }
+        self.set_git_panel_visible(true, window, cx);
         let Some(workspace) = self
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf)
