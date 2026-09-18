@@ -219,6 +219,20 @@ impl Waku {
     /// Drop every trace of a terminal: the view entity, its launch state,
     /// the group record, and any selection pointing at it.
     pub(super) fn drop_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        // A terminal filling the main area hands the view to a neighbor —
+        // the row listed before it, else the one after — found before the
+        // order entry disappears. No neighbor means the new task page.
+        let successor = (self.selected_terminal == Some(terminal_id))
+            .then(|| {
+                let index = self.terminal_order.iter().position(|id| *id == terminal_id)?;
+                self.terminal_order[..index]
+                    .iter()
+                    .rev()
+                    .chain(self.terminal_order[index + 1..].iter())
+                    .copied()
+                    .find(|id| self.terminal_records.contains_key(id))
+            })
+            .flatten();
         self.right_panel_terminals.remove(&terminal_id);
         self.right_panel_terminal_commands.remove(&terminal_id);
         self.custom_command_runs.remove(&terminal_id);
@@ -242,6 +256,14 @@ impl Waku {
             self.set_sidebar_group_collapsed(SidebarGroup::Terminals, true, cx);
         }
         self.sidebar_rows_fingerprint.set(None);
+        if let Some(successor) = successor
+            && let Some(focus) = self.activate_terminal_state(successor, true, cx)
+        {
+            // Close paths reach here without a `Window`; focus goes
+            // through the stored handle like `commit_go_to_line`.
+            let window_handle = self.window_handle;
+            let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
+        }
     }
 
     /// Spawn the PTY-backed view for a terminal id. Shared by the right
@@ -580,15 +602,27 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(record) = self.terminal_records.get(&terminal_id) else {
-            return;
-        };
+        if let Some(focus) = self.activate_terminal_state(terminal_id, record_visit, cx) {
+            window.focus(&focus, cx);
+        }
+    }
+
+    /// The state half of activation — spawn the view if needed, record the
+    /// visit, move selection — returning the terminal's focus handle so a
+    /// caller with or without a `Window` can aim it.
+    fn activate_terminal_state(
+        &mut self,
+        terminal_id: Uuid,
+        record_visit: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<FocusHandle> {
+        let record = self.terminal_records.get(&terminal_id)?;
         if !self.right_panel_terminals.contains_key(&terminal_id) {
             let working_directory = self.terminal_spawn_directory(record);
             let Some(working_directory) =
                 working_directory.filter(|directory| !self.is_remote_path(directory))
             else {
-                return;
+                return None;
             };
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
         }
@@ -611,12 +645,13 @@ impl Waku {
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
-        if let Some(terminal) = self.right_panel_terminals.get(&terminal_id) {
-            let focus = terminal.read(cx).focus_handle(cx);
-            window.focus(&focus, cx);
-        }
+        let focus = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .map(|terminal| terminal.read(cx).focus_handle(cx));
         self.save();
         cx.notify();
+        focus
     }
 
     /// Fold the group open and land on the last terminal that was on
