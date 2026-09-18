@@ -181,13 +181,14 @@ impl KeybindingsUi {
             .unwrap_or_else(|| detect_layout(cx.keyboard_layout().id()));
 
         let filtered = (0..snapshot.rows.len()).collect();
+        let row_count = snapshot.rows.len();
         let conflicts = compute_conflicts(&snapshot);
         Self {
             search,
             service,
             snapshot,
             filtered,
-            list_state: ListState::new(0, ListAlignment::Top, px(ROW_HEIGHT)),
+            list_state: ListState::new(row_count, ListAlignment::Top, px(ROW_HEIGHT)),
             hovered: None,
             selected: None,
             capture: None,
