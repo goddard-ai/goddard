@@ -2046,6 +2046,9 @@ pub struct Waku {
     /// Stable keyboard focus for each terminal row's hover-revealed close
     /// control.
     sidebar_terminal_close_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
+    /// Stable keyboard focus for each terminal row's hover-revealed pin
+    /// control.
+    sidebar_terminal_pin_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     /// Stable keyboard focus for each virtualized project-history reveal row.
     sidebar_show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     sidebar_visible: bool,
@@ -4530,6 +4533,7 @@ impl Waku {
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_terminal_close_focuses: RefCell::new(HashMap::new()),
+                sidebar_terminal_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
                 sidebar_visible,
                 sidebar_width,

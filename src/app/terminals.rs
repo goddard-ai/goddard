@@ -964,6 +964,66 @@ impl Waku {
             .entry(terminal_id)
             .or_insert_with(|| cx.focus_handle())
             .clone();
+        let pin_focus = self
+            .sidebar_terminal_pin_focuses
+            .borrow_mut()
+            .entry(terminal_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // The pin control shares the close control's reveal: zero-width
+        // until the row is hovered or the button takes keyboard focus.
+        let pin_button = div()
+            .id(SharedString::from(format!("terminal-pin-{terminal_id}")))
+            .track_focus(&pin_focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
+                if pinned {
+                    tr!("session.unpin")
+                } else {
+                    tr!("session.pin")
+                },
+                &ToggleSessionPin,
+            ))
+            .child(icon(
+                if pinned {
+                    "icons/pin-filled.svg"
+                } else {
+                    "icons/pin.svg"
+                },
+                12.0,
+                theme.text_secondary,
+            ))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.toggle_terminal_pin(terminal_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_terminal_pin(terminal_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
         // The close control borrows the status slot: it stays zero-width
         // until the row is hovered or the button takes keyboard focus.
         let close_button = div()
@@ -1023,7 +1083,7 @@ impl Waku {
                 element.bg(theme.sidebar_item_background)
             })
             .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.overlay_strong))
+            .active(|element| element.bg(theme.sidebar_item_background))
             .child(
                 div()
                     .flex()
@@ -1052,7 +1112,7 @@ impl Waku {
                             .bg(theme.inset)
                             .flex()
                             .items_center()
-                            .text_size(sp(13.0))
+                            .text_size(sp(13.5))
                             .text_color(theme.text)
                             .child(self.session_rename_input.clone())
                     } else {
@@ -1063,7 +1123,7 @@ impl Waku {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .text_size(sp(13.0))
+                            .text_size(sp(13.5))
                             .text_color(theme.text)
                             .on_click(cx.listener(
                                 move |this, event: &gpui::ClickEvent, window, cx| {
@@ -1080,6 +1140,11 @@ impl Waku {
                             div()
                                 .flex_none()
                                 .size(px(12.0))
+                                // The zero-width pin/close pair still
+                                // claims its two flex gaps; pulling the slot
+                                // right by that amount keeps the indicator's
+                                // right edge flush with the timestamp below.
+                                .mr(px(-12.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -1087,6 +1152,7 @@ impl Waku {
                                 .child(status_icon),
                         )
                     })
+                    .child(pin_button)
                     .child(close_button),
             )
             .child(
@@ -1094,7 +1160,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(5.0))
-                    .text_size(sp(12.5))
+                    .text_size(sp(13.0))
                     .line_height(sp(15.0))
                     .child(icon(detail_icon, 12.5, theme.text_tertiary))
                     // The char budget folds ancestors first; this clip is
@@ -1107,13 +1173,11 @@ impl Waku {
                             .child(SharedString::from(detail)),
                     )
                     .child(div().flex_1())
-                    .when(pinned, |element| {
-                        element.child(icon("icons/pin-filled.svg", 12.0, theme.text_ghost))
-                    })
                     .child(
                         div()
                             .flex_none()
-                            .text_color(theme.text_secondary)
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
                             .child(SharedString::from(time_label)),
                     ),
             )
