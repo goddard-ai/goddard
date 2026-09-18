@@ -872,6 +872,9 @@ pub struct TerminalView {
     /// What `ResetTitle` restores — the localized "Terminal" for a plain
     /// shell, the command's display name for a custom command.
     default_title: String,
+    /// A name the user set from the sidebar — wins over the OSC-set title
+    /// until cleared.
+    custom_title: Option<String>,
     exited: bool,
     scroll_accumulator: f32,
     panel_width: f32,
@@ -972,6 +975,7 @@ impl TerminalView {
             focus_handle: cx.focus_handle(),
             title: default_title.clone(),
             default_title,
+            custom_title: None,
             working_directory,
             shell_name,
             // A custom command's launch line is the terminal's first
@@ -1046,10 +1050,18 @@ impl TerminalView {
             .unwrap_or_default()
     }
 
-    /// The surface's current title — the shell's OSC-set name while the
-    /// program running in it controls it, the localized default otherwise.
+    /// The surface's current title — a sidebar rename while one is set,
+    /// else the shell's OSC-set name while the program running in it
+    /// controls it, the localized default otherwise.
     pub fn title(&self) -> &str {
-        &self.title
+        self.custom_title.as_deref().unwrap_or(&self.title)
+    }
+
+    /// Set or clear the user-assigned name shown wherever the terminal's
+    /// title appears.
+    pub fn set_custom_title(&mut self, title: Option<String>, cx: &mut Context<Self>) {
+        self.custom_title = title;
+        cx.notify();
     }
 
     pub fn panel_width(&self) -> f32 {
@@ -1898,10 +1910,10 @@ impl Render for TerminalView {
             .session
             .as_ref()
             .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
-        let title = if self.title.trim().is_empty() {
+        let title = if self.title().trim().is_empty() {
             tr!("right_panel.terminal")
         } else {
-            self.title.clone()
+            self.title().to_owned()
         };
         let directory = self
             .working_directory

@@ -1,0 +1,1 @@
+- Rename sidebar terminals inline — double-click the title or pick Rename from the row's menu, just like sessions

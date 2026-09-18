@@ -13,6 +13,9 @@ pub(super) struct TerminalRecord {
     /// When the terminal opened (unix seconds) — the row's "…ago" label
     /// until the view reports a command's start.
     pub opened_at: u64,
+    /// A sidebar rename — wins over the view's OSC-set title and is
+    /// applied to the view when it spawns.
+    pub custom_title: Option<String>,
 }
 
 /// A terminal row is two lines — title and status over location and time —
@@ -188,6 +191,7 @@ impl Waku {
                 pinned: false,
                 working_directory,
                 opened_at: unix_time(),
+                custom_title: None,
             },
         );
         self.terminal_order.push(terminal_id);
@@ -204,6 +208,9 @@ impl Waku {
         self.terminal_order.retain(|id| *id != terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
         self.session_navigation.remove_terminal(terminal_id);
+        if self.terminal_rename == Some(terminal_id) {
+            self.terminal_rename = None;
+        }
         if self.selected_terminal == Some(terminal_id) {
             self.selected_terminal = None;
         }
@@ -295,6 +302,14 @@ impl Waku {
                 this.refresh_command_run_tail(terminal_id, cx);
             })
             .detach();
+        }
+        // A rename that landed before the view existed applies on spawn.
+        if let Some(title) = self
+            .terminal_records
+            .get(&terminal_id)
+            .and_then(|record| record.custom_title.clone())
+        {
+            view.update(cx, |view, cx| view.set_custom_title(Some(title), cx));
         }
         self.right_panel_terminals.insert(terminal_id, view);
     }
@@ -442,6 +457,72 @@ impl Waku {
                     .active_right_panel_surface()
                     .and_then(RightPanelSurface::terminal_id)
                     == Some(terminal_id))
+    }
+
+    /// Swap a sidebar terminal row's title for the shared rename field,
+    /// seeded with the terminal's current title.
+    fn begin_terminal_rename(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.terminal_records.contains_key(&terminal_id) {
+            return;
+        }
+        let title = self
+            .terminal_records
+            .get(&terminal_id)
+            .and_then(|record| record.custom_title.clone())
+            .or_else(|| {
+                self.right_panel_terminals
+                    .get(&terminal_id)
+                    .map(|terminal| terminal.read(cx).title().to_owned())
+                    .filter(|title| !title.is_empty())
+            })
+            .unwrap_or_else(|| tr!("right_panel.terminal"));
+
+        self.session_rename = None;
+        self.terminal_rename = Some(terminal_id);
+        self.session_rename_input.update(cx, |input, cx| {
+            input.set_content(title, cx);
+            input.select_all_text(cx);
+        });
+        let focus = self.session_rename_input.read(cx).focus();
+        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        cx.notify();
+    }
+
+    pub(super) fn commit_terminal_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(terminal_id) = self.terminal_rename.take() else {
+            return;
+        };
+        let title = self
+            .session_rename_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        if !title.is_empty() {
+            if let Some(record) = self.terminal_records.get_mut(&terminal_id) {
+                record.custom_title = Some(title.clone());
+            }
+            if let Some(terminal) = self.right_panel_terminals.get(&terminal_id) {
+                terminal.update(cx, |terminal, cx| {
+                    terminal.set_custom_title(Some(title), cx);
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    fn cancel_terminal_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal_rename.take().is_none() {
+            return;
+        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+        cx.notify();
     }
 
     /// Show a terminal full-width in the main area. Entering terminal mode
@@ -703,9 +784,14 @@ impl Waku {
         };
         let pinned = record.pinned;
         let terminal = self.right_panel_terminals.get(&terminal_id);
-        let title = terminal
-            .map(|terminal| single_line_label(terminal.read(cx).title()))
-            .filter(|title| !title.is_empty())
+        let title = record
+            .custom_title
+            .clone()
+            .or_else(|| {
+                terminal
+                    .map(|terminal| single_line_label(terminal.read(cx).title()))
+                    .filter(|title| !title.is_empty())
+            })
             .unwrap_or_else(|| tr!("right_panel.terminal"));
         let cwd = self.terminal_cwd(terminal_id, cx);
         // The title line's trailing slot is the command's status: spinning
@@ -804,6 +890,7 @@ impl Waku {
             .unwrap_or(record.opened_at);
         let time_label = format_time_ago(unix_time().saturating_sub(started_at));
         let selected = self.selected_terminal == Some(terminal_id);
+        let renaming = self.terminal_rename == Some(terminal_id);
         let menu = self.menu_handle(format!("terminal-{terminal_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
@@ -875,9 +962,6 @@ impl Waku {
             })
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.overlay_strong))
-            .track_focus(&row_focus)
-            .tab_index(0)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .child(
                 div()
                     .flex()
@@ -885,15 +969,50 @@ impl Waku {
                     .gap(px(6.0))
                     .overflow_hidden()
                     .line_height(sp(18.0))
-                    .child(
+                    .child(if renaming {
                         div()
+                            .id(SharedString::from(format!(
+                                "terminal-rename-field-{terminal_id}"
+                            )))
+                            .key_context(sidebar::SESSION_RENAME_PARENT_CONTEXT)
+                            .on_action(cx.listener(
+                                |this, _: &CancelSessionRename, window, cx| {
+                                    this.cancel_terminal_rename(window, cx);
+                                },
+                            ))
+                            .h(px(18.0))
+                            .flex_1()
+                            .min_w_0()
+                            .px(px(4.0))
+                            .rounded(px(4.0))
+                            .border(hairline())
+                            .border_color(theme.accent)
+                            .bg(theme.inset)
+                            .flex()
+                            .items_center()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text)
+                            .child(self.session_rename_input.clone())
+                    } else {
+                        div()
+                            .id(SharedString::from(format!(
+                                "terminal-title-{terminal_id}"
+                            )))
                             .min_w_0()
                             .flex_1()
                             .truncate()
                             .text_size(sp(13.0))
                             .text_color(theme.text)
-                            .child(SharedString::from(title)),
-                    )
+                            .on_click(cx.listener(
+                                move |this, event: &gpui::ClickEvent, window, cx| {
+                                    if event.click_count() == 2 {
+                                        this.begin_terminal_rename(terminal_id, window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
+                            .child(SharedString::from(title))
+                    })
                     .when_some(status_icon, |element, status_icon| {
                         element.child(
                             div()
@@ -936,21 +1055,38 @@ impl Waku {
                             .child(SharedString::from(time_label)),
                     ),
             )
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                let key = event.keystroke.key.as_str();
-                if matches!(key, "enter" | "space") {
-                    this.select_terminal(terminal_id, window, cx);
-                    cx.stop_propagation();
-                } else if key == "f10" && event.keystroke.modifiers.shift {
-                    keyboard_menu.open_context_menu(window, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.select_terminal(terminal_id, window, cx);
-            }));
+            .when(!renaming, |element| {
+                element
+                    .track_focus(&row_focus)
+                    .tab_index(0)
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        let key = event.keystroke.key.as_str();
+                        if matches!(key, "enter" | "space") {
+                            this.select_terminal(terminal_id, window, cx);
+                            cx.stop_propagation();
+                        } else if key == "f10" && event.keystroke.modifiers.shift {
+                            keyboard_menu.open_context_menu(window, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_terminal(terminal_id, window, cx);
+                    }))
+            });
 
-        let row = context_menu(
+        let row = if renaming {
+            div()
+                .w_full()
+                .child(row)
+                .on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                    if this.terminal_rename == Some(terminal_id) {
+                        this.commit_terminal_rename(cx);
+                    }
+                }))
+                .into_any_element()
+        } else {
+            context_menu(
             div().w_full().child(row),
             SharedString::from(format!("terminal-menu-{terminal_id}")),
             &menu,
@@ -962,9 +1098,16 @@ impl Waku {
                             .is_some_and(|record| record.pinned)
                     })
                     .unwrap_or(false);
+                let rename_waku = waku.clone();
                 let pin_waku = waku.clone();
                 let close_waku = waku.clone();
                 vec![
+                    MenuItem::new(tr!("common.rename"), move |window, cx| {
+                        let _ = rename_waku.update(cx, |waku, cx| {
+                            waku.begin_terminal_rename(terminal_id, window, cx);
+                        });
+                    })
+                    .icon("icons/pencil.svg"),
                     MenuItem::new(
                         if pinned {
                             tr!("session.unpin")
@@ -992,7 +1135,8 @@ impl Waku {
                     .icon("icons/x.svg"),
                 ]
             },
-        );
+            )
+        };
 
         div()
             .w_full()
