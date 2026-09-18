@@ -985,7 +985,7 @@ impl Waku {
     ) {
         self.state.selected_session = None;
         self.settings_page = None;
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
@@ -1798,7 +1798,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
         let pending = self
             .pending_session_activation
@@ -1870,7 +1870,7 @@ impl Waku {
         if let Some(session_id) = self.composer_session_id() {
             self.mark_session_unread(session_id, cx);
         }
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
         let pending = self
             .pending_session_activation

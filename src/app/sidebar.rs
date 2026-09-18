@@ -231,7 +231,8 @@ const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
-const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
+/// Chats shown under a project group before the rest fold behind "Show more".
+const SIDEBAR_PROJECT_DEFAULT_VISIBLE: usize = 7;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
 /// How long the primary modifier must stay down before the sidebar reveals
 /// its ⌘1–⌘9 chips — long enough that quicker chords never flash them.
@@ -316,24 +317,11 @@ fn project_sidebar_groups(
 
 fn visible_project_sessions(
     sessions: &[Uuid],
-    session_timestamps: &HashMap<Uuid, u64>,
-    recent_cutoff: u64,
-    revealed_older_sessions: usize,
+    revealed_extra_sessions: usize,
 ) -> (Vec<Uuid>, bool) {
-    let mut visible = Vec::with_capacity(sessions.len());
-    let mut older_seen = 0usize;
-    for session_id in sessions {
-        let recent = session_timestamps
-            .get(session_id)
-            .is_some_and(|timestamp| *timestamp >= recent_cutoff);
-        if recent || older_seen < revealed_older_sessions {
-            visible.push(*session_id);
-        }
-        if !recent {
-            older_seen = older_seen.saturating_add(1);
-        }
-    }
-    (visible, older_seen > revealed_older_sessions)
+    let limit = SIDEBAR_PROJECT_DEFAULT_VISIBLE.saturating_add(revealed_extra_sessions);
+    let visible = sessions.iter().take(limit).copied().collect();
+    (visible, sessions.len() > limit)
 }
 
 fn sidebar_project_is_projectless(project: &Project, projectless_root: Option<&Path>) -> bool {
@@ -850,7 +838,7 @@ impl Waku {
     /// row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
         let target = sessions::next_unread_completion(
             &self.state.sessions,
@@ -1936,7 +1924,7 @@ impl Waku {
             .panel_resize_drag
             .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
 
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         self.sync_sidebar_rows(&rows);
         // Restored selection exists before ListState knows the viewport size.
         // Retry after the first layout so nearest-edge alignment has a height.
@@ -2036,7 +2024,7 @@ impl Waku {
     /// Keep a newly selected task visible without disturbing the sidebar when
     /// its row is already fully inside the viewport.
     pub(super) fn reveal_sidebar_session(&self, session_id: Uuid) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         self.sync_sidebar_rows(&rows);
         if let Some(index) = sidebar_session_row_index(&rows, session_id) {
             reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
@@ -2050,7 +2038,7 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let Some(session_id) = sidebar_shortcut_target_ids(&rows).nth(action.index) else {
             return;
         };
@@ -2150,8 +2138,8 @@ impl Waku {
     /// fingerprint is an allocation-free scan of exactly what
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
     /// recency, the presentation preferences, the collapsed-group set, and
-    /// today's date and the moving project-recency boundary.
-    pub(super) fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
+    /// today's date.
+    pub(super) fn sidebar_rows_cached(&self, today: NaiveDate) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
         fingerprint = mix(
             fingerprint,
@@ -2175,15 +2163,6 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, session.project_id);
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
-            if self.state.sidebar_grouping == SidebarGrouping::Project {
-                fingerprint = mix(
-                    fingerprint,
-                    u64::from(
-                        sidebar_ordering_timestamp(session, self.state.sidebar_ordering)
-                            >= now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS),
-                    ),
-                );
-            }
         }
         if self.state.sidebar_grouping == SidebarGrouping::Project {
             for project in &self.state.projects {
@@ -2226,7 +2205,7 @@ impl Waku {
             );
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today, now));
+            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today));
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
         }
         self.sidebar_rows_snapshot.borrow().clone()
@@ -2234,7 +2213,7 @@ impl Waku {
 
     /// Snapshot the session history as a flat list of lightweight rows under
     /// the current grouping and ordering preferences.
-    fn sidebar_rows(&self, today: NaiveDate, now: u64) -> Vec<SidebarRow> {
+    fn sidebar_rows(&self, today: NaiveDate) -> Vec<SidebarRow> {
         let mut sorted_sessions = self
             .state
             .sessions
@@ -2300,16 +2279,6 @@ impl Waku {
                 }
             }
             SidebarGrouping::Project => {
-                let recent_cutoff = now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS);
-                let session_timestamps = sorted_sessions
-                    .iter()
-                    .map(|session| {
-                        (
-                            session.id,
-                            sidebar_ordering_timestamp(session, self.state.sidebar_ordering),
-                        )
-                    })
-                    .collect::<HashMap<_, _>>();
                 let projectless_root = crate::projectless::workspace_root();
                 let projectless_project_ids = self
                     .state
@@ -2323,17 +2292,13 @@ impl Waku {
                 for (group, sessions) in
                     project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
                 {
-                    let revealed_older_sessions = self
+                    let revealed_extra_sessions = self
                         .sidebar_project_reveal_counts
                         .get(&group)
                         .copied()
                         .unwrap_or_default();
-                    let (visible_sessions, show_more) = visible_project_sessions(
-                        &sessions,
-                        &session_timestamps,
-                        recent_cutoff,
-                        revealed_older_sessions,
-                    );
+                    let (visible_sessions, show_more) =
+                        visible_project_sessions(&sessions, revealed_extra_sessions);
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
@@ -2421,7 +2386,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let landing = match sidebar_session_row_index(&rows, session_id) {
             Some(position) => sessions::ArchiveLanding::Neighbor(position),
             None => sessions::ArchiveLanding::NextUnread,
@@ -2434,7 +2399,7 @@ impl Waku {
     /// just-archived session occupied, so the row that followed it now sits
     /// there.
     pub(super) fn next_sidebar_session_from_row(&self, position: usize) -> Option<Uuid> {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         next_sidebar_session_in_rows(&rows, position, |session_id| {
             self.state
                 .sessions
@@ -2878,7 +2843,7 @@ impl Waku {
 
     pub(super) fn collapse_all_sidebar_groups(&mut self, cx: &mut Context<Self>) {
         let groups = self
-            .sidebar_rows_cached(Local::now().date_naive(), unix_time())
+            .sidebar_rows_cached(Local::now().date_naive())
             .iter()
             .filter_map(|row| match row {
                 SidebarRow::Header(group) => Some(*group),
@@ -4246,44 +4211,23 @@ mod tests {
     }
 
     #[test]
-    fn project_sessions_reveal_older_history_in_thirty_item_batches() {
-        let sessions = (1..=36).map(Uuid::from_u128).collect::<Vec<_>>();
-        let recent_cutoff = 100;
-        let timestamps = sessions
-            .iter()
-            .enumerate()
-            .map(|(index, session_id)| {
-                (
-                    *session_id,
-                    if index == 0 {
-                        recent_cutoff
-                    } else {
-                        recent_cutoff - 1
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+    fn project_sessions_reveal_history_beyond_the_default_cap() {
+        let sessions = (1..=40).map(Uuid::from_u128).collect::<Vec<_>>();
 
-        let (initial, show_more) =
-            visible_project_sessions(&sessions, &timestamps, recent_cutoff, 0);
-        assert_eq!(initial, vec![sessions[0]]);
+        let (initial, show_more) = visible_project_sessions(&sessions, 0);
+        assert_eq!(initial, sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE]);
         assert!(show_more);
 
-        let (first_batch, show_more) = visible_project_sessions(
-            &sessions,
-            &timestamps,
-            recent_cutoff,
-            SIDEBAR_PROJECT_REVEAL_BATCH,
+        let (first_batch, show_more) =
+            visible_project_sessions(&sessions, SIDEBAR_PROJECT_REVEAL_BATCH);
+        assert_eq!(
+            first_batch,
+            sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE + SIDEBAR_PROJECT_REVEAL_BATCH]
         );
-        assert_eq!(first_batch, sessions[..31]);
         assert!(show_more);
 
-        let (all_sessions, show_more) = visible_project_sessions(
-            &sessions,
-            &timestamps,
-            recent_cutoff,
-            SIDEBAR_PROJECT_REVEAL_BATCH * 2,
-        );
+        let (all_sessions, show_more) =
+            visible_project_sessions(&sessions, SIDEBAR_PROJECT_REVEAL_BATCH * 2);
         assert_eq!(all_sessions, sessions);
         assert!(!show_more);
     }

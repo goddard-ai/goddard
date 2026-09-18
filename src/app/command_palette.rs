@@ -1089,7 +1089,7 @@ impl Waku {
             "collapse close fold all sidebar groups projects dates history",
             next(),
         ));
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
         let pending = self
             .pending_session_activation
