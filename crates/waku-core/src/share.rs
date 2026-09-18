@@ -17,7 +17,7 @@ use waku_protocol::friends::{
     FriendInfo, FriendRequestInfo, FriendsState, TransferDirection, TransferInfo, TransferStatus,
 };
 use waku_share::friends::{
-    self, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
+    self, Friend, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
 };
 use waku_share::{EndpointId, RelayMode, ShareNode, TempTag};
 
@@ -678,17 +678,55 @@ fn run_runtime(
                             } else {
                                 RequestDecision::Decline
                             });
-                            if !accept {
+                            // Mirror the store mutation the protocol handler
+                            // performs once it wakes on the decision — the
+                            // publish below would otherwise snapshot a stale
+                            // request card and no friend row, and nothing
+                            // re-publishes when the handler later lands.
+                            if let Ok(id) = node_id.parse::<EndpointId>() {
                                 let s = state.lock();
-                                s.store
-                                    .lock()
-                                    .requests
-                                    .retain(|r| r.node_id.to_string() != node_id);
-                                let _ = s.store.lock().save();
+                                let mut store = s.store.lock();
+                                let name = accept.then(|| {
+                                    store
+                                        .requests
+                                        .iter()
+                                        .find(|r| r.node_id == id && r.incoming)
+                                        .map(|r| r.name.clone())
+                                });
+                                if let Some(Some(name)) = name {
+                                    store.friends.insert(
+                                        id,
+                                        Friend {
+                                            name,
+                                            node_id: id,
+                                            added_at_ms: now_ms(),
+                                            last_seen_ms: Some(now_ms()),
+                                        },
+                                    );
+                                }
+                                store.requests.retain(|r| r.node_id != id);
+                                let _ = store.save();
                             }
                             Ok(())
                         }
-                        None => Err(anyhow::anyhow!("no pending request from that code")),
+                        None => {
+                            // A repeat respond racing the broadcast resolves
+                            // to a no-op — the first one already answered.
+                            let resolved = node_id
+                                .parse::<EndpointId>()
+                                .ok()
+                                .is_some_and(|id| {
+                                    let s = state.lock();
+                                    let store = s.store.lock();
+                                    !store.requests.iter().any(|r| r.node_id == id)
+                                        && (!accept || store.is_friend(&id))
+                                });
+                            if resolved {
+                                Ok(())
+                            } else {
+                                Err(anyhow::anyhow!("no pending request from that code"))
+                            }
+                        }
                     };
                     publish(&state, &sink);
                     let _ = reply.send(result);
