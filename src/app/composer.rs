@@ -1501,6 +1501,7 @@ impl Waku {
                                 let select_popover = popover.clone();
                                 return div()
                                         .id("model-row-auto")
+                                        .w_full()
                                         .h(MODEL_PICKER_ROW_HEIGHT)
                                         .px(px(12.0))
                                         .rounded(px(11.0))
@@ -1639,6 +1640,7 @@ impl Waku {
                                     row.effort.as_deref().unwrap_or("base"),
                                     row.fast
                                 )))
+                                .w_full()
                                 .h(MODEL_PICKER_ROW_HEIGHT)
                                 .px(px(12.0))
                                 .rounded(px(11.0))
