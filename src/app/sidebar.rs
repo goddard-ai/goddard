@@ -2269,15 +2269,22 @@ impl Waku {
             );
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today));
+            let (rows, collapsed_members) = self.sidebar_rows(today);
+            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
+            *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
         }
         self.sidebar_rows_snapshot.borrow().clone()
     }
 
     /// Snapshot the session history as a flat list of lightweight rows under
-    /// the current grouping and ordering preferences.
-    fn sidebar_rows(&self, today: NaiveDate) -> Vec<SidebarRow> {
+    /// the current grouping and ordering preferences. Collapsed groups also
+    /// report their member session ids so a folded header can aggregate the
+    /// unread state of rows it hides.
+    fn sidebar_rows(
+        &self,
+        today: NaiveDate,
+    ) -> (Vec<SidebarRow>, HashMap<SidebarGroup, Vec<Uuid>>) {
         let mut sorted_sessions = self
             .state
             .sessions
@@ -2327,14 +2334,20 @@ impl Waku {
             .collect::<Vec<_>>();
         pinned.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)));
         let pinned_ids = pinned.iter().map(|session| session.id).collect::<Vec<_>>();
+        let mut collapsed_members = HashMap::new();
+        let pinned_collapsed = self
+            .sidebar_collapsed_groups
+            .contains(&SidebarGroup::Pinned);
         append_sidebar_group_rows(
             &mut rows,
             SidebarGroup::Pinned,
             &pinned_ids,
-            self.sidebar_collapsed_groups
-                .contains(&SidebarGroup::Pinned),
+            pinned_collapsed,
             false,
         );
+        if pinned_collapsed {
+            collapsed_members.insert(SidebarGroup::Pinned, pinned_ids);
+        }
         sorted_sessions.retain(|session| session.pinned_at.is_none());
 
         match self.state.sidebar_grouping {
@@ -2342,13 +2355,18 @@ impl Waku {
                 let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
+                    let collapsed = self.sidebar_collapsed_groups.contains(&group);
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
                         &grouped_sessions[date_group.index()],
-                        self.sidebar_collapsed_groups.contains(&group),
+                        collapsed,
                         false,
                     );
+                    if collapsed {
+                        collapsed_members
+                            .insert(group, grouped_sessions[date_group.index()].clone());
+                    }
                 }
             }
             SidebarGrouping::Project => {
@@ -2365,6 +2383,10 @@ impl Waku {
                 for (group, sessions) in
                     project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
                 {
+                    let collapsed = self.sidebar_collapsed_groups.contains(&group);
+                    if collapsed {
+                        collapsed_members.insert(group, sessions.clone());
+                    }
                     let revealed_extra_sessions = self
                         .sidebar_project_reveal_counts
                         .get(&group)
@@ -2376,7 +2398,7 @@ impl Waku {
                         &mut rows,
                         group,
                         &visible_sessions,
-                        self.sidebar_collapsed_groups.contains(&group),
+                        collapsed,
                         show_more,
                     );
                 }
@@ -2413,7 +2435,7 @@ impl Waku {
             };
             rows.push(SidebarRow::Header(group));
         }
-        rows
+        (rows, collapsed_members)
     }
 
     /// Keep the virtualized list in sync with the current row snapshot.
@@ -2529,6 +2551,41 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let collapsed = self.sidebar_collapsed_groups.contains(&group);
+        // A folded group keeps its hidden rows' unread signal: the same dot a
+        // session or terminal row earns for an unseen completion surfaces on
+        // the header. Pinned terminals stay visible through the fold, so they
+        // report for themselves and are left out of the count.
+        let has_unread = collapsed
+            && match group {
+                SidebarGroup::Terminals => {
+                    self.unseen_terminal_completions.iter().any(|terminal_id| {
+                        self.terminal_records
+                            .get(terminal_id)
+                            .is_some_and(|record| !record.pinned)
+                            && !self.terminal_is_active_surface(*terminal_id)
+                            && self.right_panel_terminals.get(terminal_id).is_some_and(
+                                |terminal| {
+                                    let terminal = terminal.read(cx);
+                                    !terminal.command_running()
+                                        && terminal.last_command_exit() == Some(0)
+                                },
+                            )
+                    })
+                }
+                _ => self
+                    .sidebar_collapsed_group_members
+                    .borrow()
+                    .get(&group)
+                    .is_some_and(|members| {
+                        members.iter().any(|session_id| {
+                            self.state.unseen_completions.contains_key(session_id)
+                                && self.state.sessions.iter().any(|session| {
+                                    session.id == *session_id
+                                        && session.status == SessionStatus::Idle
+                                })
+                        })
+                    }),
+            };
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -2743,7 +2800,18 @@ impl Waku {
                                     .child(badge),
                             )
                         })
-                        .when_some(updated_chevron, |element, chevron| element.child(chevron)),
+                        .when_some(updated_chevron, |element, chevron| element.child(chevron))
+                        .when(has_unread, |element| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .size(px(12.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+                            )
+                        }),
                 )
                 .child(div().flex_1()),
         )

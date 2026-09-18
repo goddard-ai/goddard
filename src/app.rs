@@ -2280,6 +2280,10 @@ pub struct Waku {
     /// Fingerprint + snapshot pair backing `sidebar_rows_cached`.
     sidebar_rows_fingerprint: Cell<Option<u64>>,
     sidebar_rows_snapshot: RefCell<Rc<Vec<SidebarRow>>>,
+    /// Member session ids per collapsed group, rebuilt with the row
+    /// snapshot so a folded header can aggregate its hidden rows' unread
+    /// state without re-running the grouping.
+    sidebar_collapsed_group_members: RefCell<Rc<HashMap<SidebarGroup, Vec<Uuid>>>>,
     /// Branch labels for ordinary local project paths, resolved together on a
     /// background executor so sidebar rows only read memory.
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
@@ -4607,6 +4611,7 @@ impl Waku {
                 sidebar_row_cache: RefCell::new(Vec::new()),
                 sidebar_rows_fingerprint: Cell::new(None),
                 sidebar_rows_snapshot: RefCell::new(Rc::new(Vec::new())),
+                sidebar_collapsed_group_members: RefCell::new(Rc::new(HashMap::new())),
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),

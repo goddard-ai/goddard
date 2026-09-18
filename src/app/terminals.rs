@@ -450,7 +450,7 @@ impl Waku {
     /// selection, or the visible right panel's active tab. An inactive tab
     /// or a background session's surface counts as unseen even when its
     /// stored strip still points at it.
-    fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
+    pub(super) fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
         self.selected_terminal == Some(terminal_id)
             || (self.right_panel_visible
                 && self
