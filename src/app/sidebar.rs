@@ -2452,6 +2452,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.hold_sidebar_peek();
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let landing = match sidebar_session_row_index(&rows, session_id) {
             Some(position) => sessions::ArchiveLanding::Neighbor(position),

@@ -1278,6 +1278,7 @@ impl Waku {
     /// merge precedence honest so a stale client save cannot resurrect or
     /// clobber the flag.
     pub(super) fn toggle_session_pin(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.hold_sidebar_peek();
         let Some(pinned) = self
             .state
             .sessions
