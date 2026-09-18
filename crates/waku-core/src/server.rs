@@ -1189,7 +1189,10 @@ fn send_dispatch_error(
     let outcome = hub
         .cached_response(request_id)
         .unwrap_or_else(|| ResponseOutcome::Error {
-            error: RpcError { message },
+            error: RpcError {
+                message,
+                i18n: None,
+            },
         });
     hub.cache_response(request_id, outcome.clone());
     let _ = outgoing.send(ServerMessage::Response {

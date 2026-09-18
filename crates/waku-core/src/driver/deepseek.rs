@@ -406,6 +406,7 @@ fn handle_command(
                         let _ = events.send(DriverEvent::TurnFinished {
                             success: execution.success,
                             summary,
+                            summary_i18n: None,
                         });
                     }
                     Err(error) => {
@@ -415,6 +416,7 @@ fn handle_command(
                             summary: Some(format!(
                                 "DeepSeek Harness rejected the command: {error}"
                             )),
+                            summary_i18n: None,
                         });
                     }
                 }
@@ -430,6 +432,7 @@ fn handle_command(
                     let _ = events.send(DriverEvent::TurnFinished {
                         success: false,
                         summary: Some("DeepSeek Harness could not start the turn".into()),
+                        summary_i18n: None,
                     });
                 }
             }
@@ -445,6 +448,7 @@ fn handle_command(
                 let _ = events.send(DriverEvent::SteerRejected {
                     message: text,
                     reason: error.to_string(),
+                    reason_i18n: None,
                 });
             }
         },
@@ -702,7 +706,11 @@ fn handle_session_event(
             }
             if state.turn_active {
                 state.turn_active = false;
-                let _ = events.send(DriverEvent::TurnFinished { success, summary });
+                let _ = events.send(DriverEvent::TurnFinished {
+                    success,
+                    summary,
+                    summary_i18n: None,
+                });
             }
         }
         Some("assistant/chunk") => {
@@ -972,6 +980,8 @@ fn handle_approval_request(
                 allow: false,
             },
         ],
+        title_i18n: None,
+        detail_i18n: None,
     });
 }
 

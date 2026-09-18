@@ -141,6 +141,7 @@ export type { WireComputerToolRequest } from "./WireComputerToolRequest";
 export type { WireDriverEvent } from "./WireDriverEvent";
 export type { WireDriverStartOptions } from "./WireDriverStartOptions";
 export type { WireSessionOptions } from "./WireSessionOptions";
+export type { WireTranslation } from "./WireTranslation";
 export type { WorkItemComment } from "./WorkItemComment";
 export type { WorkItemKind } from "./WorkItemKind";
 export type { WorkItemQueryState } from "./WorkItemQueryState";

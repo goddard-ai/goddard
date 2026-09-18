@@ -425,7 +425,13 @@ fn usage_panel(
                                     .min_w(px(0.0))
                                     .truncate()
                                     .text_color(theme.text)
-                                    .child(SharedString::from(window.label.clone())),
+                                    .child(SharedString::from(
+                                        window
+                                            .label_i18n
+                                            .as_ref()
+                                            .map(waku_client::WireTranslation::render)
+                                            .unwrap_or_else(|| window.label.clone()),
+                                    )),
                             )
                             .children(window.resets_at.map(|resets_at| {
                                 div()

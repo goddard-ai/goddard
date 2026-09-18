@@ -2,8 +2,15 @@
 import type { ActivityFileChange } from "./ActivityFileChange";
 import type { ActivityKind } from "./ActivityKind";
 import type { ReasoningBlock } from "./ReasoningBlock";
+import type { WireTranslation } from "./WireTranslation";
 
 export type ActivityItem = { id: string, source_id: string | null, kind: ActivityKind, title: string,
+/**
+ * The i18n semantic behind `title`, when the daemon composed it from a
+ * known key (an arg-bearing label like "Searching for %{query}") rather
+ * than provider text or a bare kind label.
+ */
+title_i18n?: WireTranslation | null,
 /**
  * Native tool identity, separate from the human-readable activity title.
  */

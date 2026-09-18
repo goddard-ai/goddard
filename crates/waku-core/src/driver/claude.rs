@@ -330,13 +330,11 @@ impl ClaudeDriver {
                             // Verified against the real CLI (2.1.223). Unlike
                             // Amp, no marker is needed: folding is the default.
                             if !*writer_turn.lock() {
-                                let _ = writer_events.send(DriverEvent::SteerRejected {
-                                    message: text,
-                                    reason: tr!(
-                                        "errors.provider_no_active_turn",
-                                        provider = "Claude"
-                                    ),
-                                });
+                                let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
+                        text,
+                        localized!("errors.provider_no_active_turn",
+                                        provider = "Claude"),
+                    ));
                                 continue;
                             }
                             // No TurnStarted and no turn re-arm: the turn the
@@ -348,14 +346,12 @@ impl ClaudeDriver {
                                         .send(DriverEvent::SteerAccepted { message: text, sent_by_task: None });
                                 }
                                 Err(error) => {
-                                    let _ = writer_events.send(DriverEvent::SteerRejected {
-                                        message: text,
-                                        reason: tr!(
-                                            "errors.provider_transport_write",
+                                    let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
+                        text,
+                        localized!("errors.provider_transport_write",
                                             provider = "Claude",
-                                            error = error
-                                        ),
-                                    });
+                                            error = error),
+                    ));
                                 }
                             }
                             // A failed write still falls through to the shared
@@ -480,20 +476,20 @@ impl ClaudeDriver {
                         CommandMessage::Shutdown => break,
                     };
                     if let Err(error) = written {
-                        let _ = writer_events.send(DriverEvent::Error(tr!(
+                        let _ = writer_events.send(DriverEvent::localized_error(localized!(
                             "errors.provider_transport_write",
                             provider = "Claude",
                             error = error
                         )));
                         // Nothing will settle a turn whose prompt never landed.
                         if std::mem::take(&mut *writer_turn.lock()) {
-                            let _ = writer_events.send(DriverEvent::TurnFinished {
-                                success: false,
-                                summary: Some(tr!(
+                            let _ = writer_events.send(DriverEvent::turn_finished_keyed(
+                                false,
+                                localized!(
                                     "errors.provider_receive_prompt",
                                     provider = "Claude"
-                                )),
-                            });
+                                ),
+                            ));
                         }
                         break;
                     }
@@ -528,7 +524,7 @@ impl ClaudeDriver {
                     && !status.success()
                     && last_visible_stderr.lock().is_none()
                 {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.provider_exited",
                         provider = "Claude Code",
                         status = status
@@ -964,27 +960,35 @@ fn claude_task_item(
     // Only the start names a task; on later events `description` is the
     // agent's current activity line ("Running …") and `summary` can be the
     // whole final report. An empty title keeps the stored one on upsert.
-    let title = if subtype == "task_started" {
-        wire_description
-            .map(str::to_owned)
-            .unwrap_or_else(|| match kind {
-                BackgroundWorkKind::Subagent => tr!("background.subagent"),
-                BackgroundWorkKind::Monitor => tr!("background.monitor"),
-                BackgroundWorkKind::Process => tr!("background.process"),
-            })
+    let (title, title_i18n) = if subtype == "task_started" {
+        match wire_description.map(str::to_owned) {
+            Some(title) => (title, None),
+            None => {
+                let pair = match kind {
+                    BackgroundWorkKind::Subagent => localized!("background.subagent"),
+                    BackgroundWorkKind::Monitor => localized!("background.monitor"),
+                    BackgroundWorkKind::Process => localized!("background.process"),
+                };
+                (pair.0, Some(pair.1))
+            }
+        }
     } else {
-        value
-            .pointer("/patch/description")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_default()
+        (
+            value
+                .pointer("/patch/description")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_default(),
+            None,
+        )
     };
     let mut status = claude_task_status(value);
     if status == BackgroundWorkStatus::Running && kind == BackgroundWorkKind::Monitor {
         status = BackgroundWorkStatus::Monitoring;
     }
     let mut item = BackgroundWorkItem::new(kind, task_id.clone(), title, status);
+    item.title_i18n = title_i18n;
     item.background = value
         .get("is_backgrounded")
         .or_else(|| value.get("isBackgrounded"))
@@ -1118,14 +1122,15 @@ fn handle_claude_system(
                 // inventing a Process entry beside the real Subagent entry.
                 let kind = known_kind
                     .or_else(|| bare_id.is_none().then(|| claude_task_kind(entry, state)))?;
+                let (title, title_i18n) = match kind {
+                    BackgroundWorkKind::Subagent => localized!("background.subagent"),
+                    BackgroundWorkKind::Monitor => localized!("background.monitor"),
+                    BackgroundWorkKind::Process => localized!("background.process"),
+                };
                 let mut item = BackgroundWorkItem::new(
                     kind,
                     task_id.clone(),
-                    match kind {
-                        BackgroundWorkKind::Subagent => tr!("background.subagent"),
-                        BackgroundWorkKind::Monitor => tr!("background.monitor"),
-                        BackgroundWorkKind::Process => tr!("background.process"),
-                    },
+                    title,
                     match kind {
                         BackgroundWorkKind::Monitor => BackgroundWorkStatus::Monitoring,
                         BackgroundWorkKind::Process | BackgroundWorkKind::Subagent => {
@@ -1133,6 +1138,7 @@ fn handle_claude_system(
                         }
                     },
                 );
+                item.title_i18n = Some(title_i18n);
                 item.background = true;
                 item.can_stop = true;
                 item.control_id = Some(task_id);
@@ -1358,14 +1364,24 @@ fn handle_message(
                 .and_then(Value::as_str);
             if subtype == Some("error") || matches!(stop_status, Some("not_found" | "not_running"))
             {
-                let message = value
+                let (message, message_i18n) = match value
                     .pointer("/response/error")
                     .or_else(|| value.pointer("/response/response/message"))
                     .and_then(Value::as_str)
                     .map(str::to_owned)
-                    .unwrap_or_else(|| tr!("background.stop_not_running"));
+                {
+                    Some(message) => (message, None),
+                    None => {
+                        let pair = localized!("background.stop_not_running");
+                        (pair.0, Some(pair.1))
+                    }
+                };
                 let _ = events.send(DriverEvent::BackgroundWork(
-                    BackgroundWorkEvent::StopFailed { key, message },
+                    BackgroundWorkEvent::StopFailed {
+                        key,
+                        message,
+                        message_i18n,
+                    },
                 ));
             } else {
                 let mut item = BackgroundWorkItem::new(
@@ -1625,6 +1641,7 @@ fn handle_message(
             let _ = events.send(DriverEvent::TurnFinished {
                 success: !failed,
                 summary: None,
+                summary_i18n: None,
             });
         }
         // `system` status/thinking-token notices and `rate_limit_event` are not
@@ -1736,22 +1753,36 @@ fn request_permission(
         .map(str::to_owned)
         .unwrap_or_else(|| tr!("permission.a_tool"));
     // The agent says why it is asking; that reason is what the answer rests on.
-    let detail = request
+    let (detail, detail_i18n) = match request
         .get("description")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .or_else(|| {
-            request
+    {
+        Some(detail) => (detail, None),
+        None => {
+            let pair = request
                 .get("blocked_path")
                 .and_then(Value::as_str)
-                .map(|path| tr!("permission.blocked_path", path = path))
-        })
-        .unwrap_or_else(|| tr!("permission.agent_wants_to_run", tool = tool.as_str()));
+                .map(|path| localized!("permission.blocked_path", path = path))
+                .unwrap_or_else(|| {
+                    localized!("permission.agent_wants_to_run", tool = tool.as_str())
+                });
+            (pair.0, Some(pair.1))
+        }
+    };
+    let (title, title_i18n) = match activity::input_title(request.get("input")) {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("permission.run_tool", tool = tool.as_str());
+            (pair.0, Some(pair.1))
+        }
+    };
     let _ = events.send(DriverEvent::Permission {
         request_id: request_id.to_owned(),
-        title: activity::input_title(request.get("input"))
-            .unwrap_or_else(|| tr!("permission.run_tool", tool = tool.as_str())),
+        title,
+        title_i18n,
         detail,
+        detail_i18n,
         options: vec![
             PermissionOption {
                 id: "allow".into(),

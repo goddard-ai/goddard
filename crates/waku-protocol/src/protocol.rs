@@ -377,13 +377,21 @@ pub enum Command {
     GetFriends,
     /// Send a friend request to a `gfr-` code. `name` is our display name
     /// as the peer will see it.
-    SendFriendRequest { code: String, name: String },
+    SendFriendRequest {
+        code: String,
+        name: String,
+    },
     /// Accept or decline an incoming friend request.
-    RespondFriendRequest { node_id: String, accept: bool },
+    RespondFriendRequest {
+        node_id: String,
+        accept: bool,
+    },
     /// Withdraw a pending outgoing friend request. Local removal only —
     /// the peer's incoming card lingers until they decline it.
     WithdrawFriendRequest { node_id: String },
-    RemoveFriend { node_id: String },
+    RemoveFriend {
+        node_id: String,
+    },
     /// Offer a file or directory to a friend. Spawns a transfer; progress
     /// arrives through `FriendsChanged` broadcasts.
     SendFileToFriend {
@@ -392,11 +400,15 @@ pub enum Command {
         path: PathBuf,
         note: Option<String>,
     },
-    CancelTransfer { transfer_id: Uuid },
+    CancelTransfer {
+        transfer_id: Uuid,
+    },
     /// On-demand presence check — dial the friend and report the outcome via
     /// `FriendsChanged` (updates `last_seen`/`online`). No-op if a fresher
     /// cached probe exists.
-    ProbeFriend { node_id: String },
+    ProbeFriend {
+        node_id: String,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -652,15 +664,103 @@ pub enum ResponsePayload {
     },
 }
 
+/// The i18n key and `%{name}` substitution values behind a user-facing
+/// string, shipped alongside the English fallback so each client can render
+/// the text in its own locale. Emitters build the pair with `localized!`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WireTranslation {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, String>,
+}
+
+impl WireTranslation {
+    pub fn new(
+        key: impl Into<String>,
+        args: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            args: args.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+        }
+    }
+
+    /// Render in the calling process's locale — the client-side counterpart
+    /// of the `tr!` fallback the daemon already shipped.
+    pub fn render(&self) -> String {
+        let mut text = crate::i18n::translate(&self.key);
+        for (name, value) in &self.args {
+            text = text.replace(&format!("%{{{name}}}"), value);
+        }
+        text
+    }
+}
+
+/// An error whose display text is a known i18n key. It travels through
+/// `anyhow` like any other error but keeps its key and args so the RPC
+/// boundary can ship the semantic beside the fallback message.
+pub struct KeyedError {
+    pub message: String,
+    pub i18n: WireTranslation,
+}
+
+impl KeyedError {
+    /// Wrap the `(fallback, translation)` pair produced by `localized!`.
+    pub fn localized(pair: (String, WireTranslation)) -> Self {
+        Self {
+            message: pair.0,
+            i18n: pair.1,
+        }
+    }
+}
+
+impl std::fmt::Display for KeyedError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::fmt::Debug for KeyedError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("KeyedError")
+            .field("key", &self.i18n.key)
+            .field("message", &self.message)
+            .finish()
+    }
+}
+
+impl std::error::Error for KeyedError {}
+
+impl RpcError {
+    /// The message a client should show: the i18n semantic rendered in this
+    /// process's locale when present, the daemon's fallback text otherwise.
+    pub fn localized_message(&self) -> String {
+        self.i18n
+            .as_ref()
+            .map(WireTranslation::render)
+            .unwrap_or_else(|| self.message.clone())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct RpcError {
     pub message: String,
+    /// The i18n semantic behind `message`, when the failing side knew it.
+    /// `None` for provider text and opaque errors — render `message` as-is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<WireTranslation>,
 }
 
 impl From<anyhow::Error> for RpcError {
     fn from(error: anyhow::Error) -> Self {
         Self {
             message: error.to_string(),
+            i18n: error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<KeyedError>())
+                .map(|keyed| keyed.i18n.clone()),
         }
     }
 }

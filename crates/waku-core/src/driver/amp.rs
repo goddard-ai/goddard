@@ -227,19 +227,20 @@ impl AmpDriver {
                                 }),
                             );
                             if let Err(error) = written {
-                                let _ = writer_events.send(DriverEvent::Error(tr!(
-                                    "errors.provider_transport_write",
-                                    provider = "Amp",
-                                    error = error
-                                )));
+                                let _ =
+                                    writer_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.provider_transport_write",
+                                        provider = "Amp",
+                                        error = error
+                                    )));
                                 if std::mem::take(&mut *writer_turn.lock()) {
-                                    let _ = writer_events.send(DriverEvent::TurnFinished {
-                                        success: false,
-                                        summary: Some(tr!(
+                                    let _ = writer_events.send(DriverEvent::turn_finished_keyed(
+                                        false,
+                                        localized!(
                                             "errors.provider_receive_prompt",
                                             provider = "Amp"
-                                        )),
-                                    });
+                                        ),
+                                    ));
                                 }
                                 break;
                             }
@@ -252,10 +253,10 @@ impl AmpDriver {
                             // TurnStarted and no turn re-arm: the turn the
                             // message joins is already running.
                             if !*writer_turn.lock() {
-                                let _ = writer_events.send(DriverEvent::SteerRejected {
-                                    message: text,
-                                    reason: tr!("errors.provider_no_active_turn", provider = "Amp"),
-                                });
+                                let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
+                                    text,
+                                    localized!("errors.provider_no_active_turn", provider = "Amp"),
+                                ));
                                 continue;
                             }
                             let written = write_line(
@@ -277,28 +278,31 @@ impl AmpDriver {
                                     });
                                 }
                                 Err(error) => {
-                                    let _ = writer_events.send(DriverEvent::SteerRejected {
-                                        message: text,
-                                        reason: tr!(
+                                    let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
+                                        text,
+                                        localized!(
                                             "errors.provider_transport_write",
                                             provider = "Amp",
                                             error = error
                                         ),
-                                    });
+                                    ));
                                     // Stdin is gone, so the running turn cannot
                                     // settle from the CLI side either.
-                                    let _ = writer_events.send(DriverEvent::Error(tr!(
-                                        "errors.provider_transport_write_short",
-                                        provider = "Amp"
-                                    )));
+                                    let _ = writer_events.send(DriverEvent::localized_error(
+                                        localized!(
+                                            "errors.provider_transport_write_short",
+                                            provider = "Amp"
+                                        ),
+                                    ));
                                     if std::mem::take(&mut *writer_turn.lock()) {
-                                        let _ = writer_events.send(DriverEvent::TurnFinished {
-                                            success: false,
-                                            summary: Some(tr!(
-                                                "errors.provider_stopped_receiving",
-                                                provider = "Amp"
-                                            )),
-                                        });
+                                        let _ =
+                                            writer_events.send(DriverEvent::turn_finished_keyed(
+                                                false,
+                                                localized!(
+                                                    "errors.provider_stopped_receiving",
+                                                    provider = "Amp"
+                                                ),
+                                            ));
                                     }
                                     break;
                                 }
@@ -339,7 +343,7 @@ impl AmpDriver {
                     && !status.success()
                     && last_visible_stderr.lock().is_none()
                 {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.provider_exited",
                         provider = "Amp",
                         status = status
@@ -509,6 +513,7 @@ fn handle_message(
                 let _ = events.send(DriverEvent::TurnFinished {
                     success: true,
                     summary: None,
+                    summary_i18n: None,
                 });
                 turn_finished = true;
             }
@@ -543,11 +548,15 @@ fn handle_message(
             }
         }
         Some("result") if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
-            let message = value
-                .get("error")
-                .and_then(Value::as_str)
-                .unwrap_or("Amp reported an error");
-            let _ = events.send(DriverEvent::Error(message.to_owned()));
+            let message = value.get("error").and_then(Value::as_str);
+            let (message, i18n) = match message.map(str::to_owned) {
+                Some(message) => (message, None),
+                None => {
+                    let pair = localized!("errors.provider_reported_error", provider = "Amp");
+                    (pair.0, Some(pair.1))
+                }
+            };
+            let _ = events.send(DriverEvent::error_or_localized(message, i18n));
         }
         Some("system") => {
             if let Some(message) = value.get("error").and_then(Value::as_str) {

@@ -17,6 +17,32 @@ macro_rules! tr {
     };
 }
 
+/// Pair a translated fallback string with its `WireTranslation` so wire
+/// emitters ship the semantic and each client renders its own locale.
+/// Args are recorded by name so the client can substitute `%{name}` itself.
+/// A `KeyedError` whose message is the `tr!` fallback and whose key+args ride
+/// to the RPC boundary so clients can render their own locale.
+macro_rules! keyed {
+    ($($t:tt)*) => {
+        waku_protocol::KeyedError::localized(localized!($($t)*))
+    };
+}
+
+macro_rules! localized {
+    ($key:expr) => {
+        (tr!($key), waku_protocol::WireTranslation::new($key, []))
+    };
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
+        (
+            tr!($key, $($name = $value),+),
+            waku_protocol::WireTranslation::new(
+                $key,
+                [$( (stringify!($name), $value.to_string()) ),+],
+            ),
+        )
+    };
+}
+
 pub mod acp_session;
 pub mod agent;
 pub mod amp_session;

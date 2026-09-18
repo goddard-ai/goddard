@@ -147,17 +147,17 @@ fn start_native_command(
 }
 
 fn reject_prompt(error: impl std::fmt::Display, events: &impl DriverEventSink, turn: &Mutex<bool>) {
-    let _ = events.send(DriverEvent::Error(tr!(
+    let _ = events.send(DriverEvent::localized_error(localized!(
         "errors.provider_rejected_prompt_detail",
         provider = "OpenCode",
         error = error
     )));
     // session.idle never arrives for a request that failed to start.
     if std::mem::take(&mut *turn.lock()) {
-        let _ = events.send(DriverEvent::TurnFinished {
-            success: false,
-            summary: Some(tr!("errors.provider_start_turn", provider = "OpenCode")),
-        });
+        let _ = events.send(DriverEvent::turn_finished_keyed(
+            false,
+            localized!("errors.provider_start_turn", provider = "OpenCode"),
+        ));
     }
 }
 
@@ -474,7 +474,7 @@ impl OpenCodeDriver {
                     Ok(None) => {}
                     Err(error) => {
                         if !stream_control.is_cancelled() {
-                            let _ = stream_events.send(DriverEvent::Error(tr!(
+                            let _ = stream_events.send(DriverEvent::localized_error(localized!(
                                 "errors.read_provider_event_stream",
                                 provider = "OpenCode",
                                 error = error
@@ -559,13 +559,13 @@ impl OpenCodeDriver {
                             // message route, which blocks until the merged turn
                             // ends — which is what makes it the steer vehicle.
                             if !*worker_turn.lock() {
-                                let _ = worker_events.send(DriverEvent::SteerRejected {
-                                    message: text,
-                                    reason: tr!(
+                                let _ = worker_events.send(DriverEvent::steer_rejected_keyed(
+                                    text,
+                                    localized!(
                                         "errors.provider_no_active_turn",
                                         provider = "OpenCode"
                                     ),
-                                });
+                                ));
                                 continue;
                             }
                             if let Some(body) = native_command_body(
@@ -586,6 +586,7 @@ impl OpenCodeDriver {
                                     let _ = worker_events.send(DriverEvent::SteerRejected {
                                         message: text,
                                         reason: error.to_string(),
+                                        reason_i18n: None,
                                     });
                                 }
                                 continue;
@@ -608,14 +609,14 @@ impl OpenCodeDriver {
                                     });
                                 }
                                 Err(error) => {
-                                    let _ = worker_events.send(DriverEvent::SteerRejected {
-                                        message: text,
-                                        reason: tr!(
+                                    let _ = worker_events.send(DriverEvent::steer_rejected_keyed(
+                                        text,
+                                        localized!(
                                             "errors.provider_rejected_steer",
                                             provider = "OpenCode",
                                             error = error
                                         ),
-                                    });
+                                    ));
                                 }
                             }
                         }
@@ -634,7 +635,11 @@ impl OpenCodeDriver {
                                         message,
                                         sent_by_task: None,
                                     },
-                                    Err(reason) => DriverEvent::SteerRejected { message, reason },
+                                    Err(reason) => DriverEvent::SteerRejected {
+                                        message,
+                                        reason,
+                                        reason_i18n: None,
+                                    },
                                 };
                                 let _ = worker_events.send(event);
                             } else if completed == generation
@@ -650,11 +655,12 @@ impl OpenCodeDriver {
                             let path =
                                 format!("/session/{}/abort", encode_path_segment(&worker_session));
                             if let Err(error) = worker_server.request("POST", &path, None) {
-                                let _ = worker_events.send(DriverEvent::Error(tr!(
-                                    "errors.stop_provider",
-                                    provider = "OpenCode",
-                                    error = error
-                                )));
+                                let _ =
+                                    worker_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.stop_provider",
+                                        provider = "OpenCode",
+                                        error = error
+                                    )));
                             }
                         }
                         CommandMessage::Respond {
@@ -668,11 +674,12 @@ impl OpenCodeDriver {
                                 &path,
                                 Some(&json!({"reply": option_id})),
                             ) {
-                                let _ = worker_events.send(DriverEvent::Error(tr!(
-                                    "errors.answer_provider_permission",
-                                    provider = "OpenCode",
-                                    error = error
-                                )));
+                                let _ =
+                                    worker_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.answer_provider_permission",
+                                        provider = "OpenCode",
+                                        error = error
+                                    )));
                             }
                         }
                         CommandMessage::RespondUserInput {
@@ -690,11 +697,12 @@ impl OpenCodeDriver {
                                 &path,
                                 Some(&json!({"answers": answers})),
                             ) {
-                                let _ = worker_events.send(DriverEvent::Error(tr!(
-                                    "errors.answer_provider_question",
-                                    provider = "OpenCode",
-                                    error = error
-                                )));
+                                let _ =
+                                    worker_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.answer_provider_question",
+                                        provider = "OpenCode",
+                                        error = error
+                                    )));
                             }
                         }
                         CommandMessage::Shutdown => break,
@@ -805,7 +813,7 @@ impl Drop for OpenCodeDriver {
 /// `/error/message` therefore never matched, and every failure — an expired
 /// login, a billing stop, a context overflow — surfaced as the same bare
 /// "OpenCode reported an error" with the real cause discarded.
-fn session_error_message(properties: &Value) -> String {
+fn session_error_message(properties: &Value) -> (String, Option<waku_protocol::WireTranslation>) {
     let error = properties.get("error");
     error
         .and_then(|error| {
@@ -828,7 +836,11 @@ fn session_error_message(properties: &Value) -> String {
                 .filter(|name| !name.is_empty())
                 .map(str::to_owned)
         })
-        .unwrap_or_else(|| tr!("errors.provider_reported_error", provider = "OpenCode"))
+        .map(|message| (message, None))
+        .unwrap_or_else(|| {
+            let pair = localized!("errors.provider_reported_error", provider = "OpenCode");
+            (pair.0, Some(pair.1))
+        })
 }
 
 #[derive(Default)]
@@ -1014,11 +1026,13 @@ fn handle_event(
                 let _ = events.send(DriverEvent::TurnFinished {
                     success: true,
                     summary: None,
+                    summary_i18n: None,
                 });
             }
         }
         "session.error" => {
-            let _ = events.send(DriverEvent::Error(session_error_message(properties)));
+            let (message, i18n) = session_error_message(properties);
+            let _ = events.send(DriverEvent::error_or_localized(message, i18n));
         }
         "session.updated" => {
             let title = properties
@@ -1239,21 +1253,29 @@ fn request_permission(
     let patterns = (!permission_request.patterns.is_empty())
         .then(|| permission_request.patterns.join(", "))
         .filter(|patterns| !patterns.is_empty());
-    let _ = events.send(DriverEvent::Permission {
-        request_id: request_id.to_owned(),
-        title: patterns.clone().unwrap_or_else(|| {
-            tr!(
+    let (title, title_i18n) = match &patterns {
+        Some(patterns) => (patterns.clone(), None),
+        None => {
+            let pair = localized!(
                 "permission.allow_named_permission",
                 permission = permission.as_str()
-            )
-        }),
-        detail: match patterns {
-            Some(_) => tr!(
-                "permission.agent_asks_for_named_permission",
-                permission = permission.as_str()
-            ),
-            None => tr!("permission.agent_asks_for_permission"),
-        },
+            );
+            (pair.0, Some(pair.1))
+        }
+    };
+    let (detail, detail_i18n) = match &patterns {
+        Some(_) => localized!(
+            "permission.agent_asks_for_named_permission",
+            permission = permission.as_str()
+        ),
+        None => localized!("permission.agent_asks_for_permission"),
+    };
+    let _ = events.send(DriverEvent::Permission {
+        request_id: request_id.to_owned(),
+        title,
+        title_i18n,
+        detail,
+        detail_i18n: Some(detail_i18n),
         options: vec![
             PermissionOption {
                 id: "once".into(),
@@ -1343,14 +1365,21 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
             Some("error") => BackgroundWorkStatus::Failed,
             _ => BackgroundWorkStatus::Running,
         };
-        let title = input
+        let (title, title_i18n) = match input
             .and_then(|input| input.get("description"))
             .and_then(Value::as_str)
             .filter(|text| !text.is_empty())
             .map(str::to_owned)
-            .unwrap_or_else(|| tr!("background.subagent"));
+        {
+            Some(title) => (title, None),
+            None => {
+                let pair = localized!("background.subagent");
+                (pair.0, Some(pair.1))
+            }
+        };
         let mut work =
             BackgroundWorkItem::new(BackgroundWorkKind::Subagent, call_id, title, status);
+        work.title_i18n = title_i18n;
         work.role = input
             .and_then(|input| {
                 input
@@ -2052,7 +2081,7 @@ server.serve_forever()
             }
         });
         assert_eq!(
-            session_error_message(&properties),
+            session_error_message(&properties).0,
             "Insufficient balance. Manage your billing here: https://opencode.ai/workspace/wrk_1/billing"
         );
     }
@@ -2066,7 +2095,7 @@ server.serve_forever()
             "error": {"name": "MessageOutputLengthError", "data": {}}
         });
         assert_eq!(
-            session_error_message(&properties),
+            session_error_message(&properties).0,
             "MessageOutputLengthError"
         );
     }
@@ -2076,7 +2105,7 @@ server.serve_forever()
     #[test]
     fn session_errors_accept_a_flat_message() {
         let properties = json!({"error": {"message": "boom"}});
-        assert_eq!(session_error_message(&properties), "boom");
+        assert_eq!(session_error_message(&properties).0, "boom");
     }
 
     #[test]
@@ -2270,7 +2299,7 @@ server.serve_forever()
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            DriverEvent::Permission { request_id, .. } if request_id == "per_current"
+            DriverEvent::Permission { request_id, ..} if request_id == "per_current"
         ));
         assert!(event_rx.try_recv().is_err());
         assert!(command_rx.try_recv().is_err());
@@ -2401,7 +2430,7 @@ server.serve_forever()
         handle_event(&repeated, &events, &commands, &turn, false, &mut isolated);
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            DriverEvent::Permission { request_id, .. } if request_id == "per_def"
+            DriverEvent::Permission { request_id, ..} if request_id == "per_def"
         ));
         assert!(
             command_rx.try_recv().is_err(),

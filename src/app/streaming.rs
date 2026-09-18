@@ -243,7 +243,16 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         runtime.last_active_at = Instant::now();
+        // Keyed errors render in the client's locale, then flow through the
+        // same handling as any opaque provider error.
+        let event = match event {
+            DriverEvent::LocalizedError { i18n, .. } => DriverEvent::Error(i18n.render()),
+            event => event,
+        };
         match event {
+            // Unreachable: normalized into `Error` above so it renders in the
+            // client's locale before any dispatch runs.
+            DriverEvent::LocalizedError { .. } => {}
             DriverEvent::RuntimeEventCursorAdvanced(cursor) => {
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.runtime_event_cursor = Some(cursor);
@@ -449,14 +458,18 @@ impl Waku {
             DriverEvent::Permission {
                 request_id,
                 title,
+                title_i18n,
                 detail,
+                detail_i18n,
                 options,
             } => {
                 if self.accepts_turn_output(session_id) {
                     runtime.pending_permission = Some(PendingPermission {
                         request_id,
                         title,
+                        title_i18n,
                         detail,
+                        detail_i18n,
                         options,
                     });
                     if let Some(session) = self.state.session_mut(session_id) {
@@ -524,7 +537,12 @@ impl Waku {
                 }
                 runtime.stream_phase = None;
             }
-            DriverEvent::SteerRejected { message, reason } => {
+            DriverEvent::SteerRejected {
+                message,
+                reason,
+                reason_i18n,
+            } => {
+                let reason = reason_i18n.map(|i18n| i18n.render()).unwrap_or(reason);
                 let mut submission = runtime
                     .pending_steers
                     .iter()
@@ -629,7 +647,11 @@ impl Waku {
                     self.state.mark_session_dirty(session_id);
                 }
             }
-            DriverEvent::TurnFinished { success, summary } => {
+            DriverEvent::TurnFinished {
+                success,
+                summary,
+                summary_i18n,
+            } => {
                 self.settle_foreground_work(
                     session_id,
                     if success {
@@ -696,13 +718,16 @@ impl Waku {
                     if needs_fallback {
                         session.push_message(
                             MessageRole::Assistant,
-                            summary.unwrap_or_else(|| {
-                                if success {
-                                    tr!("session.turn_completed")
-                                } else {
-                                    tr!("session.stopped_before_response")
-                                }
-                            }),
+                            summary_i18n
+                                .map(|i18n| i18n.render())
+                                .or(summary)
+                                .unwrap_or_else(|| {
+                                    if success {
+                                        tr!("session.turn_completed")
+                                    } else {
+                                        tr!("session.stopped_before_response")
+                                    }
+                                }),
                         );
                     }
                 }

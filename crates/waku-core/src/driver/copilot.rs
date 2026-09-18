@@ -17,14 +17,9 @@ use std::thread;
 
 use anyhow::{Context as _, anyhow};
 use async_trait::async_trait;
-use github_copilot_sdk::session_events::{
-    AssistantMessageData, AssistantMessageDeltaData, AssistantReasoningDeltaData,
-    ContextTier, SessionEventType, SessionIdleData, SessionTitleChangedData,
-    SessionUsageInfoData, ToolExecutionCompleteData, ToolExecutionStartData,
-};
 use github_copilot_sdk::handler::{
-    ExitPlanModeHandler, ExitPlanModeResult, PermissionHandler, PermissionResult,
-    UserInputHandler, UserInputResponse,
+    ExitPlanModeHandler, ExitPlanModeResult, PermissionHandler, PermissionResult, UserInputHandler,
+    UserInputResponse,
 };
 use github_copilot_sdk::rpc::{
     PermissionDecision, PermissionDecisionApproveForSession,
@@ -33,11 +28,16 @@ use github_copilot_sdk::rpc::{
     PermissionDecisionApproveForSessionApprovalRead,
     PermissionDecisionApproveForSessionApprovalWrite,
 };
+use github_copilot_sdk::session_events::{
+    AssistantMessageData, AssistantMessageDeltaData, AssistantReasoningDeltaData, ContextTier,
+    SessionEventType, SessionIdleData, SessionTitleChangedData, SessionUsageInfoData,
+    ToolExecutionCompleteData, ToolExecutionStartData,
+};
 use github_copilot_sdk::types::{
     Attachment, ExitPlanModeData, MessageOptions, PermissionRequestData, PermissionRequestKind,
     RequestId, ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SetModelOptions,
 };
-use github_copilot_sdk::{Client, ClientInfo, ClientOptions, CliProgram};
+use github_copilot_sdk::{CliProgram, Client, ClientInfo, ClientOptions};
 use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -149,9 +149,8 @@ impl CopilotDriver {
                 {
                     Ok(runtime) => runtime,
                     Err(error) => {
-                        let _ = thread_events.send(DriverEvent::Error(format!(
-                            "GitHub Copilot: {error}"
-                        )));
+                        let _ = thread_events
+                            .send(DriverEvent::Error(format!("GitHub Copilot: {error}")));
                         let _ = thread_events.send(DriverEvent::ProcessExited);
                         return;
                     }
@@ -210,13 +209,10 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             .with_application_name(crate::identity::APP_NAME)
             .with_application_version(env!("CARGO_PKG_VERSION")),
     );
-    let client = match Client::start(client_options).await
-    {
+    let client = match Client::start(client_options).await {
         Ok(client) => client,
         Err(error) => {
-            let _ = events.send(DriverEvent::Error(format!(
-                "GitHub Copilot: {error}"
-            )));
+            let _ = events.send(DriverEvent::Error(format!("GitHub Copilot: {error}")));
             return Ok(());
         }
     };
@@ -272,9 +268,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
     let session = match session {
         Ok(session) => session,
         Err(error) => {
-            let _ = events.send(DriverEvent::Error(format!(
-                "GitHub Copilot: {error}"
-            )));
+            let _ = events.send(DriverEvent::Error(format!("GitHub Copilot: {error}")));
             let _ = client.stop().await;
             return Ok(());
         }
@@ -369,11 +363,7 @@ struct CopilotStream {
     tools: HashMap<String, (ActivityKind, String)>,
 }
 
-fn handle_event(
-    event: &SessionEvent,
-    events: &impl DriverEventSink,
-    stream: &mut CopilotStream,
-) {
+fn handle_event(event: &SessionEvent, events: &impl DriverEventSink, stream: &mut CopilotStream) {
     // Sub-agent events carry `agent_id`; only the root agent's text belongs in
     // the main transcript. Tool executions stay visible regardless — a helper
     // running `bash` is real work the user should see.
@@ -467,6 +457,7 @@ fn handle_event(
                 let _ = events.send(DriverEvent::TurnFinished {
                     success: !aborted,
                     summary: None,
+                    summary_i18n: None,
                 });
             }
         }
@@ -500,6 +491,7 @@ fn handle_event(
                 let _ = events.send(DriverEvent::TurnFinished {
                     success: false,
                     summary: Some(message),
+                    summary_i18n: None,
                 });
             }
         }
@@ -509,7 +501,9 @@ fn handle_event(
 
 /// The permission request's most specific human-readable target — command,
 /// path, or URL — falling back to the generic tool prompt.
-fn permission_title(data: &PermissionRequestData) -> String {
+fn permission_title(
+    data: &PermissionRequestData,
+) -> (String, Option<waku_protocol::WireTranslation>) {
     for key in [
         "command",
         "fileName",
@@ -520,15 +514,21 @@ fn permission_title(data: &PermissionRequestData) -> String {
         "tool",
     ] {
         if let Some(value) = permission_string(data, key) {
-            return value;
+            return (value, None);
         }
     }
-    tr!("permission.run_a_tool")
+    let pair = localized!("permission.run_a_tool");
+    (pair.0, Some(pair.1))
 }
 
-fn permission_detail(data: &PermissionRequestData) -> String {
-    permission_string(data, "description")
-        .unwrap_or_else(|| tr!("permission.agent_asks_for_permission"))
+fn permission_detail(
+    data: &PermissionRequestData,
+) -> (String, Option<waku_protocol::WireTranslation>) {
+    if let Some(detail) = permission_string(data, "description") {
+        return (detail, None);
+    }
+    let pair = localized!("permission.agent_asks_for_permission");
+    (pair.0, Some(pair.1))
 }
 
 /// The objects a permission field may live in, outermost first. The CLI sends
@@ -673,10 +673,14 @@ impl PermissionHandler for CopilotHandler {
             label: tr!("common.deny"),
             allow: false,
         });
+        let (title, title_i18n) = permission_title(&data);
+        let (detail, detail_i18n) = permission_detail(&data);
         let _ = self.events.send(DriverEvent::Permission {
             request_id: key,
-            title: permission_title(&data),
-            detail: permission_detail(&data),
+            title,
+            title_i18n,
+            detail,
+            detail_i18n,
             options,
         });
         match receiver.await {
@@ -751,9 +755,11 @@ impl ExitPlanModeHandler for CopilotHandler {
             .lock()
             .permissions
             .insert(request_id.clone(), sender);
+        let (title, title_i18n) = localized!("permission.exit_plan_mode");
         let _ = self.events.send(DriverEvent::Permission {
             request_id,
-            title: tr!("permission.exit_plan_mode"),
+            title,
+            title_i18n: Some(title_i18n),
             detail: data.summary,
             options: vec![
                 PermissionOption {
@@ -767,6 +773,7 @@ impl ExitPlanModeHandler for CopilotHandler {
                     allow: false,
                 },
             ],
+            detail_i18n: None,
         });
         match receiver.await {
             Ok(option_id) => ExitPlanModeResult {

@@ -1339,6 +1339,11 @@ fn activity_tool_display_name(activity: &ActivityItem) -> String {
 pub(super) fn activity_display_title(activity: &ActivityItem) -> String {
     use crate::model::ActivityKind;
 
+    // A daemon-composed keyed label (e.g. "Searching for %{query}") renders in
+    // this client's locale before any kind-label heuristic runs.
+    if let Some(i18n) = &activity.title_i18n {
+        return i18n.render();
+    }
     match activity.kind {
         ActivityKind::FileChange => {
             let subject = match activity.file_changes.as_slice() {

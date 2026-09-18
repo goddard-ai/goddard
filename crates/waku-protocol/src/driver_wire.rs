@@ -60,14 +60,18 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::Permission {
             request_id,
             title,
+            title_i18n,
             detail,
+            detail_i18n,
             options,
         } => (
             "permission",
             json!({
                 "requestId": request_id,
                 "title": title,
+                "titleI18n": title_i18n,
                 "detail": detail,
+                "detailI18n": detail_i18n,
                 "options": options,
             }),
         ),
@@ -113,9 +117,13 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "steerAccepted",
             json!({ "message": message, "sentByTask": sent_by_task }),
         ),
-        DriverEvent::SteerRejected { message, reason } => (
+        DriverEvent::SteerRejected {
+            message,
+            reason,
+            reason_i18n,
+        } => (
             "steerRejected",
-            json!({ "message": message, "reason": reason }),
+            json!({ "message": message, "reason": reason, "reasonI18n": reason_i18n }),
         ),
         DriverEvent::UsageUpdated {
             context_tokens,
@@ -129,9 +137,17 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
-        DriverEvent::TurnFinished { success, summary } => (
+        DriverEvent::TurnFinished {
+            success,
+            summary,
+            summary_i18n,
+        } => (
             "turnFinished",
-            json!({ "success": success, "summary": summary }),
+            json!({ "success": success, "summary": summary, "summaryI18n": summary_i18n }),
+        ),
+        DriverEvent::LocalizedError { message, i18n } => (
+            "localizedError",
+            json!({ "message": message, "i18n": i18n }),
         ),
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
@@ -169,7 +185,9 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::Permission {
                 request_id: permission.request_id,
                 title: permission.title,
+                title_i18n: permission.title_i18n,
                 detail: permission.detail,
+                detail_i18n: permission.detail_i18n,
                 options: permission.options,
             }
         }
@@ -211,6 +229,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::SteerRejected {
                 message: steer.message,
                 reason: steer.reason,
+                reason_i18n: steer.reason_i18n,
             }
         }
         "usageUpdated" => {
@@ -227,6 +246,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::TurnFinished {
                 success: finished.success,
                 summary: finished.summary,
+                summary_i18n: finished.summary_i18n,
+            }
+        }
+        "localizedError" => {
+            let error: LocalizedErrorWire = serde_json::from_value(payload)?;
+            DriverEvent::LocalizedError {
+                message: error.message,
+                i18n: error.i18n,
             }
         }
         "error" => DriverEvent::Error(serde_json::from_value(payload)?),
@@ -262,8 +289,18 @@ struct ActivityWire {
 struct PermissionWire {
     request_id: String,
     title: String,
+    #[serde(default)]
+    title_i18n: Option<crate::protocol::WireTranslation>,
     detail: String,
+    #[serde(default)]
+    detail_i18n: Option<crate::protocol::WireTranslation>,
     options: Vec<PermissionOption>,
+}
+
+#[derive(Deserialize)]
+struct LocalizedErrorWire {
+    message: String,
+    i18n: crate::protocol::WireTranslation,
 }
 
 #[derive(Deserialize)]
@@ -291,9 +328,12 @@ struct AcceptedSteerWire {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RejectedSteerWire {
     message: String,
     reason: String,
+    #[serde(default)]
+    reason_i18n: Option<crate::protocol::WireTranslation>,
 }
 
 #[derive(Deserialize)]
@@ -304,9 +344,12 @@ struct UsageWire {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TurnFinishedWire {
     success: bool,
     summary: Option<String>,
+    #[serde(default)]
+    summary_i18n: Option<crate::protocol::WireTranslation>,
 }
 
 #[cfg(test)]
@@ -370,5 +413,144 @@ mod tests {
         assert_eq!(request_id, "request-1");
         assert_eq!(questions[0].id, "deployment");
         assert_eq!(questions[0].options[0].label, "Preview");
+    }
+
+    #[test]
+    fn localized_events_round_trip_through_the_daemon_wire() {
+        let i18n = crate::protocol::WireTranslation {
+            key: "errors.provider_receive_prompt".into(),
+            args: [("provider".to_owned(), "Amp".to_owned())]
+                .into_iter()
+                .collect(),
+        };
+
+        let wire = event_to_wire(DriverEvent::LocalizedError {
+            message: "Amp stopped receiving the prompt".into(),
+            i18n: i18n.clone(),
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "localizedError");
+        assert_eq!(
+            wire.payload["i18n"]["key"],
+            "errors.provider_receive_prompt"
+        );
+
+        let DriverEvent::LocalizedError { message, i18n } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(message, "Amp stopped receiving the prompt");
+        assert_eq!(i18n.key, "errors.provider_receive_prompt");
+        assert_eq!(i18n.args["provider"], "Amp");
+    }
+
+    #[test]
+    fn keyed_fields_round_trip_and_stay_optional() {
+        let i18n = crate::protocol::WireTranslation {
+            key: "permission.agent_asks_for_permission".into(),
+            args: Default::default(),
+        };
+        let wire = event_to_wire(DriverEvent::Permission {
+            request_id: "per_1".into(),
+            title: "npm test".into(),
+            title_i18n: None,
+            detail: "The agent asks for permission".into(),
+            detail_i18n: Some(i18n.clone()),
+            options: vec![],
+        })
+        .unwrap();
+        assert_eq!(
+            wire.payload["detailI18n"]["key"],
+            "permission.agent_asks_for_permission"
+        );
+
+        let DriverEvent::Permission {
+            detail_i18n,
+            title_i18n,
+            ..
+        } = event_from_wire(wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert!(title_i18n.is_none());
+        assert_eq!(
+            detail_i18n.unwrap().key,
+            "permission.agent_asks_for_permission"
+        );
+
+        // A payload written by an older daemon carries no i18n fields at all
+        // and must still decode.
+        let legacy = crate::protocol::WireDriverEvent {
+            kind: "permission".into(),
+            payload: serde_json::json!({
+                "requestId": "per_2",
+                "title": "rm -rf *",
+                "detail": "The agent asks for permission",
+                "options": []
+            }),
+        };
+        let DriverEvent::Permission {
+            title_i18n,
+            detail_i18n,
+            ..
+        } = event_from_wire(legacy).unwrap()
+        else {
+            panic!("the legacy permission payload failed to decode");
+        };
+        assert!(title_i18n.is_none() && detail_i18n.is_none());
+    }
+
+    #[test]
+    fn keyed_turn_and_steer_fields_round_trip_and_stay_optional() {
+        let i18n = crate::protocol::WireTranslation {
+            key: "session.agent_ran_out_of_context".into(),
+            args: Default::default(),
+        };
+        let wire = event_to_wire(DriverEvent::TurnFinished {
+            success: false,
+            summary: Some("The agent ran out of context".into()),
+            summary_i18n: Some(i18n.clone()),
+        })
+        .unwrap();
+        assert_eq!(
+            wire.payload["summaryI18n"]["key"],
+            "session.agent_ran_out_of_context"
+        );
+        let DriverEvent::TurnFinished { summary_i18n, .. } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert!(summary_i18n.is_some());
+
+        let wire = event_to_wire(DriverEvent::steer_rejected_keyed(
+            "keep going".into(),
+            (
+                "Claude has no active turn".into(),
+                crate::protocol::WireTranslation {
+                    key: "errors.provider_no_active_turn".into(),
+                    args: [("provider".to_owned(), "Claude".to_owned())]
+                        .into_iter()
+                        .collect(),
+                },
+            ),
+        ))
+        .unwrap();
+        assert_eq!(
+            wire.payload["reasonI18n"]["key"],
+            "errors.provider_no_active_turn"
+        );
+        let DriverEvent::SteerRejected { reason_i18n, .. } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(reason_i18n.unwrap().args["provider"], "Claude");
+
+        // Legacy payloads without the i18n fields decode with `None`.
+        let legacy = crate::protocol::WireDriverEvent {
+            kind: "steerRejected".into(),
+            payload: serde_json::json!({"message": "go", "reason": "nope"}),
+        };
+        let DriverEvent::SteerRejected { reason_i18n, .. } = event_from_wire(legacy).unwrap()
+        else {
+            panic!("the legacy steer rejection failed to decode");
+        };
+        assert!(reason_i18n.is_none());
     }
 }

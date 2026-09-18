@@ -260,7 +260,13 @@ impl Waku {
                                     .text_size(sp(12.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(SharedString::from(permission.title.clone())),
+                                    .child(SharedString::from(
+                                            permission
+                                                .title_i18n
+                                                .as_ref()
+                                                .map(waku_client::WireTranslation::render)
+                                                .unwrap_or_else(|| permission.title.clone()),
+                                        )),
                             ),
                     )
                     .child(
@@ -277,7 +283,13 @@ impl Waku {
                             .line_height(sp(16.0))
                             .text_color(theme.text_secondary)
                             .whitespace_normal()
-                            .child(SharedString::from(permission.detail.clone())),
+                            .child(SharedString::from(
+                                permission
+                                    .detail_i18n
+                                    .as_ref()
+                                    .map(waku_client::WireTranslation::render)
+                                    .unwrap_or_else(|| permission.detail.clone()),
+                            )),
                     )
                     .child(buttons),
             ),

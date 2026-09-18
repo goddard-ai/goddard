@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
-use serde_json::{Value, json};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::attachments::AttachmentStore;
@@ -23,7 +23,11 @@ use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
 use waku_protocol::custom_commands::CustomCommand;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
-use waku_protocol::{decode_enum, event_from_wire, event_to_wire};
+use waku_protocol::{decode_enum, event_to_wire};
+#[cfg(test)]
+use serde_json::json;
+#[cfg(test)]
+use waku_protocol::event_from_wire;
 
 /// How many fully hydrated transcripts the daemon keeps resident.
 ///

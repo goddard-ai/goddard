@@ -2330,7 +2330,11 @@ pub enum DriverEvent {
     Permission {
         request_id: String,
         title: String,
+        /// The i18n semantic behind `title`/`detail`, when the daemon
+        /// composed them from a known key rather than provider text.
+        title_i18n: Option<crate::protocol::WireTranslation>,
         detail: String,
+        detail_i18n: Option<crate::protocol::WireTranslation>,
         options: Vec<PermissionOption>,
     },
     /// Structured questions the provider needs answered before it can
@@ -2354,6 +2358,9 @@ pub enum DriverEvent {
     SteerRejected {
         message: String,
         reason: String,
+        /// The i18n semantic behind `reason`, when the daemon composed it
+        /// from a known key rather than provider text.
+        reason_i18n: Option<crate::protocol::WireTranslation>,
     },
     /// Context-window occupancy reported by the live stream. Fields arrive at
     /// different moments — token counts with each assistant message, the
@@ -2374,9 +2381,71 @@ pub enum DriverEvent {
     TurnFinished {
         success: bool,
         summary: Option<String>,
+        /// The i18n semantic behind `summary`, when the daemon knew it.
+        /// Absent on older daemons — clients render `summary` as-is.
+        summary_i18n: Option<crate::protocol::WireTranslation>,
+    },
+    /// A user-facing error whose text is a known i18n key: `message` is the
+    /// English fallback, `i18n` lets each client render its own locale.
+    /// Provider-supplied error text still travels as [`Self::Error`].
+    LocalizedError {
+        message: String,
+        i18n: crate::protocol::WireTranslation,
     },
     Error(String),
     ProcessExited,
+}
+
+impl DriverEvent {
+    /// Wrap the `(fallback, translation)` pair produced by `localized!`.
+    pub fn localized_error(pair: (String, crate::protocol::WireTranslation)) -> Self {
+        Self::LocalizedError {
+            message: pair.0,
+            i18n: pair.1,
+        }
+    }
+
+    /// Provider-or-fallback error text: carries the i18n semantic when the
+    /// daemon composed the message, stays an opaque `Error` when the text
+    /// came from the provider.
+    pub fn error_or_localized(
+        text: String,
+        i18n: Option<crate::protocol::WireTranslation>,
+    ) -> Self {
+        match i18n {
+            Some(i18n) => Self::LocalizedError {
+                message: text,
+                i18n,
+            },
+            None => Self::Error(text),
+        }
+    }
+
+    /// A rejected steer whose reason is a known i18n key — the `localized!`
+    /// pair supplies both the English fallback and the semantic.
+    pub fn steer_rejected_keyed(
+        message: String,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self::SteerRejected {
+            message,
+            reason: pair.0,
+            reason_i18n: Some(pair.1),
+        }
+    }
+
+    /// A settled turn whose reason is a known i18n key — the `localized!`
+    /// pair supplies both the English fallback and the semantic.
+    pub fn turn_finished_keyed(
+        success: bool,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self::TurnFinished {
+            success,
+            summary: Some(pair.0),
+            summary_i18n: Some(pair.1),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
@@ -2434,6 +2503,10 @@ impl BackgroundWorkKey {
 pub struct BackgroundWorkItem {
     pub key: BackgroundWorkKey,
     pub title: String,
+    /// The i18n semantic behind `title`, when the daemon composed it from a
+    /// known key (e.g. the kind's generic label) rather than provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_i18n: Option<crate::protocol::WireTranslation>,
     pub detail: Option<String>,
     pub command: Option<String>,
     pub cwd: Option<String>,
@@ -2457,6 +2530,15 @@ pub struct BackgroundWorkItem {
 }
 
 impl BackgroundWorkItem {
+    /// The title to show: the i18n semantic rendered in this process's locale
+    /// when present, the daemon's fallback text otherwise.
+    pub fn display_title(&self) -> String {
+        self.title_i18n
+            .as_ref()
+            .map(crate::protocol::WireTranslation::render)
+            .unwrap_or_else(|| self.title.clone())
+    }
+
     pub fn new(
         kind: BackgroundWorkKind,
         provider_id: impl Into<String>,
@@ -2467,6 +2549,7 @@ impl BackgroundWorkItem {
         Self {
             key: BackgroundWorkKey::new(kind, provider_id),
             title: title.into(),
+            title_i18n: None,
             detail: None,
             command: None,
             cwd: None,
@@ -2509,6 +2592,10 @@ pub enum BackgroundWorkEvent {
     StopFailed {
         key: BackgroundWorkKey,
         message: String,
+        /// The i18n semantic behind `message`, when the daemon composed it
+        /// from a known key rather than provider text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_i18n: Option<crate::protocol::WireTranslation>,
     },
 }
 
@@ -2638,6 +2725,11 @@ pub struct ActivityItem {
     pub source_id: Option<String>,
     pub kind: ActivityKind,
     pub title: String,
+    /// The i18n semantic behind `title`, when the daemon composed it from a
+    /// known key (an arg-bearing label like "Searching for %{query}") rather
+    /// than provider text or a bare kind label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_i18n: Option<crate::protocol::WireTranslation>,
     /// Native tool identity, separate from the human-readable activity title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
@@ -2697,6 +2789,7 @@ impl ActivityItem {
             source_id,
             kind,
             title,
+            title_i18n: None,
             tool_name: None,
             mcp_server: None,
             detail,
@@ -3101,8 +3194,7 @@ pub fn is_generic_activity_title(kind: ActivityKind, title: &str) -> bool {
         ActivityKind::FileList => title_in_any_locale(title, &["activity.list_files"]),
         ActivityKind::Plan => title_in_any_locale(title, &["activity.plan_updated"]),
         ActivityKind::Tool => {
-            title.eq_ignore_ascii_case("tool")
-                || title_in_any_locale(title, &["activity.tool"])
+            title.eq_ignore_ascii_case("tool") || title_in_any_locale(title, &["activity.tool"])
         }
         _ => false,
     }
@@ -3946,7 +4038,11 @@ impl<'de> Deserialize<'de> for TranscriptBlock {
 pub struct PendingPermission {
     pub request_id: String,
     pub title: String,
+    /// The i18n semantic behind `title`/`detail`, when the daemon composed
+    /// them from a known key rather than provider text.
+    pub title_i18n: Option<crate::protocol::WireTranslation>,
     pub detail: String,
+    pub detail_i18n: Option<crate::protocol::WireTranslation>,
     pub options: Vec<PermissionOption>,
 }
 

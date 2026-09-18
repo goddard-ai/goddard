@@ -91,7 +91,12 @@ impl BackgroundWorkRegistry {
                     item.updated_at_ms = unix_time_millis();
                 }
             }
-            BackgroundWorkEvent::StopFailed { key, message } => {
+            BackgroundWorkEvent::StopFailed {
+                key,
+                message,
+                message_i18n,
+            } => {
+                let message = message_i18n.map(|i18n| i18n.render()).unwrap_or(message);
                 if let Some(item) = self
                     .items
                     .get_mut(&key)
@@ -140,8 +145,10 @@ impl BackgroundWorkRegistry {
                 current.status == BackgroundWorkStatus::Stopping && incoming.status.is_stoppable();
             if incoming.title.is_empty() {
                 incoming.title.clone_from(&current.title);
+                incoming.title_i18n.clone_from(&current.title_i18n);
             }
             current.title = incoming.title;
+            current.title_i18n = incoming.title_i18n;
             merge_option(&mut current.detail, incoming.detail);
             merge_option(&mut current.command, incoming.command);
             merge_option(&mut current.cwd, incoming.cwd);
@@ -669,6 +676,7 @@ impl Waku {
                 DriverEvent::TurnFinished {
                     success: true,
                     summary: None,
+                    summary_i18n: None,
                 },
                 true,
                 cx,
@@ -1439,7 +1447,7 @@ impl Waku {
                                     .text_size(sp(12.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(single_line_label(&item.title)),
+                                    .child(single_line_label(&item.display_title())),
                             )
                             .child(
                                 div()
@@ -2166,7 +2174,7 @@ fn render_background_summary_row(
                 } else {
                     theme.text
                 })
-                .child(single_line_label(&item.title)),
+                .child(single_line_label(&item.display_title())),
         )
         .children(trailing)
         .on_click(move |_, window, cx| {

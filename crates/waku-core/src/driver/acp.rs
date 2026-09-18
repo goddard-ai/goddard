@@ -700,6 +700,7 @@ async fn run_sdk_connection(
                             let _ = events.send(DriverEvent::TurnFinished {
                                 success: false,
                                 summary: None,
+                                summary_i18n: None,
                             });
                         }
                     }
@@ -711,6 +712,7 @@ async fn run_sdk_connection(
                                     "{} has no active turn to steer.",
                                     provider.display_name()
                                 ),
+                                reason_i18n: None,
                             });
                             continue;
                         }
@@ -737,6 +739,7 @@ async fn run_sdk_connection(
                                 let _ = events.send(DriverEvent::SteerRejected {
                                     message: text,
                                     reason: error.to_string(),
+                                    reason_i18n: None,
                                 });
                             }
                         }
@@ -1429,14 +1432,14 @@ async fn apply_model(
                 )
                 .await
                 {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.select_model",
                         error = error
                     )));
                 }
             }
             Err(error) => {
-                let _ = events.send(DriverEvent::Error(tr!(
+                let _ = events.send(DriverEvent::localized_error(localized!(
                     "errors.select_model",
                     error = error
                 )));
@@ -1460,7 +1463,7 @@ async fn apply_model(
             {
                 Ok(response) => options = response.config_options,
                 Err(error) => {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.select_model",
                         error = error
                     )));
@@ -1469,14 +1472,14 @@ async fn apply_model(
             }
         }
         let Some(option) = fx_model_option(&options) else {
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.select_model",
                 error = "Fx did not advertise its model configuration"
             )));
             return;
         };
         if !session_config_select_values(option).contains(&model) {
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.select_model",
                 error = format!("Fx did not advertise model {model}")
             )));
@@ -1491,7 +1494,7 @@ async fn apply_model(
             .block_task()
             .await
         {
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.select_model",
                 error = error
             )));
@@ -1518,7 +1521,7 @@ async fn apply_model(
                 Ok(_) => return,
                 Err(error) if is_missing_acp_method(&error) => {}
                 Err(error) => {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.select_model",
                         error = error
                     )));
@@ -1527,7 +1530,7 @@ async fn apply_model(
             }
         } else {
             if option.is_some() && !is_devin_auto_model(model) {
-                let _ = events.send(DriverEvent::Error(tr!(
+                let _ = events.send(DriverEvent::localized_error(localized!(
                     "errors.select_model",
                     error = format!("Devin did not advertise model {model}")
                 )));
@@ -1546,7 +1549,7 @@ async fn apply_model(
     ) {
         Ok(request) => request,
         Err(error) => {
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.select_model",
                 error = error
             )));
@@ -1555,7 +1558,7 @@ async fn apply_model(
     };
     if let Err(error) = connection.send_request(request).block_task().await {
         if !is_missing_acp_method(&error) {
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.select_model",
                 error = error
             )));
@@ -1750,6 +1753,7 @@ fn finish_prompt(
             let _ = events.send(DriverEvent::TurnFinished {
                 success: false,
                 summary: None,
+                summary_i18n: None,
             });
             return false;
         }
@@ -1763,26 +1767,37 @@ fn finish_prompt(
         let _ = events.send(DriverEvent::TurnFinished {
             success: false,
             summary: None,
+            summary_i18n: None,
         });
         return false;
     }
-    let (success, summary) = match response.stop_reason {
+    let (success, summary_pair) = match response.stop_reason {
         StopReason::EndTurn | StopReason::Cancelled => (true, None),
-        StopReason::MaxTokens => (false, Some(tr!("session.agent_ran_out_of_context"))),
-        StopReason::Refusal => (false, Some(tr!("session.agent_declined_turn"))),
+        StopReason::MaxTokens => (false, Some(localized!("session.agent_ran_out_of_context"))),
+        StopReason::Refusal => (false, Some(localized!("session.agent_declined_turn"))),
         StopReason::MaxTurnRequests => (
             false,
-            Some(tr!(
+            Some(localized!(
                 "session.agent_stopped_reason",
                 reason = "max_turn_requests"
             )),
         ),
         _ => (
             false,
-            Some(tr!("session.agent_stopped_reason", reason = "unknown")),
+            Some(localized!(
+                "session.agent_stopped_reason",
+                reason = "unknown"
+            )),
         ),
     };
-    let _ = events.send(DriverEvent::TurnFinished { success, summary });
+    let (summary, summary_i18n) = summary_pair
+        .map(|pair| (Some(pair.0), Some(pair.1)))
+        .unwrap_or((None, None));
+    let _ = events.send(DriverEvent::TurnFinished {
+        success,
+        summary,
+        summary_i18n,
+    });
     success
 }
 
@@ -2091,24 +2106,36 @@ fn handle_permission_request(
         };
     }
 
-    let title = params
+    let (title, title_i18n) = match params
         .pointer("/toolCall/title")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .unwrap_or_else(|| tr!("permission.run_a_tool"));
-    let detail = permission_reason(&params).unwrap_or_else(|| {
-        params
-            .pointer("/toolCall/kind")
-            .and_then(Value::as_str)
-            .map(|kind| tr!("permission.agent_wants_to", action = kind))
-            .unwrap_or_else(|| tr!("permission.agent_asks_for_permission"))
-    });
+    {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("permission.run_a_tool");
+            (pair.0, Some(pair.1))
+        }
+    };
+    let (detail, detail_i18n) = match permission_reason(&params) {
+        Some(detail) => (detail, None),
+        None => {
+            let pair = params
+                .pointer("/toolCall/kind")
+                .and_then(Value::as_str)
+                .map(|kind| localized!("permission.agent_wants_to", action = kind))
+                .unwrap_or_else(|| localized!("permission.agent_asks_for_permission"));
+            (pair.0, Some(pair.1))
+        }
+    };
     pending.lock().insert(request_id.clone(), responder);
     if events
         .send(DriverEvent::Permission {
             request_id: request_id.clone(),
             title,
+            title_i18n,
             detail,
+            detail_i18n,
             options,
         })
         .is_err()
@@ -2965,7 +2992,8 @@ mod tests {
             event_rx.try_recv().unwrap(),
             DriverEvent::TurnFinished {
                 success: true,
-                summary: None
+                summary: None,
+                summary_i18n: None,
             }
         ));
         assert!(!settle_prompt_request(&requests, &request_id));
@@ -2992,7 +3020,8 @@ mod tests {
             event_rx.try_recv().unwrap(),
             DriverEvent::TurnFinished {
                 success: false,
-                summary: None
+                summary: None,
+                summary_i18n: None,
             }
         ));
     }
@@ -3009,7 +3038,8 @@ mod tests {
             event_rx.try_recv().unwrap(),
             DriverEvent::TurnFinished {
                 success: true,
-                summary: None
+                summary: None,
+                summary_i18n: None,
             }
         ));
     }

@@ -68,16 +68,16 @@ pub fn fetch_claude_plan_usage(cli_version: Option<&str>) -> anyhow::Result<Plan
     match status {
         200 => {}
         401 | 403 => {
-            return Err(anyhow!(tr!(
+            return Err(anyhow!(keyed!(
                 "usage_error.signin_cannot_read",
                 provider = "Claude Code",
                 status = status
             )));
         }
-        429 => return Err(anyhow!(tr!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(tr!("usage_error.http_status", status = other))),
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
     }
-    let body: Value = serde_json::from_str(&body).context(tr!("usage_error.invalid_json"))?;
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let mut usage = parse_plan_usage(&body, &credentials);
     // The stored credential's tier is login-time metadata and survives plan
     // changes unchanged — verified live: a keychain saying `max_5x` against a
@@ -124,18 +124,18 @@ fn profile_plan_label(body: &Value) -> Option<String> {
 /// same primary/secondary windows the CLI's own status view shows. Blocking.
 pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
     let path = dirs::home_dir()
-        .ok_or_else(|| anyhow!(tr!("usage_error.no_home_directory")))?
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_home_directory")))?
         .join(".codex/auth.json");
     let auth: Value = serde_json::from_str(
         &std::fs::read_to_string(&path)
-            .with_context(|| tr!("usage_error.read_file", path = path.display()))?,
+            .with_context(|| keyed!("usage_error.read_file", path = path.display()))?,
     )
-    .context(tr!("usage_error.codex_auth_invalid"))?;
+    .context(keyed!("usage_error.codex_auth_invalid"))?;
     let access_token = auth
         .pointer("/tokens/access_token")
         .and_then(Value::as_str)
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| anyhow!(tr!("usage_error.codex_access_token_missing")))?;
+        .ok_or_else(|| anyhow!(keyed!("usage_error.codex_access_token_missing")))?;
     let mut headers = vec![
         format!("Authorization: Bearer {access_token}"),
         "Accept: application/json".to_owned(),
@@ -148,17 +148,18 @@ pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
     match status {
         200 => {}
         401 | 403 => {
-            return Err(anyhow!(tr!(
+            return Err(anyhow!(keyed!(
                 "usage_error.signin_cannot_read",
                 provider = "Codex",
                 status = status
             )));
         }
-        429 => return Err(anyhow!(tr!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(tr!("usage_error.http_status", status = other))),
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
     }
-    let body: Value = serde_json::from_str(&body).context(tr!("usage_error.invalid_json"))?;
-    parse_codex_plan_usage(&body).ok_or_else(|| anyhow!(tr!("usage_error.no_rate_limit_windows")))
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    parse_codex_plan_usage(&body)
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))
 }
 
 /// Fetch OpenCode Go's rolling, weekly, and monthly subscription limits.
@@ -183,24 +184,24 @@ pub fn fetch_opencode_go_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
         // is not entitled ("OpenCode Go subscription required."), and telling
         // that user to reconnect sends them round a loop that cannot help.
         401 => {
-            return Err(anyhow!(tr!(
+            return Err(anyhow!(keyed!(
                 "usage_error.opencode_go_key_rejected",
                 status = status
             )));
         }
         403 => {
-            return Err(anyhow!(
-                usage_error_detail(&body)
-                    .unwrap_or_else(|| tr!("usage_error.opencode_go_not_entitled"))
-            ));
+            return Err(match usage_error_detail(&body) {
+                Some(detail) => anyhow!(detail),
+                None => anyhow!(keyed!("usage_error.opencode_go_not_entitled")),
+            });
         }
-        429 => return Err(anyhow!(tr!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(tr!("usage_error.http_status", status = other))),
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
     }
-    let body: Value = serde_json::from_str(&body).context(tr!("usage_error.invalid_json"))?;
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     parse_opencode_go_plan_usage(&body)
         .map(Some)
-        .ok_or_else(|| anyhow!(tr!("usage_error.no_rate_limit_windows")))
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))
 }
 
 /// The endpoint's own sentence, when it sent one.
@@ -259,15 +260,16 @@ fn opencode_go_api_key_from_auth(auth: Option<&Value>) -> Option<String> {
 fn parse_opencode_go_plan_usage(body: &Value) -> Option<PlanUsage> {
     let usage = body.get("usage")?;
     let windows = [
-        ("rolling", tr!("usage.hour_limit", count = 5)),
-        ("weekly", tr!("usage.weekly_limit")),
-        ("monthly", tr!("usage.monthly_limit")),
+        ("rolling", localized!("usage.hour_limit", count = 5)),
+        ("weekly", localized!("usage.weekly_limit")),
+        ("monthly", localized!("usage.monthly_limit")),
     ]
     .into_iter()
-    .filter_map(|(key, label)| {
+    .filter_map(|(key, (label, label_i18n))| {
         let window = usage.get(key)?;
         Some(PlanWindow {
             label,
+            label_i18n: Some(label_i18n),
             percent: window
                 .get("percent")
                 .and_then(Value::as_f64)?
@@ -302,7 +304,7 @@ pub fn fetch_grok_plan_usage(binary: &std::path::Path) -> anyhow::Result<PlanUsa
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child =
-        crate::command_env::spawn(command).context(tr!("usage_error.start_grok_probe"))?;
+        crate::command_env::spawn(command).context(keyed!("usage_error.start_grok_probe"))?;
     let result = grok_billing_over_stdio(&mut child);
     // The probe has no shutdown request; ending it is the protocol.
     let _ = child.kill();
@@ -314,11 +316,11 @@ fn grok_billing_over_stdio(child: &mut std::process::Child) -> anyhow::Result<Va
     let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| anyhow!(tr!("usage_error.grok_stdin_unavailable")))?;
+        .ok_or_else(|| anyhow!(keyed!("usage_error.grok_stdin_unavailable")))?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| anyhow!(tr!("usage_error.grok_stdout_unavailable")))?;
+        .ok_or_else(|| anyhow!(keyed!("usage_error.grok_stdout_unavailable")))?;
     let (lines_tx, lines) = crossbeam_channel::unbounded::<Value>();
     std::thread::Builder::new()
         .name("waku-grok-usage-probe".into())
@@ -331,7 +333,7 @@ fn grok_billing_over_stdio(child: &mut std::process::Child) -> anyhow::Result<Va
                 }
             }
         })
-        .context(tr!("usage_error.start_grok_reader"))?;
+        .context(keyed!("usage_error.start_grok_reader"))?;
 
     let mut send = |id: u64, method: &str, params: Value| -> anyhow::Result<()> {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
@@ -345,15 +347,15 @@ fn grok_billing_over_stdio(child: &mut std::process::Child) -> anyhow::Result<Va
         loop {
             let remaining = deadline
                 .checked_duration_since(std::time::Instant::now())
-                .ok_or_else(|| anyhow!(tr!("usage_error.grok_billing_timeout")))?;
+                .ok_or_else(|| anyhow!(keyed!("usage_error.grok_billing_timeout")))?;
             let message = lines
                 .recv_timeout(remaining)
-                .map_err(|_| anyhow!(tr!("usage_error.grok_billing_timeout")))?;
+                .map_err(|_| anyhow!(keyed!("usage_error.grok_billing_timeout")))?;
             if message.get("id").and_then(Value::as_u64) != Some(id) {
                 continue;
             }
             if let Some(error) = message.pointer("/error/message").and_then(Value::as_str) {
-                return Err(anyhow!(tr!("usage_error.grok_answered", error = error)));
+                return Err(anyhow!(keyed!("usage_error.grok_answered", error = error)));
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
@@ -411,13 +413,13 @@ fn parse_grok_billing(billing: &Value) -> anyhow::Result<PlanUsage> {
 
     let mut windows = Vec::new();
     if let Some(percent) = percent {
-        let label = match config
+        let (label, label_i18n) = match config
             .pointer("/currentPeriod/type")
             .and_then(Value::as_str)
         {
-            Some(period) if period.contains("WEEKLY") => tr!("usage.weekly_limit"),
-            Some(period) if period.contains("DAILY") => tr!("usage.daily_limit"),
-            _ => tr!("usage.monthly_limit"),
+            Some(period) if period.contains("WEEKLY") => localized!("usage.weekly_limit"),
+            Some(period) if period.contains("DAILY") => localized!("usage.daily_limit"),
+            _ => localized!("usage.monthly_limit"),
         };
         let resets_at = config
             .get("billingPeriodEnd")
@@ -428,12 +430,13 @@ fn parse_grok_billing(billing: &Value) -> anyhow::Result<PlanUsage> {
             .map(|date| date.timestamp());
         windows.push(PlanWindow {
             label,
+            label_i18n: Some(label_i18n),
             percent: percent.clamp(0.0, 100.0),
             resets_at,
         });
     }
     if plan_label.is_none() && windows.is_empty() {
-        return Err(anyhow!(tr!("usage_error.grok_no_billing_data")));
+        return Err(anyhow!(keyed!("usage_error.grok_no_billing_data")));
     }
     Ok(PlanUsage {
         plan_label,
@@ -492,17 +495,19 @@ fn push_codex_windows(windows: &mut Vec<PlanWindow>, rate_limit: &Value, scope: 
             .get("limit_window_seconds")
             .and_then(Value::as_i64)
             .map(|seconds| seconds / 60);
-        let base = window_label_from_minutes(minutes);
-        let label = match scope {
+        let (base, base_i18n) = window_label_from_minutes(minutes);
+        let (label, label_i18n) = match scope {
             Some(name) => {
                 let suffix = tr!("usage.limit_suffix");
                 let period = base.strip_suffix(&suffix).unwrap_or(&base);
-                tr!("usage.scoped_limit", period = period, name = name)
+                let pair = localized!("usage.scoped_limit", period = period, name = name);
+                (pair.0, pair.1)
             }
-            None => base,
+            None => (base, base_i18n),
         };
         windows.push(PlanWindow {
             label,
+            label_i18n: Some(label_i18n),
             percent: percent.clamp(0.0, 100.0),
             resets_at: window.get("reset_at").and_then(Value::as_i64),
         });
@@ -512,16 +517,16 @@ fn push_codex_windows(windows: &mut Vec<PlanWindow>, rate_limit: &Value, scope: 
 /// "5-hour limit" / "Weekly limit" from a window duration, shared by the
 /// Codex stream notification (minutes) and the ChatGPT usage endpoint
 /// (seconds, converted by the caller).
-pub fn window_label_from_minutes(minutes: Option<i64>) -> String {
+pub fn window_label_from_minutes(minutes: Option<i64>) -> (String, waku_protocol::WireTranslation) {
     let Some(minutes) = minutes.filter(|minutes| *minutes > 0) else {
-        return tr!("usage.usage_limit");
+        return localized!("usage.usage_limit");
     };
     if minutes < 24 * 60 {
-        tr!("usage.hour_limit", count = (minutes + 59) / 60)
+        localized!("usage.hour_limit", count = (minutes + 59) / 60)
     } else if minutes == 7 * 24 * 60 {
-        tr!("usage.weekly_limit")
+        localized!("usage.weekly_limit")
     } else {
-        tr!(
+        localized!(
             "usage.day_limit",
             count = (minutes + 24 * 60 - 1) / (24 * 60)
         )
@@ -557,11 +562,11 @@ fn read_credentials() -> anyhow::Result<OauthCredentials> {
     #[cfg(target_os = "macos")]
     let payload = keychain_payload().or_else(|keychain_error| {
         credentials_file_payload()
-            .map_err(|_| keychain_error.context(tr!("usage_error.claude_credentials_missing")))
+            .map_err(|_| keychain_error.context(keyed!("usage_error.claude_credentials_missing")))
     })?;
     #[cfg(not(target_os = "macos"))]
     let payload =
-        credentials_file_payload().context(tr!("usage_error.claude_credentials_missing"))?;
+        credentials_file_payload().context(keyed!("usage_error.claude_credentials_missing"))?;
     parse_credentials(&payload)
 }
 
@@ -571,9 +576,9 @@ fn keychain_payload() -> anyhow::Result<String> {
         .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
         .stdin(Stdio::null())
         .output()
-        .context(tr!("usage_error.run_security"))?;
+        .context(keyed!("usage_error.run_security"))?;
     if !output.status.success() {
-        return Err(anyhow!(tr!(
+        return Err(anyhow!(keyed!(
             "usage_error.keychain_item_missing",
             service = KEYCHAIN_SERVICE
         )));
@@ -583,24 +588,24 @@ fn keychain_payload() -> anyhow::Result<String> {
 
 fn credentials_file_payload() -> anyhow::Result<String> {
     let path = dirs::home_dir()
-        .ok_or_else(|| anyhow!(tr!("usage_error.no_home_directory")))?
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_home_directory")))?
         .join(".claude/.credentials.json");
     std::fs::read_to_string(&path)
-        .with_context(|| tr!("usage_error.read_file", path = path.display()))
+        .with_context(|| keyed!("usage_error.read_file", path = path.display()))
 }
 
 fn parse_credentials(payload: &str) -> anyhow::Result<OauthCredentials> {
     let value: Value = serde_json::from_str(payload.trim())
-        .context(tr!("usage_error.claude_credentials_invalid"))?;
+        .context(keyed!("usage_error.claude_credentials_invalid"))?;
     let oauth = value
         .get("claudeAiOauth")
-        .ok_or_else(|| anyhow!(tr!("usage_error.claude_oauth_missing")))?;
+        .ok_or_else(|| anyhow!(keyed!("usage_error.claude_oauth_missing")))?;
     let access_token = oauth
         .get("accessToken")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| anyhow!(tr!("usage_error.claude_access_token_missing")))?
+        .ok_or_else(|| anyhow!(keyed!("usage_error.claude_access_token_missing")))?
         .to_owned();
     let field = |name: &str| {
         oauth
@@ -647,19 +652,20 @@ fn curl_get(url: &str, headers: &[String]) -> anyhow::Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context(tr!("usage_error.run_curl"))?;
+        .context(keyed!("usage_error.run_curl"))?;
     {
         let stdin = child
             .stdin
             .as_mut()
-            .ok_or_else(|| anyhow!(tr!("usage_error.curl_stdin_unavailable")))?;
+            .ok_or_else(|| anyhow!(keyed!("usage_error.curl_stdin_unavailable")))?;
         for header in headers {
-            writeln!(stdin, "header = \"{header}\"").context(tr!("usage_error.configure_curl"))?;
+            writeln!(stdin, "header = \"{header}\"")
+                .context(keyed!("usage_error.configure_curl"))?;
         }
     }
     let output = child
         .wait_with_output()
-        .context(tr!("usage_error.curl_did_not_finish"))?;
+        .context(keyed!("usage_error.curl_did_not_finish"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let error = stderr
@@ -669,7 +675,7 @@ fn curl_get(url: &str, headers: &[String]) -> anyhow::Result<String> {
             .filter(|error| !error.is_empty())
             .map(str::to_owned)
             .unwrap_or_else(|| tr!("usage_error.unknown_error"));
-        return Err(anyhow!(tr!("usage_error.curl_failed", error = error)));
+        return Err(anyhow!(keyed!("usage_error.curl_failed", error = error)));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -683,7 +689,7 @@ fn split_response(raw: &str) -> anyhow::Result<HttpResponse> {
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|code| code.parse::<u16>().ok())
-        .ok_or_else(|| anyhow!(tr!("usage_error.curl_no_status")))?;
+        .ok_or_else(|| anyhow!(keyed!("usage_error.curl_no_status")))?;
     let (headers, body) = raw
         .split_once("\r\n\r\n")
         .or_else(|| raw.split_once("\n\n"))
@@ -718,15 +724,15 @@ fn limit_entry_windows(body: &Value) -> Vec<PlanWindow> {
     limits
         .iter()
         .filter_map(|entry| {
-            let label = match entry.get("kind").and_then(Value::as_str)? {
-                "session" => tr!("usage.hour_limit", count = 5),
-                "weekly_all" => tr!("usage.weekly_all_models"),
+            let (label, label_i18n) = match entry.get("kind").and_then(Value::as_str)? {
+                "session" => localized!("usage.hour_limit", count = 5),
+                "weekly_all" => localized!("usage.weekly_all_models"),
                 "weekly_scoped" => {
                     let model = entry
                         .pointer("/scope/model/display_name")
                         .and_then(Value::as_str)
                         .unwrap_or("model");
-                    tr!("usage.weekly_model", model = model)
+                    localized!("usage.weekly_model", model = model)
                 }
                 // Overage/credit lanes render elsewhere if ever wanted; the
                 // meter mirrors the CLI's three quota rows.
@@ -734,6 +740,7 @@ fn limit_entry_windows(body: &Value) -> Vec<PlanWindow> {
             };
             Some(PlanWindow {
                 label,
+                label_i18n: Some(label_i18n),
                 percent: entry
                     .get("percent")
                     .and_then(Value::as_f64)?
@@ -756,15 +763,16 @@ fn flat_field_windows(body: &Value) -> Vec<PlanWindow> {
     .into_iter()
     .filter_map(|key| {
         let window = body.get(key)?;
-        let label = match key {
-            "five_hour" => tr!("usage.hour_limit", count = 5),
-            "seven_day" => tr!("usage.weekly_all_models"),
-            "seven_day_opus" => tr!("usage.weekly_model", model = "Opus"),
-            "seven_day_sonnet" => tr!("usage.weekly_model", model = "Sonnet"),
+        let (label, label_i18n) = match key {
+            "five_hour" => localized!("usage.hour_limit", count = 5),
+            "seven_day" => localized!("usage.weekly_all_models"),
+            "seven_day_opus" => localized!("usage.weekly_model", model = "Opus"),
+            "seven_day_sonnet" => localized!("usage.weekly_model", model = "Sonnet"),
             _ => return None,
         };
         Some(PlanWindow {
             label,
+            label_i18n: Some(label_i18n),
             percent: window
                 .get("utilization")
                 .and_then(Value::as_f64)?

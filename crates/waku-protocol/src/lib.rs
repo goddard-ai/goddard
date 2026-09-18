@@ -65,6 +65,7 @@ pub use protocol::{
     ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireComputerToolRequest,
     WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
+pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;
 pub use workspace::{
     BranchDeleteFailure, GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary,

@@ -344,7 +344,7 @@ impl CodexDriver {
                     )
                     .is_err()
                 {
-                    let _ = writer_events.send(DriverEvent::Error(tr!(
+                    let _ = writer_events.send(DriverEvent::localized_error(localized!(
                         "errors.initialize_codex_app_server"
                     )));
                     return;
@@ -366,7 +366,7 @@ impl CodexDriver {
                     )
                     .is_err()
                     {
-                        let _ = writer_events.send(DriverEvent::Error(tr!(
+                        let _ = writer_events.send(DriverEvent::localized_error(localized!(
                             "errors.register_computer_use_skill"
                         )));
                         return;
@@ -438,9 +438,9 @@ impl CodexDriver {
                     let message = match command {
                         CommandMessage::Prompt(text) => {
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
-                                let _ = writer_events.send(DriverEvent::Error(tr!(
-                                    "errors.codex_thread_open_incomplete"
-                                )));
+                                let _ = writer_events.send(DriverEvent::localized_error(
+                                    localized!("errors.codex_thread_open_incomplete"),
+                                ));
                                 continue;
                             };
                             {
@@ -482,13 +482,13 @@ impl CodexDriver {
                             let (Some(thread_id), Some(expected_turn_id)) =
                                 (thread_id, active_turn_id)
                             else {
-                                let _ = writer_events.send(DriverEvent::SteerRejected {
-                                    message: text,
-                                    reason: tr!(
+                                let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
+                                    text,
+                                    localized!(
                                         "errors.provider_no_active_turn",
                                         provider = "Codex"
                                     ),
-                                });
+                                ));
                                 continue;
                             };
                             next_request_id += 1;
@@ -508,14 +508,14 @@ impl CodexDriver {
                             if let Err(error) = write_json_line(&mut stdin, &message)
                                 && let Some(text) = writer_pending_steers.lock().remove(&request_id)
                             {
-                                let _ = writer_events.send(DriverEvent::SteerRejected {
-                                    message: text,
-                                    reason: tr!(
+                                let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
+                                    text,
+                                    localized!(
                                         "errors.provider_transport_write",
                                         provider = "Codex",
                                         error = error
                                     ),
-                                });
+                                ));
                             }
                             continue;
                         }
@@ -526,9 +526,9 @@ impl CodexDriver {
                             // surfaces through the unmatched-response error
                             // path in `handle_codex_message`.
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
-                                let _ = writer_events.send(DriverEvent::Error(tr!(
-                                    "errors.codex_thread_open_incomplete"
-                                )));
+                                let _ = writer_events.send(DriverEvent::localized_error(
+                                    localized!("errors.codex_thread_open_incomplete"),
+                                ));
                                 continue;
                             };
                             next_request_id += 1;
@@ -637,17 +637,17 @@ impl CodexDriver {
                             let quiet = matches!(operation, GoalOperation::Refresh);
                             if writer_goal_rpcs.lock().unsupported {
                                 if !quiet {
-                                    let _ = writer_events.send(DriverEvent::Error(tr!(
-                                        "errors.codex_goals_unsupported"
-                                    )));
+                                    let _ = writer_events.send(DriverEvent::localized_error(
+                                        localized!("errors.codex_goals_unsupported"),
+                                    ));
                                 }
                                 continue;
                             }
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
                                 if !quiet {
-                                    let _ = writer_events.send(DriverEvent::Error(tr!(
-                                        "errors.codex_thread_open_incomplete"
-                                    )));
+                                    let _ = writer_events.send(DriverEvent::localized_error(
+                                        localized!("errors.codex_thread_open_incomplete"),
+                                    ));
                                 }
                                 continue;
                             };
@@ -723,6 +723,9 @@ impl CodexDriver {
                                     BackgroundWorkEvent::StopFailed {
                                         key,
                                         message: tr!("errors.codex_thread_open_incomplete"),
+                                        message_i18n: Some(
+                                            localized!("errors.codex_thread_open_incomplete").1,
+                                        ),
                                     },
                                 ));
                                 continue;
@@ -760,7 +763,7 @@ impl CodexDriver {
                         CommandMessage::Shutdown => break,
                     };
                     if let Err(error) = write_json_line(&mut stdin, &message) {
-                        let _ = writer_events.send(DriverEvent::Error(tr!(
+                        let _ = writer_events.send(DriverEvent::localized_error(localized!(
                             "errors.provider_transport_write",
                             provider = "Codex",
                             error = error
@@ -838,17 +841,19 @@ impl CodexDriver {
                                     }
                                 }
                                 Err(error) => {
-                                    let _ = reader_events.send(DriverEvent::Error(tr!(
-                                        "errors.provider_invalid_json",
-                                        provider = "Codex",
-                                        error = error
-                                    )));
+                                    let _ = reader_events.send(DriverEvent::localized_error(
+                                        localized!(
+                                            "errors.provider_invalid_json",
+                                            provider = "Codex",
+                                            error = error
+                                        ),
+                                    ));
                                 }
                             }
                         }
                         Ok(_) => {}
                         Err(error) => {
-                            let _ = reader_events.send(DriverEvent::Error(tr!(
+                            let _ = reader_events.send(DriverEvent::localized_error(localized!(
                                 "errors.provider_transport_read",
                                 provider = "Codex",
                                 error = error
@@ -882,14 +887,14 @@ impl CodexDriver {
                 let _ = stderr_thread.join();
                 match status {
                     Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                        let _ = events.send(DriverEvent::localized_error(localized!(
                             "errors.provider_exited",
                             provider = "Codex app-server",
                             status = status
                         )));
                     }
                     Err(error) => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                        let _ = events.send(DriverEvent::localized_error(localized!(
                             "errors.read_provider_exit_status",
                             provider = "Codex app-server",
                             error = error
@@ -1511,17 +1516,24 @@ fn json_id(value: Option<&Value>) -> Option<String> {
 fn codex_background_terminal(item: &Value) -> Option<BackgroundWorkItem> {
     let item_id = json_id(item.get("itemId").or_else(|| item.get("id")))?;
     let process_id = json_id(item.get("processId"))?;
-    let command = item
+    let (command, command_i18n) = match item
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .unwrap_or_else(|| tr!("background.process"));
+    {
+        Some(command) => (command, None),
+        None => {
+            let pair = localized!("background.process");
+            (pair.0, Some(pair.1))
+        }
+    };
     let mut work = BackgroundWorkItem::new(
         BackgroundWorkKind::Process,
         item_id,
         command.clone(),
         BackgroundWorkStatus::Running,
     );
+    work.title_i18n = command_i18n;
     work.command = Some(command);
     work.cwd = item.get("cwd").and_then(Value::as_str).map(str::to_owned);
     let mut telemetry = Vec::new();
@@ -1549,11 +1561,17 @@ fn codex_command_work(item: &Value, complete: bool) -> Option<BackgroundWorkItem
         return None;
     }
     let item_id = item.get("id").and_then(Value::as_str)?.to_owned();
-    let command = item
+    let (command, command_i18n) = match item
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .unwrap_or_else(|| tr!("background.command"));
+    {
+        Some(command) => (command, None),
+        None => {
+            let pair = localized!("background.command");
+            (pair.0, Some(pair.1))
+        }
+    };
     let exit_code = item
         .get("exitCode")
         .and_then(Value::as_i64)
@@ -1571,6 +1589,7 @@ fn codex_command_work(item: &Value, complete: bool) -> Option<BackgroundWorkItem
         command.clone(),
         status,
     );
+    work.title_i18n = command_i18n;
     work.command = Some(command);
     work.cwd = item.get("cwd").and_then(Value::as_str).map(str::to_owned);
     work.output = item
@@ -1605,7 +1624,7 @@ fn codex_subagent_work(item: &Value) -> Vec<BackgroundWorkItem> {
         return Vec::new();
     }
     let origin = item.get("id").and_then(Value::as_str).map(str::to_owned);
-    let prompt = item
+    let (prompt, prompt_i18n) = item
         .get("prompt")
         .and_then(Value::as_str)
         .and_then(|prompt| prompt.lines().find(|line| !line.trim().is_empty()))
@@ -1618,7 +1637,11 @@ fn codex_subagent_work(item: &Value) -> Vec<BackgroundWorkItem> {
             }
             title
         })
-        .unwrap_or_else(|| tr!("background.subagent"));
+        .map(|title| (title, None))
+        .unwrap_or_else(|| {
+            let pair = localized!("background.subagent");
+            (pair.0, Some(pair.1))
+        });
     let model = item.get("model").and_then(Value::as_str).map(str::to_owned);
     let parent_id = item
         .get("senderThreadId")
@@ -1647,6 +1670,7 @@ fn codex_subagent_work(item: &Value) -> Vec<BackgroundWorkItem> {
                 prompt.clone(),
                 status,
             );
+            work.title_i18n = prompt_i18n.clone();
             work.detail = state
                 .get("message")
                 .and_then(Value::as_str)
@@ -1724,6 +1748,7 @@ fn handle_codex_message(
                         BackgroundWorkEvent::StopFailed {
                             key,
                             message: error.to_owned(),
+                            message_i18n: None,
                         },
                     ));
                 } else if value.pointer("/result/terminated").and_then(Value::as_bool)
@@ -1733,6 +1758,7 @@ fn handle_codex_message(
                         BackgroundWorkEvent::StopFailed {
                             key,
                             message: tr!("background.stop_not_running"),
+                            message_i18n: Some(localized!("background.stop_not_running").1),
                         },
                     ));
                 } else {
@@ -1762,6 +1788,7 @@ fn handle_codex_message(
             let _ = events.send(DriverEvent::SteerRejected {
                 message,
                 reason: error.to_owned(),
+                reason_i18n: None,
             });
         } else {
             let _ = events.send(DriverEvent::SteerAccepted {
@@ -1902,17 +1929,19 @@ fn handle_codex_message(
                     // `thread/compact/start` reports through the item's
                     // started/completed lifecycle; the id is stable across
                     // both so they update one card.
-                    let activity = ActivityItem::new(
+                    let (title, title_i18n) = if complete {
+                        localized!("activity.compacted_context")
+                    } else {
+                        localized!("activity.compacting_context")
+                    };
+                    let mut activity = ActivityItem::new(
                         item.get("id").and_then(Value::as_str).map(str::to_owned),
                         ActivityKind::Tool,
-                        if complete {
-                            tr!("activity.compacted_context")
-                        } else {
-                            tr!("activity.compacting_context")
-                        },
+                        title,
                         None,
                         complete,
                     );
+                    activity.title_i18n = Some(title_i18n);
                     let _ = events.send(DriverEvent::RichActivity(activity));
                     return;
                 }
@@ -1928,11 +1957,11 @@ fn handle_codex_message(
                 }
                 let kind = codex_activity_kind(item);
                 if let Some(kind) = kind {
-                    let title = codex_item_title(item);
+                    let (title, title_i18n) = codex_item_title(item);
                     let output = codex_item_output(item);
                     let image_urls = codex_item_image_urls(item);
                     let detail = codex_item_detail(item, output.as_deref());
-                    let activity = ActivityItem::new(
+                    let mut activity = ActivityItem::new(
                         item.get("id").and_then(Value::as_str).map(str::to_owned),
                         kind,
                         title,
@@ -1946,6 +1975,7 @@ fn handle_codex_message(
                     .with_output(output)
                     .with_image_urls(image_urls)
                     .with_failed(codex_item_failed(item));
+                    activity.title_i18n = title_i18n;
                     let _ = events.send(DriverEvent::RichActivity(activity));
                 }
             }
@@ -1964,6 +1994,7 @@ fn handle_codex_message(
             let _ = events.send(DriverEvent::TurnFinished {
                 success: status == "completed",
                 summary: error,
+                summary_i18n: None,
             });
         }
         "thread/name/updated" => {
@@ -2058,6 +2089,8 @@ fn handle_codex_message(
                         allow: false,
                     },
                 ],
+                title_i18n: None,
+                detail_i18n: None,
             });
         }
         _ => {}
@@ -2133,10 +2166,12 @@ fn codex_plan_usage(snapshot: Option<&Value>) -> Option<crate::usage::PlanUsage>
         let Some(percent) = window.get("usedPercent").and_then(Value::as_f64) else {
             continue;
         };
+        let (label, label_i18n) = crate::usage::window_label_from_minutes(
+            window.get("windowDurationMins").and_then(Value::as_i64),
+        );
         windows.push(crate::usage::PlanWindow {
-            label: crate::usage::window_label_from_minutes(
-                window.get("windowDurationMins").and_then(Value::as_i64),
-            ),
+            label,
+            label_i18n: Some(label_i18n),
             percent: percent.clamp(0.0, 100.0),
             resets_at: window.get("resetsAt").and_then(Value::as_i64),
         });
@@ -2182,15 +2217,16 @@ fn codex_activity_kind(item: &Value) -> Option<ActivityKind> {
     }
 }
 
-fn codex_item_title(item: &Value) -> String {
+fn codex_item_title(item: &Value) -> (String, Option<waku_protocol::WireTranslation>) {
     if let Some((_, title)) = codex_command_action_presentation(item) {
-        return title;
+        return (title, None);
     }
     if let Some(command) = item.get("command").and_then(Value::as_str) {
-        return command.to_owned();
+        return (command.to_owned(), None);
     }
     if let Some(query) = non_empty_string(item.get("query")) {
-        return tr!("activity.search_for", query = query);
+        let pair = localized!("activity.search_for", query = query);
+        return (pair.0, Some(pair.1));
     }
     if item.get("type").and_then(Value::as_str) == Some("webSearch") {
         return codex_web_search_title(item);
@@ -2202,26 +2238,38 @@ fn codex_item_title(item: &Value) -> String {
             .map(str::trim)
             .filter(|title| !title.is_empty())
     {
-        return title.to_owned();
+        return (title.to_owned(), None);
     }
     if let Some(name) = item.get("tool").and_then(Value::as_str) {
-        return split_camel_case(name);
+        return (split_camel_case(name), None);
     }
-    item.get("type")
+    match item
+        .get("type")
         .and_then(Value::as_str)
         .map(split_camel_case)
-        .unwrap_or_else(|| tr!("activity.activity"))
+    {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("activity.activity");
+            (pair.0, Some(pair.1))
+        }
+    }
 }
 
-fn codex_web_search_title(item: &Value) -> String {
+fn codex_web_search_title(item: &Value) -> (String, Option<waku_protocol::WireTranslation>) {
+    let pair = web_search_title_pair(item);
+    (pair.0, Some(pair.1))
+}
+
+fn web_search_title_pair(item: &Value) -> (String, waku_protocol::WireTranslation) {
     let Some(action) = item.get("action") else {
-        return tr!("activity.searched_web");
+        return localized!("activity.searched_web");
     };
 
     match action.get("type").and_then(Value::as_str) {
         Some("search") => {
             if let Some(query) = non_empty_string(action.get("query")) {
-                return tr!("activity.search_for", query = query);
+                return localized!("activity.search_for", query = query);
             }
             if let Some(query) =
                 action
@@ -2233,23 +2281,23 @@ fn codex_web_search_title(item: &Value) -> String {
                             .find_map(|query| non_empty_string(Some(query)))
                     })
             {
-                return tr!("activity.search_for", query = query);
+                return localized!("activity.search_for", query = query);
             }
-            tr!("activity.searched_web")
+            localized!("activity.searched_web")
         }
         Some("openPage") => non_empty_string(action.get("url"))
-            .map(|url| tr!("activity.open_url", url = url))
-            .unwrap_or_else(|| tr!("activity.opened_web_page")),
+            .map(|url| localized!("activity.open_url", url = url))
+            .unwrap_or_else(|| localized!("activity.opened_web_page")),
         Some("findInPage") => match (
             non_empty_string(action.get("pattern")),
             non_empty_string(action.get("url")),
         ) {
             (Some(pattern), Some(url)) => {
-                tr!("activity.find_in_url", pattern = pattern, url = url)
+                localized!("activity.find_in_url", pattern = pattern, url = url)
             }
-            (Some(pattern), None) => tr!("activity.find_on_page", pattern = pattern),
-            (None, Some(url)) => tr!("activity.search_within_url", url = url),
-            (None, None) => tr!("activity.searched_within_page"),
+            (Some(pattern), None) => localized!("activity.find_on_page", pattern = pattern),
+            (None, Some(url)) => localized!("activity.search_within_url", url = url),
+            (None, None) => localized!("activity.searched_within_page"),
         },
         _ => item
             .get("results")
@@ -2257,12 +2305,12 @@ fn codex_web_search_title(item: &Value) -> String {
             .filter(|results| !results.is_empty())
             .map(|results| {
                 if results.len() == 1 {
-                    tr!("activity.browsed_page", count = results.len())
+                    localized!("activity.browsed_page", count = results.len())
                 } else {
-                    tr!("activity.browsed_pages", count = results.len())
+                    localized!("activity.browsed_pages", count = results.len())
                 }
             })
-            .unwrap_or_else(|| tr!("activity.browsed_web")),
+            .unwrap_or_else(|| localized!("activity.browsed_web")),
     }
 }
 
@@ -2684,7 +2732,11 @@ mod tests {
                         eprintln!("live fork test cursor: {provider_cursor:?}");
                     }
                     DriverEvent::TextDelta(delta) => text.push_str(&delta),
-                    DriverEvent::TurnFinished { success, summary } => {
+                    DriverEvent::TurnFinished {
+                        success,
+                        summary,
+                        summary_i18n: _,
+                    } => {
                         assert!(success, "Codex failed: {summary:?}");
                         return text;
                     }
@@ -3447,7 +3499,11 @@ mod tests {
 
         assert!(pending_steers.lock().is_empty());
         match event_rx.try_recv().unwrap() {
-            DriverEvent::SteerRejected { message, reason } => {
+            DriverEvent::SteerRejected {
+                message,
+                reason,
+                reason_i18n: _,
+            } => {
                 assert_eq!(message, "Steer me");
                 assert_eq!(reason, "expected turn mismatch");
             }
@@ -3562,9 +3618,9 @@ mod tests {
             "action": { "type": "search", "queries": ["GPT-5.6 Luna official"] }
         });
 
-        assert_eq!(codex_item_title(&batch_open), "Browsed 2 pages");
+        assert_eq!(codex_item_title(&batch_open).0, "Browsed 2 pages");
         assert_eq!(
-            codex_item_title(&nested_query),
+            codex_item_title(&nested_query).0,
             "Search for GPT-5.6 Luna official"
         );
     }
@@ -3586,9 +3642,9 @@ mod tests {
             }
         });
 
-        assert_eq!(codex_item_title(&open), "Open https://openai.com");
+        assert_eq!(codex_item_title(&open).0, "Open https://openai.com");
         assert_eq!(
-            codex_item_title(&find),
+            codex_item_title(&find).0,
             "Find pricing in https://openai.com"
         );
     }
@@ -3697,8 +3753,8 @@ mod tests {
             "arguments": { "code": "cua.list_apps()" }
         });
 
-        assert_eq!(codex_item_title(&titled), "Inspect Helium browser");
-        assert_eq!(codex_item_title(&untitled), "Js");
+        assert_eq!(codex_item_title(&titled).0, "Inspect Helium browser");
+        assert_eq!(codex_item_title(&untitled).0, "Js");
     }
 
     #[test]
@@ -3716,7 +3772,7 @@ mod tests {
         let activity = ActivityItem::new(
             Some("read-1".into()),
             kind,
-            codex_item_title(&item),
+            codex_item_title(&item).0,
             None,
             false,
         )
@@ -3779,7 +3835,7 @@ mod tests {
             let activity = ActivityItem::new(
                 Some("command-1".into()),
                 kind,
-                codex_item_title(&item),
+                codex_item_title(&item).0,
                 None,
                 true,
             )
@@ -3819,7 +3875,7 @@ mod tests {
             });
 
             assert_eq!(codex_activity_kind(&item), Some(ActivityKind::Command));
-            assert_eq!(codex_item_title(&item), "inspect files");
+            assert_eq!(codex_item_title(&item).0, "inspect files");
         }
     }
 
@@ -3840,7 +3896,7 @@ mod tests {
         let activity = ActivityItem::new(
             Some("patch-1".into()),
             ActivityKind::FileChange,
-            codex_item_title(&item),
+            codex_item_title(&item).0,
             None,
             true,
         )
