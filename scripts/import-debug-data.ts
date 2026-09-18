@@ -13,7 +13,8 @@
  * - `app.json` and legacy `settings.json` are copied into `~/.goddard` —
  *   where release desktop settings live — only when absent.
  * - `blobs/` and `attachments/` entries are hardlinked only when absent
- *   (shared with the debug install instead of duplicated).
+ *   (shared with the debug install instead of duplicated), falling back to
+ *   a copy when the two directories live on different volumes.
  * - `app.db` is cloned through `VACUUM INTO` only when the destination has no
  *   database and every migration tag the source records is one this checkout
  *   ships (`db/migrations/*.sql` file stems) — the same gate the app applies,
@@ -128,7 +129,19 @@ async function linkTreeEntries(source: string, destination: string) {
         await link(sourceItem, destinationItem);
         report.adopted.push(destinationItem);
       } catch (error) {
-        report.failures.push({ path: destinationItem, error });
+        const code = (error as NodeJS.ErrnoException).code;
+        // Hardlinks cannot cross volumes (EXDEV) and some filesystems reject
+        // them outright (EPERM/ENOTSUP); copy instead so adoption still works.
+        if (code === "EXDEV" || code === "EPERM" || code === "ENOTSUP") {
+          try {
+            await copyFile(sourceItem, destinationItem);
+            report.adopted.push(destinationItem);
+          } catch (copyError) {
+            report.failures.push({ path: destinationItem, error: copyError });
+          }
+        } else {
+          report.failures.push({ path: destinationItem, error });
+        }
       }
     }
   }
