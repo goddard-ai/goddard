@@ -1,1 +1,1 @@
-- Dedicate ⌘T to a new terminal rooted in the current context — the on-screen terminal's directory, the selected session's workspace, or ~ — and bind ⌘⇧N to the workspace toggle on the new task page
+- Rebind ⌘T to always open a new terminal rooted in the current context — the on-screen terminal's directory, the selected session's workspace, or ~ — moving the Terminals chord to ⌘⇧T and leaving Toggle Workspace reachable from the menu, command palette, and Work-in chip; ⌘⇧N now toggles the workspace on the new task page
