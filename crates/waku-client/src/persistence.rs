@@ -443,13 +443,16 @@ pub enum PersistedSettingsPage {
     General,
     Providers,
     Skills,
+    Friends,
     Archived,
     Usage,
     Daemon,
     ComputerUse,
     Commands,
     Appearance,
+    Git,
     Experiments,
+    Keybindings,
 }
 
 /// The Review surface's chosen diff source — mirrors `review_diff::Source`

@@ -575,7 +575,7 @@ impl Waku {
         if let Some(page) = self.state.settings_page {
             // The open path, so Usage's scan and the Skills catalog kick off
             // the same way a click on their page would.
-            self.open_settings_page(settings_page_from_persisted(page), cx);
+            self.open_settings_page(settings_page_from_persisted(page), window, cx);
             self.automatic_updates_enabled = cx
                 .try_global::<crate::updater::UpdaterState>()
                 .and_then(|updater| updater.0.as_ref())

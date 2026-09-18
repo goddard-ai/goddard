@@ -1408,13 +1408,16 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
         SettingsPage::General => PersistedSettingsPage::General,
         SettingsPage::Providers => PersistedSettingsPage::Providers,
         SettingsPage::Skills => PersistedSettingsPage::Skills,
+        SettingsPage::Friends => PersistedSettingsPage::Friends,
         SettingsPage::Archived => PersistedSettingsPage::Archived,
         SettingsPage::Usage => PersistedSettingsPage::Usage,
         SettingsPage::Daemon => PersistedSettingsPage::Daemon,
         SettingsPage::ComputerUse => PersistedSettingsPage::ComputerUse,
         SettingsPage::Commands => PersistedSettingsPage::Commands,
         SettingsPage::Appearance => PersistedSettingsPage::Appearance,
+        SettingsPage::Git => PersistedSettingsPage::Git,
         SettingsPage::Experiments => PersistedSettingsPage::Experiments,
+        SettingsPage::Keybindings => PersistedSettingsPage::Keybindings,
     }
 }
 
@@ -1423,13 +1426,16 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
         PersistedSettingsPage::General => SettingsPage::General,
         PersistedSettingsPage::Providers => SettingsPage::Providers,
         PersistedSettingsPage::Skills => SettingsPage::Skills,
+        PersistedSettingsPage::Friends => SettingsPage::Friends,
         PersistedSettingsPage::Archived => SettingsPage::Archived,
         PersistedSettingsPage::Usage => SettingsPage::Usage,
         PersistedSettingsPage::Daemon => SettingsPage::Daemon,
         PersistedSettingsPage::ComputerUse => SettingsPage::ComputerUse,
         PersistedSettingsPage::Commands => SettingsPage::Commands,
         PersistedSettingsPage::Appearance => SettingsPage::Appearance,
+        PersistedSettingsPage::Git => SettingsPage::Git,
         PersistedSettingsPage::Experiments => SettingsPage::Experiments,
+        PersistedSettingsPage::Keybindings => SettingsPage::Keybindings,
     }
 }
 
