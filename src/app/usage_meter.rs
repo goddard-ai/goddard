@@ -234,6 +234,11 @@ impl Waku {
             }
         });
 
+        // The panel's compact action uses the same eligibility as `/compact`
+        // and the palette: a reserved Waku path or a provider-reported one.
+        let compact = (provider.supports_compact()
+            || crate::composer_complete::has_compact_path(&self.slash_command_index))
+        .then(|| (session.id, cx.entity().downgrade()));
         let percent = context.and_then(context_percent);
         let fill = match percent {
             Some(percent) if percent >= 95.0 => theme.danger,
@@ -279,6 +284,7 @@ impl Waku {
                     plan.clone(),
                     error.as_deref(),
                     plan_loading,
+                    compact.clone(),
                     cx,
                 )
             },
@@ -304,6 +310,7 @@ fn usage_panel(
     plan: Option<PlanUsage>,
     error: Option<&str>,
     plan_loading: bool,
+    compact: Option<(Uuid, WeakEntity<Waku>)>,
     cx: &App,
 ) -> AnyElement {
     let theme = Theme::current(cx);
@@ -361,6 +368,9 @@ fn usage_panel(
             )
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );
+    if let Some((session_id, weak)) = compact {
+        panel = panel.child(compact_row(handle, session_id, weak, &theme, cx));
+    }
     if plan.is_some() || error.is_some() || plan_loading {
         panel = panel.child(div().h(hairline()).flex_none().bg(theme.separator));
     }
@@ -459,6 +469,59 @@ fn usage_panel(
     }
 
     panel.into_any_element()
+}
+
+/// The panel's compact action: same guards and driver path as `/compact`,
+/// closing the popover before the request goes out so the toast it may
+/// raise is not anchored to a dismissed card.
+fn compact_row(
+    handle: &ContextMenuHandle,
+    session_id: Uuid,
+    weak: WeakEntity<Waku>,
+    theme: &Theme,
+    cx: &App,
+) -> Stateful<Div> {
+    let focus = cx.focus_handle();
+    let click_close = handle.clone();
+    let click_weak = weak.clone();
+    let key_close = handle.clone();
+    div()
+        .id("usage-compact")
+        .track_focus(&focus)
+        .tab_index(0)
+        .h(px(28.0))
+        .w_full()
+        .px(px(8.0))
+        .rounded(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .cursor_default()
+        .text_color(theme.text)
+        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .hover(|style| style.bg(theme.overlay_strong))
+        .tooltip(Tooltip::text(tr!("commands.compact_description")))
+        .child(icon("icons/minimize.svg", 12.0, theme.text_secondary))
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .child(tr!("commands.compact_context")),
+        )
+        .on_click(move |_, window, cx| {
+            click_close.close(window, cx);
+            let _ = click_weak.update(cx, |waku, cx| waku.compact_session(session_id, cx));
+        })
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                key_close.close(window, cx);
+                let _ = weak.update(cx, |waku, cx| waku.compact_session(session_id, cx));
+                cx.stop_propagation();
+            }
+        })
 }
 
 /// Placeholder for the plan section while its first fetch is in flight:

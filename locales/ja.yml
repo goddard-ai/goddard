@@ -852,6 +852,10 @@ commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
 commands.resume_description: ターミナルのエージェントセッションを再開
 commands.land_description: ベースブランチにリベースしてこのタスクのコミットを取り込む
+commands.compact_description: 会話のコンテキストを圧縮
+commands.compact_context: コンテキストを圧縮
+commands.compact_turn_running: 圧縮する前に現在のターンの終了を待ってください
+commands.compact_nothing_to_compact: まだ圧縮できるものがありません — まずメッセージを送信してください
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？
 goal.set: ゴールを設定
