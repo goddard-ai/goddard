@@ -279,13 +279,18 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use is still experimental, so its navigation entry points
-    /// only appear once the Experiments opt-in is on. Keeping this decision
-    /// on the page itself makes the Settings sidebar and command palette use
-    /// the same gate.
-    fn is_visible_in_navigation(self, computer_use_experiment_enabled: bool) -> bool {
+    /// Computer Use and Friends are still experimental, so their navigation
+    /// entry points only appear once the Experiments opt-in is on. Keeping
+    /// this decision on the page itself makes the Settings sidebar and
+    /// command palette use the same gate.
+    fn is_visible_in_navigation(
+        self,
+        computer_use_experiment_enabled: bool,
+        friends_enabled: bool,
+    ) -> bool {
         match self {
             Self::ComputerUse => computer_use_experiment_enabled,
+            Self::Friends => friends_enabled,
             Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
         }
@@ -293,8 +298,8 @@ impl SettingsPage {
 
     /// A persisted page whose navigation gate closed falls back to General
     /// rather than rendering a surface the sidebar no longer lists.
-    fn into_visible(self, computer_use_experiment_enabled: bool) -> Self {
-        if self.is_visible_in_navigation(computer_use_experiment_enabled) {
+    fn into_visible(self, computer_use_experiment_enabled: bool, friends_enabled: bool) -> Self {
+        if self.is_visible_in_navigation(computer_use_experiment_enabled, friends_enabled) {
             self
         } else {
             Self::General

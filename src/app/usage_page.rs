@@ -44,6 +44,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Experimental — the page only opens while its opt-in is on, so a
+        // persisted or programmatic visit cannot reach it once off.
+        if page == SettingsPage::Friends && !self.state.friends_enabled {
+            return;
+        }
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.
         self.daemon_token_revealed = false;

@@ -2849,7 +2849,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     use super::SettingsPage;
 
     let pages = |query: &str| {
-        visible_settings_pages(query, true)
+        visible_settings_pages(query, true, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };
@@ -2888,6 +2888,10 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     assert_eq!(pages("codex"), codex_pages);
 
     assert_eq!(pages("no such setting"), vec![]);
+    // Friends is experimental: with the opt-in off its row leaves the
+    // navigation and the cycle skips it.
+    assert!(!visible_settings_pages("", true, false)
+        .any(|(page, ..)| page == SettingsPage::Friends));
 }
 
 #[test]
@@ -2936,13 +2940,13 @@ fn archived_filter_matches_titles_and_projects() {
 fn computer_use_navigation_follows_the_experiment_opt_in() {
     use super::SettingsPage;
 
-    assert!(SettingsPage::General.is_visible_in_navigation(false));
-    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false));
-    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true));
+    assert!(SettingsPage::General.is_visible_in_navigation(false, false));
+    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false, false));
+    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true, false));
 
     // The experiment flag also removes the page from search results.
     let pages = |query: &str, enabled: bool| {
-        visible_settings_pages(query, enabled)
+        visible_settings_pages(query, enabled, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };

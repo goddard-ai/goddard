@@ -636,6 +636,9 @@ pub struct AppSettings {
     /// branches, issues, and pull requests in one place. Defaults on in
     /// debug builds.
     pub projects_page_enabled: bool,
+    /// Experimental: the Settings → Friends page and friend-to-friend file
+    /// transfers. Defaults on in debug builds.
+    pub friends_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -676,6 +679,7 @@ impl Default for AppSettings {
             git_panel_enabled: default_experiment_enabled(),
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
+            friends_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -929,6 +933,8 @@ pub struct PersistedState {
     pub github_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub projects_page_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub friends_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1080,6 +1086,7 @@ impl PersistedState {
             git_panel_enabled: default_experiment_enabled(),
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
+            friends_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1315,6 +1322,7 @@ impl PersistedState {
             git_panel_enabled: self.git_panel_enabled,
             github_enabled: self.github_enabled,
             projects_page_enabled: self.projects_page_enabled,
+            friends_enabled: self.friends_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1394,6 +1402,7 @@ impl PersistedState {
         self.git_panel_enabled = settings.git_panel_enabled;
         self.github_enabled = settings.github_enabled;
         self.projects_page_enabled = settings.projects_page_enabled;
+        self.friends_enabled = settings.friends_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 

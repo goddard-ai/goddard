@@ -1474,7 +1474,10 @@ impl Waku {
                 "settings preferences experiments experimental beta opt in unfinished preview",
             ),
         ] {
-            if !page.is_visible_in_navigation(self.state.computer_use_experiment_enabled) {
+            if !page.is_visible_in_navigation(
+                self.state.computer_use_experiment_enabled,
+                self.state.friends_enabled,
+            ) {
                 continue;
             }
             commands.push(CommandPaletteItem::command(

@@ -481,6 +481,10 @@ experiments.computer_use_title:
   en: Computer Use
 experiments.computer_use_description:
   en: Reveal the Computer Use settings page and let sessions drive Cua Driver capture and input through the bundled helper. Turning it off also turns Computer Use itself off.
+experiments.friends_title:
+  en: Friends
+experiments.friends_description:
+  en: A Settings → Friends page for friend-to-friend file transfers — share your friend code, accept incoming requests, and watch live transfer progress from a sidebar footer ring.
 daemon.not_configured:
   en: Not configured
 daemon.status:

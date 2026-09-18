@@ -1530,6 +1530,9 @@ impl Waku {
     /// offers declared a size; until then a spinning loader carries the
     /// state. Activating it lands on Settings → Friends.
     fn render_transfer_indicator(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.state.friends_enabled {
+            return None;
+        }
         let active = self
             .friends_state
             .transfers

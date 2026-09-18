@@ -174,14 +174,16 @@ pub(super) struct RemoteHostEditor {
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
+/// Friends is an experiment — its row only appears while the opt-in is on.
 pub(super) fn visible_settings_pages(
     query: &str,
     computer_use_experiment_enabled: bool,
+    friends_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
         .filter(move |(page, ..)| {
-            page.is_visible_in_navigation(computer_use_experiment_enabled)
+            page.is_visible_in_navigation(computer_use_experiment_enabled, friends_enabled)
         })
         .filter_map(move |(page, label_key, icon, keywords_key)| {
             let label = crate::i18n::translate(label_key);
@@ -258,9 +260,11 @@ impl Waku {
         let query = self.settings_search_query(cx);
         let mut navigation = div().flex().flex_col().gap(px(3.0));
 
-        for (page, label, icon_path) in
-            visible_settings_pages(&query, self.state.computer_use_experiment_enabled)
-        {
+        for (page, label, icon_path) in visible_settings_pages(
+            &query,
+            self.state.computer_use_experiment_enabled,
+            self.state.friends_enabled,
+        ) {
             let selected = current_page == page;
             navigation = navigation.child(
                 div()
@@ -368,7 +372,11 @@ impl Waku {
     /// from whichever end matches the key.
     fn cycle_settings_page(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.settings_search_query(cx);
-        let pages = visible_settings_pages(&query, self.state.computer_use_experiment_enabled)
+        let pages = visible_settings_pages(
+            &query,
+            self.state.computer_use_experiment_enabled,
+            self.state.friends_enabled,
+        )
             .map(|(page, ..)| page)
             .collect::<Vec<_>>();
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
@@ -433,7 +441,10 @@ impl Waku {
         let page = self
             .settings_page
             .unwrap_or(SettingsPage::General)
-            .into_visible(self.state.computer_use_experiment_enabled);
+            .into_visible(
+                self.state.computer_use_experiment_enabled,
+                self.state.friends_enabled,
+            );
         let right_window_controls = self.render_client_window_controls(
             super::window_chrome::WindowControlSide::Right,
             window,
@@ -3174,6 +3185,15 @@ impl Waku {
                         |this, enabled, cx| {
                             this.set_computer_use_experiment_enabled(enabled, cx)
                         },
+                    ))
+                    .child(self.experiment_card(
+                        "friends-experiment-toggle",
+                        "experiments.friends_title",
+                        "experiments.friends_description",
+                        self.state.friends_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_friends_enabled(enabled, cx),
                     )),
             )
             .into_any_element()
@@ -3277,6 +3297,15 @@ impl Waku {
         if !enabled {
             self.state.computer_use_enabled = false;
         }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_friends_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled && self.settings_page == Some(SettingsPage::Friends) {
+            self.settings_page = None;
+        }
+        self.state.friends_enabled = enabled;
         self.save();
         cx.notify();
     }
