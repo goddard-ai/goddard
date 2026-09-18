@@ -1421,6 +1421,7 @@ impl StateStore {
         // Quarantine is detail, not a list column — the skeleton's flag is a
         // placeholder and the stored blob carries the real value.
         session.quarantined = stored.quarantined;
+        session.sandboxed = stored.sandboxed;
 
         let mut statement = connection
             .prepare(

@@ -433,6 +433,9 @@ fn create_transfer_session(
     }
     session.status = SessionStatus::Idle;
     session.quarantined = true;
+    // Received files stay in the sandbox VM even once trusted — the agent
+    // never works on them with this Mac's filesystem in reach.
+    session.sandboxed = true;
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
@@ -3436,6 +3439,10 @@ mod tests {
                 .find(|session| session.id == session_id)
                 .expect("the transfer's session");
             assert!(session.quarantined, "received files start untrusted");
+            assert!(
+                session.sandboxed,
+                "received files run in the sandbox VM once trusted"
+            );
             assert_eq!(session.status, SessionStatus::Idle);
             assert_eq!(session.project_id, project.id);
             assert_eq!(session.title, "design.pdf from maya");
@@ -3479,10 +3486,12 @@ mod tests {
             .position(|session| session.id == session_id)
             .unwrap();
         assert!(!reloaded.sessions[index].quarantined);
+        assert!(!reloaded.sessions[index].sandboxed);
         reload_store
             .hydrate(&mut reloaded.sessions[index])
             .unwrap();
         assert!(reloaded.sessions[index].quarantined);
+        assert!(reloaded.sessions[index].sandboxed);
 
         std::fs::remove_dir_all(root).ok();
     }
