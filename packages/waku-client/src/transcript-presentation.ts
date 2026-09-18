@@ -1,4 +1,4 @@
-import type { ActivityItem, AgentSession, MessageAttachment } from './generated'
+import type { ActivityItem, AgentSession, MessageAttachment, WireTranslation } from './generated'
 
 export type AssistantResponseFooter = {
   content: string
@@ -6,6 +6,19 @@ export type AssistantResponseFooter = {
 }
 
 export type Translator = (key: string, params?: Record<string, string | number>) => string
+
+/**
+ * A `WireTranslation` the daemon shipped beside its English fallback renders
+ * through the client's translator when one is available; the fallback text is
+ * what older clients and translator-free callers keep showing.
+ */
+export function wireTranslationText(
+  i18n: WireTranslation | null | undefined,
+  fallback: string,
+  t?: Translator,
+): string {
+  return i18n && t ? t(i18n.key, i18n.args) : fallback
+}
 
 export function userMessageRewindTurnCount(
   session: AgentSession,
@@ -67,6 +80,8 @@ export function reasoningTitle(activity: ActivityItem, t?: Translator) {
 }
 
 export function activityDisplayTitle(activity: ActivityItem, t?: Translator) {
+  // A daemon-composed keyed label outranks every kind-label heuristic.
+  if (activity.title_i18n) return wireTranslationText(activity.title_i18n, activity.title, t)
   const target = activity.display_target?.trim() || null
   switch (activity.kind) {
     case 'fileChange': {
@@ -625,6 +640,7 @@ function activityToolDisplayName(activity: ActivityItem, t?: Translator) {
   }
   const target = activity.display_target?.trim()
   if (target) return target
+  if (activity.title_i18n) return wireTranslationText(activity.title_i18n, activity.title, t)
   if (!isGenericActivityTitle(activity)) return humanizeToolName(activity.title)
   return t ? t('activity.tool') : 'Tool'
 }

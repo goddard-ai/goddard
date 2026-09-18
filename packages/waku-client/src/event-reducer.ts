@@ -8,12 +8,17 @@ import type {
   ThreadGoal,
   TranscriptBlock,
   TurnStatus,
+  WireTranslation,
 } from './generated'
 
 export interface PendingPermission {
   requestId: string
   title: string
   detail: string
+  /** The i18n semantics behind daemon-composed title/detail; render through
+   * the client's translator when present, else the fallback strings. */
+  titleI18n?: WireTranslation
+  detailI18n?: WireTranslation
   options: Array<{ id: string; label: string; allow: boolean }>
 }
 
@@ -35,6 +40,9 @@ export interface RuntimeEventResult {
   settled: boolean
   removeRuntime: boolean
   error?: string
+  /** The i18n semantic behind `error`, when the daemon composed it from a
+   * known key rather than relaying provider text. */
+  errorI18n?: WireTranslation
 }
 
 export interface ReducerClock {
@@ -47,6 +55,57 @@ const defaultClock: ReducerClock = {
   nowSeconds: () => Math.floor(Date.now() / 1_000),
   nowMillis: () => Date.now(),
   randomUUID: () => crypto.randomUUID(),
+}
+
+/** What an `error`/`localizedError` does to the open turn: unwinds an
+ * optimistic pursuit with no submission, else fails the active turn and
+ * stores the message as its assistant-visible reason. */
+function failTurn(session: AgentSession, message: string, clock: ReducerClock) {
+  // An optimistic pursuit turn has no submission to fail with. Unwind it
+  // so the error cannot strand a spinner; if the pursuit does start
+  // later, its own start report recreates the turn.
+  const pursuit = session.turns.at(-1)
+  if (
+    pursuit && pursuit.status === 'running'
+    && !pursuit.provider_turn_started
+    && !session.messages.some((message) => message.turn_id === pursuit.id)
+  ) {
+    session.turns.pop()
+    if (['connecting', 'working', 'waiting', 'background'].includes(session.status)) {
+      session.status = 'idle'
+    }
+    return
+  }
+  const turn = activeTurn(session)
+  if (!turn || session.status === 'working') return
+  const hasAssistant = session.messages.some(
+    (message) => message.turn_id === turn.id && message.role === 'assistant',
+  )
+  session.status = 'failed'
+  if (!hasAssistant) {
+    session.messages.push({
+      id: clock.randomUUID(),
+      turn_id: turn.id,
+      role: 'assistant',
+      content: message,
+      created_at: clock.nowSeconds(),
+      streaming: false,
+    })
+  }
+}
+
+function asWireTranslation(value: unknown): WireTranslation | undefined {
+  const record = asRecord(value)
+  if (!record || typeof record.key !== 'string') return undefined
+  const args = asRecord(record.args)
+  return {
+    key: record.key,
+    args: args
+      ? Object.fromEntries(
+          Object.entries(args).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+        )
+      : undefined,
+  }
 }
 
 export function reduceRuntimeEvent(
@@ -191,6 +250,8 @@ export function reduceRuntimeEvent(
         requestId: value.requestId,
         title: typeof value.title === 'string' ? value.title : 'Permission required',
         detail: typeof value.detail === 'string' ? value.detail : '',
+        titleI18n: asWireTranslation(value.titleI18n),
+        detailI18n: asWireTranslation(value.detailI18n),
         options: Array.isArray(value.options)
           ? value.options.filter(isPermissionOption)
           : [],
@@ -248,40 +309,18 @@ export function reduceRuntimeEvent(
       result.userInput = null
       break
     }
+    case 'localizedError': {
+      const value = asRecord(payload)
+      if (!value || typeof value.message !== 'string') break
+      result.error = value.message
+      result.errorI18n = asWireTranslation(value.i18n)
+      failTurn(session, value.message, clock)
+      break
+    }
     case 'error': {
       if (typeof payload !== 'string') break
       result.error = payload
-      // An optimistic pursuit turn has no submission to fail with. Unwind it
-      // so the error cannot strand a spinner; if the pursuit does start
-      // later, its own start report recreates the turn.
-      const pursuit = session.turns.at(-1)
-      if (
-        pursuit && pursuit.status === 'running'
-        && !pursuit.provider_turn_started
-        && !session.messages.some((message) => message.turn_id === pursuit.id)
-      ) {
-        session.turns.pop()
-        if (['connecting', 'working', 'waiting', 'background'].includes(session.status)) {
-          session.status = 'idle'
-        }
-        break
-      }
-      const turn = activeTurn(session)
-      if (!turn || session.status === 'working') break
-      const hasAssistant = session.messages.some(
-        (message) => message.turn_id === turn.id && message.role === 'assistant',
-      )
-      session.status = 'failed'
-      if (!hasAssistant) {
-        session.messages.push({
-          id: clock.randomUUID(),
-          turn_id: turn.id,
-          role: 'assistant',
-          content: payload,
-          created_at: clock.nowSeconds(),
-          streaming: false,
-        })
-      }
+      failTurn(session, payload, clock)
       break
     }
     case 'processExited':
