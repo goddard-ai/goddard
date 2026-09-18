@@ -547,6 +547,12 @@ impl Waku {
                 SettingsPage::Keybindings => div().into_any_element(),
             });
 
+        let git_scrollbar = if page == SettingsPage::Git {
+            self.render_git_settings_scrollbar()
+        } else {
+            None
+        };
+
         div()
             .flex_1()
             .h_full()
@@ -592,7 +598,8 @@ impl Waku {
                             &self.settings_scroll,
                             &self.settings_scrollbar,
                         ))
-                    }),
+                    })
+                    .children(git_scrollbar),
             )
     }
 

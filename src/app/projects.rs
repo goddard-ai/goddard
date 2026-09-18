@@ -1960,7 +1960,15 @@ impl Waku {
             let filter_empty = self
                 .projects_page_states
                 .get(&project_id)
-                .is_none_or(|state| state.filter_text(tab, cx).trim().is_empty());
+                .map(|state| {
+                    // Drop the stale extent so the page-level scrollbar
+                    // can't phantom over the empty state.
+                    state
+                        .list_state
+                        .reset_with_uniform_height(0, px(PROJECTS_ROW_HEIGHT));
+                    state.filter_text(tab, cx).trim().is_empty()
+                })
+                .unwrap_or(true);
             return github::github_centered(
                 icon("icons/git-branch.svg", 16.0, theme.text_tertiary).into_any_element(),
                 if filter_empty {
@@ -1979,7 +1987,6 @@ impl Waku {
             return div().into_any_element();
         };
         let list_state = state.list_state.clone();
-        let scrollbar = state.list_scrollbar.clone();
         if list_state.item_count() != rows.len() {
             list_state.reset_with_uniform_height(rows.len(), px(PROJECTS_ROW_HEIGHT));
         }
@@ -1995,7 +2002,6 @@ impl Waku {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .relative()
                     .child(
                         list(list_state.clone(), move |index, _window, cx| {
                             let Some(row) = rows.get(index) else {
@@ -2029,14 +2035,7 @@ impl Waku {
                         })
                         .pb(px(PROJECTS_LIST_BOTTOM_PADDING))
                         .size_full(),
-                    )
-                    .child(scrollbar::vertical(
-                        &PaddedListScroll {
-                            state: list_state,
-                            bottom: px(PROJECTS_LIST_BOTTOM_PADDING),
-                        },
-                        &scrollbar,
-                    )),
+                    ),
             )
             .into_any_element()
     }
@@ -3188,6 +3187,41 @@ impl Waku {
             )
             .into_any_element()
     }
+
+    /// The Settings → Git page's overlay scrollbar, rendered by the
+    /// settings column at the window's right edge — the table itself is
+    /// width-capped and centered, so mounting the bar inside it would pull
+    /// it off the edge. `None` while the page shows anything but the row
+    /// list, so a stale extent can't phantom over a centered state.
+    pub(super) fn render_git_settings_scrollbar(&mut self) -> Option<AnyElement> {
+        let project_id = self.resolve_git_settings_project()?;
+        if self.missing_projects.contains(&project_id) {
+            return None;
+        }
+        let state = self.projects_page_states.get(&project_id)?;
+        let rows_ready = match state.git_tab {
+            ProjectsTab::Worktrees => {
+                matches!(state.worktrees, github::GitHubFetch::Loaded(Some(_)))
+            }
+            ProjectsTab::Branches => {
+                matches!(state.branches, github::GitHubFetch::Loaded(Some(_)))
+            }
+            _ => false,
+        };
+        if !rows_ready || state.list_state.item_count() == 0 {
+            return None;
+        }
+        Some(
+            scrollbar::vertical(
+                &PaddedListScroll {
+                    state: state.list_state.clone(),
+                    bottom: px(PROJECTS_LIST_BOTTOM_PADDING),
+                },
+                &state.list_scrollbar,
+            )
+            .into_any_element(),
+        )
+    }
 }
 
 /// The pinned column header above a Worktrees/Branches table. Its cells use
@@ -3266,8 +3300,9 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
 
 /// A `list()`'s own padding joins its scroll extent, but
 /// `ListState::max_offset_for_scrollbar` reports only the measured items —
-/// a padded list would bottom out its thumb early. This wraps the state so
-/// the scrollbar's travel covers the padded bottom too.
+/// and clamps before padding can be added back — so a padded list bottoms
+/// out its thumb early. This wraps the state so the scrollbar's travel
+/// covers the padded extent exactly.
 #[derive(Clone)]
 struct PaddedListScroll {
     state: ListState,
@@ -3280,7 +3315,8 @@ impl scrollbar::Scrollable for PaddedListScroll {
     }
 
     fn max_offset(&self) -> Pixels {
-        self.state.max_offset_for_scrollbar().y + self.bottom
+        let items = px(PROJECTS_ROW_HEIGHT * self.state.item_count() as f32);
+        (items + self.bottom - self.viewport_height()).max(Pixels::ZERO)
     }
 
     fn scrolled(&self) -> Pixels {
