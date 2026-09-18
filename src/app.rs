@@ -65,7 +65,7 @@ use crate::persistence::{
     PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
-    PersistedWindowState, SidebarGrouping, SidebarOrdering, StateStore,
+    PersistedWindowState, RecentModelUse, SidebarGrouping, SidebarOrdering, StateStore,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -80,18 +80,19 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    DismissInbox, DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
-    FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
-    MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
-    NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
-    OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
-    SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab,
-    SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward,
-    SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette,
-    ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
-    ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage,
-    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
-    ToggleUsagePanel, ToggleWorkspace,
+    CycleReasoningEffort, DismissInbox, DismissProjectsLayer, ExitPanelFullscreen, FindNext,
+    FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
+    GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
+    NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
+    OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, ReplaceAllMatches,
+    RunProjectScript, SaveFile, SelectAllProjectsRows, SelectFavoriteModel, SelectFirstProject,
+    SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
+    SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
+    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder,
+    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
+    ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
+    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
+    ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -240,12 +241,6 @@ enum StreamPhase {
 enum StreamDeltaKind {
     Text,
     Reasoning,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ModelPickerTab {
-    Favorites,
-    Provider(ProviderKind),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1827,7 +1822,6 @@ pub struct Waku {
     /// executor. Render only reads this; empty means not resolved yet (or
     /// nothing to offer) and hides the control.
     open_in_apps: Rc<Vec<crate::platform::ExternalApp>>,
-    model_picker_tab: ModelPickerTab,
     /// Keyboard cursor over the model picker's filtered rows. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
     model_picker_highlight: Option<usize>,
@@ -2705,7 +2699,7 @@ pub use command_palette::{
     SelectPrevious,
 };
 pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog};
-pub use git_panel::{DismissGitPanelModal, GitPanelPrimaryAction};
+pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use settings::{FocusNext, FocusPrevious};
@@ -3676,13 +3670,6 @@ impl Waku {
                 })
                 .ok();
         }
-        let model_picker_tab = ModelPickerTab::Provider(
-            state
-                .selected_session
-                .and_then(|id| state.sessions.iter().find(|session| session.id == id))
-                .map(|session| session.provider)
-                .unwrap_or(state.last_provider),
-        );
         let mut session_navigation = SessionNavigation::default();
         if let Some(session_id) = state.selected_session.filter(|session_id| {
             state
@@ -4454,7 +4441,6 @@ impl Waku {
                 computer_use_app_icons: RefCell::new(HashMap::new()),
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
-                model_picker_tab,
                 model_picker_highlight: None,
                 model_picker_scroll: ScrollHandle::new(),
                 model_picker_scrollbar: ScrollbarState::new(),

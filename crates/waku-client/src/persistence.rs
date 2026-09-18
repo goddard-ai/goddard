@@ -244,6 +244,27 @@ pub struct RememberedModelTraits {
     context_window: Option<String>,
 }
 
+/// A model+effort selection a session was actually started with, most recent
+/// first. The model picker reads list position as the recency rank.
+///
+/// `fast` is a remembered flag, not part of the entry's identity: starting a
+/// session with `model-effort` and later `model-effort-fast` updates the same
+/// slot rather than occupying two, so only the most recently used variant of
+/// an effort ever carries the rank.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RecentModelUse {
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
+    pub used_at: u64,
+}
+
+/// How many selections the picker keeps in its recent section.
+const RECENT_MODEL_USES_LIMIT: usize = 32;
+
 /// Remote composer-draft proxy. Draft bytes and attachments remain owned by
 /// the daemon even though the desktop keeps an in-memory editing snapshot.
 /// With several daemons connected, each draft routes to the daemon that owns
@@ -760,6 +781,8 @@ struct AppState {
     last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_model_uses: Vec<RecentModelUse>,
     /// The workspace mode last chosen for a draft in each project, applied
     /// to that project's next fresh task.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -838,6 +861,8 @@ pub struct PersistedState {
     pub last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_model_uses: Vec<RecentModelUse>,
     /// The workspace mode last chosen for a draft in each project, applied
     /// to that project's next fresh task. Only `Local` and `NewWorktree`
     /// are stored; a materialized worktree is a result, not a choice.
@@ -1054,6 +1079,7 @@ impl PersistedState {
             last_service_tier: None,
             last_context_window: None,
             remembered_model_traits: Vec::new(),
+            recent_model_uses: Vec::new(),
             project_workspaces: HashMap::new(),
             favorite_models: Vec::new(),
             theme: ThemeSettings::default(),
@@ -1254,6 +1280,52 @@ impl PersistedState {
             .unwrap_or_default()
     }
 
+    /// Moves `provider`/`model`/`effort` to the front of the recent list. The
+    /// fast flag keys nothing — a rerun of the same selection on the other
+    /// tier replaces the entry in place, so one effort slot ever holds rank.
+    pub fn record_model_use(
+        &mut self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<String>,
+        fast: bool,
+    ) {
+        if let Some(index) = self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider && use_.model == model && use_.effort == effort
+        }) {
+            self.recent_model_uses.remove(index);
+        }
+        self.recent_model_uses.insert(
+            0,
+            RecentModelUse {
+                provider,
+                model: model.to_owned(),
+                effort,
+                fast,
+                used_at: waku_protocol::model::unix_time(),
+            },
+        );
+        self.recent_model_uses.truncate(RECENT_MODEL_USES_LIMIT);
+    }
+
+    /// The row's recency rank, when this exact selection — fast flag included —
+    /// is the variant last started. The sibling tier carries no rank, so only
+    /// one of `effort` and `effort-fast` ever sorts into the recent section.
+    pub fn recent_model_rank(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<&str>,
+        fast: bool,
+    ) -> Option<usize> {
+        self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider
+                && use_.model == model
+                && use_.effort.as_deref() == effort
+                && use_.fast == fast
+        })
+    }
+
     pub fn daemon_settings(&self) -> DaemonSettings {
         DaemonSettings {
             computer_use_enabled: self.computer_use_enabled,
@@ -1342,6 +1414,7 @@ impl PersistedState {
             last_service_tier: self.last_service_tier.clone(),
             last_context_window: self.last_context_window.clone(),
             remembered_model_traits: self.remembered_model_traits.clone(),
+            recent_model_uses: self.recent_model_uses.clone(),
             project_workspaces: self.project_workspaces.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
@@ -1419,6 +1492,7 @@ impl PersistedState {
         self.last_service_tier = app_state.last_service_tier;
         self.last_context_window = app_state.last_context_window;
         self.remembered_model_traits = app_state.remembered_model_traits;
+        self.recent_model_uses = app_state.recent_model_uses;
         self.project_workspaces = app_state.project_workspaces;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
@@ -1655,9 +1729,7 @@ impl StateStore {
             // `GODDARD_DATA_DIR` lets a second debug instance run beside the
             // first (friend-sharing smoke tests, isolated experiments)
             // without colliding on `temp/`.
-            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR")
-                .filter(|dir| !dir.is_empty())
-            {
+            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty()) {
                 return PathBuf::from(dir).join("app.db");
             }
             Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -4678,6 +4678,13 @@ impl Waku {
         } else {
             Vec::new()
         };
+        // A selection only counts as recently used once a session is actually
+        // started with it, so the first turn records the picker's combo —
+        // keyed on model+effort, with fast remembered on that entry.
+        let first_model_use = (!session.has_started())
+            .then(|| self.session_model_combo(session))
+            .flatten()
+            .map(|(model_id, effort, fast)| (session.provider, model_id, effort, fast));
         let (transcript_anchor, sent_message_id) =
             if let Some(session) = self.state.session_mut(session_id) {
                 // A hidden prompt is not user input: no title, no anchor, and no
@@ -4706,6 +4713,10 @@ impl Waku {
             } else {
                 (None, None)
             };
+        if let Some((provider, model_id, effort, fast)) = first_model_use {
+            self.state
+                .record_model_use(provider, &model_id, effort, fast);
+        }
         if let Some(message_id) = sent_message_id {
             self.record_sent_annotations(session_id, message_id, &submission.annotations);
         }

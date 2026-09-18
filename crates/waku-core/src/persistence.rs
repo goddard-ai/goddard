@@ -107,6 +107,27 @@ pub struct RememberedModelTraits {
     context_window: Option<String>,
 }
 
+/// A model+effort selection a session was actually started with, most recent
+/// first. The model picker reads list position as the recency rank.
+///
+/// `fast` is a remembered flag, not part of the entry's identity: starting a
+/// session with `model-effort` and later `model-effort-fast` updates the same
+/// slot rather than occupying two, so only the most recently used variant of
+/// an effort ever carries the rank.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RecentModelUse {
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
+    pub used_at: u64,
+}
+
+/// How many selections the picker keeps in its recent section.
+const RECENT_MODEL_USES_LIMIT: usize = 32;
+
 /// Small, independently persisted composer state.
 ///
 /// Session storage intentionally excludes blank sessions. Keeping drafts in a
@@ -239,6 +260,8 @@ struct AppState {
     last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_model_uses: Vec<RecentModelUse>,
     #[serde(default = "default_sidebar_visibility")]
     sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
@@ -273,6 +296,8 @@ pub struct PersistedState {
     pub last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_model_uses: Vec<RecentModelUse>,
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
@@ -414,6 +439,7 @@ impl PersistedState {
             last_service_tier: None,
             last_context_window: None,
             remembered_model_traits: Vec::new(),
+            recent_model_uses: Vec::new(),
             favorite_models: Vec::new(),
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
@@ -513,6 +539,52 @@ impl PersistedState {
             .unwrap_or_default()
     }
 
+    /// Moves `provider`/`model`/`effort` to the front of the recent list. The
+    /// fast flag keys nothing — a rerun of the same selection on the other
+    /// tier replaces the entry in place, so one effort slot ever holds rank.
+    pub fn record_model_use(
+        &mut self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<String>,
+        fast: bool,
+    ) {
+        if let Some(index) = self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider && use_.model == model && use_.effort == effort
+        }) {
+            self.recent_model_uses.remove(index);
+        }
+        self.recent_model_uses.insert(
+            0,
+            RecentModelUse {
+                provider,
+                model: model.to_owned(),
+                effort,
+                fast,
+                used_at: crate::model::unix_time(),
+            },
+        );
+        self.recent_model_uses.truncate(RECENT_MODEL_USES_LIMIT);
+    }
+
+    /// The row's recency rank, when this exact selection — fast flag included —
+    /// is the variant last started. The sibling tier carries no rank, so only
+    /// one of `effort` and `effort-fast` ever sorts into the recent section.
+    pub fn recent_model_rank(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<&str>,
+        fast: bool,
+    ) -> Option<usize> {
+        self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider
+                && use_.model == model
+                && use_.effort.as_deref() == effort
+                && use_.fast == fast
+        })
+    }
+
     fn app_settings(&self) -> AppSettings {
         AppSettings {
             analytics_enabled: self.analytics_enabled,
@@ -550,6 +622,7 @@ impl PersistedState {
             last_service_tier: self.last_service_tier.clone(),
             last_context_window: self.last_context_window.clone(),
             remembered_model_traits: self.remembered_model_traits.clone(),
+            recent_model_uses: self.recent_model_uses.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
             sidebar_width: self.sidebar_width,
@@ -588,6 +661,7 @@ impl PersistedState {
         self.last_service_tier = app_state.last_service_tier;
         self.last_context_window = app_state.last_context_window;
         self.remembered_model_traits = app_state.remembered_model_traits;
+        self.recent_model_uses = app_state.recent_model_uses;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
         self.sidebar_width = app_state.sidebar_width;
@@ -969,9 +1043,7 @@ impl StateStore {
             // `GODDARD_DATA_DIR` lets a second debug instance run beside the
             // first (friend-sharing smoke tests, isolated experiments)
             // without colliding on `temp/`.
-            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR")
-                .filter(|dir| !dir.is_empty())
-            {
+            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty()) {
                 return PathBuf::from(dir).join("app.db");
             }
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2796,6 +2868,8 @@ mod tests {
         state.favorite_models.push(FavoriteModel {
             provider: ProviderKind::Codex,
             model: "gpt-5.6-luna".into(),
+            effort: None,
+            fast: false,
         });
         state.theme = ThemeSettings {
             mode: crate::theme::ThemeMode::Light,

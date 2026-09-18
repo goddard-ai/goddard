@@ -2415,18 +2415,104 @@ impl Waku {
         );
     }
 
+    /// The session's effective model+effort+fast selection, in picker-row
+    /// terms: the catalog model id (a suffix-encoded Cursor id resolves to
+    /// its base), the effort a turn would run at, and whether the fast tier
+    /// is on. `None` when no model can be named at all.
+    pub(super) fn session_model_combo(
+        &self,
+        session: &AgentSession,
+    ) -> Option<(String, Option<String>, bool)> {
+        let model_id = self.catalog_model_id_for_session(session)?.to_owned();
+        let metadata = self.model_metadata_for_session(session);
+        // Mirror the traits chip's suffix decode: Cursor packs the choice
+        // into the model id, so the suffix fills what the session fields
+        // leave unset.
+        let (suffix_effort, suffix_tier) = (session.provider == ProviderKind::Cursor)
+            .then(|| self.model_for_session(session))
+            .flatten()
+            .and_then(|requested| {
+                self.provider_probe(session.provider).and_then(|probe| {
+                    crate::model_catalog::cursor_catalog_model(&probe.models, requested)
+                })
+            })
+            .map(|matched| {
+                (
+                    crate::model_catalog::cursor_suffix_reasoning_effort(
+                        &matched.suffix,
+                        &matched.model.reasoning_efforts,
+                    ),
+                    crate::model_catalog::cursor_suffix_service_tier(
+                        &matched.suffix,
+                        &matched.model.service_tiers,
+                    ),
+                )
+            })
+            .unwrap_or_default();
+        let effort = session
+            .reasoning_effort
+            .as_deref()
+            .filter(|selected| {
+                metadata.is_some_and(|model| {
+                    model
+                        .reasoning_efforts
+                        .iter()
+                        .any(|option| option.id == *selected)
+                })
+            })
+            .or(suffix_effort.as_deref())
+            .map(str::to_owned)
+            .or_else(|| {
+                if super::composer::supports_reasoning_default_reset(session.provider) {
+                    None
+                } else {
+                    metadata.and_then(|model| {
+                        model.default_reasoning_effort.clone().or_else(|| {
+                            model
+                                .reasoning_efforts
+                                .first()
+                                .map(|option| option.id.clone())
+                        })
+                    })
+                }
+            });
+        let tier = session
+            .service_tier
+            .as_deref()
+            .filter(|selected| {
+                *selected == "default"
+                    || metadata.is_some_and(|model| {
+                        model
+                            .service_tiers
+                            .iter()
+                            .any(|option| option.id == *selected)
+                    })
+            })
+            .or(suffix_tier.as_deref())
+            .or_else(|| metadata.and_then(|model| model.default_service_tier.as_deref()))
+            .unwrap_or("default");
+        Some((model_id, effort, tier == "fast"))
+    }
+
+    /// Applies a picker row: the model plus the exact effort and fast-tier
+    /// choice the row names, rather than the model's remembered traits.
     pub(super) fn choose_model(
         &mut self,
         provider: ProviderKind,
         model: String,
+        effort: Option<String>,
+        fast: bool,
         cx: &mut Context<Self>,
     ) {
+        let service_tier = fast.then(|| "fast".to_owned());
         let Some((session_id, provider_changed)) = self
             .composer_session()
             .filter(|session| {
                 session.can_choose_model(provider)
                     && (session.provider != provider
-                        || session.model.as_deref() != Some(model.as_str()))
+                        || session.model.as_deref() != Some(model.as_str())
+                        || session.reasoning_effort != effort
+                        || session.service_tier != service_tier)
             })
             .map(|session| (session.id, session.provider != provider))
         else {
@@ -2434,23 +2520,23 @@ impl Waku {
         };
 
         self.remember_selected_model_traits();
-        let (reasoning_effort, service_tier, context_window) =
-            self.state.model_traits_for(provider, &model);
+        // Effort and tier come from the row; the context window stays a
+        // per-model memory like before.
+        let (_, _, context_window) = self.state.model_traits_for(provider, &model);
         if let Some(session) = self.composer_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
             if provider_changed {
                 session.agent_preset = None;
             }
-            session.reasoning_effort.clone_from(&reasoning_effort);
+            session.reasoning_effort.clone_from(&effort);
             session.service_tier.clone_from(&service_tier);
             session.context_window.clone_from(&context_window);
             self.state.last_provider = provider;
             self.state.last_model = Some(model);
-            self.state.last_reasoning_effort = reasoning_effort;
+            self.state.last_reasoning_effort = effort;
             self.state.last_service_tier = service_tier;
             self.state.last_context_window = context_window;
-            self.model_picker_tab = ModelPickerTab::Provider(provider);
             // A different provider is a different binary and protocol; only a
             // model change within one provider can be applied in session.
             if provider_changed {
@@ -2460,6 +2546,9 @@ impl Waku {
             } else {
                 self.apply_session_options(session_id, cx);
             }
+            // The picked combo becomes the model's remembered traits, so a
+            // later plain pick of the same model lands back on it.
+            self.remember_selected_model_traits();
             self.save();
             cx.notify();
         }
@@ -2583,60 +2672,148 @@ impl Waku {
         });
     }
 
-    /// Discovery is not requested here: launch already requested it for every
-    /// installed provider, so tabs only ever switch between loaded lists.
-    pub(super) fn select_model_picker_tab(&mut self, tab: ModelPickerTab, cx: &mut Context<Self>) {
-        if self.model_picker_tab != tab {
-            self.model_picker_tab = tab;
-            if let ModelPickerTab::Provider(provider) = tab {
-                // Selecting a rail re-runs that provider's catalog discovery,
-                // so each tab is fresh when viewed without probing every
-                // provider on open.
-                self.refresh_provider_model_discovery(provider);
-            }
-            // A different tab renumbers the rows under the keyboard cursor,
-            // and would otherwise inherit the old tab's scroll offset.
-            self.model_picker_highlight = None;
-            self.reveal_selected_picker_model();
-            cx.notify();
-        }
-    }
-
-    /// A sidebar rail click is an explicit "show me this tab": it exits search
-    /// mode even when the clicked tab is already selected. A live query spans
-    /// every provider and hides which tab is selected, so a click that left
-    /// the query in place would visibly do nothing — `select_model_picker_tab`
-    /// also bails when the tab is unchanged, which is exactly the state that
-    /// query leaves it in. Clearing the field first emits an edit, which
-    /// resets the keyboard highlight and re-reveals the current model under
-    /// the now-unfiltered list.
-    pub(super) fn select_model_picker_tab_from_rail(
+    /// ⌘⌥1–⌘⌥9 applies the nth starred selection to the composer session —
+    /// a draft or an idle session, and only while its provider is one the
+    /// session may still run.
+    pub(super) fn select_favorite_model_action(
         &mut self,
-        tab: ModelPickerTab,
+        action: &SelectFavoriteModel,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.model_search.update(cx, |input, cx| input.clear(cx));
-        self.select_model_picker_tab(tab, cx);
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(favorite) = self.state.favorite_models.get(action.index).cloned() else {
+            return;
+        };
+        let Some(session) = self.composer_session() else {
+            return;
+        };
+        if !session.can_choose_model(favorite.provider) {
+            return;
+        }
+        // A switched-off provider's favorite stays reachable only for the
+        // session already locked to it — same rule the picker's rows follow.
+        let locked = !session.messages.is_empty() && session.provider == favorite.provider;
+        if !locked && !self.provider_enabled(favorite.provider) {
+            return;
+        }
+        // A favorite stored before rows were combos carries no effort; it
+        // claims the model's default-effort row in the list, so the chord
+        // applies that same effort rather than leaving the field unset.
+        let effort = favorite.effort.clone().or_else(|| {
+            self.provider_probe(favorite.provider)
+                .and_then(|probe| probe.model(&favorite.model))
+                .and_then(|model| {
+                    model.default_reasoning_effort.clone().or_else(|| {
+                        model
+                            .reasoning_efforts
+                            .first()
+                            .map(|option| option.id.clone())
+                    })
+                })
+        });
+        self.choose_model(favorite.provider, favorite.model, effort, favorite.fast, cx);
+    }
+
+    /// ⌘E steps the composer session's reasoning effort through the current
+    /// model's ladder, wrapping at the top. Providers that can return to a
+    /// base `default` variant include the unset step in the cycle.
+    pub(super) fn cycle_reasoning_effort_action(
+        &mut self,
+        _: &CycleReasoningEffort,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some((steps, current)) = self.composer_session().and_then(|session| {
+            let model = self.model_metadata_for_session(session)?;
+            if model.reasoning_efforts.is_empty() {
+                return None;
+            }
+            let current = self
+                .session_model_combo(session)
+                .and_then(|(_, effort, _)| effort);
+            let mut steps: Vec<Option<String>> = Vec::new();
+            if super::composer::supports_reasoning_default_reset(session.provider) {
+                steps.push(None);
+            }
+            steps.extend(
+                model
+                    .reasoning_efforts
+                    .iter()
+                    .map(|option| Some(option.id.clone())),
+            );
+            Some((steps, current))
+        }) else {
+            return;
+        };
+        let position = steps
+            .iter()
+            .position(|step| *step == current)
+            // An unset or unlisted effort takes the ladder's first step.
+            .unwrap_or_else(|| steps.len().saturating_sub(1));
+        match steps[(position + 1) % steps.len()].clone() {
+            Some(effort) => self.set_reasoning_effort(effort, cx),
+            None => self.clear_reasoning_effort(cx),
+        }
     }
 
     pub(super) fn toggle_favorite_model(
         &mut self,
         provider: ProviderKind,
         model: String,
+        effort: Option<String>,
+        fast: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(index) = self
-            .state
-            .favorite_models
-            .iter()
-            .position(|favorite| favorite.provider == provider && favorite.model == model)
-        {
+        let default_effort = self
+            .provider_probe(provider)
+            .and_then(|probe| probe.model(&model))
+            .and_then(|model| {
+                model.default_reasoning_effort.clone().or_else(|| {
+                    model
+                        .reasoning_efforts
+                        .first()
+                        .map(|option| option.id.clone())
+                })
+            });
+        if let Some(index) = self.state.favorite_models.iter().position(|favorite| {
+            super::composer::favorite_matches_row(
+                favorite,
+                provider,
+                &model,
+                effort.as_deref(),
+                fast,
+                default_effort.as_deref(),
+            )
+        }) {
             self.state.favorite_models.remove(index);
         } else {
-            self.state
-                .favorite_models
-                .push(FavoriteModel { provider, model });
+            self.state.favorite_models.push(FavoriteModel {
+                provider,
+                model,
+                effort,
+                fast,
+            });
         }
+        self.save();
+        cx.notify();
+    }
+
+    /// Drag-reorder inside the picker's favorites section: the dropped entry
+    /// takes the target row's slot.
+    pub(super) fn move_favorite_model(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from == to || from >= self.state.favorite_models.len() {
+            return;
+        }
+        let favorite = self.state.favorite_models.remove(from);
+        self.state
+            .favorite_models
+            .insert(to.min(self.state.favorite_models.len()), favorite);
         self.save();
         cx.notify();
     }

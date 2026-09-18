@@ -1,0 +1,1 @@
+- Model picker is now one filterable list instead of provider tabs: starred favorites lead (drag to reorder, ⌘⌥1–⌘⌥9 to apply), then recently used combos, then every provider's models with logos — each row enumerates a model/effort/tier selection with effort and fast mode shown on a second line, and ⌘E cycles reasoning effort for the current model

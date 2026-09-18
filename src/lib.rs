@@ -114,6 +114,7 @@ actions!(
         FocusComposer,
         FocusTerminal,
         ToggleModelPicker,
+        CycleReasoningEffort,
         ToggleBranchPicker,
         ToggleRuntimeModePicker,
         ToggleUsagePanel,
@@ -178,6 +179,15 @@ pub struct SelectSidebarSession {
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = waku, no_json)]
 pub struct SelectProjectsTab {
+    pub index: usize,
+}
+
+/// Apply the nth starred model selection to the composer session (⌘⌥1–⌘⌥9),
+/// ordered as in the model picker's favorites section. Carries the target
+/// index so nine bindings share one action.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct SelectFavoriteModel {
     pub index: usize,
 }
 
@@ -541,10 +551,75 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘⇧I opens the notification inbox — the same page contract the
         // Projects page has. ⌘⇧N stays on ToggleWorkspace.
         KeyBinding::new("secondary-shift-i", ToggleInboxPage, None),
-        // ⌘⌥1–2 name the page's tabs; with the page closed the same
-        // chords open it straight onto that tab.
-        KeyBinding::new("secondary-alt-1", SelectProjectsTab { index: 0 }, None),
-        KeyBinding::new("secondary-alt-2", SelectProjectsTab { index: 1 }, None),
+        // ⌘⌥1–2 switch the page's tabs while it is open. The chords used
+        // to deep-link to a tab from anywhere; the model picker's
+        // ⌘⌥1–⌘⌥9 favorite jump owns the workspace scope now.
+        KeyBinding::new(
+            "secondary-alt-1",
+            SelectProjectsTab { index: 0 },
+            Some("ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-2",
+            SelectProjectsTab { index: 1 },
+            Some("ProjectsPage"),
+        ),
+        // ⌘⌥1–⌘⌥9 apply the nth starred model selection to the composer
+        // session — a draft or an idle task, ordered as in the picker's
+        // favorites section. The terminal keeps every chord as pty input;
+        // the Projects page keeps its own ⌘⌥ tab chords.
+        KeyBinding::new(
+            "secondary-alt-1",
+            SelectFavoriteModel { index: 0 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-2",
+            SelectFavoriteModel { index: 1 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-3",
+            SelectFavoriteModel { index: 2 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-4",
+            SelectFavoriteModel { index: 3 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-5",
+            SelectFavoriteModel { index: 4 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-6",
+            SelectFavoriteModel { index: 5 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-7",
+            SelectFavoriteModel { index: 6 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-8",
+            SelectFavoriteModel { index: 7 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-9",
+            SelectFavoriteModel { index: 8 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        // ⌘E cycles the composer session's reasoning effort through the
+        // current model's ladder.
+        KeyBinding::new(
+            "secondary-e",
+            CycleReasoningEffort,
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own
         // ⌘A and first Escape. The Settings → Git page keeps the same

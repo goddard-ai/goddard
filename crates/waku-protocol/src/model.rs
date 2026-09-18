@@ -664,6 +664,13 @@ pub struct ProviderModel {
 pub struct FavoriteModel {
     pub provider: ProviderKind,
     pub model: String,
+    /// The picker treats a favorite as a model+effort+fast selection, not a
+    /// bare model. `None` predates combo favorites and resolves to the
+    /// model's default effort at match time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
 }
 
 /// One provider-owned agent composition available when a task starts.

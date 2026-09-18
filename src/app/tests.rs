@@ -2800,32 +2800,28 @@ fn model_picker_highlight_wraps_at_both_ends() {
 
 #[test]
 fn model_picker_highlight_seeds_from_the_selected_model() {
-    use super::composer::picker_selected_model_index;
-    use crate::model::ProviderModel;
+    use super::composer::{picker_selected_row_index, visible_picker_rows};
 
-    let models: Vec<(ProviderKind, ProviderModel)> = ["claude-a", "claude-b", "claude-c"]
-        .into_iter()
-        .map(|model| (ProviderKind::Claude, ProviderModel::new(model, model)))
-        .collect();
+    let probes = [
+        picker_probe(ProviderKind::Claude, "claude-a", &[], false),
+        picker_probe(ProviderKind::Claude, "claude-b", &[], false),
+        picker_probe(ProviderKind::Claude, "claude-c", &[], false),
+    ];
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "");
 
-    // The first arrow moves relative to the session's model — the row the
+    // The first arrow moves relative to the session's combo — the row the
     // reveal scrolled into view — rather than jumping to an end.
-    let seed = picker_selected_model_index(ProviderKind::Claude, Some("claude-b"), &models);
+    let selection = (ProviderKind::Claude, "claude-b".to_owned(), None, false);
+    let seed = picker_selected_row_index(Some(&selection), &rows);
     assert_eq!(seed, Some(1));
-    assert_eq!(next_picker_highlight(seed, models.len(), "down"), Some(2));
-    assert_eq!(next_picker_highlight(seed, models.len(), "up"), Some(0));
+    assert_eq!(next_picker_highlight(seed, rows.len(), "down"), Some(2));
+    assert_eq!(next_picker_highlight(seed, rows.len(), "up"), Some(0));
 
-    // A row the list does not contain — another provider's tab, or no
-    // selected model at all — leaves the cursor unseeded so the arrows open
-    // on an edge as before.
-    assert_eq!(
-        picker_selected_model_index(ProviderKind::Codex, Some("claude-b"), &models),
-        None
-    );
-    assert_eq!(
-        picker_selected_model_index(ProviderKind::Claude, None, &models),
-        None
-    );
+    // A combo the list does not contain — another provider's row — leaves
+    // the cursor unseeded so the arrows open on an edge as before.
+    let other = (ProviderKind::Codex, "claude-b".to_owned(), None, false);
+    assert_eq!(picker_selected_row_index(Some(&other), &rows), None);
+    assert_eq!(picker_selected_row_index(None, &rows), None);
 }
 
 #[test]
@@ -2958,8 +2954,7 @@ fn computer_use_navigation_follows_the_experiment_opt_in() {
 
 #[test]
 fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
-    use super::ModelPickerTab;
-    use super::composer::visible_picker_models;
+    use super::composer::visible_picker_rows;
     use crate::model::{FavoriteModel, ProviderModel, ProviderProbe};
 
     let probe = |provider: ProviderKind, model: &str| ProviderProbe {
@@ -2976,59 +2971,30 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
     let favorites = [FavoriteModel {
         provider: ProviderKind::Claude,
         model: "claude-sonnet-5".into(),
+        effort: None,
+        fast: false,
     }];
     let disabled = [ProviderKind::Claude];
 
-    // Provider tab and favorites both stop offering the switched-off provider.
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Provider(ProviderKind::Claude),
-        "",
-    );
-    assert!(models.is_empty());
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Favorites,
-        "",
-    );
-    assert!(models.is_empty());
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Provider(ProviderKind::Codex),
-        "",
-    );
-    assert_eq!(models.len(), 1);
-
-    // Search cannot resurface it either.
-    let models = visible_picker_models(
-        &probes,
-        &favorites,
-        &disabled,
-        None,
-        ModelPickerTab::Provider(ProviderKind::Codex),
-        "claude",
-    );
-    assert!(models.is_empty());
+    // The merged list offers only the provider left switched on — its star
+    // or its search index cannot resurface the other one's rows.
+    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].provider, ProviderKind::Codex);
+    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "claude");
+    assert!(rows.is_empty());
 
     // A session already locked to the provider keeps its models.
-    let models = visible_picker_models(
+    let rows = visible_picker_rows(
         &probes,
         &favorites,
+        &[],
         &disabled,
         Some(ProviderKind::Claude),
-        ModelPickerTab::Provider(ProviderKind::Claude),
         "",
     );
-    assert_eq!(models.len(), 1);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].provider, ProviderKind::Claude);
 }
 
 #[test]
@@ -3045,53 +3011,181 @@ fn model_picker_subtitle_deduplicates_the_provider_name() {
     );
 }
 
-#[test]
-fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
-    use super::ModelPickerTab;
-    use super::composer::visible_picker_tabs;
-    use crate::model::{ProviderModel, ProviderProbe};
-
-    let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
+/// The picker probes a catalog where `model` expands into its own (effort,
+/// tier) rows: `efforts` advertises the ladder, `has_fast` the fast tier.
+fn picker_probe(
+    provider: ProviderKind,
+    model: &str,
+    efforts: &[&str],
+    has_fast: bool,
+) -> crate::model::ProviderProbe {
+    use crate::model::{ProviderModel, ProviderModelOption, ProviderProbe};
+    ProviderProbe {
         provider,
-        installed,
-        path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
-        models: vec![ProviderModel::new("model", "model")],
+        installed: true,
+        path: Some(std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
+        models: vec![ProviderModel {
+            id: model.into(),
+            name: model.into(),
+            name_i18n: None,
+            sub_provider: None,
+            is_default: false,
+            reasoning_efforts: efforts
+                .iter()
+                .map(|effort| ProviderModelOption::new(*effort, *effort))
+                .collect(),
+            default_reasoning_effort: None,
+            service_tiers: has_fast
+                .then(|| ProviderModelOption::new("fast", "Fast"))
+                .into_iter()
+                .collect(),
+            default_service_tier: None,
+            context_windows: Vec::new(),
+            default_context_window: None,
+        }],
         agent_presets: Vec::new(),
-    };
+    }
+}
+
+#[test]
+fn picker_rows_expand_models_into_effort_and_fast_combos() {
+    use super::composer::visible_picker_rows;
+
     let probes = [
-        probe(ProviderKind::Claude, true),
-        probe(ProviderKind::Codex, true),
-        probe(ProviderKind::Cursor, false),
+        picker_probe(ProviderKind::Codex, "gpt", &["low", "high"], true),
+        picker_probe(ProviderKind::Claude, "opus", &["max"], false),
+        // A model with no effort metadata contributes exactly one row.
+        picker_probe(ProviderKind::Cursor, "auto", &[], false),
     ];
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "");
 
-    // Uninstalled providers never join the cycle; favorites leads.
+    assert_eq!(rows.len(), 6);
+    // Provider order first (Claude before Codex in `ProviderKind::ALL`),
+    // then a model's rows in ladder order, standard before fast.
+    let combos: Vec<_> = rows
+        .iter()
+        .map(|row| (row.effort.as_deref(), row.fast))
+        .collect();
     assert_eq!(
-        visible_picker_tabs(&probes, &[], None),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Claude),
-            ModelPickerTab::Provider(ProviderKind::Codex),
+        combos,
+        [
+            (Some("max"), false),
+            (Some("low"), false),
+            (Some("low"), true),
+            (Some("high"), false),
+            (Some("high"), true),
+            (None, false),
         ]
     );
-
-    // Switched-off providers leave the cycle like they leave the rail.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[ProviderKind::Claude], None),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Codex),
-        ]
+    assert!(
+        rows.iter()
+            .any(|row| row.provider == ProviderKind::Cursor && row.effort.is_none())
     );
 
-    // A locked session cycles between favorites and its own provider only,
-    // even when that provider was switched off after the session started.
+    // Effort ids and the fast flag are searchable.
+    let fast_rows = visible_picker_rows(&probes, &[], &[], &[], None, "fast");
+    assert_eq!(fast_rows.len(), 2);
+    assert!(fast_rows.iter().all(|row| row.fast));
+    let high_rows = visible_picker_rows(&probes, &[], &[], &[], None, "high");
+    assert_eq!(high_rows.len(), 2);
+}
+
+#[test]
+fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
+    use super::composer::visible_picker_rows;
+    use crate::model::FavoriteModel;
+    use crate::persistence::RecentModelUse;
+
+    // One effort-less model per provider keeps the ordering readable.
+    let probes = [
+        picker_probe(ProviderKind::Claude, "opus", &[], false),
+        picker_probe(ProviderKind::Codex, "gpt", &[], false),
+        picker_probe(ProviderKind::Cursor, "auto", &[], false),
+    ];
+    let favorites = [
+        FavoriteModel {
+            provider: ProviderKind::Cursor,
+            model: "auto".into(),
+            effort: None,
+            fast: false,
+        },
+        FavoriteModel {
+            provider: ProviderKind::Claude,
+            model: "opus".into(),
+            effort: None,
+            fast: false,
+        },
+    ];
+    let recents = [RecentModelUse {
+        provider: ProviderKind::Codex,
+        model: "gpt".into(),
+        effort: None,
+        fast: false,
+        used_at: 0,
+    }];
+
+    let rows = visible_picker_rows(&probes, &favorites, &recents, &[], None, "");
+    let order: Vec<ProviderKind> = rows.iter().map(|row| row.provider).collect();
+    // Favorites lead in their stored order, then the recent, then the rest.
     assert_eq!(
-        visible_picker_tabs(&probes, &[ProviderKind::Claude], Some(ProviderKind::Claude)),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Claude),
+        order,
+        [
+            ProviderKind::Cursor,
+            ProviderKind::Claude,
+            ProviderKind::Codex
         ]
     );
+    assert_eq!(rows[0].favorite_index, Some(0));
+    assert_eq!(rows[1].favorite_index, Some(1));
+    assert_eq!(rows[2].recent_rank, Some(0));
+}
+
+#[test]
+fn picker_rows_give_recency_to_the_fast_variant_last_started() {
+    use super::composer::visible_picker_rows;
+    use crate::persistence::RecentModelUse;
+
+    let probes = [picker_probe(ProviderKind::Codex, "gpt", &["high"], true)];
+    // The stored entry says the last `gpt-high` run was on the fast tier, so
+    // only that row may carry the rank — the standard twin sorts as unused.
+    let recents = [RecentModelUse {
+        provider: ProviderKind::Codex,
+        model: "gpt".into(),
+        effort: Some("high".into()),
+        fast: true,
+        used_at: 0,
+    }];
+
+    let rows = visible_picker_rows(&probes, &[], &recents, &[], None, "");
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].fast);
+    assert_eq!(rows[0].recent_rank, Some(0));
+    assert_eq!(rows[1].recent_rank, None);
+}
+
+#[test]
+fn picker_rows_match_a_bare_legacy_favorite_to_the_default_effort_row() {
+    use super::composer::visible_picker_rows;
+    use crate::model::FavoriteModel;
+
+    let mut probe = picker_probe(ProviderKind::Codex, "gpt", &["low", "high"], true);
+    probe.models[0].default_reasoning_effort = Some("high".into());
+    let probes = [probe];
+    // A favorite written before rows were combos carries no effort or tier:
+    // it claims the model's default-effort row on the standard tier.
+    let favorites = [FavoriteModel {
+        provider: ProviderKind::Codex,
+        model: "gpt".into(),
+        effort: None,
+        fast: false,
+    }];
+
+    let rows = visible_picker_rows(&probes, &favorites, &[], &[], None, "");
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0].favorite_index, Some(0));
+    assert_eq!(rows[0].effort.as_deref(), Some("high"));
+    assert!(!rows[0].fast);
+    assert!(rows[1..].iter().all(|row| row.favorite_index.is_none()));
 }
 
 #[test]
@@ -3142,8 +3236,8 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
 }
 
 #[test]
-fn the_rail_draws_only_installed_providers_the_settings_left_on() {
-    use super::composer::picker_rail_shows_provider;
+fn the_list_draws_only_installed_providers_the_settings_left_on() {
+    use super::composer::picker_lists_provider;
     use crate::model::{ProviderModel, ProviderProbe};
 
     let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
@@ -3161,31 +3255,31 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
 
     // An undetected CLI and a switched-off provider both leave the rail
     // outright, rather than sitting in it dimmed.
-    assert!(!picker_rail_shows_provider(
+    assert!(!picker_lists_provider(
         &probes,
         &[],
         None,
         ProviderKind::Cursor
     ));
-    assert!(!picker_rail_shows_provider(
+    assert!(!picker_lists_provider(
         &probes,
         &[ProviderKind::Claude],
         None,
         ProviderKind::Claude
     ));
 
-    // A provider only the *current* session locks out stays drawn: that is a
+    // A provider only the *current* session locks out stays listed: that is a
     // fact about this session, not about what the user configured.
-    assert!(picker_rail_shows_provider(
+    assert!(picker_lists_provider(
         &probes,
         &[],
         Some(ProviderKind::Codex),
         ProviderKind::Claude
     ));
 
-    // ...and the locked session keeps its own tab even once it is switched
+    // ...and the locked session keeps its rows even once it is switched
     // off, since the picker is its only route to another model.
-    assert!(picker_rail_shows_provider(
+    assert!(picker_lists_provider(
         &probes,
         &[ProviderKind::Claude],
         Some(ProviderKind::Claude),
@@ -3290,7 +3384,14 @@ fn workspace_subject_follows_the_overlay_composer() {
 
     // Overlay closed: the selection, exactly like before.
     assert_eq!(
-        workspace_subject_for(false, None, Some(selected_id), Some(project_a), None, &sessions),
+        workspace_subject_for(
+            false,
+            None,
+            Some(selected_id),
+            Some(project_a),
+            None,
+            &sessions
+        ),
         (Some(selected_id), Some(project_a))
     );
 
