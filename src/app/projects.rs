@@ -2024,6 +2024,7 @@ impl Waku {
                                 })
                                 .unwrap_or_else(|| div().into_any_element())
                         })
+                        .pb(px(32.0))
                         .size_full(),
                     )
                     .child(scrollbar::vertical(&list_state, &scrollbar)),
@@ -3085,7 +3086,6 @@ impl Waku {
             .flex_1()
             .min_h_0()
             .w_full()
-            .pb(px(32.0))
             .flex()
             .flex_col()
             .on_action(cx.listener(Self::select_all_git_rows_action))
