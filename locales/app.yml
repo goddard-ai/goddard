@@ -2752,6 +2752,8 @@ git_panel.landing_onto:
   en: "Landing onto %{base}…"
 git_panel.landed:
   en: Landed on %{base}
+git_panel.land_local_checkout:
+  en: This task works directly in the project checkout — there's nothing to land
 git_panel.already_landed:
   en: "%{base} already contains every commit here"
 git_panel.land_conflict_description:

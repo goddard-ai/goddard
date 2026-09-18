@@ -1457,6 +1457,7 @@ git_panel.land_onto: 合入 %{base}
 git_panel.landing: 正在合入…
 git_panel.landing_onto: "正在合入 %{base}…"
 git_panel.landed: 已合入 %{base}
+git_panel.land_local_checkout: 此任务直接在项目检出目录中工作，没有需要合入的内容
 git_panel.already_landed: "%{base} 已包含此处的所有提交"
 git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
 git_panel.resolve_land_rebase_prompt: "此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"

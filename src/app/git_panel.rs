@@ -1155,7 +1155,16 @@ impl Waku {
         };
         let base = match &session.workspace {
             SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
-            _ => None,
+            // A local checkout has no base to land on — say so plainly
+            // instead of letting the daemon's "no base branch" error toast.
+            _ => {
+                self.show_toast_with_tone(
+                    tr!("git_panel.land_local_checkout"),
+                    ToastTone::Notice,
+                    None,
+                );
+                return;
+            }
         };
         let Some(workspace) = self
             .workspace_path_for_session(session)
