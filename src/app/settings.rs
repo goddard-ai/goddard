@@ -176,10 +176,13 @@ pub(super) struct RemoteHostEditor {
 /// already be trimmed and lowercased; when it is empty every page matches.
 pub(super) fn visible_settings_pages(
     query: &str,
+    computer_use_experiment_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
-        .filter(|(page, ..)| page.is_visible_in_navigation())
+        .filter(move |(page, ..)| {
+            page.is_visible_in_navigation(computer_use_experiment_enabled)
+        })
         .filter_map(move |(page, label_key, icon, keywords_key)| {
             let label = crate::i18n::translate(label_key);
             let keywords = crate::i18n::translate(keywords_key).to_lowercase();
@@ -255,7 +258,9 @@ impl Waku {
         let query = self.settings_search_query(cx);
         let mut navigation = div().flex().flex_col().gap(px(3.0));
 
-        for (page, label, icon_path) in visible_settings_pages(&query) {
+        for (page, label, icon_path) in
+            visible_settings_pages(&query, self.state.computer_use_experiment_enabled)
+        {
             let selected = current_page == page;
             navigation = navigation.child(
                 div()
@@ -363,7 +368,7 @@ impl Waku {
     /// from whichever end matches the key.
     fn cycle_settings_page(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.settings_search_query(cx);
-        let pages = visible_settings_pages(&query)
+        let pages = visible_settings_pages(&query, self.state.computer_use_experiment_enabled)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>();
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
@@ -422,7 +427,13 @@ impl Waku {
 
     fn render_settings_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let page = self.settings_page.unwrap_or(SettingsPage::General);
+        // A persisted page whose navigation gate closed (e.g. the Computer
+        // Use experiment was switched back off) falls back to General instead
+        // of rendering a surface the sidebar no longer lists.
+        let page = self
+            .settings_page
+            .unwrap_or(SettingsPage::General)
+            .into_visible(self.state.computer_use_experiment_enabled);
         let right_window_controls = self.render_client_window_controls(
             super::window_chrome::WindowControlSide::Right,
             window,
@@ -3081,8 +3092,8 @@ impl Waku {
     }
 
     /// The Experiments page: one opt-in card per unfinished feature, each
-    /// defaulting off. Subagents is daemon-owned — its flag travels with the
-    /// daemon settings `save()` already syncs.
+    /// defaulting off. Subagents and Computer Use are daemon-owned — their
+    /// flags travel with the daemon settings `save()` already syncs.
     fn render_experiments_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         div()
@@ -3152,6 +3163,17 @@ impl Waku {
                         theme,
                         cx,
                         |this, enabled, cx| this.set_subagents_enabled(enabled, cx),
+                    ))
+                    .child(self.experiment_card(
+                        "computer-use-experiment-toggle",
+                        "experiments.computer_use_title",
+                        "experiments.computer_use_description",
+                        self.state.computer_use_experiment_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| {
+                            this.set_computer_use_experiment_enabled(enabled, cx)
+                        },
                     )),
             )
             .into_any_element()
@@ -3243,6 +3265,18 @@ impl Waku {
 
     fn set_subagents_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.subagents_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The Computer Use experiment opt-in also decides whether its dedicated
+    /// settings page appears in navigation. Disabling the experiment turns the
+    /// feature flag itself off so new sessions stop registering the Cua bridge.
+    fn set_computer_use_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.computer_use_experiment_enabled = enabled;
+        if !enabled {
+            self.state.computer_use_enabled = false;
+        }
         self.save();
         cx.notify();
     }
@@ -6032,7 +6066,7 @@ impl Waku {
 
     pub(super) fn request_computer_permissions(&mut self, prompt: bool, cx: &mut Context<Self>) {
         if !cfg!(target_os = "macos")
-            || !crate::computer_use::is_available()
+            || !self.state.computer_use_experiment_enabled
             || self.computer_permission_request_pending
         {
             return;

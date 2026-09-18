@@ -33,6 +33,10 @@ pub struct SubagentTier {
 #[serde(default)]
 pub struct DaemonSettings {
     pub computer_use_enabled: bool,
+    /// Experimental opt-in that exposes Computer Use at all: its settings
+    /// page, permission probing, and driver helper all stay off while this
+    /// is off. Defaults on in development builds, opt-in in release builds.
+    pub computer_use_experiment_enabled: bool,
     pub computer_use_allowed_apps: Vec<ComputerAppGrant>,
     /// Whether agents running inside this daemon's provider sessions may
     /// create and prompt other Waku tasks through the scoped agent
@@ -77,6 +81,7 @@ impl Default for DaemonSettings {
     fn default() -> Self {
         Self {
             computer_use_enabled: false,
+            computer_use_experiment_enabled: default_experiment_enabled(),
             computer_use_allowed_apps: Vec::new(),
             agent_tools_enabled: false,
             agent_settings_enabled: true,

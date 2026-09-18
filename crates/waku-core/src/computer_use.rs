@@ -22,7 +22,7 @@ const MAX_HELPER_OUTPUT_BYTES: usize = 24 * 1024 * 1024;
 
 pub use waku_protocol::computer_use::{
     ComputerAppGrant, ComputerPermissions, ComputerTarget, ComputerUsePhase, ComputerUseState,
-    is_available, resolve_enabled,
+    resolve_enabled,
 };
 
 #[derive(Clone, Debug)]
@@ -133,11 +133,6 @@ struct HelperResponse {
 
 #[cfg(target_os = "macos")]
 pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
-    // A release daemon never installs or launches the helper app, not even to
-    // read permission status, so production never opens its TCC prompts.
-    if !is_available() {
-        bail!("Goddard Computer Use is not available in this build");
-    }
     let operation = if prompt {
         json!({"operation": "requestPermissions"})
     } else {

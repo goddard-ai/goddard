@@ -2849,42 +2849,42 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     use super::SettingsPage;
 
     let pages = |query: &str| {
-        visible_settings_pages(query)
+        visible_settings_pages(query, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };
 
     // An empty query keeps every page in sidebar order, so the arrows cycle
     // the full navigation even before anything is typed.
-    let mut all_pages = vec![
-        SettingsPage::General,
+    let mut all_pages = vec![SettingsPage::General];
+    if crate::keybindings::manager_enabled() {
+        all_pages.push(SettingsPage::Keybindings);
+    }
+    all_pages.extend([
         SettingsPage::Appearance,
         SettingsPage::Providers,
         SettingsPage::Skills,
+        SettingsPage::Friends,
         SettingsPage::Archived,
         SettingsPage::Git,
         SettingsPage::Commands,
         SettingsPage::Usage,
         SettingsPage::Daemon,
-    ];
-    if cfg!(debug_assertions) {
-        all_pages.push(SettingsPage::ComputerUse);
-    }
-    all_pages.push(SettingsPage::Experiments);
+        SettingsPage::ComputerUse,
+        SettingsPage::Experiments,
+    ]);
     assert_eq!(pages(""), all_pages);
 
     assert_eq!(pages("theme"), vec![SettingsPage::Appearance]);
     assert_eq!(pages("skill"), vec![SettingsPage::Skills]);
 
     // A keyword shared across pages keeps them all reachable.
-    let mut codex_pages = vec![
+    let codex_pages = vec![
         SettingsPage::Providers,
         SettingsPage::Skills,
         SettingsPage::Usage,
+        SettingsPage::ComputerUse,
     ];
-    if cfg!(debug_assertions) {
-        codex_pages.push(SettingsPage::ComputerUse);
-    }
     assert_eq!(pages("codex"), codex_pages);
 
     assert_eq!(pages("no such setting"), vec![]);
@@ -2933,14 +2933,23 @@ fn archived_filter_matches_titles_and_projects() {
 }
 
 #[test]
-fn computer_use_navigation_is_debug_only() {
+fn computer_use_navigation_follows_the_experiment_opt_in() {
     use super::SettingsPage;
 
-    assert!(SettingsPage::General.is_visible_in_navigation());
-    assert_eq!(
-        SettingsPage::ComputerUse.is_visible_in_navigation(),
-        cfg!(debug_assertions)
-    );
+    assert!(SettingsPage::General.is_visible_in_navigation(false));
+    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false));
+    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true));
+
+    // The experiment flag also removes the page from search results.
+    let pages = |query: &str, enabled: bool| {
+        visible_settings_pages(query, enabled)
+            .map(|(page, ..)| page)
+            .collect::<Vec<_>>()
+    };
+    assert!(!pages("", false).contains(&SettingsPage::ComputerUse));
+    assert!(pages("", true).contains(&SettingsPage::ComputerUse));
+    assert!(!pages("codex", false).contains(&SettingsPage::ComputerUse));
+    assert!(pages("codex", true).contains(&SettingsPage::ComputerUse));
 }
 
 #[test]

@@ -971,6 +971,10 @@ pub struct PersistedState {
     pub fullscreen_surface: Option<PersistedFullscreenSurface>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
+    /// Experimental opt-in gating Computer Use entirely. Daemon-owned;
+    /// mirrored here so clients can render the toggle and the gated page.
+    #[serde(default = "default_experiment_enabled")]
+    pub computer_use_experiment_enabled: bool,
     #[serde(default)]
     pub computer_use_allowed_apps: Vec<ComputerAppGrant>,
     #[serde(default)]
@@ -1086,6 +1090,7 @@ impl PersistedState {
             right_panel_sessions: HashMap::new(),
             fullscreen_surface: None,
             computer_use_enabled: false,
+            computer_use_experiment_enabled: default_experiment_enabled(),
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
@@ -1235,6 +1240,7 @@ impl PersistedState {
     pub fn daemon_settings(&self) -> DaemonSettings {
         DaemonSettings {
             computer_use_enabled: self.computer_use_enabled,
+            computer_use_experiment_enabled: self.computer_use_experiment_enabled,
             computer_use_allowed_apps: self.computer_use_allowed_apps.clone(),
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
@@ -1252,11 +1258,8 @@ impl PersistedState {
     /// replaces the local mirror — including an empty list after another
     /// client or an agent removed the last one.
     pub fn apply_daemon_settings(&mut self, settings: DaemonSettings) {
-        // Computer Use is experimental, so a release build must not let a
-        // setting written by a development build leave this client believing
-        // it is on.
-        self.computer_use_enabled =
-            crate::computer_use::resolve_enabled(settings.computer_use_enabled);
+        self.computer_use_enabled = settings.computer_use_enabled;
+        self.computer_use_experiment_enabled = settings.computer_use_experiment_enabled;
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;

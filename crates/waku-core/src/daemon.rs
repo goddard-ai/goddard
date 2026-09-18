@@ -594,6 +594,11 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::PlanUsage { usage })
             }
             Command::ProbeComputerPermissions { prompt } => {
+                // Probing installs and launches the helper app, so it obeys
+                // the same experiment opt-in as starting a runtime.
+                if !self.settings.get().computer_use_experiment_enabled {
+                    bail!("Goddard Computer Use is not enabled in this daemon's settings");
+                }
                 Ok(ResponsePayload::ComputerPermissions {
                     permissions: crate::computer_use::probe_permissions(prompt)?,
                 })
@@ -2166,6 +2171,13 @@ impl WakuBackend {
         // daemon address disables injection for this launch only. Either
         // agent surface — task tools or settings writes — gets it injected.
         let daemon_settings = self.settings.get();
+        // Computer Use is experimental: the enable flag only counts while the
+        // experiment opt-in is on, whatever a client or a hand-edited settings
+        // document sent over the wire.
+        options.computer_use_enabled = crate::computer_use::resolve_enabled(
+            options.computer_use_enabled,
+            daemon_settings.computer_use_experiment_enabled,
+        );
         if daemon_settings.agent_tools_enabled || daemon_settings.agent_settings_enabled {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),

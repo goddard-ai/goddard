@@ -9,10 +9,14 @@ Use `jsRepl.write(value)` for output and `await jsRepl.emitImage(image)` for
 images. Tool schemas, capture, accessibility, input, and authorization come
 from Cua.
 The previous `sky` API and custom macOS action engine have been removed.
-Computer Use is a development-only feature. Debug builds expose its settings
-page and honor the enable flag; release builds clamp that flag before any
-driver starts, and the REPL refuses to launch the helper, so no production
-build registers the `cua` bridge, attaches the skill, or reaches the SDK.
+Computer Use is gated by the **Computer Use** experiment on Settings →
+Experiments. The opt-in defaults on in development builds (`bun run dev`) and
+is off in release builds until the user enables it. While the experiment is
+off the Computer Use settings page stays hidden, the daemon refuses to probe
+helper permissions, and `spawn_runtime` clamps `computer_use_enabled` before
+any driver starts — so nothing registers the `cua` bridge, attaches the
+skill, or reaches the SDK. Turning the experiment off also turns the
+Computer Use enable flag itself off.
 
 ## Processes and lifetime
 

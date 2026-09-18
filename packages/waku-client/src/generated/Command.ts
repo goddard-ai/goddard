@@ -30,13 +30,6 @@ export type Command = { "type": "attachSession" } | { "type": "start", options: 
  */
 turnId?: string | null, messageId?: string | null,
 /**
- * Structured attachments staged with the submission. Their daemon-
- * host paths are already named by the `@mention` text folded into
- * `prompt`; drivers that accept binary content (image parts) read
- * the files themselves, and text-only drivers ignore this list.
- */
-attachments?: Array<MessageAttachment>,
-/**
  * The prompt is provider-facing only — the internal nudge a
  * "continue" sends to an interrupted session. No client renders a
  * transcript row for it.

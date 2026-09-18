@@ -284,7 +284,7 @@ settings.commands_keywords:
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:
-  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page
+  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page computer use
 settings.experiments_description:
   en: Unfinished features you can try early. Each is off by default, may change or disappear, and can be turned off at any time.
 settings.archived:
@@ -459,6 +459,10 @@ experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:
   en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Applies to sessions started after turning it on.
+experiments.computer_use_title:
+  en: Computer Use
+experiments.computer_use_description:
+  en: Reveal the Computer Use settings page and let sessions drive Cua Driver capture and input through the bundled helper. Turning it off also turns Computer Use itself off.
 daemon.not_configured:
   en: Not configured
 daemon.status:

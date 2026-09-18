@@ -972,12 +972,6 @@ impl Drop for RequestWatchdog {
 
 impl HelperConnection {
     fn start(deadline: Option<Instant>, config: Option<&SessionConfig>) -> anyhow::Result<Self> {
-        // The SDK host ships in every bundle, but only development builds may
-        // run it. Refusing here means a release build never reaches the SDK
-        // even when GODDARD_COMPUTER_USE_SERVER is set by hand.
-        if !waku_protocol::computer_use::is_available() {
-            bail!("Goddard Computer Use is not available in this build");
-        }
         let command = config
             .map(|config| config.server_path.clone())
             .or_else(|| std::env::var_os("GODDARD_COMPUTER_USE_SERVER").map(PathBuf::from))

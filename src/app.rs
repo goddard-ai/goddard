@@ -270,14 +270,25 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use is still experimental, so only development builds expose
-    /// its navigation entry points. Keeping this decision on the page itself
-    /// makes the Settings sidebar and command palette use the same gate.
-    fn is_visible_in_navigation(self) -> bool {
+    /// Computer Use is still experimental, so its navigation entry points
+    /// only appear once the Experiments opt-in is on. Keeping this decision
+    /// on the page itself makes the Settings sidebar and command palette use
+    /// the same gate.
+    fn is_visible_in_navigation(self, computer_use_experiment_enabled: bool) -> bool {
         match self {
-            Self::ComputerUse => crate::computer_use::is_available(),
+            Self::ComputerUse => computer_use_experiment_enabled,
             Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
+        }
+    }
+
+    /// A persisted page whose navigation gate closed falls back to General
+    /// rather than rendering a surface the sidebar no longer lists.
+    fn into_visible(self, computer_use_experiment_enabled: bool) -> Self {
+        if self.is_visible_in_navigation(computer_use_experiment_enabled) {
+            self
+        } else {
+            Self::General
         }
     }
 }
@@ -3586,7 +3597,7 @@ impl Waku {
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
         #[cfg(target_os = "macos")]
-        if crate::computer_use::is_available() {
+        if state.computer_use_experiment_enabled {
             let computer_permission_tx = computer_permission_tx.clone();
             let event_wake = event_wake_tx.clone();
             let daemon = daemon.client();

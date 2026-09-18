@@ -5,7 +5,13 @@ import type { ProviderKind } from "./ProviderKind";
 import type { SubagentTier } from "./SubagentTier";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type DaemonSettings = { computer_use_enabled: boolean, computer_use_allowed_apps: Array<ComputerAppGrant>,
+export type DaemonSettings = { computer_use_enabled: boolean,
+/**
+ * Experimental opt-in that exposes Computer Use at all: its settings
+ * page, permission probing, and driver helper all stay off while this
+ * is off. Defaults on in development builds, opt-in in release builds.
+ */
+computer_use_experiment_enabled: boolean, computer_use_allowed_apps: Array<ComputerAppGrant>,
 /**
  * Whether agents running inside this daemon's provider sessions may
  * create and prompt other Waku tasks through the scoped agent
@@ -29,7 +35,8 @@ agent_settings_enabled: boolean,
 custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
 /**
  * Experimental: inject named subagents into every session's harness.
- * Off by default; toggling affects only sessions started afterwards.
+ * Off by default in release builds, on in debug builds (`bun run dev`);
+ * toggling affects only sessions started afterwards.
  */
 subagents_enabled: boolean,
 /**
