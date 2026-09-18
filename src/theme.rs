@@ -64,30 +64,32 @@ fn wash(color: u32, alpha: f32) -> Hsla {
 }
 
 /// Border-tier floors, in contrast ratios. Normal mode spaces the tiers in
-/// quarter-ratio steps — chrome stays quiet by default. High-contrast mode
-/// widens the steps to half a ratio, restoring the ladder where
-/// `border_strong` — the outline on interactive controls — carries WCAG
-/// 2.2 §1.4.11's 3:1 non-text floor. `separator` holds 1.5:1 in both:
-/// visible but clearly subordinate, roughly GitHub's border-muted weight.
-const SEPARATOR_CONTRAST: f32 = 1.5;
-const BORDER_SUBTLE_CONTRAST: f32 = 1.75;
-const BORDER_CONTRAST: f32 = 2.0;
-const BORDER_STRONG_CONTRAST: f32 = 2.25;
-const HIGH_CONTRAST_SUBTLE: f32 = 2.0;
-const HIGH_CONTRAST_BORDER: f32 = 2.5;
+/// 0.2-ratio steps starting at a hairline 1.4 — chrome stays quiet by
+/// default. High-contrast mode lifts the whole ladder and spaces it in 0.4
+/// steps up to `border_strong` — the outline on interactive controls —
+/// carrying WCAG 2.2 §1.4.11's 3:1 non-text floor, so even decorative rules
+/// stay legible when the user asks for contrast.
+const SEPARATOR_CONTRAST: f32 = 1.4;
+const BORDER_SUBTLE_CONTRAST: f32 = 1.6;
+const BORDER_CONTRAST: f32 = 1.8;
+const BORDER_STRONG_CONTRAST: f32 = 2.0;
+const HIGH_CONTRAST_SEPARATOR: f32 = 1.8;
+const HIGH_CONTRAST_SUBTLE: f32 = 2.2;
+const HIGH_CONTRAST_BORDER: f32 = 2.6;
 const HIGH_CONTRAST_STRONG: f32 = 3.0;
 
-/// The active mode's floors: (subtle, border, strong). `separator` is
-/// mode-independent.
-fn border_floors() -> (f32, f32, f32) {
+/// The active mode's floors: (separator, subtle, border, strong).
+fn border_floors() -> (f32, f32, f32, f32) {
     if high_contrast() {
         (
+            HIGH_CONTRAST_SEPARATOR,
             HIGH_CONTRAST_SUBTLE,
             HIGH_CONTRAST_BORDER,
             HIGH_CONTRAST_STRONG,
         )
     } else {
         (
+            SEPARATOR_CONTRAST,
             BORDER_SUBTLE_CONTRAST,
             BORDER_CONTRAST,
             BORDER_STRONG_CONTRAST,
@@ -342,8 +344,8 @@ impl Theme {
         ]
         .map(rgb);
         let border_pairs = surfaces.map(|surface| (surface, surface));
-        let (subtle_c, border_c, strong_c) = border_floors();
-        let separator = contrast_wash(neutral, spec.is_dark, &border_pairs, SEPARATOR_CONTRAST);
+        let (separator_c, subtle_c, border_c, strong_c) = border_floors();
+        let separator = contrast_wash(neutral, spec.is_dark, &border_pairs, separator_c);
         let border_subtle = contrast_wash(neutral, spec.is_dark, &border_pairs, subtle_c);
         let border = contrast_wash(neutral, spec.is_dark, &border_pairs, border_c);
         let border_strong = contrast_wash(neutral, spec.is_dark, &border_pairs, strong_c);
@@ -1465,7 +1467,7 @@ mod tests {
             // `set_high_contrast`, which ORs in the host OS's own setting and
             // would make the mode under test machine-dependent.
             HIGH_CONTRAST.store(hc, Ordering::Relaxed);
-            let (subtle, border, strong) = border_floors();
+            let (separator, subtle, border, strong) = border_floors();
             for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {
                 let theme = theme_named(name);
                 let surfaces = [
@@ -1481,7 +1483,7 @@ mod tests {
                 // f32 solve noise sits under the floor by ~1e-6; the epsilon
                 // keeps the assert on the intent, not the rounding.
                 for (token, line, target) in [
-                    ("separator", theme.separator, SEPARATOR_CONTRAST),
+                    ("separator", theme.separator, separator),
                     ("border_subtle", theme.border_subtle, subtle),
                     ("border", theme.border, border),
                     ("border_strong", theme.border_strong, strong),
