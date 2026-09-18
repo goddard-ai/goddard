@@ -3,6 +3,7 @@
 //! from the daemon's `friendsChanged` document; this file only renders it
 //! and sends commands.
 
+use super::settings::{SettingSearch, settings_search_text};
 use super::*;
 use waku_client::friends::{TransferDirection, TransferInfo, TransferStatus};
 
@@ -66,7 +67,11 @@ impl Waku {
             }))
     }
 
-    pub(super) fn render_friends_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_friends_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let friends = &self.friends_state;
 
@@ -74,88 +79,122 @@ impl Waku {
         let code = friends.friend_code.clone();
         let copy_feedback = "friend-code";
         let code_copied = self.control_was_copied(copy_feedback);
-        let code_card = self.friends_card(
-            &theme,
-            [
-                self.friends_section_title(&theme, tr!("friends.your_code")).into_any_element(),
-                div()
-                    .mt(px(5.0))
-                    .text_size(sp(12.5))
-                    .line_height(sp(18.0))
-                    .text_color(theme.text_secondary)
-                    .child(tr!("friends.code_hint"))
-                    .into_any_element(),
-                div()
-                    .mt(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
+        let code_card = {
+            let title = tr!("friends.your_code");
+            let hint = tr!("friends.code_hint");
+            search
+                .matched(&title, &hint)
+                .map(|(title_ranges, hint_ranges)| {
+                    let mut children: Vec<AnyElement> = vec![
                         div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_size(sp(12.0))
-                            .font_family(crate::fonts::current(cx).code)
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(code.clone()),
-                    )
-                    .child(
-                        self.friends_button(
-                            "copy-friend-code",
-                            if code_copied {
-                                tr!("common.copied")
-                            } else {
-                                tr!("common.copy")
-                            },
-                            &theme,
-                            move |this, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
-                                this.show_control_copied(copy_feedback, cx);
-                            },
-                            cx,
-                        ),
-                    )
-                    .into_any_element(),
-            ],
-        );
+                            .child(settings_search_text(title, title_ranges, theme))
+                            .into_any_element(),
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(settings_search_text(hint, hint_ranges, theme))
+                            .into_any_element(),
+                    ];
+                    if !search.active() {
+                        children.push(
+                            div()
+                                .mt(px(10.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .text_size(sp(12.0))
+                                        .font_family(crate::fonts::current(cx).code)
+                                        .text_color(theme.text)
+                                        .child(code.clone()),
+                                )
+                                .child(self.friends_button(
+                                    "copy-friend-code",
+                                    if code_copied {
+                                        tr!("common.copied")
+                                    } else {
+                                        tr!("common.copy")
+                                    },
+                                    &theme,
+                                    move |this, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            code.clone(),
+                                        ));
+                                        this.show_control_copied(copy_feedback, cx);
+                                    },
+                                    cx,
+                                ))
+                                .into_any_element(),
+                        );
+                    }
+                    self.friends_card(&theme, children)
+                })
+        };
 
         // -- Add friend ------------------------------------------------------
         let code_input = self.friend_code_input.read(cx).content().trim().to_string();
         let can_send = code_input.starts_with("gfr-");
-        let add_card = self.friends_card(
-            &theme,
-            [
-                self.friends_section_title(&theme, tr!("friends.add_friend")).into_any_element(),
-                div()
-                    .mt(px(5.0))
-                    .text_size(sp(12.5))
-                    .line_height(sp(18.0))
-                    .text_color(theme.text_secondary)
-                    .child(tr!("friends.add_hint"))
-                    .into_any_element(),
-                div()
-                    .mt(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        TextField::new("friend-code-field", self.friend_code_input.clone())
-                            .w_full(),
-                    )
-                    .child(
-                        self.friends_button(
-                            "send-friend-request",
-                            tr!("friends.send_request"),
-                            &theme,
-                            move |this, cx| this.send_friend_request(cx),
-                            cx,
-                        )
-                        .opacity(if can_send { 1.0 } else { 0.55 }),
-                    )
-                    .into_any_element(),
-            ],
-        );
+        let add_card =
+            {
+                let title = tr!("friends.add_friend");
+                let hint = tr!("friends.add_hint");
+                search
+                    .matched(&title, &hint)
+                    .map(|(title_ranges, hint_ranges)| {
+                        let mut children: Vec<AnyElement> = vec![
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(title, title_ranges, theme))
+                                .into_any_element(),
+                            div()
+                                .mt(px(5.0))
+                                .text_size(sp(12.5))
+                                .line_height(sp(18.0))
+                                .text_color(theme.text_secondary)
+                                .child(settings_search_text(hint, hint_ranges, theme))
+                                .into_any_element(),
+                        ];
+                        if !search.active() {
+                            children.push(
+                                div()
+                                    .mt(px(10.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        TextField::new(
+                                            "friend-code-field",
+                                            self.friend_code_input.clone(),
+                                        )
+                                        .w_full(),
+                                    )
+                                    .child(
+                                        self.friends_button(
+                                            "send-friend-request",
+                                            tr!("friends.send_request"),
+                                            &theme,
+                                            move |this, cx| this.send_friend_request(cx),
+                                            cx,
+                                        )
+                                        .opacity(if can_send { 1.0 } else { 0.55 }),
+                                    )
+                                    .into_any_element(),
+                            );
+                        }
+                        self.friends_card(&theme, children)
+                    })
+            };
 
         // -- Pending requests -------------------------------------------------
         let mut request_cards = Vec::new();
@@ -165,6 +204,9 @@ impl Waku {
             let short = short_node_id(&request.node_id);
             let accept_id = node_id.clone();
             let decline_id = node_id.clone();
+            let Some((name_ranges, _)) = search.matched(&format!("{name} · {short}"), "") else {
+                continue;
+            };
             request_cards.push(
                 div()
                     .mt(px(10.0))
@@ -175,12 +217,13 @@ impl Waku {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.0))
-                                    .text_color(theme.text)
-                                    .child(format!("{name} · {short}")),
-                            )
+                            .child(div().text_size(sp(13.0)).text_color(theme.text).child(
+                                settings_search_text(
+                                    format!("{name} · {short}"),
+                                    name_ranges,
+                                    theme,
+                                ),
+                            ))
                             .child(
                                 div()
                                     .text_size(sp(11.5))
@@ -223,6 +266,15 @@ impl Waku {
         }
         for request in &friends.outgoing_requests {
             let withdraw_id = request.node_id.clone();
+            if search
+                .matched(
+                    &format!("{} · {}", request.name, short_node_id(&request.node_id)),
+                    "",
+                )
+                .is_none()
+            {
+                continue;
+            }
             request_cards.push(
                 div()
                     .mt(px(10.0))
@@ -271,13 +323,14 @@ impl Waku {
             };
             let mut meta = status.to_string();
             if let Some(last_seen_ms) = friend.last_seen_ms {
-                let ago = format_time_ago(
-                    unix_time_millis().saturating_sub(last_seen_ms) / 1_000,
-                );
+                let ago = format_time_ago(unix_time_millis().saturating_sub(last_seen_ms) / 1_000);
                 meta = format!("{meta} · {}", tr!("friends.last_seen", ago = ago));
             }
             let send_id = node_id.clone();
             let remove_id = node_id.clone();
+            let Some((name_ranges, _)) = search.matched(&friend.name, "") else {
+                continue;
+            };
             friend_rows.push(
                 div()
                     .id(SharedString::from(format!("friend-row-{node_id}")))
@@ -285,23 +338,14 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(
-                        div()
-                            .size(px(8.0))
-                            .rounded_full()
-                            .flex_none()
-                            .bg(dot_color),
-                    )
+                    .child(div().size(px(8.0)).rounded_full().flex_none().bg(dot_color))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.0))
-                                    .text_color(theme.text)
-                                    .child(friend.name.clone()),
-                            )
+                            .child(div().text_size(sp(13.0)).text_color(theme.text).child(
+                                settings_search_text(friend.name.clone(), name_ranges, theme),
+                            ))
                             .child(
                                 div()
                                     .text_size(sp(11.5))
@@ -333,7 +377,7 @@ impl Waku {
                     .into_any_element(),
             );
         }
-        if friend_rows.is_empty() {
+        if friend_rows.is_empty() && !search.active() {
             friend_rows.push(
                 div()
                     .mt(px(10.0))
@@ -343,20 +387,34 @@ impl Waku {
                     .into_any_element(),
             );
         }
-        let friends_card = self.friends_card(
-            &theme,
-            std::iter::once(self.friends_section_title(&theme, tr!("friends.list")).into_any_element())
-                .chain(friend_rows)
-                .collect::<Vec<_>>(),
-        );
+        // The roster card stays when its title matched or a member did.
+        let friends_title_matched = search.matched(&tr!("friends.list"), "").is_some();
+        let friends_card = (friends_title_matched || !search.active() || !friend_rows.is_empty())
+            .then(|| {
+                self.friends_card(
+                    &theme,
+                    std::iter::once(
+                        self.friends_section_title(&theme, tr!("friends.list"))
+                            .into_any_element(),
+                    )
+                    .chain(friend_rows)
+                    .collect::<Vec<_>>(),
+                )
+            });
 
         // -- Transfers ----------------------------------------------------------
         let transfer_cards: Vec<AnyElement> = friends
             .transfers
             .iter()
+            .filter(|transfer| {
+                search
+                    .matched(&format!("{} · {}", transfer.title, transfer.peer_name), "")
+                    .is_some()
+            })
             .map(|transfer| self.render_transfer_row(transfer, &theme, cx))
             .collect();
-        let transfers_card = (!transfer_cards.is_empty()).then(|| {
+        let transfers_title_matched = search.matched(&tr!("friends.transfers"), "").is_some();
+        let transfers_card = (!transfer_cards.is_empty() || transfers_title_matched).then(|| {
             self.friends_card(
                 &theme,
                 std::iter::once(
@@ -368,25 +426,28 @@ impl Waku {
             )
         });
 
+        let requests_title_matched = search.matched(&tr!("friends.requests"), "").is_some();
         let mut column = div()
             .mt(px(15.0))
             .w_full()
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(code_card)
-            .child(add_card)
-            .child(friends_card);
-        if !request_cards.is_empty() {
-            column = column.child(self.friends_card(
-                &theme,
-                std::iter::once(
-                    self.friends_section_title(&theme, tr!("friends.requests"))
-                        .into_any_element(),
-                )
-                .chain(request_cards)
-                .collect::<Vec<_>>(),
-            ));
+            .children(code_card)
+            .children(add_card)
+            .children(friends_card);
+        if !request_cards.is_empty() || requests_title_matched {
+            column = column.child(
+                self.friends_card(
+                    &theme,
+                    std::iter::once(
+                        self.friends_section_title(&theme, tr!("friends.requests"))
+                            .into_any_element(),
+                    )
+                    .chain(request_cards)
+                    .collect::<Vec<_>>(),
+                ),
+            );
         }
         if let Some(transfers_card) = transfers_card {
             column = column.child(transfers_card);
@@ -495,12 +556,7 @@ impl Waku {
 
     /// "Send request" for the add-friend field.
     pub(super) fn send_friend_request(&self, cx: &mut Context<Self>) {
-        let code = self
-            .friend_code_input
-            .read(cx)
-            .content()
-            .trim()
-            .to_string();
+        let code = self.friend_code_input.read(cx).content().trim().to_string();
         if !code.starts_with("gfr-") {
             return;
         }

@@ -355,6 +355,8 @@ settings.back:
   en: Back
 settings.search:
   en: Search Settings
+settings.search_empty:
+  en: No settings match your search.
 
 commands.title:
   en: Custom commands

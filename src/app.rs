@@ -2357,6 +2357,13 @@ pub struct Waku {
     /// slides under it.
     settings_scroll: ScrollHandle,
     settings_scrollbar: Rc<ScrollbarState>,
+    /// Sections the settings search rendered, in scroll order — each is a
+    /// direct child of the content scroll element, so its index here is the
+    /// `scroll_to_top_of_item` target the sidebar and arrow keys use.
+    settings_search_sections: Vec<SettingsPage>,
+    /// The section the last search-mode navigation landed on; arrow cycling
+    /// steps from it rather than from the selected page.
+    settings_search_target: Option<SettingsPage>,
     /// Filter query over the Archived Chats page's rows.
     archived_search: Entity<TextInput>,
     /// Project the archived list is narrowed to; `None` shows every project.
@@ -4284,8 +4291,12 @@ impl Waku {
             .detach();
             cx.subscribe(
                 &settings_search,
-                |_: &mut Self, _, event: &InputEvent, cx| {
+                |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
+                        // A new query rebuilds the result list, so the scroll
+                        // offset and any arrow-key target no longer apply.
+                        this.settings_scroll.set_offset(point(px(0.0), px(0.0)));
+                        this.settings_search_target = None;
                         cx.notify();
                     }
                 },
@@ -4896,6 +4907,8 @@ impl Waku {
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
+                settings_search_sections: Vec::new(),
+                settings_search_target: None,
                 archived_search,
                 archived_project_filter: None,
                 archived_sessions_list: ListState::new(0, ListAlignment::Top, px(256.0)),
