@@ -23,7 +23,7 @@ use crate::keybindings::{
 };
 use std::collections::HashMap;
 use crate::theme::{Theme, sp};
-use crate::ui::motion;
+use crate::ui::{icon, motion};
 
 const ROW_HEIGHT: f32 = 34.0;
 /// Table columns (VS Code layout): Command | Keybinding | When | Category.
@@ -1058,13 +1058,11 @@ fn keybinding_cell(
         .bindings
         .iter()
         .any(|binding| binding.source == BindingSource::User);
-    // Hard conflicts read as danger; shadowed and unknown overlaps as
-    // warning.
-    let conflict_color = match conflict {
-        Some(ConflictKind::Hard) => Some(theme.danger),
-        Some(_) => Some(theme.warning),
-        None => None,
-    };
+    // Only a hard conflict — same chord, same context, so one binding is
+    // silently unreachable — is worth marking. Shadowed and partial
+    // overlaps are the normal shape of a contextual keymap (arrows inside
+    // a menu vs a text field) and tinting them lit up most of the table.
+    let hard_conflict = conflict == Some(ConflictKind::Hard);
     let label = binding
         .map(|binding| crate::ui::shortcut::sequence_label(&binding.sequence))
         .or_else(|| row.descriptor.builtin_label.map(str::to_string));
@@ -1085,11 +1083,18 @@ fn keybinding_cell(
                 .py(px(2.0))
                 .rounded(px(4.0))
                 .border_1()
-                .border_color(conflict_color.unwrap_or(theme.border))
+                .border_color(if hard_conflict {
+                    theme.danger
+                } else {
+                    theme.border
+                })
                 .text_size(sp(11.0))
                 .text_color(theme.text)
                 .child(label)
         }))
+        // The tint alone would be a color-only signal, so a hard conflict
+        // also carries an icon.
+        .children(hard_conflict.then(|| icon("icons/alert.svg", 11.0, theme.danger)))
         // Customized rows keep a way back to the default chord.
         .children(
             (customized && editable)
