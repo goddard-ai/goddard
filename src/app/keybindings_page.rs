@@ -23,6 +23,7 @@ use crate::keybindings::{
 };
 use std::collections::HashMap;
 use crate::theme::{Theme, sp};
+use crate::ui::tooltip::Tooltip;
 use crate::ui::{icon, motion};
 
 const ROW_HEIGHT: f32 = 34.0;
@@ -663,27 +664,36 @@ impl super::Waku {
         let filtered = ui.filtered.clone();
         let selected = ui.selected;
         let this = cx.weak_entity();
-        // Worst conflict per command, for chip tinting in the table.
-        let severities: HashMap<String, ConflictKind> = ui
+        // Hard conflicts only — same chord under the same context, so one
+        // binding is silently unreachable. Shadowed and partial overlaps
+        // are how a contextual keymap normally looks and are not marked.
+        // The value names the colliding commands for the row's tooltip.
+        let hard_conflicts: HashMap<String, SharedString> = ui
             .conflicts
             .iter()
-            .map(|(command, conflicts)| {
-                let worst = conflicts
+            .filter_map(|(command, conflicts)| {
+                let mut others: Vec<String> = conflicts
                     .iter()
-                    .map(|conflict| conflict.kind)
-                    .max_by_key(|kind| match kind {
-                        ConflictKind::Hard => 3,
-                        ConflictKind::UnknownOverlap => 2,
-                        ConflictKind::Shadowed | ConflictKind::PartialOverlap => 1,
-                        ConflictKind::Duplicate => 0,
-                    });
-                (command.clone(), worst.unwrap_or(ConflictKind::Duplicate))
+                    .filter(|conflict| conflict.kind == ConflictKind::Hard)
+                    .filter_map(|conflict| {
+                        crate::keybindings::command(&conflict.other)
+                            .map(|descriptor| descriptor.title().to_string())
+                    })
+                    .collect();
+                others.sort();
+                others.dedup();
+                (!others.is_empty()).then(|| {
+                    (
+                        command.clone(),
+                        SharedString::from(tr!(
+                            "keybind.conflict.banner",
+                            other = others.join(", ")
+                        )),
+                    )
+                })
             })
             .collect();
-        let hard_conflicts = severities
-            .values()
-            .filter(|kind| **kind == ConflictKind::Hard)
-            .count();
+        let hard_conflict_count = hard_conflicts.len();
 
         let mut page = div()
             .size_full()
@@ -794,8 +804,8 @@ impl super::Waku {
                         "{} · {}{}",
                         tr!("keybind.counts", n = ui.filtered.len()),
                         tr!("keybind.modified", n = modified),
-                        if hard_conflicts > 0 {
-                            format!(" · {}", tr!("keybind.conflicts", n = hard_conflicts))
+                        if hard_conflict_count > 0 {
+                            format!(" · {}", tr!("keybind.conflicts", n = hard_conflict_count))
                         } else {
                             String::new()
                         }
@@ -817,7 +827,7 @@ impl super::Waku {
                             row,
                             index,
                             selected == Some(index),
-                            severities.get(row.descriptor.id).copied(),
+                            hard_conflicts.get(row.descriptor.id).cloned(),
                             this.clone(),
                             theme,
                         )
@@ -1048,7 +1058,7 @@ fn render_column_header(theme: Theme) -> gpui::Div {
 /// non-editable command shows its chord or built-in label, inert.
 fn keybinding_cell(
     row: &CommandRow,
-    conflict: Option<ConflictKind>,
+    conflict: Option<SharedString>,
     this: gpui::WeakEntity<super::Waku>,
     theme: Theme,
 ) -> AnyElement {
@@ -1058,11 +1068,6 @@ fn keybinding_cell(
         .bindings
         .iter()
         .any(|binding| binding.source == BindingSource::User);
-    // Only a hard conflict — same chord, same context, so one binding is
-    // silently unreachable — is worth marking. Shadowed and partial
-    // overlaps are the normal shape of a contextual keymap (arrows inside
-    // a menu vs a text field) and tinting them lit up most of the table.
-    let hard_conflict = conflict == Some(ConflictKind::Hard);
     let label = binding
         .map(|binding| crate::ui::shortcut::sequence_label(&binding.sequence))
         .or_else(|| row.descriptor.builtin_label.map(str::to_string));
@@ -1083,18 +1088,26 @@ fn keybinding_cell(
                 .py(px(2.0))
                 .rounded(px(4.0))
                 .border_1()
-                .border_color(if hard_conflict {
-                    theme.danger
-                } else {
-                    theme.border
-                })
+                .border_color(theme.border)
                 .text_size(sp(11.0))
                 .text_color(theme.text)
                 .child(label)
         }))
-        // The tint alone would be a color-only signal, so a hard conflict
-        // also carries an icon.
-        .children(hard_conflict.then(|| icon("icons/alert.svg", 11.0, theme.danger)))
+        // A hard conflict is carried by an icon, not by tinting the chord:
+        // the chip's border is structure (the click target) and a 1px tint
+        // would be a color-only signal. The tooltip names the collision.
+        .children(conflict.map(|conflict| {
+            div()
+                .id(SharedString::from(format!(
+                    "{}:conflict",
+                    row.descriptor.id
+                )))
+                .flex_none()
+                .flex()
+                .items_center()
+                .child(icon("icons/alert.svg", 12.0, theme.danger))
+                .tooltip(Tooltip::text(conflict))
+        }))
         // Customized rows keep a way back to the default chord.
         .children(
             (customized && editable)
@@ -1144,7 +1157,9 @@ fn render_row(
     row: &CommandRow,
     index: usize,
     selected: bool,
-    conflict: Option<ConflictKind>,
+    // Tooltip text naming the commands this row's chord collides with,
+    // when the collision is a hard one.
+    conflict: Option<SharedString>,
     this: gpui::WeakEntity<super::Waku>,
     theme: Theme,
 ) -> AnyElement {
