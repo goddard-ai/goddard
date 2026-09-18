@@ -4055,6 +4055,17 @@ impl Waku {
                 },
             )
             .detach();
+            cx.subscribe(
+                &friend_code_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.send_friend_request(cx),
+                    // Repaint so the Send button's enabled state tracks the
+                    // field while typing.
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
+            .detach();
             for (target, search) in [
                 (settings::FontTarget::Ui, ui_font_selector.search.clone()),
                 (

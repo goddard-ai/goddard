@@ -494,7 +494,7 @@ impl Waku {
     }
 
     /// "Send request" for the add-friend field.
-    fn send_friend_request(&self, cx: &mut Context<Self>) {
+    pub(super) fn send_friend_request(&self, cx: &mut Context<Self>) {
         let code = self
             .friend_code_input
             .read(cx)
