@@ -232,7 +232,7 @@ const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
 /// Chats shown under a project group before the rest fold behind "Show more".
-const SIDEBAR_PROJECT_DEFAULT_VISIBLE: usize = 7;
+const SIDEBAR_PROJECT_DEFAULT_VISIBLE: usize = 16;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
 /// How long the primary modifier must stay down before the sidebar reveals
 /// its ⌘1–⌘9 chips — long enough that quicker chords never flash them.
@@ -4212,7 +4212,7 @@ mod tests {
 
     #[test]
     fn project_sessions_reveal_history_beyond_the_default_cap() {
-        let sessions = (1..=40).map(Uuid::from_u128).collect::<Vec<_>>();
+        let sessions = (1..=50).map(Uuid::from_u128).collect::<Vec<_>>();
 
         let (initial, show_more) = visible_project_sessions(&sessions, 0);
         assert_eq!(initial, sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE]);

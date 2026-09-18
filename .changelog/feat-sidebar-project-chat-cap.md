@@ -1,1 +1,1 @@
-- Cap each sidebar project group at seven chats; a "Show more" row reveals the rest in batches instead of folding only chats older than three days
+- Cap each sidebar project group at sixteen chats; a "Show more" row reveals the rest in batches instead of folding only chats older than three days
