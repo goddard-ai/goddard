@@ -855,6 +855,12 @@ pub struct Project {
     /// When the project was added, unix seconds.
     #[serde(default)]
     pub created_at: u64,
+    /// Picked ad hoc for one task ("New task in…") rather than registered as
+    /// a project. Temporary projects leave the catalog once no live session
+    /// references them; `false` for every project persisted before the flag
+    /// existed.
+    #[serde(default)]
+    pub temporary: bool,
 }
 
 /// Filesystem context a task runs in.
@@ -951,6 +957,7 @@ impl Project {
             path,
             bookmark: None,
             created_at: unix_time(),
+            temporary: false,
         }
     }
 

@@ -481,6 +481,14 @@ pub enum WorkspaceOperation {
         root: PathBuf,
         cap: usize,
     },
+    /// Depth-limited directory listing under each root, for pickers that
+    /// choose a directory rather than a file. Returns `Directories`.
+    SearchDirectories {
+        #[ts(type = "string[]")]
+        roots: Vec<PathBuf>,
+        max_depth: usize,
+        cap: usize,
+    },
     DiscoverSlashCommands {
         provider: ProviderKind,
         #[ts(type = "string")]
@@ -955,6 +963,10 @@ pub enum WorkspaceResult {
     },
     ProjectFiles {
         entries: Vec<FileEntry>,
+    },
+    Directories {
+        #[ts(type = "string[]")]
+        paths: Vec<PathBuf>,
     },
     SlashCommands {
         commands: Vec<SlashCommand>,

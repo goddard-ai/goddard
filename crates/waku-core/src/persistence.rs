@@ -1180,7 +1180,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at, bookmark FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, bookmark, temporary FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1190,17 +1190,19 @@ impl StateStore {
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<Vec<u8>>>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
-            .filter_map(|(id, name, path, created_at, bookmark)| {
+            .filter_map(|(id, name, path, created_at, bookmark, temporary)| {
                 Some(Project {
                     id: Uuid::parse_str(&id).ok()?,
                     name,
                     path: PathBuf::from(path),
                     bookmark,
                     created_at: created_at as u64,
+                    temporary,
                 })
             })
             .collect();
@@ -1436,7 +1438,8 @@ impl StateStore {
                             project.path.to_string_lossy(),
                             project.bookmark,
                             position as i64,
-                            project.created_at as i64
+                            project.created_at as i64,
+                            project.temporary
                         ],
                     )
                     .map_err(to_io_error)?;
@@ -1910,14 +1913,16 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          landed_at     = excluded.landed_at,
          workspace     = excluded.workspace";
 
-const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, bookmark, position, created_at)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+const INSERT_PROJECT: &str =
+    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
          bookmark   = excluded.bookmark,
          position   = excluded.position,
-         created_at = excluded.created_at";
+         created_at = excluded.created_at,
+         temporary  = excluded.temporary";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)

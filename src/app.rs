@@ -82,7 +82,7 @@ use crate::{
     DismissInbox, DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
     FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
     MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
-    NewSession, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
+    NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
     OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
     SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab,
     SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward,

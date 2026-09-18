@@ -86,6 +86,13 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::ListProjectFiles { root, cap } => WorkspaceResult::ProjectFiles {
             entries: crate::composer_complete::list_project_files(&root, cap),
         },
+        WorkspaceOperation::SearchDirectories {
+            roots,
+            max_depth,
+            cap,
+        } => WorkspaceResult::Directories {
+            paths: search_directories(&roots, max_depth, cap),
+        },
         WorkspaceOperation::DiscoverSlashCommands {
             provider,
             project_root,
@@ -516,6 +523,95 @@ fn list_directory(directory: &Path) -> anyhow::Result<Vec<WorkingTreeEntry>> {
         .collect::<Vec<_>>();
     entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
     Ok(entries)
+}
+
+/// Directory names a picker walk never descends into, beyond the hidden
+/// `.`-prefixed trees: dependency and build output (the same exclusions as
+/// the composer file walk) plus the platform home directories that are
+/// effectively never project roots.
+const DIRECTORY_SEARCH_SKIP: [&str; 13] = [
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    "vendor",
+    "__pycache__",
+    "Library",
+    "Applications",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+];
+
+/// Directories under `roots` a picker can offer. A root nested inside
+/// another contributes nothing new and is skipped. Results carry their
+/// depth and repo-ness so the caller's ordering — repositories first, then
+/// shallow paths — needs no second filesystem pass; `max_depth` bounds both
+/// the work and any symlink cycle, `cap` the result size.
+fn search_directories(roots: &[PathBuf], max_depth: usize, cap: usize) -> Vec<PathBuf> {
+    fn visit(
+        directory: &Path,
+        depth: usize,
+        max_depth: usize,
+        found: &mut Vec<(bool, usize, PathBuf)>,
+        cap: usize,
+    ) {
+        if depth > max_depth || found.len() >= cap {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if found.len() >= cap {
+                break;
+            }
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            if name.starts_with('.') || DIRECTORY_SEARCH_SKIP.contains(&name) {
+                continue;
+            }
+            // `fs::metadata` follows symlinks; the depth cap bounds the
+            // cycles a linked tree could create.
+            let Ok(metadata) = fs::metadata(entry.path()) else {
+                continue;
+            };
+            if !metadata.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            let is_repo = path.join(".git").exists();
+            found.push((is_repo, depth, path.clone()));
+            visit(&path, depth + 1, max_depth, found, cap);
+        }
+    }
+
+    let mut roots = roots.to_vec();
+    roots.sort();
+    roots.dedup();
+    let mut walked: Vec<PathBuf> = Vec::new();
+    let mut found: Vec<(bool, usize, PathBuf)> = Vec::new();
+    for root in roots {
+        if found.len() >= cap {
+            break;
+        }
+        // Overlapping roots in a filesystem tree always nest, so a prior
+        // root containing this one would list the same directories twice.
+        if walked.iter().any(|covered| root.starts_with(covered)) {
+            continue;
+        }
+        if fs::metadata(&root).is_ok_and(|metadata| metadata.is_dir()) {
+            visit(&root, 1, max_depth, &mut found, cap);
+            walked.push(root);
+        }
+    }
+    found.sort_by(|a, b| (!a.0, a.1, &a.2).cmp(&(!b.0, b.1, &b.2)));
+    found.truncate(cap);
+    found.into_iter().map(|(_, _, path)| path).collect()
 }
 
 #[derive(Clone, Debug)]

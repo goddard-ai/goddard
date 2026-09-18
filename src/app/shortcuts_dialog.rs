@@ -89,6 +89,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
     use crate::input;
     let mut global = vec![
         bound(tr!("menu.new_task"), NewSession, None),
+        bound(tr!("menu.new_task_in"), NewTaskIn, None),
         bound(tr!("menu.new_project"), NewProject, None),
         bound(
             tr!("menu.command_palette"),
