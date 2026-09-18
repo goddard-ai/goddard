@@ -1487,12 +1487,13 @@ impl Waku {
         }
 
         // Same gate as the composer's `/land`: the session the composer
-        // answers to has a checkout to land and no panel operation is
-        // already running.
+        // answers to runs in a worktree — local checkouts have no base to
+        // land on — and no panel operation is already running.
         if self.git_panel_operation.is_none()
-            && self
-                .composer_session()
-                .is_some_and(|session| self.workspace_path_for_session(session).is_some())
+            && self.composer_session().is_some_and(|session| {
+                matches!(&session.workspace, SessionWorkspace::Worktree { .. })
+                    && self.workspace_path_for_session(session).is_some()
+            })
         {
             let mut item = CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
