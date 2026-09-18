@@ -187,9 +187,28 @@ impl ShareService {
         self.state.lock().task_notifier = Some(notifier);
     }
 
-    /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required.
+    /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required,
+    /// though the friend code is resolved lazily from the identity file so
+    /// it displays before the endpoint has ever started.
     pub fn state(&self) -> FriendsState {
-        self.state.lock().snapshot()
+        let mut inner = self.state.lock();
+        if inner.friend_code.is_empty() {
+            if let Ok(secret) = waku_share::identity::load_or_create(&self.dir) {
+                inner.friend_code = waku_share::identity::friend_code(secret.public());
+            }
+        }
+        inner.snapshot()
+    }
+
+    /// Begin binding the endpoint without blocking the caller on
+    /// readiness — surfaces that make this install reachable (opening
+    /// Friends, connecting a client) kick this so requests and offers
+    /// can arrive, while their own reply returns immediately.
+    pub fn kickstart(self: &Arc<Self>) {
+        let this = self.clone();
+        std::thread::spawn(move || {
+            let _ = this.ensure_started();
+        });
     }
 
     fn ensure_started(&self) -> anyhow::Result<Sender<ShareCommand>> {

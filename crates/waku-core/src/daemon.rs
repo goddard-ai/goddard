@@ -77,7 +77,7 @@ pub struct WakuBackend {
     default_cwd: std::path::PathBuf,
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
     /// friends command so tests and headless runs pay nothing.
-    share: crate::share::ShareService,
+    share: Arc<crate::share::ShareService>,
 }
 
 impl WakuBackend {
@@ -126,7 +126,7 @@ impl WakuBackend {
             daemon_address: Mutex::new(None),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            share: crate::share::ShareService::new(share_dir.clone(), our_name),
+            share: Arc::new(crate::share::ShareService::new(share_dir.clone(), our_name)),
         };
         backend.purge_expired_archived_sessions();
         {
@@ -474,9 +474,15 @@ impl Backend for WakuBackend {
             Command::GetSettings => Ok(ResponsePayload::Settings {
                 settings: self.settings.get(),
             }),
-            Command::GetFriends => Ok(ResponsePayload::Friends {
-                state: self.share.state(),
-            }),
+            Command::GetFriends => {
+                // Reading friends state means this install wants to be
+                // reachable — incoming requests and offers can only
+                // arrive while the endpoint is up.
+                self.share.kickstart();
+                Ok(ResponsePayload::Friends {
+                    state: self.share.state(),
+                })
+            }
             Command::SendFriendRequest { code, name } => {
                 self.share.send_friend_request(code, name)?;
                 Ok(ResponsePayload::Ack)
