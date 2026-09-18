@@ -525,6 +525,7 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
                 .on_action(cx.listener(Self::new_terminal_action))
                 .on_action(cx.listener(Self::open_created_issue_in_github_action))
+                .on_action(cx.listener(Self::open_toast_session_action))
                 .on_action(cx.listener(Self::toggle_terminals_action))
                 .on_action(cx.listener(Self::toggle_projects_page_action))
                 .on_action(cx.listener(Self::toggle_inbox_page_action))
@@ -641,6 +642,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
             .on_action(cx.listener(Self::new_terminal_action))
             .on_action(cx.listener(Self::open_created_issue_in_github_action))
+            .on_action(cx.listener(Self::open_toast_session_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
             .on_action(cx.listener(Self::toggle_projects_page_action))
             .on_action(cx.listener(Self::toggle_inbox_page_action))
@@ -1066,9 +1068,20 @@ impl Waku {
             let kind = action.kind.clone();
             let mut label = action.label.to_string();
             let mut tooltip = None;
+            if matches!(kind, ToastActionKind::Session(_)) {
+                if let Some(open) =
+                    crate::ui::shortcut::ShortcutHint::action(&crate::OpenToastSession)
+                        .resolve(window, cx)
+                {
+                    label = format!("{label} {open}");
+                }
+            }
             if matches!(kind, ToastActionKind::LocalhostUrl) {
+                // The unarchive toast's binding wins the shared ⌘⌥O but
+                // propagates back here when its session is not the offer.
                 if let Some(open) =
                     crate::ui::shortcut::ShortcutHint::action(&crate::OpenLocalhostUrl)
+                        .shadowed_by(&crate::OpenToastSession)
                         .resolve(window, cx)
                 {
                     label = format!("{label} {open}");

@@ -3172,6 +3172,28 @@ impl Waku {
         self.open_detected_localhost_url(true, window, cx);
     }
 
+    /// The unarchive toast's "View now" without the mouse. ⌘⌥O is shared
+    /// with `OpenLocalhostUrl`: while a session toast is up this jumps to
+    /// the task, anything else falls through to the localhost open.
+    fn open_toast_session_action(
+        &mut self,
+        _: &crate::OpenToastSession,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = match self.toast.as_ref().and_then(|toast| toast.action.as_ref()) {
+            Some(ToastAction {
+                kind: ToastActionKind::Session(session_id),
+                ..
+            }) => *session_id,
+            _ => {
+                cx.propagate();
+                return;
+            }
+        };
+        self.open_toast_session(session_id, cx);
+    }
+
     fn set_toast(&mut self, mut toast: ToastState) {
         self.toast_selection.selection.borrow_mut().clear();
         self.toast_selection.registry.borrow_mut().clear();

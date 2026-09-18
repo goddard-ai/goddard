@@ -3384,6 +3384,8 @@ shortcuts.open_localhost_tab:
   en: Open Localhost URL in Tab
 shortcuts.open_created_issue:
   en: Open Created GitHub Issue
+shortcuts.view_unarchived_task:
+  en: View Unarchived Task
 shortcuts.open_settings:
   en: Open Settings
 shortcuts.fps_counter:

@@ -16,7 +16,8 @@ use super::*;
 use crate::{
     AdjustFontSize, BrowserAddressCancel, BrowserBack, BrowserDevtools, BrowserForward,
     BrowserHardReload, BrowserReload, BrowserStop, FocusBrowserAddress, FontSizeDirection,
-    FontSizeTarget, OpenCreatedIssueInGitHub, OpenLocalhostUrl, OpenLocalhostUrlInTab, Quit,
+    FontSizeTarget, OpenCreatedIssueInGitHub, OpenLocalhostUrl, OpenLocalhostUrlInTab,
+    OpenToastSession, Quit,
     WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
 };
 #[cfg(target_os = "macos")]
@@ -129,6 +130,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         bound(
             tr!("shortcuts.open_created_issue"),
             OpenCreatedIssueInGitHub,
+            None,
+        ),
+        bound(
+            tr!("shortcuts.view_unarchived_task"),
+            OpenToastSession,
             None,
         ),
         bound(tr!("shortcuts.open_settings"), OpenSettings, None),

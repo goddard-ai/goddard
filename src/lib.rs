@@ -153,7 +153,8 @@ actions!(
         WebviewSelectAll,
         OpenLocalhostUrl,
         OpenLocalhostUrlInTab,
-        OpenCreatedIssueInGitHub
+        OpenCreatedIssueInGitHub,
+        OpenToastSession
     ]
 );
 
@@ -929,6 +930,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // adding shift opens it in a built-in browser tab instead.
         KeyBinding::new("secondary-alt-o", OpenLocalhostUrl, None),
         KeyBinding::new("secondary-alt-shift-o", OpenLocalhostUrlInTab, None),
+        // The unarchive toast's "View now" — shares ⌘⌥O with the localhost
+        // open above. A session toast takes the chord; anything else
+        // propagates back to the URL open.
+        KeyBinding::new("secondary-alt-o", OpenToastSession, None),
         // The last-created GitHub issue — the toast's "View" without the
         // mouse. Deep-links the GitHub browser when its project and
         // number are known, falls back to the external URL.
