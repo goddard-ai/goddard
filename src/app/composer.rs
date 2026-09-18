@@ -1283,6 +1283,12 @@ impl Waku {
             self.session_model_combo(session)
                 .map(|(model_id, effort, fast)| (session.provider, model_id, effort, fast))
         });
+        // The rail offers a favorites jump only when a combo is starred and a
+        // recents jump only when a session use was recorded — either list may
+        // hold entries the merged rows no longer draw, but the jump then just
+        // clears the filter without a scroll target.
+        let rail_favorites = !favorites.is_empty();
+        let rail_recents = !recents.is_empty();
 
         // With nothing to pick from, naming a model the app cannot run would
         // be a lie. The chip says so instead, and stays a trigger because the
@@ -1314,6 +1320,79 @@ impl Waku {
 
                 if no_providers {
                     return model_picker_empty_state(&theme, &empty_focus, popover, weak.clone());
+                }
+
+                // The rail jumps rather than filters: a button drops the
+                // query and brings its section's first row into view.
+                let rail_target = |id: SharedString, section: ModelPickerSection| {
+                    let rail_weak = weak.clone();
+                    div()
+                        .id(id)
+                        .w(px(38.0))
+                        .h(px(38.0))
+                        .rounded(px(9.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .hover(|element| element.bg(theme.overlay))
+                        .on_click(move |_, _, cx| {
+                            let _ = rail_weak.update(cx, |this, cx| {
+                                this.scroll_model_picker_to_section(section, cx);
+                            });
+                        })
+                };
+                let mut rail = div()
+                    .w(px(50.0))
+                    .h_full()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.0))
+                    .p(px(5.0))
+                    .rounded_tl(px(15.0))
+                    .rounded_bl(px(15.0))
+                    .bg(theme.canvas)
+                    .border_r(hairline())
+                    .border_color(theme.separator);
+                if rail_favorites {
+                    rail = rail.child(
+                        rail_target("model-rail-favorites".into(), ModelPickerSection::Favorites)
+                            .child(icon("icons/star.svg", 17.0, theme.text_tertiary)),
+                    );
+                }
+                if rail_recents {
+                    rail = rail.child(
+                        rail_target("model-rail-recents".into(), ModelPickerSection::Recents)
+                            .child(icon("icons/hourglass.svg", 17.0, theme.text_tertiary)),
+                    );
+                }
+                if rail_favorites || rail_recents {
+                    rail = rail.child(
+                        div()
+                            .w(px(34.0))
+                            .h(hairline())
+                            .my(px(3.0))
+                            .bg(theme.separator),
+                    );
+                }
+                for kind in ProviderKind::ALL {
+                    if !picker_lists_provider(&probes, &disabled_providers, locked_provider, kind) {
+                        continue;
+                    }
+                    rail = rail.child(
+                        rail_target(
+                            SharedString::from(format!("model-rail-{}", kind.id())),
+                            ModelPickerSection::Provider(kind),
+                        )
+                        .child(provider_mark(
+                            &theme,
+                            kind,
+                            18.0,
+                            provider_color(&theme, kind).opacity(0.82),
+                        )),
+                    );
                 }
 
                 let search_input = div()
@@ -1686,6 +1765,8 @@ impl Waku {
                 let confirm_models = available_rows.clone();
                 let next_weak = weak.clone();
                 let previous_weak = weak.clone();
+                let next_section_weak = weak.clone();
+                let previous_section_weak = weak.clone();
                 let confirm_weak = weak.clone();
                 let confirm_popover = popover.clone();
                 div()
@@ -1698,7 +1779,6 @@ impl Waku {
                     .bg(theme.surface)
                     .shadow_lg()
                     .flex()
-                    .flex_col()
                     // The filter field keeps focus and the selected row is only
                     // drawn, never focused — the same split Zed's picker uses.
                     // These arrive as actions bound to `WakuMenu > TextInput`,
@@ -1714,6 +1794,16 @@ impl Waku {
                             this.move_model_picker_highlight("up", &previous_models, cx);
                         });
                     })
+                    .on_action(move |_: &SelectNextTab, _, cx| {
+                        let _ = next_section_weak.update(cx, |this, cx| {
+                            this.cycle_model_picker_section("down", cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectPreviousTab, _, cx| {
+                        let _ = previous_section_weak.update(cx, |this, cx| {
+                            this.cycle_model_picker_section("up", cx);
+                        });
+                    })
                     .on_action(move |_: &ConfirmEntry, window, cx| {
                         let _ = confirm_weak.update(cx, |this, cx| {
                             this.choose_highlighted_model(&confirm_models, cx);
@@ -1721,14 +1811,25 @@ impl Waku {
                         confirm_popover.close(window, cx);
                         window.refresh();
                     })
-                    .child(search_input)
+                    .child(rail)
                     .child(
                         div()
+                            .min_w_0()
                             .flex_1()
-                            .min_h_0()
-                            .relative()
-                            .child(rows)
-                            .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                            .flex()
+                            .flex_col()
+                            .rounded_tr(px(15.0))
+                            .rounded_br(px(15.0))
+                            .bg(theme.surface)
+                            .child(search_input)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .relative()
+                                    .child(rows)
+                                    .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                            ),
                     )
                     .into_any_element()
             },
@@ -1796,6 +1897,93 @@ impl Waku {
         let index =
             picker_selected_row_index(selection.as_ref(), auto_route, &rows).unwrap_or(0);
         self.model_picker_scroll.scroll_to_item(index);
+    }
+
+    /// A rail button's jump: drop the filter and bring the section's first
+    /// row into view, leaving the keyboard cursor on it so the next arrow
+    /// moves from there. Clearing the query routes back through the search
+    /// subscription's selection reveal, so the section scroll issued after
+    /// it is the request that lands.
+    fn scroll_model_picker_to_section(
+        &mut self,
+        section: ModelPickerSection,
+        cx: &mut Context<Self>,
+    ) {
+        self.model_search.update(cx, |search, cx| search.clear(cx));
+        let locked_provider = self
+            .composer_session()
+            .filter(|session| !session.messages.is_empty())
+            .map(|session| session.provider);
+        let rows = visible_picker_rows(
+            &self.probes,
+            &self.state.favorite_models,
+            &self.state.recent_model_uses,
+            &self.state.disabled_providers,
+            locked_provider,
+            "",
+        );
+        let first = rows
+            .iter()
+            .position(|row| picker_row_section(row) == section);
+        self.model_picker_highlight = first;
+        if let Some(index) = first {
+            self.model_picker_scroll.scroll_to_item(index);
+        }
+        cx.notify();
+    }
+
+    /// Step the rail to the adjacent section, wrapping at both ends.
+    /// `tab`/`shift-tab` land here from under the focused filter field, the
+    /// same route the arrows take. A live query filters across all
+    /// sections, so cycling waits until the field is cleared.
+    fn cycle_model_picker_section(&mut self, key: &str, cx: &mut Context<Self>) {
+        if !self.model_search.read(cx).content().trim().is_empty() {
+            return;
+        }
+        let session = self.composer_session();
+        let locked_provider = session
+            .filter(|session| !session.messages.is_empty())
+            .map(|session| session.provider);
+        let rows = visible_picker_rows(
+            &self.probes,
+            &self.state.favorite_models,
+            &self.state.recent_model_uses,
+            &self.state.disabled_providers,
+            locked_provider,
+            "",
+        );
+        let mut sections = Vec::new();
+        let mut previous = None;
+        for (index, row) in rows.iter().enumerate() {
+            let section = picker_row_section(row);
+            if previous != Some(section) {
+                sections.push(index);
+                previous = Some(section);
+            }
+        }
+        if sections.is_empty() {
+            return;
+        }
+        // The section the keyboard cursor sits in — seeded from the
+        // session combo's row the way the reveal lands, so the first tab
+        // steps relative to the selection rather than an end.
+        let current_row = self.model_picker_highlight.unwrap_or_else(|| {
+            let selection = session.and_then(|session| {
+                self.session_model_combo(session)
+                    .map(|(model, effort, fast)| (session.provider, model, effort, fast))
+            });
+            picker_selected_row_index(selection.as_ref(), &rows).unwrap_or(0)
+        });
+        let current_section = sections
+            .iter()
+            .rposition(|start| *start <= current_row)
+            .unwrap_or(0);
+        let Some(next) = next_picker_highlight(Some(current_section), sections.len(), key) else {
+            return;
+        };
+        self.model_picker_highlight = Some(sections[next]);
+        self.model_picker_scroll.scroll_to_item(sections[next]);
+        cx.notify();
     }
 
     /// Take the row the selection is on, defaulting to the first so `enter`
@@ -5777,6 +5965,27 @@ pub(super) fn picker_has_no_providers(
         && !ProviderKind::ALL
             .into_iter()
             .any(|kind| picker_lists_provider(probes, disabled_providers, locked_provider, kind))
+}
+
+/// A rail button's destination in the merged picker: one of the two
+/// leading sections or the first row of a provider's block.
+#[derive(Clone, Copy, PartialEq)]
+enum ModelPickerSection {
+    Favorites,
+    Recents,
+    Provider(ProviderKind),
+}
+
+/// A row's jump section in the merged list: favorites and recents each
+/// form one block ahead of the provider blocks.
+fn picker_row_section(row: &ModelPickerRow) -> ModelPickerSection {
+    if row.favorite_index.is_some() {
+        ModelPickerSection::Favorites
+    } else if row.recent_rank.is_some() {
+        ModelPickerSection::Recents
+    } else {
+        ModelPickerSection::Provider(row.provider)
+    }
 }
 
 /// One selectable row in the merged model picker: a model pinned to a
