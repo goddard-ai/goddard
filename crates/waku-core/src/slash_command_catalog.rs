@@ -37,6 +37,9 @@ pub(crate) fn discover(
         ProviderKind::OpenCode2 => discover_opencode2(binary, project_root),
         ProviderKind::OhMyPi => discover_oh_my_pi(binary, project_root),
         ProviderKind::Pi => discover_pi(binary, project_root),
+        // Antigravity sessions are its own TUI — there is no composer to
+        // autocomplete in.
+        ProviderKind::Antigravity => None,
         // ACP advertises commands only after session/new. Harness likewise
         // requires an agent id for commands/list, and Copilot's `commands.list`
         // is an SDK RPC on a live client. Creating throwaway sessions merely

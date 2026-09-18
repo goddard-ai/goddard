@@ -196,6 +196,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "play",
     "plus",
     "provider-amp",
+    "provider-antigravity",
     "provider-claude",
     "provider-copilot",
     "provider-cursor",

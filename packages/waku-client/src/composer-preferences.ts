@@ -29,6 +29,7 @@ const DEFAULT_PREFERENCES: ComposerPreferences = {
 }
 
 const PROVIDERS = new Set<ProviderKind>([
+  'antigravity',
   'amp',
   'claude',
   'codex',

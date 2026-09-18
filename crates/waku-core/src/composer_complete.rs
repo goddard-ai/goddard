@@ -205,6 +205,8 @@ fn assemble_slash_commands(
         // the filesystem here. The shared `.agents/skills` + `.goddard/commands`
         // layer below still applies.
         ProviderKind::OpenCode2 => {}
+        // Antigravity keeps plugins and skills inside its own TUI surface.
+        ProviderKind::Antigravity => {}
         ProviderKind::OpenCode => {
             scan_command_files(
                 &project_root.join(".opencode/command"),

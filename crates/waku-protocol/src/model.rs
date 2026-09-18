@@ -14,6 +14,7 @@ use crate::routing::RouteDecision;
 )]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
+    Antigravity,
     Amp,
     Claude,
     #[default]
@@ -34,7 +35,8 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
+        Self::Antigravity,
         Self::Amp,
         Self::Claude,
         Self::Codex,
@@ -55,6 +57,7 @@ impl ProviderKind {
 
     pub fn id(self) -> &'static str {
         match self {
+            Self::Antigravity => "antigravity",
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -76,6 +79,7 @@ impl ProviderKind {
 
     pub fn display_name(self) -> &'static str {
         match self {
+            Self::Antigravity => "Antigravity CLI",
             Self::Amp => "Amp",
             Self::Claude => "Claude Code",
             Self::Codex => "Codex CLI",
@@ -97,6 +101,7 @@ impl ProviderKind {
 
     pub fn short_name(self) -> &'static str {
         match self {
+            Self::Antigravity => "Antigravity",
             Self::Amp => "Amp",
             Self::Claude => "Claude",
             Self::Codex => "Codex",
@@ -118,6 +123,7 @@ impl ProviderKind {
 
     pub fn command(self) -> &'static str {
         match self {
+            Self::Antigravity => "agy",
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -144,6 +150,14 @@ impl ProviderKind {
     /// The Settings page shows these verbatim and can run them in a terminal.
     pub fn setup(self) -> ProviderSetup {
         match self {
+            // Antigravity signs in inside its own TUI, so the sign-in step
+            // simply launches `agy`.
+            Self::Antigravity => ProviderSetup {
+                install: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+                sign_in: Some("agy"),
+                api_key_env: Some("GEMINI_API_KEY"),
+                docs_url: "https://antigravity.google/docs/cli/overview",
+            },
             Self::Amp => ProviderSetup {
                 install: "curl -fsSL https://ampcode.com/install.sh | bash",
                 sign_in: Some("amp login"),
@@ -256,11 +270,13 @@ impl ProviderKind {
         }
     }
 
-    /// Kimi Code, Fx, Devin, and Droid are deliberately absent from this
-    /// list and from [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork`
-    /// copies a whole session and takes no turn count, and Fx, Devin, and Droid expose
-    /// no turn-aware fork or truncation method. None of them can reproduce
-    /// Goddard's "drop the last N turns" semantics without corrupting history.
+    /// Kimi Code, Fx, Devin, Droid, and Antigravity are deliberately absent
+    /// from this list and from [`Self::supports_conversation_fork`]. Kimi's
+    /// ACP `session/fork` copies a whole session and takes no turn count, and
+    /// Fx, Devin, and Droid expose no turn-aware fork or truncation method.
+    /// Antigravity is terminal-backed: its sessions are its own TUI, not
+    /// Goddard turns. None of them can reproduce Goddard's "drop the last N
+    /// turns" semantics without corrupting history.
     /// Copilot is present: `sessions.fork` truncates at an event boundary, and
     /// rewinding resumes the task on the truncated fork.
     pub fn supports_conversation_rollback(self) -> bool {
@@ -302,7 +318,8 @@ impl ProviderKind {
     pub fn supports_model_discovery(self) -> bool {
         matches!(
             self,
-            Self::Claude
+            Self::Antigravity
+                | Self::Claude
                 | Self::Codex
                 | Self::Copilot
                 | Self::Cursor
@@ -354,6 +371,9 @@ pub struct ProviderSetup {
     tag = "provider"
 )]
 pub enum ProviderResumeCursor {
+    Antigravity {
+        conversation_id: String,
+    },
     Amp {
         thread_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -423,6 +443,9 @@ pub enum ProviderResumeCursor {
 impl ProviderResumeCursor {
     pub fn from_session_id(provider: ProviderKind, id: String) -> Self {
         match provider {
+            ProviderKind::Antigravity => Self::Antigravity {
+                conversation_id: id,
+            },
             ProviderKind::Amp => Self::Amp {
                 thread_id: id,
                 fork_context: None,
@@ -465,6 +488,7 @@ impl ProviderResumeCursor {
 
     pub fn provider(&self) -> ProviderKind {
         match self {
+            Self::Antigravity { .. } => ProviderKind::Antigravity,
             Self::Amp { .. } => ProviderKind::Amp,
             Self::Claude { .. } => ProviderKind::Claude,
             Self::Codex { .. } => ProviderKind::Codex,
@@ -486,6 +510,7 @@ impl ProviderResumeCursor {
 
     pub fn native_id(&self) -> &str {
         match self {
+            Self::Antigravity { conversation_id } => conversation_id,
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
             | Self::Copilot { session_id }
@@ -4874,7 +4899,11 @@ mod tests {
         for provider in ProviderKind::ALL {
             let supported = !matches!(
                 provider,
-                ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi
+                ProviderKind::Antigravity
+                    | ProviderKind::Devin
+                    | ProviderKind::Droid
+                    | ProviderKind::Fx
+                    | ProviderKind::Kimi
             );
             assert_eq!(provider.supports_conversation_fork(), supported);
             assert_eq!(provider.supports_conversation_rollback(), supported);
@@ -4883,6 +4912,7 @@ mod tests {
 
     #[test]
     fn only_dynamic_provider_catalogs_are_discovered() {
+        assert!(ProviderKind::Antigravity.supports_model_discovery());
         assert!(!ProviderKind::Amp.supports_model_discovery());
         assert!(ProviderKind::Claude.supports_model_discovery());
         assert!(ProviderKind::Codex.supports_model_discovery());
@@ -4959,7 +4989,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 16);
+        assert_eq!(ProviderKind::ALL.len(), 17);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

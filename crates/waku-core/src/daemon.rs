@@ -884,6 +884,9 @@ impl Backend for WakuBackend {
                 // must not start every installed agent CLI, and another
                 // provider is queried only after the user explicitly picks it.
                 let mut sessions = match provider {
+                    // Antigravity conversations live in its own TUI; there is
+                    // no Goddard transcript to import.
+                    ProviderKind::Antigravity => Vec::new(),
                     ProviderKind::Amp => {
                         crate::amp_session::list_provider_sessions(&binary, limit)?
                     }
@@ -1037,6 +1040,9 @@ impl Backend for WakuBackend {
                             session_file,
                             VISIBLE_TURN_LIMIT,
                         )?
+                    }
+                    ProviderResumeCursor::Antigravity { .. } => {
+                        bail!("Antigravity conversations live in its own TUI; there is no transcript to import")
                     }
                 };
                 Ok(ResponsePayload::ProviderSessionHistory { history })
@@ -1791,7 +1797,11 @@ impl WakuBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Antigravity
+            | ProviderKind::Devin
+            | ProviderKind::Droid
+            | ProviderKind::Fx
+            | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -2074,7 +2084,11 @@ impl WakuBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Antigravity
+            | ProviderKind::Devin
+            | ProviderKind::Droid
+            | ProviderKind::Fx
+            | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()

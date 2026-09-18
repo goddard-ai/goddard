@@ -111,6 +111,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
         ProviderKind::Grok => Vec::new(),
+        // Antigravity's catalog is the account's quota, reported by `agy
+        // models`. An invented fallback would offer models the CLI rejects.
+        ProviderKind::Antigravity => Vec::new(),
         // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
@@ -147,6 +150,7 @@ pub fn discover_catalog(
     binary: &Path,
 ) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>) {
     let (discovered, discovered_presets) = match provider {
+        ProviderKind::Antigravity => (discover_antigravity_models(binary), None),
         // Amp exposes stable agent modes rather than a model inventory. Keep
         // the picker aligned with the modes advertised by the current CLI.
         ProviderKind::Amp => (Vec::new(), None),
@@ -1429,6 +1433,32 @@ fn parse_opencode_models(output: &str) -> Vec<ProviderModel> {
                 ProviderModel::new(id.clone(), display_name_from_slug(model))
                     .sub_provider(display_name_from_slug(provider)),
             )
+        })
+        .collect()
+}
+
+/// `agy models` prints `id<TAB>name` rows on stdout — the account's actual
+/// quota — while a fetch spinner animates on stderr.
+fn discover_antigravity_models(binary: &Path) -> Vec<ProviderModel> {
+    let mut command = crate::command_env::command(binary);
+    let command = command.arg("models");
+    let Ok(output) = crate::command_env::output(command) else {
+        return Vec::new();
+    };
+    parse_antigravity_models(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_antigravity_models(output: &str) -> Vec<ProviderModel> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (id, name) = line.trim().split_once('\t')?;
+            let id = id.trim();
+            let name = name.trim();
+            if id.is_empty() {
+                return None;
+            }
+            Some(ProviderModel::new(id, if name.is_empty() { id } else { name }))
         })
         .collect()
 }

@@ -273,6 +273,13 @@ pub(crate) fn start_local(
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
     let inner: Arc<dyn DriverControl> = match provider {
+        // Antigravity has no driver: its sessions are the CLI's own TUI
+        // running in a client-owned terminal, so there is nothing for the
+        // daemon to supervise. Reaching this arm means a client asked the
+        // daemon to start one anyway.
+        ProviderKind::Antigravity => {
+            anyhow::bail!("Antigravity sessions are terminal-backed and have no daemon driver")
+        }
         ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
         ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),
         ProviderKind::OhMyPi => {

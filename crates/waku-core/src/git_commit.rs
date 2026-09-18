@@ -335,6 +335,17 @@ pub(crate) fn agent_arguments(
         args.push(OsString::from(value));
     }
     match provider {
+        // `-p` takes the prompt as its own value, so it cannot trail as a
+        // positional argument the way the other providers pass it.
+        ProviderKind::Antigravity => {
+            push(&mut args, "-p");
+            push(&mut args, prompt);
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            return args;
+        }
         ProviderKind::Amp => {
             push(&mut args, "--execute");
             push(&mut args, "--no-color");
@@ -1027,6 +1038,10 @@ mod tests {
             );
             assert!(has(&args, prompt));
             match provider {
+                ProviderKind::Antigravity => {
+                    assert!(has_pair(&args, "-p", prompt));
+                    assert!(has_pair(&args, "--model", "model"));
+                }
                 ProviderKind::Amp => {
                     assert!(has(&args, "--execute"));
                     assert!(has_pair(&args, "--settings-file", "/tmp/amp.json"));

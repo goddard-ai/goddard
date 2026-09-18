@@ -70,7 +70,8 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::Droid => {
             vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
         }
-        ProviderKind::Devin
+        ProviderKind::Antigravity
+        | ProviderKind::Devin
         | ProviderKind::DeepSeek
         | ProviderKind::Fx
         | ProviderKind::Grok
