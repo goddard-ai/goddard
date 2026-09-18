@@ -1,1 +1,0 @@
-- On macOS 26 the transparent sidebar renders as real Liquid Glass (`NSGlassEffectView`) instead of a vibrancy tint — the theme wash rides on the glass's own `tintColor`. Older macOS keeps the existing vibrancy path unchanged.

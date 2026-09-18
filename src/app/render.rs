@@ -482,6 +482,9 @@ impl Render for Waku {
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
         self.sync_browser_webviews(cx);
+        // Same per-render handoff for the composer card's liquid-glass
+        // surface, which sits *behind* the Metal layer.
+        self.sync_composer_glass(window, cx);
         if self.fps_counter_visible {
             self.tick_fps(window);
         }
