@@ -309,8 +309,49 @@ impl Waku {
         self.spans_anchor(&annotation.spans)
     }
 
+    /// Bounding box of every on-screen glyph rect for `spans` — the anchor
+    /// for the comment editor, which sits below the whole selection rather
+    /// than under its first line. `None` under the same conditions as
+    /// [`Self::spans_anchor`].
+    fn spans_anchor_union(&self, spans: &[Span]) -> Option<Bounds<Pixels>> {
+        let registry = self.transcript_selection.registry.borrow();
+        let viewport = self.active_transcript_rows().viewport_bounds();
+        let mut union: Option<Bounds<Pixels>> = None;
+        for span in spans {
+            let Some(entry) = registry
+                .entries()
+                .iter()
+                .find(|entry| entry.key == span.key)
+            else {
+                continue;
+            };
+            if entry.geometry.is_missing() || !annotation_span_live(span, &entry.text) {
+                continue;
+            }
+            let end = span.range.end.min(entry.text.len());
+            for rect in text_range_bounds(&entry.geometry, &(span.range.start..end)) {
+                if rect.bottom() > viewport.top() && rect.top() < viewport.bottom() {
+                    union = Some(match union {
+                        Some(u) => u.union(&rect),
+                        None => rect,
+                    });
+                }
+            }
+        }
+        union
+    }
+
+    fn annotation_editor_anchor(&self, annotation_id: u64) -> Option<Bounds<Pixels>> {
+        let annotations = self.transcript_selection.annotations.borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        self.spans_anchor_union(&annotation.spans)
+    }
+
     /// First on-screen glyph rect of a file annotation's range — the anchor
-    /// for its comment editor and hover tooltip. `None` when the range
+    /// for its hover tooltip. `None` when the range
     /// scrolled out of the editor viewport or the file's text moved under it.
     fn file_annotation_anchor(
         &self,
@@ -334,6 +375,35 @@ impl Waku {
             .range_bounds(&file.range)
             .into_iter()
             .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())
+    }
+
+    /// Bounding box of every on-screen glyph rect of a file annotation's
+    /// range — the anchor for its comment editor, which sits below the whole
+    /// selection rather than under its first line. `None` under the same
+    /// conditions as [`Self::file_annotation_anchor`].
+    fn file_annotation_editor_anchor(
+        &self,
+        relative_path: &str,
+        annotation_id: u64,
+        cx: &App,
+    ) -> Option<Bounds<Pixels>> {
+        let editor = self.right_panel_file_editors.get(relative_path)?;
+        let annotations = editor.annotations.borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        let file = annotation.file.as_ref()?;
+        let input = editor.state.read(cx);
+        if !file_annotation_live(annotation, input.content()) {
+            return None;
+        }
+        let viewport = self.right_panel_editor_scroll_handle.bounds();
+        input
+            .range_bounds(&file.range)
+            .into_iter()
+            .filter(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())
+            .reduce(|u, rect| u.union(&rect))
     }
 
     /// The file annotation whose highlight contains `position`, hit-tested by
@@ -984,7 +1054,7 @@ impl Waku {
     }
 
     /// The shared comment-editor card. The caller anchors it below the
-    /// annotation's first visible line — transcript span or file range.
+    /// annotation's visible extent — transcript spans or file range.
     fn annotation_editor_card(
         &self,
         element_id: &'static str,
@@ -1060,19 +1130,19 @@ impl Waku {
         .into_any_element()
     }
 
-    /// The floating comment editor, anchored below the annotation's first
-    /// visible line.
+    /// The floating comment editor, anchored below the annotation's visible
+    /// extent.
     pub(super) fn render_annotation_editor(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editor = self.annotation_editor.as_ref()?;
         if editor.target != AnnotationTarget::Transcript {
             return None;
         }
-        let anchor = self.annotation_anchor(editor.annotation_id)?;
+        let anchor = self.annotation_editor_anchor(editor.annotation_id)?;
         Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
     }
 
     /// The same floating comment editor over a file annotation, anchored
-    /// below its first visible line in the editor.
+    /// below its visible extent in the editor.
     pub(super) fn render_file_annotation_editor(
         &self,
         relative_path: &str,
@@ -1082,7 +1152,8 @@ impl Waku {
         if editor.target != AnnotationTarget::File(relative_path.to_owned()) {
             return None;
         }
-        let anchor = self.file_annotation_anchor(relative_path, editor.annotation_id, cx)?;
+        let anchor =
+            self.file_annotation_editor_anchor(relative_path, editor.annotation_id, cx)?;
         Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
     }
 
