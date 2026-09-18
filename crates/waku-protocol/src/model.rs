@@ -30,7 +30,7 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Amp,
         Self::Claude,
         Self::Codex,

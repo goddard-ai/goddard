@@ -314,7 +314,6 @@ impl DriverControl for RemoteDriverControl {
             prompt,
             turn_id,
             message_id,
-            attachments,
             hidden,
             attachments,
         });

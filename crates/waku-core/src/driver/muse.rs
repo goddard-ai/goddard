@@ -1924,6 +1924,7 @@ mod tests {
             is_dir: false,
             is_image,
             blob_reference: None,
+            session_id: None,
         }
     }
 
