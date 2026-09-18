@@ -13,6 +13,12 @@ tool_name?: string | null,
  */
 mcp_server?: string | null, detail: string | null, arguments?: string | null, output?: string | null,
 /**
+ * Any bounded text field (`output`, `arguments`, `detail`) was clipped
+ * at the source cap. Renderers append the localized truncation marker
+ * at display time; the stored text itself stays locale-neutral.
+ */
+output_truncated?: boolean,
+/**
  * Images returned by a tool, kept separate from text so large data URLs
  * are never truncated or treated as literal activity output.
  */

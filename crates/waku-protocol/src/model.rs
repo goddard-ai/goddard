@@ -1604,7 +1604,9 @@ impl AgentSession {
         for block in &mut self.transcript_blocks {
             for activity in &mut block.activities {
                 if activity.kind == ActivityKind::Search && activity.title.trim() == "Search for" {
-                    activity.title = tr!("activity.browsed_web");
+                    // Persisted titles stay locale-neutral: stored English,
+                    // not a tr! baked in whichever process migrated the row.
+                    activity.title = "Browsed the web".to_owned();
                 }
                 let named_kind = ActivityKind::from_tool_name(&activity.title);
                 if named_kind != ActivityKind::Tool
@@ -2647,6 +2649,11 @@ pub struct ActivityItem {
     pub arguments: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// Any bounded text field (`output`, `arguments`, `detail`) was clipped
+    /// at the source cap. Renderers append the localized truncation marker
+    /// at display time; the stored text itself stays locale-neutral.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub output_truncated: bool,
     /// Images returned by a tool, kept separate from text so large data URLs
     /// are never truncated or treated as literal activity output.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2695,6 +2702,7 @@ impl ActivityItem {
             detail,
             arguments: None,
             output: None,
+            output_truncated: false,
             image_urls: Vec::new(),
             failed: false,
             complete,
@@ -3060,6 +3068,19 @@ fn fallback_activity_display_target(kind: ActivityKind, title: &str) -> Option<S
     .then(|| compact_activity_target(title))
 }
 
+/// The locale every shipped translation renders `key` under. Generic titles
+/// persisted by earlier builds were baked in whatever locale the writing
+/// process ran, so checking only the current locale misses them.
+const SHIPPED_LOCALES: [&str; 3] = ["en", "zh-CN", "ja"];
+
+fn title_in_any_locale(title: &str, keys: &[&str]) -> bool {
+    keys.iter().any(|key| {
+        SHIPPED_LOCALES
+            .iter()
+            .any(|locale| title == rust_i18n::t!(*key, locale = *locale))
+    })
+}
+
 pub fn is_generic_activity_title(kind: ActivityKind, title: &str) -> bool {
     // Classification falling back to `Tool` only means the name is not one of
     // the semantic kinds above. It does not make the provider-supplied tool
@@ -3069,17 +3090,20 @@ pub fn is_generic_activity_title(kind: ActivityKind, title: &str) -> bool {
         return true;
     }
     match kind {
-        ActivityKind::Command => title == tr!("activity.run_command"),
+        ActivityKind::Command => title_in_any_locale(title, &["activity.run_command"]),
         ActivityKind::FileChange => {
-            title == tr!("activity.edit_file") || title == tr!("activity.write_file")
+            title_in_any_locale(title, &["activity.edit_file", "activity.write_file"])
         }
-        ActivityKind::FileRead => title == tr!("activity.read_file"),
+        ActivityKind::FileRead => title_in_any_locale(title, &["activity.read_file"]),
         ActivityKind::FileSearch => {
-            title == tr!("activity.search_files") || title == tr!("activity.find_files")
+            title_in_any_locale(title, &["activity.search_files", "activity.find_files"])
         }
-        ActivityKind::FileList => title == tr!("activity.list_files"),
-        ActivityKind::Plan => title == tr!("activity.plan_updated"),
-        ActivityKind::Tool => title.eq_ignore_ascii_case("tool") || title == tr!("activity.tool"),
+        ActivityKind::FileList => title_in_any_locale(title, &["activity.list_files"]),
+        ActivityKind::Plan => title_in_any_locale(title, &["activity.plan_updated"]),
+        ActivityKind::Tool => {
+            title.eq_ignore_ascii_case("tool")
+                || title_in_any_locale(title, &["activity.tool"])
+        }
         _ => false,
     }
 }

@@ -250,6 +250,12 @@ export type ActivityDisclosureSection = {
   content: string
 }
 
+// The daemon clips bounded text fields at a source cap and marks the item;
+// the marker is rendered here so stored output stays locale-neutral.
+function truncatedMarker(activity: ActivityItem, t?: Translator): string {
+  return activity.output_truncated ? (t ? t('activity.output_truncated') : '\n\n… output truncated') : ''
+}
+
 export function activityDisclosureSections(activity: ActivityItem, t?: Translator): ActivityDisclosureSection[] {
   const sections: ActivityDisclosureSection[] = []
   const server = activity.mcp_server?.trim()
@@ -261,14 +267,14 @@ export function activityDisclosureSections(activity: ActivityItem, t?: Translato
     const command = activity.arguments?.trim() || activity.display_target?.trim()
     const output = activity.output?.trim()
     if (command) sections.push({ kind: 'command', label: t ? t('activity.command_detail') : 'Command', content: command })
-    if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
+    if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output + truncatedMarker(activity, t) })
     else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
     return sections
   }
   const argumentsText = activity.arguments?.trim()
   const output = activity.output?.trim()
   if (argumentsText) sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
-  if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
+  if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output + truncatedMarker(activity, t) })
   else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
   const detail = activity.detail?.trim()
   if (sections.length === metadataCount && detail) sections.push({ kind: 'detail', label: null, content: detail })

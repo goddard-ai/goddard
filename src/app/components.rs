@@ -1689,9 +1689,14 @@ pub(super) fn activity_disclosure_sections(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
+            let truncated = if activity.output_truncated {
+                tr!("activity.output_truncated")
+            } else {
+                String::new()
+            };
             sections.push(ActivityDisclosureSection {
                 kind: ActivityDisclosureSectionKind::Output,
-                content: output.to_owned(),
+                content: format!("{output}{truncated}"),
             });
         } else if !activity.image_urls.is_empty() {
             sections.push(ActivityDisclosureSection {
@@ -1723,9 +1728,14 @@ pub(super) fn activity_disclosure_sections(
         .filter(|value| !value.is_empty())
         .filter(|_| !shows_diff || activity.failed)
     {
+        let truncated = if activity.output_truncated {
+            tr!("activity.output_truncated")
+        } else {
+            String::new()
+        };
         sections.push(ActivityDisclosureSection {
             kind: ActivityDisclosureSectionKind::Output,
-            content: output.to_owned(),
+            content: format!("{output}{truncated}"),
         });
     } else if !activity.image_urls.is_empty() {
         sections.push(ActivityDisclosureSection {

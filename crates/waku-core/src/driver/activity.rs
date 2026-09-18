@@ -19,12 +19,13 @@ pub(super) fn tool_activity(
     complete: bool,
 ) -> ActivityItem {
     let raw_arguments = arguments;
+    let mut truncated = false;
     let arguments = arguments
         .filter(|value| !value.is_null())
-        .and_then(format_json);
+        .and_then(|value| format_json(value, &mut truncated));
     let formatted_output = output
         .filter(|value| !value.is_null())
-        .and_then(format_output);
+        .and_then(|value| format_output(value, &mut truncated));
     let mut image_urls = Vec::new();
     if let Some(value) = output {
         collect_image_urls(value, &mut image_urls);
@@ -43,12 +44,14 @@ pub(super) fn tool_activity(
         })
         .flatten();
 
-    ActivityItem::new(source_id, kind, title, detail, complete)
+    let mut item = ActivityItem::new(source_id, kind, title, detail, complete)
         .with_arguments(arguments)
         .with_activity_source(raw_arguments)
         .with_output(formatted_output)
         .with_image_urls(image_urls)
-        .with_failed(failed)
+        .with_failed(failed);
+    item.output_truncated = truncated;
+    item
 }
 
 pub(super) fn input_title(value: Option<&Value>) -> Option<String> {
@@ -73,21 +76,29 @@ mod tests {
         // ACP tool calls report output as ToolCallContent blocks; the command's
         // real text is inside, not the transport object itself.
         assert_eq!(
-            format_output(&serde_json::json!([
-                {"type": "content", "content": {"type": "text", "text": "first line\n{\"actual\":\"command json\"}"}}
-            ]))
+            format_output(
+                &serde_json::json!([
+                    {"type": "content", "content": {"type": "text", "text": "first line\n{\"actual\":\"command json\"}"}}
+                ]),
+                &mut false,
+            )
             .as_deref(),
             Some("first line\n{\"actual\":\"command json\"}")
         );
         assert_eq!(
             format_output(
-                &serde_json::json!({"type": "content", "content": {"type": "text", "text": "hi"}})
+                &serde_json::json!({"type": "content", "content": {"type": "text", "text": "hi"}}),
+                &mut false,
             )
             .as_deref(),
             Some("hi")
         );
         assert_eq!(
-            format_output(&serde_json::json!({"type": "text", "text": "hi"})).as_deref(),
+            format_output(
+                &serde_json::json!({"type": "text", "text": "hi"}),
+                &mut false,
+            )
+            .as_deref(),
             Some("hi")
         );
     }
@@ -95,11 +106,14 @@ mod tests {
     #[test]
     fn output_joins_mixed_text_content_and_bare_items() {
         assert_eq!(
-            format_output(&serde_json::json!([
-                {"type": "text", "text": "plain"},
-                {"type": "content", "content": {"type": "text", "text": "wrapped"}},
-                "bare",
-            ]))
+            format_output(
+                &serde_json::json!([
+                    {"type": "text", "text": "plain"},
+                    {"type": "content", "content": {"type": "text", "text": "wrapped"}},
+                    "bare",
+                ]),
+                &mut false,
+            )
             .as_deref(),
             Some("plain\n\nwrapped\n\nbare")
         );
@@ -130,42 +144,42 @@ mod tests {
     }
 }
 
-pub(super) fn format_json(value: &Value) -> Option<String> {
+pub(super) fn format_json(value: &Value, truncated: &mut bool) -> Option<String> {
     serde_json::to_string_pretty(value)
         .ok()
-        .and_then(non_empty_text)
+        .and_then(|text| non_empty_text(text, truncated))
 }
 
-fn format_output(value: &Value) -> Option<String> {
+fn format_output(value: &Value, truncated: &mut bool) -> Option<String> {
     if let Some(text) = value.as_str() {
-        return non_empty_text(text.to_owned());
+        return non_empty_text(text.to_owned(), truncated);
     }
     if value.get("type").and_then(Value::as_str) == Some("text")
         && let Some(text) = value.get("text").and_then(Value::as_str)
     {
-        return non_empty_text(text.to_owned());
+        return non_empty_text(text.to_owned(), truncated);
     }
     if let Some(structured) = value
         .get("structuredContent")
         .filter(|value| !value.is_null())
     {
-        return format_json(structured);
+        return format_json(structured, truncated);
     }
     // ACP wraps every tool-call output block in {"type": "content", "content": ...};
     // the generic content recursion unwraps it here and inside array items.
     if let Some(content) = value.get("content").filter(|value| !value.is_null()) {
-        return format_output(content);
+        return format_output(content, truncated);
     }
     if let Some(items) = value.as_array() {
         let text = items
             .iter()
             .filter(|item| !is_image_item(item))
-            .filter_map(format_output)
+            .filter_map(|item| format_output(item, truncated))
             .collect::<Vec<_>>()
             .join("\n\n");
-        return non_empty_text(text);
+        return non_empty_text(text, truncated);
     }
-    format_json(value)
+    format_json(value, truncated)
 }
 
 fn collect_image_urls(value: &Value, urls: &mut Vec<String>) {
@@ -233,7 +247,7 @@ fn is_image_item(value: &Value) -> bool {
         || (item_type == Some("file") && mime.is_some_and(|mime| mime.starts_with("image/")))
 }
 
-fn non_empty_text(value: String) -> Option<String> {
+fn non_empty_text(value: String, truncated: &mut bool) -> Option<String> {
     let value = value.trim().to_owned();
     if value.is_empty() {
         return None;
@@ -241,7 +255,8 @@ fn non_empty_text(value: String) -> Option<String> {
     if value.chars().count() <= MAX_ACTIVITY_CHARS {
         return Some(value);
     }
-    let mut truncated = value.chars().take(MAX_ACTIVITY_CHARS).collect::<String>();
-    truncated.push_str(&tr!("activity.output_truncated"));
-    Some(truncated)
+    // Persisted text stays locale-neutral: the renderer appends the
+    // "output truncated" marker from `output_truncated` at display time.
+    *truncated = true;
+    Some(value.chars().take(MAX_ACTIVITY_CHARS).collect())
 }
