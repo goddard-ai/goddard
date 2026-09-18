@@ -18,6 +18,11 @@
 //!   menu and reopen it.
 //! - **Escape** is an action bound in the menu's own key context, so it beats
 //!   the transcript's `escape` binding instead of also cancelling the turn.
+//! - **Drag release** ends a press that opened the menu and was never let go:
+//!   the pointer tracks across rows while the button stays held, and the
+//!   release picks whatever it lands on — or dismisses when it lands on
+//!   nothing. A release back where the press began reads as a click instead,
+//!   leaving the menu up for a second pick.
 //! - **Focus** is taken two frames after opening. Deferred elements are not
 //!   linked into the dispatch tree until after the deferred draw runs, so
 //!   focusing any earlier silently does nothing — and then no key reaches the
@@ -30,8 +35,9 @@ use std::time::Duration;
 use gpui::{
     AlignItems, AnyElement, App, Bounds, Display, Edges, Element, ElementId, FocusHandle,
     FontWeight, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent,
-    LayoutId, Length, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Position,
-    RenderOnce, SharedString, Size, StatefulInteractiveElement, Style, Styled, Window, actions,
+    LayoutId, Length, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    Position, RenderOnce, SharedString, Size, StatefulInteractiveElement, Style, Styled, Window,
+    actions,
     anchored, canvas, deferred, div, img, prelude::FluentBuilder, px,
 };
 
@@ -61,6 +67,11 @@ const TRIGGER_GAP: f32 = 4.0;
 /// Dwell before a hover-open trigger's menu appears: long enough that a
 /// cursor crossing the strip never flashes it, short enough to feel instant.
 const HOVER_OPEN_DELAY: Duration = Duration::from_millis(150);
+
+/// How far a release can land from the press that opened the menu and still
+/// read as a click. Past it the press was a drag, and releasing over nothing
+/// dismisses.
+const DRAG_RELEASE_SLOP: f32 = 4.0;
 
 /// A text field inside an open panel, such as a picker's filter box.
 ///
@@ -277,10 +288,31 @@ impl MenuItem {
     }
 }
 
+/// A mouse-down that opened a menu and is still held, turning the open menu
+/// into drag tracking: the release picks whatever it lands on.
+#[derive(Clone, Copy)]
+struct HeldPress {
+    button: MouseButton,
+    /// Where the press landed, so a release back there can read as a click.
+    origin: Point<Pixels>,
+}
+
+/// The release of a drag-opening press, once its button matches.
+enum HeldRelease {
+    /// Released within [`DRAG_RELEASE_SLOP`] of the press — a click; the menu
+    /// stays open for a second pick.
+    InPlace,
+    /// Released anywhere else; the gesture ended wherever it landed.
+    Dragged,
+}
+
 /// Where an open menu is anchored, in window coordinates.
 #[derive(Default)]
 struct MenuState {
     open: Option<Point<Pixels>>,
+    /// The press that opened the menu and has not been released yet. `None`
+    /// for keyboard and hover opens, which have no gesture to finish.
+    held_press: Option<HeldPress>,
     /// A nested hit target can contribute actions to its ancestor's menu.
     /// Snapshot them on opening so streaming/reflow cannot retarget an action.
     pending_context_items: Vec<MenuItem>,
@@ -374,7 +406,7 @@ impl ContextMenuHandle {
             .get()
             .map(|bounds| Point::new(bounds.left() + px(8.0), bounds.bottom()))
             .unwrap_or_else(|| window.mouse_position());
-        open_menu(self, position, SurfaceFocus::Card, false, window, cx);
+        open_menu(self, position, SurfaceFocus::Card, false, None, window, cx);
     }
 
     pub fn close(&self, window: &mut Window, cx: &mut App) {
@@ -382,6 +414,7 @@ impl ContextMenuHandle {
             let mut state = self.state.borrow_mut();
             let was_open = state.open.is_some();
             state.open = None;
+            state.held_press = None;
             state.pending_context_items.clear();
             state.context_items.clear();
             state.highlighted = None;
@@ -414,10 +447,31 @@ impl ContextMenuHandle {
         window.refresh();
     }
 
+    /// Consume the press that drag-opened the menu when `event` is its
+    /// release. `None` means the menu was not opened by a still-held press of
+    /// this button, so the release is not the menu's to interpret — a click
+    /// after a click-open, say, or the other button's release mid-drag.
+    fn held_release(&self, event: &MouseUpEvent) -> Option<HeldRelease> {
+        let mut state = self.state.borrow_mut();
+        let press = state.held_press?;
+        if press.button != event.button {
+            return None;
+        }
+        state.held_press = None;
+        let dragged = (event.position.x - press.origin.x).abs() > px(DRAG_RELEASE_SLOP)
+            || (event.position.y - press.origin.y).abs() > px(DRAG_RELEASE_SLOP);
+        Some(if dragged {
+            HeldRelease::Dragged
+        } else {
+            HeldRelease::InPlace
+        })
+    }
+
     fn open_at(
         &self,
         position: Point<Pixels>,
         trigger_click_toggles: bool,
+        held_press: Option<HeldPress>,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -425,6 +479,7 @@ impl ContextMenuHandle {
             let mut state = self.state.borrow_mut();
             let was_open = state.open.is_some();
             state.open = Some(position);
+            state.held_press = held_press;
             state.context_items = std::mem::take(&mut state.pending_context_items);
             state.highlighted = None;
             state.active_submenu = None;
@@ -461,13 +516,14 @@ fn open_menu(
     position: Point<Pixels>,
     focus_target: SurfaceFocus,
     trigger_click_toggles: bool,
+    held_press: Option<HeldPress>,
     window: &mut Window,
     cx: &mut App,
 ) {
     // Runs the toggle observers, which is where a content-focusing surface
     // schedules its own focus. Ours is scheduled after, so it would win — only
     // request it when the card is what should end up focused.
-    handle.open_at(position, trigger_click_toggles, window, cx);
+    handle.open_at(position, trigger_click_toggles, held_press, window, cx);
     if focus_target == SurfaceFocus::Card {
         let focus = handle.focus.clone();
         window.on_next_frame(move |window, _| {
@@ -881,7 +937,7 @@ where
                     .get()
                     .map(|bounds| align.anchor_point(bounds, px(TRIGGER_GAP)))
                     .unwrap_or_else(|| window.mouse_position());
-                open_menu(&handle, anchor, SurfaceFocus::Card, true, window, cx);
+                open_menu(&handle, anchor, SurfaceFocus::Card, true, None, window, cx);
             });
         })
         .detach();
@@ -966,7 +1022,7 @@ fn toggle_keyboard_anchored(
     else {
         return;
     };
-    open_menu(handle, anchor, focus_target, true, window, cx);
+    open_menu(handle, anchor, focus_target, true, None, window, cx);
 }
 
 /// The shared half of both dropdown surfaces: a trigger that records its bounds
@@ -992,15 +1048,21 @@ where
         .track_focus(&handle.trigger_focus)
         .tab_index(0)
         .child(trigger_bounds_probe(handle))
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            toggle_anchored_surface(&toggle_handle, align, focus_target, window, cx);
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            // Only a menu card tracks the rest of this press as a drag; a
+            // popover's arbitrary content has no rows to release onto.
+            let held_press = (focus_target == SurfaceFocus::Card).then_some(HeldPress {
+                button: MouseButton::Left,
+                origin: event.position,
+            });
+            toggle_anchored_surface(&toggle_handle, align, focus_target, held_press, window, cx);
             cx.stop_propagation();
         })
         .on_key_down(move |event: &KeyDownEvent, window, cx| {
             if key_handle.trigger_focus.is_focused(window)
                 && matches!(event.keystroke.key.as_str(), "enter" | "space")
             {
-                toggle_anchored_surface(&key_handle, align, focus_target, window, cx);
+                toggle_anchored_surface(&key_handle, align, focus_target, None, window, cx);
                 cx.stop_propagation();
             }
         });
@@ -1031,6 +1093,7 @@ fn toggle_anchored_surface(
     handle: &ContextMenuHandle,
     align: MenuAlign,
     focus_target: SurfaceFocus,
+    held_press: Option<HeldPress>,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -1044,7 +1107,7 @@ fn toggle_anchored_surface(
         .get()
         .map(|bounds| align.anchor_point(bounds, px(TRIGGER_GAP)))
         .unwrap_or_else(|| window.mouse_position());
-    open_menu(handle, anchor, focus_target, true, window, cx);
+    open_menu(handle, anchor, focus_target, true, held_press, window, cx);
 }
 
 /// A chrome-less card: dismissal and the menu key context, nothing else.
@@ -1123,6 +1186,10 @@ where
                     event.position,
                     SurfaceFocus::Card,
                     false,
+                    Some(HeldPress {
+                        button: MouseButton::Right,
+                        origin: event.position,
+                    }),
                     window,
                     cx,
                 );
@@ -1236,6 +1303,25 @@ impl RenderOnce for MenuCard {
             .on_mouse_down_out({
                 let handle = self.handle.clone();
                 move |event, window, cx| handle.dismiss_on_down_out(event, window, cx)
+            })
+            // A drag-opening press released over the card but not on an entry
+            // row — padding, a separator, a header, a disabled row — lands
+            // here when the row's own listener didn't claim it.
+            .on_mouse_up(MouseButton::Left, {
+                let handle = self.handle.clone();
+                move |event, window, cx| release_over_nothing(&handle, event, window, cx)
+            })
+            .on_mouse_up(MouseButton::Right, {
+                let handle = self.handle.clone();
+                move |event, window, cx| release_over_nothing(&handle, event, window, cx)
+            })
+            .on_mouse_up_out(MouseButton::Left, {
+                let handle = self.handle.clone();
+                move |event, window, cx| release_over_nothing(&handle, event, window, cx)
+            })
+            .on_mouse_up_out(MouseButton::Right, {
+                let handle = self.handle.clone();
+                move |event, window, cx| release_over_nothing(&handle, event, window, cx)
             })
             .on_key_down({
                 let handle = self.handle.clone();
@@ -1373,6 +1459,7 @@ fn render_menu_item(
             let hover = theme.overlay;
             let hover_handle = handle.clone();
             let click_handle = handle.clone();
+            let up_handle = handle.clone();
             row(index, highlighted, theme, handle, None)
                 .cursor_default()
                 .hover(move |element| element.bg(hover))
@@ -1387,6 +1474,16 @@ fn render_menu_item(
                     open_submenu(&click_handle, index, false);
                     window.refresh();
                     cx.stop_propagation();
+                })
+                // A drag released on a submenu row ends on its flyout, not on
+                // a pick — swallow it so the card doesn't read a release over
+                // nothing and dismiss.
+                .on_mouse_up(MouseButton::Left, {
+                    let handle = up_handle.clone();
+                    move |event, _, cx| swallow_held_release(&handle, event, cx)
+                })
+                .on_mouse_up(MouseButton::Right, move |event, _, cx| {
+                    swallow_held_release(&up_handle, event, cx)
                 })
                 .child(div().flex_1().min_w_0().truncate().child(label))
                 .when_some(value, |element, value| {
@@ -1462,6 +1559,51 @@ fn track_pointer_highlight(
     })
 }
 
+/// A drag-opening press released on an entry row picks it. Released within
+/// [`DRAG_RELEASE_SLOP`] of the press it was a click, which still ends the
+/// gesture — just without a pick.
+#[allow(clippy::type_complexity)]
+fn release_on_entry(
+    handle: &ContextMenuHandle,
+    on_click: &Rc<dyn Fn(&mut Window, &mut App)>,
+    event: &MouseUpEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    match handle.held_release(event) {
+        Some(HeldRelease::Dragged) => {
+            handle.close(window, cx);
+            on_click(window, cx);
+            window.refresh();
+            cx.stop_propagation();
+        }
+        Some(HeldRelease::InPlace) => cx.stop_propagation(),
+        None => {}
+    }
+}
+
+/// A drag released where no entry claimed it — card padding, a separator, a
+/// disabled row, or anywhere outside the card — dismisses. A release in place
+/// reads as a click and leaves the menu up.
+fn release_over_nothing(
+    handle: &ContextMenuHandle,
+    event: &MouseUpEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(HeldRelease::Dragged) = handle.held_release(event) {
+        handle.close(window, cx);
+        window.refresh();
+    }
+}
+
+/// A drag released on a submenu row ends on its flyout, not on a pick.
+fn swallow_held_release(handle: &ContextMenuHandle, event: &MouseUpEvent, cx: &mut App) {
+    if handle.held_release(event).is_some() {
+        cx.stop_propagation();
+    }
+}
+
 /// The shared row: consistent insets, plus hover, keyboard highlight and
 /// close-then-act when it has a handler. A `None` handler renders the same
 /// geometry inert, which is how a disabled entry keeps the menu's shape.
@@ -1487,6 +1629,8 @@ fn row(
         .line_height(sp(15.0))
         .when(highlighted, |element| element.bg(highlight))
         .when_some(on_click, |element, on_click| {
+            let up_handle = handle.clone();
+            let up_click = on_click.clone();
             element
                 .cursor_default()
                 .hover(move |element| element.bg(hover))
@@ -1494,6 +1638,14 @@ fn row(
                     handle.close(window, cx);
                     on_click(window, cx);
                     window.refresh();
+                })
+                .on_mouse_up(MouseButton::Left, {
+                    let handle = up_handle.clone();
+                    let on_click = up_click.clone();
+                    move |event, window, cx| release_on_entry(&handle, &on_click, event, window, cx)
+                })
+                .on_mouse_up(MouseButton::Right, move |event, window, cx| {
+                    release_on_entry(&up_handle, &up_click, event, window, cx)
                 })
         })
 }
@@ -1924,6 +2076,184 @@ mod tests {
                 },
             )
         }
+    }
+
+    /// A menu whose pickable row is a full-size custom body, so a test can
+    /// point at it through `debug_bounds` the way a drag release would.
+    struct DragHarness {
+        handle: ContextMenuHandle,
+        activated: Rc<Cell<bool>>,
+        context: bool,
+    }
+
+    impl Render for DragHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let activated = self.activated.clone();
+            let items = move |_: &mut App| {
+                let activated = activated.clone();
+                vec![
+                    MenuItem::custom(|_, _| {
+                        div()
+                            .debug_selector(|| "drag-item".into())
+                            .size_full()
+                            .into_any_element()
+                    })
+                    .on_click(move |_, _| activated.set(true)),
+                    MenuItem::Separator,
+                    MenuItem::Header("Section".into()),
+                ]
+            };
+            let trigger = div().w(px(120.0)).h(px(32.0));
+            div().size_full().child(if self.context {
+                context_menu(trigger, "drag-context", &self.handle, items)
+            } else {
+                dropdown_menu(
+                    trigger,
+                    "drag-dropdown",
+                    &self.handle,
+                    MenuAlign::BelowLeft,
+                    items,
+                )
+            })
+        }
+    }
+
+    fn drag_harness(
+        context: bool,
+        cx: &mut TestAppContext,
+    ) -> (ContextMenuHandle, Rc<Cell<bool>>, DragHarness) {
+        // The card's entrance clip starts zero-size and would keep every row
+        // unhittable until the animation finishes; reduce-motion skips it.
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let handle = cx.update(ContextMenuHandle::new);
+        let activated = Rc::new(Cell::new(false));
+        let harness = DragHarness {
+            handle: handle.clone(),
+            activated: activated.clone(),
+            context,
+        };
+        (handle, activated, harness)
+    }
+
+    #[gpui::test]
+    fn dropdown_drag_release_picks_the_row_under_the_pointer(cx: &mut TestAppContext) {
+        let (handle, activated, harness) = drag_harness(false, cx);
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        assert!(handle.is_open());
+        cx.run_until_parked();
+        let item = cx
+            .debug_bounds("drag-item")
+            .expect("the item row should paint");
+
+        cx.simulate_mouse_move(item.center(), MouseButton::Left, Modifiers::none());
+        assert_eq!(
+            handle.state.borrow().highlighted,
+            Some(0),
+            "the drag should highlight the row it is over"
+        );
+        cx.simulate_mouse_up(item.center(), MouseButton::Left, Modifiers::none());
+
+        assert!(activated.get(), "a drag released on a row should pick it");
+        assert!(!handle.is_open());
+    }
+
+    #[gpui::test]
+    fn dropdown_drag_release_outside_dismisses(cx: &mut TestAppContext) {
+        let (handle, activated, harness) = drag_harness(false, cx);
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+        cx.simulate_mouse_move(
+            point(px(500.0), px(400.0)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.simulate_mouse_up(
+            point(px(500.0), px(400.0)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+
+        assert!(!handle.is_open(), "a drag released on nothing dismisses");
+        assert!(!activated.get());
+    }
+
+    #[gpui::test]
+    fn dropdown_drag_release_on_a_non_entry_dismisses(cx: &mut TestAppContext) {
+        let (handle, activated, harness) = drag_harness(false, cx);
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+        let item = cx
+            .debug_bounds("drag-item")
+            .expect("the item row should paint");
+        // Inside the card but above the first row: the card's own padding.
+        let padding = point(item.center().x, item.top() - px(2.0));
+        cx.simulate_mouse_up(padding, MouseButton::Left, Modifiers::none());
+
+        assert!(!handle.is_open());
+        assert!(!activated.get());
+    }
+
+    #[gpui::test]
+    fn dropdown_release_in_place_leaves_the_menu_up_for_a_click(cx: &mut TestAppContext) {
+        let (handle, activated, harness) = drag_harness(false, cx);
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+        cx.simulate_mouse_up(on_trigger, MouseButton::Left, Modifiers::none());
+        assert!(handle.is_open(), "a release in place is a click, not a drag");
+
+        // Click mode still works: a press on the row picks it on the down.
+        let item = cx
+            .debug_bounds("drag-item")
+            .expect("the item row should paint");
+        cx.simulate_mouse_down(item.center(), MouseButton::Left, Modifiers::none());
+        assert!(activated.get());
+        assert!(!handle.is_open());
+    }
+
+    #[gpui::test]
+    fn context_menu_right_drag_release_picks_the_row(cx: &mut TestAppContext) {
+        let (handle, activated, harness) = drag_harness(true, cx);
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Right, Modifiers::none());
+        assert!(handle.is_open());
+        cx.run_until_parked();
+        let item = cx
+            .debug_bounds("drag-item")
+            .expect("the item row should paint");
+
+        cx.simulate_mouse_move(item.center(), MouseButton::Right, Modifiers::none());
+        cx.simulate_mouse_up(item.center(), MouseButton::Right, Modifiers::none());
+
+        assert!(activated.get());
+        assert!(!handle.is_open());
+    }
+
+    #[gpui::test]
+    fn context_menu_release_in_place_leaves_the_menu_open(cx: &mut TestAppContext) {
+        let (handle, activated, harness) = drag_harness(true, cx);
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Right, Modifiers::none());
+        cx.run_until_parked();
+        cx.simulate_mouse_up(on_trigger, MouseButton::Right, Modifiers::none());
+
+        assert!(handle.is_open());
+        assert!(!activated.get());
     }
 
     /// The trigger sits at the window origin, 120×32; the card hangs below it,
