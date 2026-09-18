@@ -1275,7 +1275,14 @@ struct SessionNavigation {
 
 impl SessionNavigation {
     fn visit(&mut self, current: Option<NavigationLocation>, next: NavigationLocation) {
+        // `next` becomes the current location, so it can no longer be a
+        // back/forward target — an entry pointing at it is a dead hop.
+        self.back.retain(|entry| *entry != next);
+        self.forward.retain(|entry| *entry != next);
         if let Some(current) = current.filter(|current| *current != next) {
+            // `current` is pushed exactly once; earlier visits to it are
+            // folded away so the stack never repeats a location.
+            self.back.retain(|entry| *entry != current);
             self.back.push(current);
             self.forward.clear();
         }

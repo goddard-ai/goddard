@@ -622,6 +622,52 @@ fn session_navigation_prunes_deleted_tasks() {
     );
 }
 
+#[test]
+fn session_navigation_never_targets_the_current_location() {
+    let task = NavigationLocation::Task(Uuid::new_v4());
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let mut navigation = SessionNavigation::default();
+
+    // Task -> T1 -> T2, then T2 closes while viewed: the app lands on
+    // T1, so it can no longer sit in the stacks — Back reaches the task.
+    navigation.visit(Some(task), NavigationLocation::Terminal(first));
+    navigation.visit(
+        Some(NavigationLocation::Terminal(first)),
+        NavigationLocation::Terminal(second),
+    );
+    navigation.remove_terminal(second);
+    navigation.visit(None, NavigationLocation::Terminal(first));
+    assert_eq!(
+        navigation.go_back(NavigationLocation::Terminal(first)),
+        Some(task)
+    );
+
+    // The forward stack gets the same treatment: T1 -> T2 -> Back ->
+    // close T1 lands on T2, and Forward has nowhere to point but the
+    // terminal already on screen.
+    let mut navigation = SessionNavigation::default();
+    navigation.visit(Some(task), NavigationLocation::Terminal(first));
+    navigation.visit(
+        Some(NavigationLocation::Terminal(first)),
+        NavigationLocation::Terminal(second),
+    );
+    assert_eq!(
+        navigation.go_back(NavigationLocation::Terminal(second)),
+        Some(NavigationLocation::Terminal(first))
+    );
+    navigation.remove_terminal(first);
+    navigation.visit(None, NavigationLocation::Terminal(second));
+    assert_eq!(
+        navigation.go_forward(NavigationLocation::Terminal(second)),
+        None
+    );
+    assert_eq!(
+        navigation.go_back(NavigationLocation::Terminal(second)),
+        Some(task)
+    );
+}
+
 /// A session skeleton, as the session list holds them: stored rows report
 /// started without their transcript detail loaded.
 fn started_session(id: Uuid) -> AgentSession {
