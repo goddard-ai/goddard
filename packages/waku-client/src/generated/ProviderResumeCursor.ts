@@ -6,4 +6,3 @@ export type ProviderResumeCursor = { "provider": "antigravity", conversationId: 
  * `session/resume` for the suffix only instead of a full fold.
  */
 viewCursor?: string | null, } | { "provider": "ohMyPi", sessionId: string, sessionFile?: string | null, } | { "provider": "pi", sessionId: string, sessionFile?: string | null, };
-

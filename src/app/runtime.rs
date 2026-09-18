@@ -1459,7 +1459,15 @@ impl Waku {
                 self.state.unseen_completions.insert(session_id, unix_time());
             }
         }
-        self.friends_state = state;
+        // Mirror the display name into its editor — but only while the
+        // field still shows the last broadcast value, so typing a new name
+        // is never clobbered by an unrelated friends update.
+        let previous_name = std::mem::replace(&mut self.friends_state, state).display_name;
+        if self.friend_name_input.read(cx).content() == previous_name {
+            let name = self.friends_state.display_name.clone();
+            self.friend_name_input
+                .update(cx, |input, cx| input.set_content(name, cx));
+        }
         // Presence is lazy — a fresh document is the cheapest place to
         // refresh probe verdicts for the open page.
         if self.settings_page == Some(SettingsPage::Friends) {

@@ -5,7 +5,7 @@
 
 use super::settings::{SettingSearch, settings_search_text};
 use super::*;
-use waku_client::friends::{TransferDirection, TransferInfo, TransferStatus};
+use waku_client::friends::{FriendInfo, TransferDirection, TransferInfo, TransferStatus};
 
 impl Waku {
     fn friends_card(&self, theme: &Theme, children: impl IntoIterator<Item = AnyElement>) -> Div {
@@ -74,6 +74,38 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let friends = &self.friends_state;
+
+        // -- Your display name ----------------------------------------------
+        let name_card = self.friends_card(
+            &theme,
+            [
+                self.friends_section_title(&theme, tr!("friends.display_name")).into_any_element(),
+                div()
+                    .mt(px(5.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(18.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("friends.display_name_hint"))
+                    .into_any_element(),
+                div()
+                    .mt(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        TextField::new("friend-name-field", self.friend_name_input.clone())
+                            .w_full(),
+                    )
+                    .child(self.friends_button(
+                        "save-friend-name",
+                        tr!("common.save"),
+                        &theme,
+                        move |this, cx| this.save_friend_display_name(cx),
+                        cx,
+                    ))
+                    .into_any_element(),
+            ],
+        );
 
         // -- Your friend code ------------------------------------------------
         let code = friends.friend_code.clone();
@@ -316,35 +348,77 @@ impl Waku {
         let mut friend_rows = Vec::new();
         for friend in &friends.friends {
             let node_id = friend.node_id.clone();
+            let display = friend_display_name(friend).to_string();
             let (dot_color, status) = if friend.online {
                 (theme.success, tr!("friends.online"))
             } else {
                 (theme.text_tertiary, tr!("friends.unreachable"))
             };
             let mut meta = status.to_string();
+            if friend.nickname.is_some() {
+                meta = format!("{} · {meta}", friend.name);
+            }
             if let Some(last_seen_ms) = friend.last_seen_ms {
                 let ago = format_time_ago(unix_time_millis().saturating_sub(last_seen_ms) / 1_000);
                 meta = format!("{meta} · {}", tr!("friends.last_seen", ago = ago));
             }
+            let editing = self.editing_friend_nickname.as_deref() == Some(node_id.as_str());
             let send_id = node_id.clone();
             let remove_id = node_id.clone();
-            let Some((name_ranges, _)) = search.matched(&friend.name, "") else {
+            // Nicknames are searchable too — the row renders the resolved
+            // name, so match on it rather than the self-reported one.
+            let Some((name_ranges, _)) = search.matched(&display, "") else {
                 continue;
             };
-            friend_rows.push(
-                div()
-                    .id(SharedString::from(format!("friend-row-{node_id}")))
-                    .mt(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(div().size(px(8.0)).rounded_full().flex_none().bg(dot_color))
+            let edit_id = node_id.clone();
+            let mut row = div()
+                .id(SharedString::from(format!("friend-row-{node_id}")))
+                .mt(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .size(px(8.0))
+                        .rounded_full()
+                        .flex_none()
+                        .bg(dot_color),
+                );
+            if editing {
+                row = row
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            TextField::new(
+                                "friend-nickname-field",
+                                self.friend_nickname_input.clone(),
+                            )
+                            .w_full(),
+                        ),
+                    )
+                    .child(self.friends_button(
+                        SharedString::from(format!("friend-nickname-save-{node_id}")),
+                        tr!("common.save"),
+                        &theme,
+                        move |this, cx| this.commit_friend_nickname(cx),
+                        cx,
+                    ))
+                    .child(self.friends_button(
+                        SharedString::from(format!("friend-nickname-cancel-{node_id}")),
+                        tr!("common.cancel"),
+                        &theme,
+                        move |this, cx| {
+                            this.cancel_friend_nickname_edit(cx);
+                        },
+                        cx,
+                    ));
+            } else {
+                row = row
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .child(div().text_size(sp(13.0)).text_color(theme.text).child(
-                                settings_search_text(friend.name.clone(), name_ranges, theme),
+                                settings_search_text(display.clone(), name_ranges, theme),
                             ))
                             .child(
                                 div()
@@ -353,6 +427,13 @@ impl Waku {
                                     .child(meta),
                             ),
                     )
+                    .child(self.friends_button(
+                        SharedString::from(format!("friend-nickname-{node_id}")),
+                        tr!("friends.nickname"),
+                        &theme,
+                        move |this, cx| this.begin_friend_nickname_edit(edit_id.clone(), cx),
+                        cx,
+                    ))
                     .child(self.friends_button(
                         SharedString::from(format!("friend-send-{node_id}")),
                         tr!("friends.send_file"),
@@ -373,9 +454,9 @@ impl Waku {
                             );
                         },
                         cx,
-                    ))
-                    .into_any_element(),
-            );
+                    ));
+            }
+            friend_rows.push(row.into_any_element());
         }
         if friend_rows.is_empty() && !search.active() {
             friend_rows.push(
@@ -433,6 +514,7 @@ impl Waku {
             .flex()
             .flex_col()
             .gap(px(12.0))
+            .child(name_card)
             .children(code_card)
             .children(add_card)
             .children(friends_card);
@@ -487,6 +569,13 @@ impl Waku {
             transfer.status,
             TransferStatus::Pending | TransferStatus::Transferring
         );
+        let peer_name = self
+            .friends_state
+            .friends
+            .iter()
+            .find(|f| f.node_id == transfer.peer_id)
+            .map(|f| friend_display_name(f).to_string())
+            .unwrap_or_else(|| transfer.peer_name.clone());
         let transfer_id = transfer.id;
         let session_id = transfer.session_id;
         let reveal_dir = (transfer.direction == TransferDirection::Incoming
@@ -507,7 +596,7 @@ impl Waku {
                         div()
                             .text_size(sp(13.0))
                             .text_color(theme.text)
-                            .child(format!("{} · {}", transfer.title, transfer.peer_name)),
+                            .child(format!("{} · {}", transfer.title, peer_name)),
                     )
                     .child(
                         div()
@@ -560,10 +649,16 @@ impl Waku {
         if !code.starts_with("gfr-") {
             return;
         }
-        let our_name = std::env::var("USER")
-            .ok()
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "Goddard".to_owned());
+        let our_name = self
+            .friends_state
+            .display_name
+            .trim()
+            .to_string();
+        let our_name = if our_name.is_empty() {
+            "Goddard".to_owned()
+        } else {
+            our_name
+        };
         self.friend_code_input.update(cx, |input, cx| {
             input.set_content("", cx);
         });
@@ -574,6 +669,65 @@ impl Waku {
             },
             cx,
         );
+    }
+
+    /// Persist the display-name field (Save button or Enter).
+    pub(super) fn save_friend_display_name(&mut self, cx: &mut Context<Self>) {
+        let name = self
+            .friend_name_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_string();
+        self.friends_command(waku_client::Command::SetFriendDisplayName { name }, cx);
+    }
+
+    /// Swap the friend's name for the shared nickname editor, prefilled
+    /// with their current nickname (empty when they have none).
+    fn begin_friend_nickname_edit(&mut self, node_id: String, cx: &mut Context<Self>) {
+        let current = self
+            .friends_state
+            .friends
+            .iter()
+            .find(|f| f.node_id == node_id)
+            .and_then(|f| f.nickname.clone())
+            .unwrap_or_default();
+        self.editing_friend_nickname = Some(node_id);
+        self.friend_nickname_input.update(cx, |input, cx| {
+            input.set_content(current, cx);
+        });
+        let focus = self.friend_nickname_input.read(cx).focus();
+        let _ = self
+            .window_handle
+            .update(cx, |_, window, cx| window.focus(&focus, cx));
+        cx.notify();
+    }
+
+    /// Commit the shared nickname editor to the daemon (Save or Enter).
+    /// Blank clears the override.
+    pub(super) fn commit_friend_nickname(&mut self, cx: &mut Context<Self>) {
+        let Some(node_id) = self.editing_friend_nickname.take() else {
+            return;
+        };
+        let nickname = self
+            .friend_nickname_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_string();
+        self.friends_command(
+            waku_client::Command::SetFriendNickname {
+                node_id,
+                nickname: (!nickname.is_empty()).then_some(nickname),
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    fn cancel_friend_nickname_edit(&mut self, cx: &mut Context<Self>) {
+        self.editing_friend_nickname = None;
+        cx.notify();
     }
 
     /// File picker → `SendFileToFriend`. The daemon dials fresh regardless
@@ -603,6 +757,16 @@ impl Waku {
         })
         .detach();
     }
+}
+
+/// What this install shows for a friend: local nickname, else their
+/// self-reported name.
+fn friend_display_name(friend: &FriendInfo) -> &str {
+    friend
+        .nickname
+        .as_deref()
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&friend.name)
 }
 
 fn short_node_id(node_id: &str) -> String {

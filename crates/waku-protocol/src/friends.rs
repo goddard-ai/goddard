@@ -15,6 +15,8 @@ use uuid::Uuid;
 pub struct FriendsState {
     /// This install's shareable code (`gfr-<endpoint id>`).
     pub friend_code: String,
+    /// The name friends see on our requests and offers.
+    pub display_name: String,
     pub friends: Vec<FriendInfo>,
     /// Friend requests awaiting a local decision.
     pub incoming_requests: Vec<FriendRequestInfo>,
@@ -28,7 +30,11 @@ pub struct FriendsState {
 pub struct FriendInfo {
     /// `gfr-…` / endpoint id string.
     pub node_id: String,
+    /// The friend's self-reported display name.
     pub name: String,
+    /// Local-only override — render this instead of `name` when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
     /// Result of the most recent on-demand probe — presence is lazy, so this
     /// is only as fresh as the last dial; `None` means never seen.
     #[serde(default, skip_serializing_if = "Option::is_none")]

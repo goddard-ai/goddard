@@ -1,1 +1,2 @@
 - Move Friends — the friend-to-friend file transfer page — behind a Settings → Experiments toggle, off by default in release builds
+- Add a customizable display name (what friends see) and per-friend local nicknames; completed transfers now also get a readable `Name-file` symlink under `~/Documents/Goddard/From Friends/`

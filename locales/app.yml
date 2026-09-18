@@ -1474,6 +1474,8 @@ common.search_with_google:
   en: Search with Google
 common.cancel:
   en: Cancel
+common.save:
+  en: Save
 common.send:
   en: Send
 
@@ -3625,6 +3627,16 @@ settings.friends:
   en: Friends
 settings.friends_keywords:
   en: friends friend share send receive file transfer peer online presence
+friends.display_name:
+  en: Your display name
+friends.display_name_hint:
+  en: Friends see this name on your requests and file offers.
+friends.display_name_placeholder:
+  en: Name shown to friends
+friends.nickname:
+  en: Nickname
+friends.nickname_placeholder:
+  en: Only you see this name
 friends.your_code:
   en: Your friend code
 friends.code_hint:

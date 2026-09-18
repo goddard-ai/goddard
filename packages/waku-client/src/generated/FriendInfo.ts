@@ -4,7 +4,15 @@ export type FriendInfo = {
 /**
  * `gfr-…` / endpoint id string.
  */
-nodeId: string, name: string,
+nodeId: string,
+/**
+ * The friend's self-reported display name.
+ */
+name: string,
+/**
+ * Local-only override — render this instead of `name` when set.
+ */
+nickname?: string | null,
 /**
  * Result of the most recent on-demand probe — presence is lazy, so this
  * is only as fresh as the last dial; `None` means never seen.
