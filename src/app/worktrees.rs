@@ -94,6 +94,8 @@ impl Waku {
             return;
         };
         self.worktree_creation_pending = true;
+        let sync_default_branch = self.state.new_worktree_sync_default_branch;
+        let sync_branches = self.state.new_worktree_sync_branches.clone();
         cx.notify();
         cx.spawn(async move |waku, cx| {
             let base_branch = base_ref.clone();
@@ -104,6 +106,8 @@ impl Waku {
                         project_path: project.path,
                         name,
                         base_ref,
+                        sync_default_branch,
+                        sync_branches,
                     })? {
                         waku_client::WorkspaceResult::WorktreeCreated { worktree } => Ok(worktree),
                         _ => anyhow::bail!("the daemon returned an invalid worktree response"),

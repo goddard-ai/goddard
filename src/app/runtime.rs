@@ -239,6 +239,8 @@ fn prepare_submission(
     driver_start: Option<anyhow::Result<DriverStartRequest>>,
     session_id: Uuid,
     turn_count: usize,
+    sync_default_branch: bool,
+    sync_branches: Vec<String>,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
     let workspace = match workspace {
@@ -251,6 +253,8 @@ fn prepare_submission(
                     project_path: project.path.clone(),
                     name: None,
                     base_ref: base_branch.clone(),
+                    sync_default_branch,
+                    sync_branches,
                 })? {
                     waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
                     _ => anyhow::bail!("the daemon returned an invalid worktree response"),
@@ -3977,6 +3981,8 @@ impl Waku {
         };
         self.goal_runtime_starts.insert(session_id);
         cx.notify();
+        let sync_default_branch = self.state.new_worktree_sync_default_branch;
+        let sync_branches = self.state.new_worktree_sync_branches.clone();
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -3988,6 +3994,8 @@ impl Waku {
                         Some(driver_start),
                         session_id,
                         next_turn_count,
+                        sync_default_branch,
+                        sync_branches,
                     )
                 })
                 .await;
@@ -4664,6 +4672,8 @@ impl Waku {
             self.show_toast(tr!("errors.daemon_disconnected"));
             return;
         };
+        let sync_default_branch = self.state.new_worktree_sync_default_branch;
+        let sync_branches = self.state.new_worktree_sync_branches.clone();
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -4675,6 +4685,8 @@ impl Waku {
                         driver_start,
                         session_id,
                         next_turn_count,
+                        sync_default_branch,
+                        sync_branches,
                     )
                 })
                 .await;

@@ -37,8 +37,11 @@ const CHANGED_FILES_DIFF_MAX_HEIGHT: f32 = 360.0;
 const CHANGED_FILES_ROW_HEIGHT: f32 = 31.0;
 /// The preview card's fixed header row.
 const CHANGED_FILES_DIFF_HEADER_HEIGHT: f32 = 32.0;
-/// The preview card's corner radius. The bottom edge fade rounds one pixel
-/// less to follow the inside of the card's border.
+/// The preview card's corner radius — also the diff body's bottom inset.
+/// `overflow_hidden` clips to a rectangle, not the card's corner curve, so a
+/// full-bleed row fill painted to the card's bottom edge would overrun the
+/// rounded corners; the scroll viewport and its overlays stop short of the
+/// corner curve instead.
 const CHANGED_FILES_DIFF_CARD_RADIUS: f32 = 12.0;
 /// The margin passed with the preview's `FloatingSurface` anchor: placement
 /// keeps the card this far off every viewport edge.
@@ -2310,6 +2313,7 @@ impl Waku {
                             .relative()
                             .max_h(body_max_height)
                             .overflow_hidden()
+                            .pb(px(CHANGED_FILES_DIFF_CARD_RADIUS))
                             .child(
                                 div()
                                     .id(SharedString::from(format!(
@@ -2317,7 +2321,7 @@ impl Waku {
                                     )))
                                     .w_full()
                                     .min_w_0()
-                                    .max_h(body_max_height)
+                                    .max_h(body_max_height - px(CHANGED_FILES_DIFF_CARD_RADIUS))
                                     .overflow_y_scroll()
                                     .track_scroll(&scroll_handle)
                                     .flex()
@@ -2327,18 +2331,30 @@ impl Waku {
                                     })
                                     .child(rows),
                             )
-                            .child(scrollbar::edge_fade(
-                                scroll_handle.clone(),
-                                scrollbar::FadeEdge::Top,
-                                theme.raised,
-                            ))
-                            .child(scrollbar::edge_fade_rounded(
-                                scroll_handle.clone(),
-                                scrollbar::FadeEdge::Bottom,
-                                theme.raised,
-                                px(CHANGED_FILES_DIFF_CARD_RADIUS - 1.0),
-                            ))
-                            .child(scrollbar::vertical(&scroll_handle, &scrollbar_state))
+                            // Overlays ride a layer that ends at the scroll
+                            // viewport's bottom edge, so neither the bottom
+                            // fade nor the scrollbar thumb can paint into the
+                            // card's corner curve either.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .bottom(px(CHANGED_FILES_DIFF_CARD_RADIUS))
+                                    .child(scrollbar::edge_fade(
+                                        scroll_handle.clone(),
+                                        scrollbar::FadeEdge::Top,
+                                        theme.raised,
+                                    ))
+                                    .child(scrollbar::edge_fade(
+                                        scroll_handle.clone(),
+                                        scrollbar::FadeEdge::Bottom,
+                                        theme.raised,
+                                    ))
+                                    .child(scrollbar::vertical(
+                                        &scroll_handle,
+                                        &scrollbar_state,
+                                    )),
+                            )
                             .into_any_element()
                     }
                     // A binary or mode-only change produces no textual body.

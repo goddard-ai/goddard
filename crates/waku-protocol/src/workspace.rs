@@ -448,6 +448,15 @@ pub enum WorkspaceOperation {
         /// default branch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_ref: Option<String>,
+        /// Fast-forward the local default branch to its tracking branch
+        /// before the worktree bases on it. `false` matches older clients
+        /// that did not send the field.
+        #[serde(default)]
+        sync_default_branch: bool,
+        /// Additional local branches that get the same fast-forward when one
+        /// is the resolved base. Empty matches older clients.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sync_branches: Vec<String>,
     },
     /// Create a linked worktree that adopts `project_path`'s checkout state:
     /// based on its HEAD commit with uncommitted — including untracked —

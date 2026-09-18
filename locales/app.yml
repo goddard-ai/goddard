@@ -657,6 +657,14 @@ settings.new_worktree_default_branch:
   en: New worktrees use the default branch
 settings.new_worktree_default_branch_description:
   en: Always fork a new worktree from the repository's default branch instead of the base branch last used
+settings.new_worktree_sync_default_branch:
+  en: New worktrees update the default branch
+settings.new_worktree_sync_default_branch_description:
+  en: Fetch the remote and fast-forward the local default branch to its tracked state before a new worktree is based on it
+settings.new_worktree_sync_branches:
+  en: Also update these branches
+settings.new_worktree_sync_branches_placeholder:
+  en: develop, release/1.2
 settings.three_finger_swipe_navigation:
   en: Three-finger swipe navigation
 settings.three_finger_swipe_navigation_description:

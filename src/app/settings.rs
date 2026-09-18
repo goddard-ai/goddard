@@ -984,6 +984,63 @@ impl Waku {
                         },
                     )),
             )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.new_worktree_sync_default_branch")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!(
+                                        "settings.new_worktree_sync_default_branch_description"
+                                    )),
+                            )
+                            .child(
+                                div().mt(px(9.0)).max_w(px(360.0)).child(
+                                    TextField::new(
+                                        "worktree-sync-branches-field",
+                                        self.worktree_sync_branches_input.clone(),
+                                    )
+                                    .w_full(),
+                                ),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        "new-worktree-sync-default-branch-toggle",
+                        self.state.new_worktree_sync_default_branch,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.new_worktree_sync_default_branch;
+                            move |this, _, cx| {
+                                this.set_new_worktree_sync_default_branch(!enabled, cx)
+                            }
+                        },
+                    )),
+            )
             .when(cfg!(target_os = "macos"), |element| {
                 // The platform recognizer reads the trackpad's touch stream,
                 // which macOS only hands over when no system gesture claims
@@ -4688,6 +4745,28 @@ impl Waku {
         cx.notify();
     }
 
+    fn set_new_worktree_sync_default_branch(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.new_worktree_sync_default_branch == enabled {
+            return;
+        }
+        self.state.new_worktree_sync_default_branch = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// Persist the whitelist field's current names as the user types; the
+    /// list applies to the next worktree created.
+    pub(super) fn apply_worktree_sync_branches(&mut self, cx: &mut Context<Self>) {
+        let branches = sync_branches_from_text(
+            &self.worktree_sync_branches_input.read(cx).content(),
+        );
+        if branches != self.state.new_worktree_sync_branches {
+            self.state.new_worktree_sync_branches = branches;
+            self.save();
+        }
+        cx.notify();
+    }
+
     fn set_ui_font_size(&mut self, size: f32, window: &mut Window, cx: &mut Context<Self>) {
         let size = waku_client::persistence::sanitized_ui_font_size(size);
         if self.state.ui_font_size == size {
@@ -6392,6 +6471,20 @@ fn detection_checked_label(elapsed: Duration) -> String {
     }
 }
 
+/// Split the whitelist field's comma- or whitespace-separated text into
+/// branch names — Git names admit neither separator — deduplicated in
+/// first-seen order.
+fn sync_branches_from_text(text: &str) -> Vec<String> {
+    let mut branches = Vec::new();
+    for name in text.split([',', ' ', '\t', '\n']) {
+        let name = name.trim();
+        if !name.is_empty() && !branches.iter().any(|seen| seen == name) {
+            branches.push(name.to_owned());
+        }
+    }
+    branches
+}
+
 /// Keep the full binary path, abbreviating only the user's home directory.
 pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
     match home.and_then(|home| path.strip_prefix(home).ok()) {
@@ -6477,7 +6570,7 @@ fn permission_status_row(
 mod tests {
     use super::{
         CUSTOM_COMMAND_EDITOR_CONTEXT, FocusNext, FocusPrevious, SETTINGS_PAGES,
-        abbreviate_home_path,
+        abbreviate_home_path, sync_branches_from_text,
     };
     use crate::input::TextInput;
     use gpui::{Context, Entity, Render, TestAppContext, Window, div, prelude::*};
@@ -6563,6 +6656,15 @@ mod tests {
                 "missing embedded icon: {icon}"
             );
         }
+    }
+
+    #[test]
+    fn sync_branches_parse_separators_and_deduplicate() {
+        assert_eq!(
+            sync_branches_from_text("develop, release/1.2\nnext develop"),
+            ["develop", "release/1.2", "next"]
+        );
+        assert!(sync_branches_from_text(" , ").is_empty());
     }
 
     #[test]

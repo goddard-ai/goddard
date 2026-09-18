@@ -1643,6 +1643,9 @@ pub struct Waku {
     code_font_selector: settings::FontSelector,
     daemon_port_input: Entity<TextInput>,
     daemon_origins_input: Entity<TextInput>,
+    /// The worktree fast-forward branch whitelist, edited live on the
+    /// General settings page.
+    worktree_sync_branches_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
     daemon_token_revealed: bool,
     settings_focus: FocusHandle,
@@ -3320,6 +3323,14 @@ impl Waku {
             input.set_content(daemon_origins, cx);
             input
         });
+        let worktree_sync_branches_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("settings.new_worktree_sync_branches"))
+                .placeholder(tr!("settings.new_worktree_sync_branches_placeholder"));
+            input.set_content(state.new_worktree_sync_branches.join(", "), cx);
+            input
+        });
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -4051,6 +4062,15 @@ impl Waku {
                 )
                 .detach();
             }
+            cx.subscribe(
+                &worktree_sync_branches_input,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.apply_worktree_sync_branches(cx);
+                    }
+                },
+            )
+            .detach();
             cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -4245,6 +4265,7 @@ impl Waku {
                 code_font_selector,
                 daemon_port_input,
                 daemon_origins_input,
+                worktree_sync_branches_input,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
                 settings_focus,

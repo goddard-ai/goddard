@@ -293,13 +293,20 @@ private func writeFrame(_ payload: Data, to output: FileHandle) throws {
 
 private final class UnixListener {
     let path: String
+    private let directory: String
     private var descriptor: Int32
 
     init() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("goddard-computer-use", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        path = directory.appendingPathComponent(UUID().uuidString).path
+        // sockaddr_un.sun_path is 104 bytes on macOS, and a per-user temporary
+        // directory path plus a UUID filename does not fit. A private directory
+        // under /tmp keeps the socket path short no matter what TMPDIR is.
+        directory = "/tmp/goddard-cu-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        path = directory + "/s"
         descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else {
             throw CuaError(String(cString: strerror(errno)))
@@ -356,6 +363,7 @@ private final class UnixListener {
             descriptor = -1
         }
         Darwin.unlink(path)
+        Darwin.rmdir(directory)
     }
 }
 

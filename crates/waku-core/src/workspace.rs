@@ -136,8 +136,16 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             project_path,
             name,
             base_ref,
+            sync_default_branch,
+            sync_branches,
         } => WorkspaceResult::WorktreeCreated {
-            worktree: crate::worktree::create(&project_path, name.as_deref(), base_ref.as_deref())?,
+            worktree: crate::worktree::create(
+                &project_path,
+                name.as_deref(),
+                base_ref.as_deref(),
+                sync_default_branch,
+                &sync_branches,
+            )?,
         },
         WorkspaceOperation::CreateWorktreeFromCheckout { project_path, name } => {
             WorkspaceResult::WorktreeCreated {
