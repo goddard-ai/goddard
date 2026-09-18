@@ -78,7 +78,12 @@ pinned_at?: number | null,
  * the workspace untouched until the user explicitly trusts them, and
  * the daemon refuses prompts while this is set.
  */
-quarantined?: boolean, provider_cursor: ProviderResumeCursor | null,
+quarantined?: boolean,
+/**
+ * When the session's workspace landed on its base branch, unix seconds.
+ * `None` while the session's work has not been landed through the app.
+ */
+landed_at?: number | null, provider_cursor: ProviderResumeCursor | null,
 /**
  * Slash commands the provider reported for this session's live process,
  * kept so a resumed session still completes them before its next

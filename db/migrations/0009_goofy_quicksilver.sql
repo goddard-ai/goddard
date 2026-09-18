@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `landed_at` integer;

@@ -1285,6 +1285,10 @@ pub struct AgentSession {
     /// the daemon refuses prompts while this is set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub quarantined: bool,
+    /// When the session's workspace landed on its base branch, unix seconds.
+    /// `None` while the session's work has not been landed through the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed_at: Option<u64>,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Slash commands the provider reported for this session's live process,
@@ -1372,6 +1376,7 @@ impl AgentSession {
             archived_at: None,
             pinned_at: None,
             quarantined: false,
+            landed_at: None,
             detail_loaded: true,
             provider_cursor: None,
             available_commands: Vec::new(),
@@ -1416,6 +1421,7 @@ impl AgentSession {
             archived_at: self.archived_at,
             pinned_at: self.pinned_at,
             quarantined: self.quarantined,
+            landed_at: self.landed_at,
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,

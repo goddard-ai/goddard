@@ -1206,7 +1206,7 @@ impl StateStore {
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
-                        workspace
+                        landed_at, workspace
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1226,7 +1226,8 @@ impl StateStore {
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<i64>>(10)?,
                     row.get::<_, Option<i64>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<i64>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1583,6 +1584,7 @@ type SessionColumns = (
     Option<i64>,
     Option<i64>,
     Option<i64>,
+    Option<i64>,
     Option<String>,
 );
 
@@ -1605,6 +1607,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at,
         archived_at,
         pinned_at,
+        landed_at,
         workspace,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
@@ -1641,6 +1644,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // sessions. The daemon gate reads full task_state; the UI card
         // requires detail_loaded.
         quarantined: false,
+        landed_at: landed_at.map(|at| at as u64),
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,
@@ -1882,8 +1886,8 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
-         workspace
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         landed_at, workspace
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -1896,6 +1900,7 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          last_reply_at = excluded.last_reply_at,
          archived_at   = excluded.archived_at,
          pinned_at     = excluded.pinned_at,
+         landed_at     = excluded.landed_at,
          workspace     = excluded.workspace";
 
 const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, bookmark, position, created_at)
@@ -1941,6 +1946,9 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
         session
             .pinned_at
+            .map_or(Value::Null, |at| Value::Integer(at as i64)),
+        session
+            .landed_at
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
         // Local stays NULL the way the detail blob omits it, so the column is
         // only ever populated for sessions that live in a worktree.
@@ -3221,8 +3229,19 @@ mod tests {
     fn workspace_migration_backfills_the_column_from_session_details() {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(MIGRATIONS_TABLE).unwrap();
-        // Every migration before the workspace column, recorded as applied.
-        for (tag, sql) in &MIGRATIONS[..MIGRATIONS.len() - 1] {
+        // Every migration except the one that adds the workspace column,
+        // recorded as applied. Later migrations must keep running — the
+        // workspace backfill is no longer the last entry.
+        let workspace_migration = MIGRATIONS
+            .iter()
+            .position(|(_, sql)| sql.contains("ADD `workspace`"))
+            .expect("a migration adds the workspace column");
+        for (tag, sql) in MIGRATIONS
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != workspace_migration)
+            .map(|(_, migration)| migration)
+        {
             connection.execute_batch(sql).unwrap();
             connection
                 .execute(

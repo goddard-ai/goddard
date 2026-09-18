@@ -1287,6 +1287,7 @@ fn merge_session_list_columns(
     existing.last_reply_at = existing.last_reply_at.max(incoming.last_reply_at);
     existing.archived_at = incoming.archived_at;
     existing.pinned_at = incoming.pinned_at;
+    existing.landed_at = incoming.landed_at;
     true
 }
 
@@ -1305,6 +1306,7 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.last_reply_at = incoming.last_reply_at.or(existing.last_reply_at);
         existing.archived_at = incoming.archived_at;
         existing.pinned_at = incoming.pinned_at;
+        existing.landed_at = incoming.landed_at;
     }
     for queued in incoming.queued_messages {
         if !existing

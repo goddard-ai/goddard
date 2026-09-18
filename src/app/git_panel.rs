@@ -1439,6 +1439,7 @@ impl Waku {
                         tr!("git_panel.landed", base = base),
                         ToastTone::Success,
                     );
+                    self.mark_workspace_sessions_landed(&op.workspace, cx);
                     self.invalidate_workspace_queries(cx);
                     self.refresh_git_panel(cx);
                     self.refresh_git_panel_commits(cx);
@@ -1449,6 +1450,7 @@ impl Waku {
                         tr!("git_panel.already_landed", base = base),
                         ToastTone::Notice,
                     );
+                    self.mark_workspace_sessions_landed(&op.workspace, cx);
                     self.invalidate_workspace_queries(cx);
                 }
             },
@@ -1480,6 +1482,34 @@ impl Waku {
                 cx.notify();
             }
         }
+    }
+
+    /// Records that every session rooted at `workspace` landed its work on
+    /// the base — the flag a session row shows as landed once archived. A
+    /// worktree path identifies one session; a local checkout is shared by
+    /// the project's sessions, which all saw their tree land together.
+    fn mark_workspace_sessions_landed(&mut self, workspace: &Path, cx: &mut Context<Self>) {
+        let session_ids: Vec<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.landed_at.is_none()
+                    && self.workspace_path_for_session(session) == Some(workspace)
+            })
+            .map(|session| session.id)
+            .collect();
+        if session_ids.is_empty() {
+            return;
+        }
+        let now = unix_time();
+        for session_id in session_ids {
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.landed_at = Some(now);
+            }
+        }
+        self.save();
+        cx.notify();
     }
 
     /// Settle an operation's spinner toast to its result: resolve it in

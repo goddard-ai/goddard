@@ -3626,7 +3626,11 @@ impl Waku {
         let project_name = self.project_display_name(session.project_id);
         let updated =
             super::sidebar::format_time_ago(unix_time().saturating_sub(session.updated_at));
-        let detail = format!("{project_name} · {updated}");
+        let detail = if session.landed_at.is_some() {
+            format!("{project_name} · {updated} · {}", tr!("settings.archived_landed"))
+        } else {
+            format!("{project_name} · {updated}")
+        };
 
         let unarchive_button = div()
             .id(SharedString::from(format!(
@@ -3732,8 +3736,14 @@ impl Waku {
                     .child(
                         div()
                             .mt(px(1.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
                             .text_size(sp(11.5))
                             .text_color(theme.text_tertiary)
+                            .when(session.landed_at.is_some(), |element| {
+                                element.child(icon("icons/check.svg", 11.0, theme.success))
+                            })
                             .child(detail),
                     ),
             )
