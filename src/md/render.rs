@@ -40,7 +40,8 @@ use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
 use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
 use super::selection::{
-    RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range, word_range,
+    CopySpec, RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range,
+    word_range,
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
@@ -307,6 +308,9 @@ pub struct FlatText {
     /// entry there whose "URL" is the mention's resolved absolute path.
     pub file_refs: Vec<Range<usize>>,
     pub math: Option<Rc<math_text::MathData>>,
+    /// How the flat text maps back to markdown for copy; default emits the
+    /// flat text unchanged.
+    pub copy: Rc<CopySpec>,
 }
 
 /// One literal find-in-page hit inside a shaped markdown text element.
@@ -343,6 +347,7 @@ pub fn flatten(
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
     let mut math = Vec::new();
+    let mut fragments = Vec::new();
 
     for run in runs {
         if run.text.is_empty() {
@@ -351,6 +356,9 @@ pub fn flatten(
         let start = text.len();
         text.push_str(&run.text);
         let end = text.len();
+        if let Some(fragment) = markdown_fragment(run) {
+            fragments.push((start..end, fragment));
+        }
         if run.style.math {
             math.push(math_text::MathSpan {
                 range: start..end,
@@ -425,7 +433,65 @@ pub fn flatten(
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
         math: (!math.is_empty()).then(|| Rc::new(math_text::MathData::new(math))),
+        copy: Rc::new(CopySpec {
+            prefix: Rc::default(),
+            suffix: Rc::default(),
+            fragments,
+        }),
     }
+}
+
+/// The markdown for one inline run, or `None` when it renders exactly as
+/// written. Styles compose inside-out: code is atomic (its contents carry no
+/// emphasis), then emphasis markers, then the link. Whitespace-only runs stay
+/// plain — `** **` would just decorate the gap.
+fn markdown_fragment(run: &InlineRun) -> Option<Rc<str>> {
+    let style = &run.style;
+    let linked = style.link.as_deref().is_some_and(|url| url != PENDING_LINK_URL);
+    let styled = style.bold
+        || style.italic
+        || style.code
+        || style.strikethrough
+        || style.math
+        || linked;
+    if !styled || run.text.trim().is_empty() {
+        return None;
+    }
+    let mut out = run.text.clone();
+    if style.code {
+        // One more backtick than the longest interior run keeps `a`b`
+        // pasteable; the pad spaces are required when the content touches a
+        // tick.
+        let interior = run
+            .text
+            .split(|ch| ch != '`')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let fence = "`".repeat(interior + 1);
+        out = if run.text.starts_with('`') || run.text.ends_with('`') {
+            format!("{fence} {out} {fence}")
+        } else {
+            format!("{fence}{out}{fence}")
+        };
+    } else {
+        if style.strikethrough {
+            out = format!("~~{out}~~");
+        }
+        if style.bold {
+            out = format!("**{out}**");
+        }
+        if style.italic {
+            out = format!("*{out}*");
+        }
+        if style.math {
+            out = format!("${out}$");
+        }
+    }
+    if let Some(url) = style.link.as_deref().filter(|url| *url != PENDING_LINK_URL) {
+        out = format!("[{out}]({url})");
+    }
+    Some(Rc::from(out))
 }
 
 /// `Annotation N` — the citation label the annotation prompt header teaches
@@ -559,6 +625,7 @@ pub fn flatten_plain(
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
         math: None,
+        copy: Rc::default(),
     }
 }
 
@@ -798,6 +865,13 @@ pub struct Ctx<'a> {
     next_ordinal: Cell<usize>,
     /// Set while rendering the first element of a block, for copy spacing.
     starts_block: Cell<bool>,
+    /// Markdown prefix every element in the current container contributes to
+    /// copy: a blockquote pushes `> `, a list item pushes its continuation
+    /// indent. Scoped — renderers restore it when the container ends.
+    copy_margin: Cell<Option<Rc<str>>>,
+    /// One-shot markdown prefix for the next registered element — a list
+    /// marker like `- ` or `3. ` — replacing the margin for that element.
+    copy_lead: Cell<Option<Rc<str>>>,
     animate_streaming: bool,
     math_enabled: bool,
     math_menu: Option<ContextMenuHandle>,
@@ -828,6 +902,8 @@ impl<'a> Ctx<'a> {
             cache: None,
             next_ordinal: Cell::new(0),
             starts_block: Cell::new(true),
+            copy_margin: Cell::new(None),
+            copy_lead: Cell::new(None),
             animate_streaming: true,
             math_enabled: true,
             math_menu: None,
@@ -936,6 +1012,8 @@ impl<'a> Ctx<'a> {
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
             starts_block: Cell::new(self.starts_block.get()),
+            copy_margin: Cell::new(self.copy_margin()),
+            copy_lead: Cell::new(None),
             animate_streaming: self.animate_streaming,
             math_enabled: self.math_enabled,
             math_menu: self.math_menu.clone(),
@@ -952,6 +1030,39 @@ impl<'a> Ctx<'a> {
 
     fn take_block_break(&self) -> bool {
         self.starts_block.replace(false)
+    }
+
+    /// The current copy margin — `Cell<Option<Rc>>` can't be read in place,
+    /// so this swaps it out and back.
+    fn copy_margin(&self) -> Option<Rc<str>> {
+        let margin = self.copy_margin.take();
+        self.copy_margin.set(margin.clone());
+        margin
+    }
+
+    /// Extend the copy margin for a nested container, returning the previous
+    /// value for the caller to restore when the container's blocks are done.
+    fn push_copy_margin(&self, add: &str) -> Option<Rc<str>> {
+        let previous = self.copy_margin.take();
+        let margin = format!("{}{add}", previous.as_deref().unwrap_or(""));
+        self.copy_margin.set(Some(Rc::from(margin)));
+        previous
+    }
+
+    /// The element's copy spec: its own fragments and wrap, preceded by the
+    /// container's markdown prefix — the one-shot `copy_lead` a list marker
+    /// left, else the `copy_margin` — so a heading inside a quote copies as
+    /// `> ## Title`.
+    fn copy_spec(&self, flat: &Rc<FlatText>) -> Rc<CopySpec> {
+        let container = self.copy_lead.take().or_else(|| self.copy_margin());
+        match container {
+            None => flat.copy.clone(),
+            Some(prefix) => {
+                let mut spec = (*flat.copy).clone();
+                spec.prefix = Rc::from(format!("{prefix}{}", spec.prefix));
+                Rc::new(spec)
+            }
+        }
     }
 
     /// Flatten through the cache when one is wired: a settled block reuses its
@@ -1021,6 +1132,7 @@ fn text_element_with_selection(
     ref_underline: Hsla,
     ref_underline_hovered: Hsla,
     block_break: bool,
+    copy: Rc<CopySpec>,
 ) -> AnyElement {
     let styled = StyledText::new(flat.text.clone()).with_runs(runs);
     let layout = styled.layout().clone();
@@ -1191,6 +1303,7 @@ fn text_element_with_selection(
                 block_break,
                 annotation_refs: annotation_refs.clone(),
                 commit_refs: commit_refs.clone(),
+                copy: copy.clone(),
                 geometry: TextGeometry::Text(layout.clone()),
             });
         }
@@ -1240,6 +1353,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.palette.tertiary,
         ctx.palette.secondary,
         ctx.take_block_break(),
+        ctx.copy_spec(flat),
     )
 }
 
@@ -1272,6 +1386,7 @@ pub fn selectable_flat_text(
         gpui::transparent_black(),
         gpui::transparent_black(),
         block_break,
+        flat.copy.clone(),
     )
 }
 
@@ -1514,6 +1629,7 @@ pub fn install_selection_input(
                                 range: line_range(&entry.text, offset),
                                 text: entry.text.clone(),
                                 block_break: false,
+                                copy: entry.copy.clone(),
                             },
                         );
                         drop(selection);
@@ -1532,11 +1648,13 @@ pub fn install_selection_input(
                                 entry.key.clone(),
                                 entry.text.clone(),
                                 word_range(&entry.text, offset),
+                                entry.copy.clone(),
                             ),
                             count if count >= 3 => selection.begin_with_span(
                                 entry.key.clone(),
                                 entry.text.clone(),
                                 line_range(&entry.text, offset),
+                                entry.copy.clone(),
                             ),
                             _ => selection.begin(entry.key.clone(), offset),
                         }
@@ -1837,7 +1955,13 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
-                flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text)
+                let mut flat =
+                    flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text);
+                flat.copy = Rc::new(CopySpec {
+                    prefix: Rc::from(format!("{} ", "#".repeat(*level as usize))),
+                    ..(*flat.copy).clone()
+                });
+                flat
             });
             div()
                 .w_full()
@@ -1865,6 +1989,11 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                         display: true,
                     },
                 ])));
+                flat.copy = Rc::new(CopySpec {
+                    prefix: Rc::from("$$"),
+                    suffix: Rc::from("$$"),
+                    fragments: Vec::new(),
+                });
                 flat
             });
             div()
@@ -1877,10 +2006,12 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
         }
         Block::CodeBlock { language, code } => render_code_block(language.as_deref(), code, ctx),
         Block::BlockQuote { children } => {
+            let margin = ctx.push_copy_margin("> ");
             let rendered = children
                 .iter()
                 .map(|child| render_block(child, ctx))
                 .collect::<Vec<_>>();
+            ctx.copy_margin.set(margin);
             div()
                 .w_full()
                 .min_w_0()
@@ -1916,12 +2047,15 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             rows,
             align,
         } => render_table(header, rows, align, ctx),
-        Block::Rule => div()
+        Block::Rule => {
+            ctx.copy_lead.take();
+            div()
             .w_full()
             .h(hairline())
             .my(px(4.0))
             .bg(ctx.palette.separator)
-            .into_any_element(),
+            .into_any_element()
+        }
     }
 }
 
@@ -1944,11 +2078,26 @@ fn render_list(ordered_start: Option<u64>, items: &[ListItem], ctx: &Ctx) -> Any
                 }
                 (None, None) => marker_text("•".to_owned(), marker_width, ctx),
             };
+            // Markdown copy: the item's first element gets the marker as a
+            // one-shot lead; every element in the item carries the
+            // continuation indent as margin.
+            let lead = match (ordered_start, item.task) {
+                (_, Some(checked)) => {
+                    format!("- [{}] ", if checked { "x" } else { " " })
+                }
+                (Some(start), None) => format!("{}. ", start + index as u64),
+                (None, None) => "- ".to_owned(),
+            };
+            let base = ctx.copy_margin();
+            let margin = ctx.push_copy_margin(&" ".repeat(lead.len()));
+            ctx.copy_lead
+                .set(Some(Rc::from(format!("{}{lead}", base.as_deref().unwrap_or("")))));
             let blocks = item
                 .blocks
                 .iter()
                 .map(|block| render_block(block, ctx))
                 .collect::<Vec<_>>();
+            ctx.copy_margin.set(margin);
             div()
                 .w_full()
                 .min_w_0()
@@ -2044,6 +2193,9 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
     // The key is consumed before branching so a placeholder → image swap does
     // not shift later blocks' ordinals.
     let key = ctx.next_key();
+    // An image registers no selectable text; a list marker must not leak past
+    // it into the next element's copy.
+    ctx.copy_lead.take();
     let id = SharedString::from(format!("image-{}-{}", key.row, key.index));
 
     let decoded = decode_data_url(url);
@@ -2150,6 +2302,13 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             commit_refs: Vec::new(),
             file_refs: Vec::new(),
             math: None,
+            // The fence wraps only a whole-block grab; a partial selection
+            // copies raw code.
+            copy: Rc::new(CopySpec {
+                prefix: Rc::from(format!("```{}\n", language.unwrap_or(""))),
+                suffix: Rc::from("\n```"),
+                fragments: Vec::new(),
+            }),
         }
     });
     let label = language
@@ -2718,6 +2877,34 @@ mod tests {
                 .any(|run| run.strikethrough.is_some() && run.len == 4)
         );
         assert!(flat.runs.iter().any(|run| run.underline.is_some()));
+    }
+
+    #[test]
+    fn flatten_records_copy_fragments_for_styled_runs() {
+        let flat = flatten(
+            &runs_of("plain **bold** `code` [link](https://example.com) ~~gone~~"),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        let fragments = flat
+            .copy
+            .fragments
+            .iter()
+            .map(|(range, markdown)| {
+                (flat.text[range.clone()].to_owned(), markdown.to_string())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fragments,
+            vec![
+                ("bold".to_owned(), "**bold**".to_owned()),
+                ("code".to_owned(), "`code`".to_owned()),
+                ("link".to_owned(), "[link](https://example.com)".to_owned()),
+                ("gone".to_owned(), "~~gone~~".to_owned()),
+            ]
+        );
     }
 
     #[test]

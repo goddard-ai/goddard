@@ -571,6 +571,7 @@ fn review_diff_flat_text(
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
         math: None,
+        copy: Rc::default(),
     }
 }
 

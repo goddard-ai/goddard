@@ -476,6 +476,7 @@ impl Waku {
                     range: 0..text.len(),
                     text: Rc::from(text.as_str()),
                     block_break: false,
+                    copy: Rc::default(),
                 }],
                 comment: String::new(),
                 file: Some(FileAnnotation {
@@ -1880,6 +1881,7 @@ mod tests {
                 range: 0..text.len(),
                 text: Rc::from(text),
                 block_break: false,
+                copy: Rc::default(),
             }],
             comment: comment.to_owned(),
             file: None,
@@ -1905,6 +1907,7 @@ mod tests {
                 range: 0..text.len(),
                 text: Rc::from(text),
                 block_break: false,
+                copy: Rc::default(),
             }],
             comment: comment.to_owned(),
             file: Some(FileAnnotation {

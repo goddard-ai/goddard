@@ -36,6 +36,55 @@ impl TextKey {
     }
 }
 
+/// How one element's flat text maps back to markdown, for copy.
+///
+/// `fragments` covers the inline runs whose markdown differs from their
+/// rendered text — `**bold**`, `` `code` ``, `[label](url)` — keyed by the
+/// run's byte range in the flat text. `prefix`/`suffix` wrap the element as a
+/// whole (heading marks, code fences, list markers, quote `>`) and are only
+/// emitted when the selection covers the entire element: a partial grab of a
+/// fenced block should yield raw code, not half a fence.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CopySpec {
+    pub prefix: Rc<str>,
+    pub suffix: Rc<str>,
+    /// (flat byte range, markdown) pairs in document order, non-overlapping.
+    pub fragments: Vec<(Range<usize>, Rc<str>)>,
+}
+
+impl CopySpec {
+    /// The markdown for `text[range]`, mapping fully covered runs to their
+    /// fragments and leaving partially covered runs as flat text.
+    fn render(&self, text: &str, range: &Range<usize>) -> String {
+        if self.fragments.is_empty() {
+            return text[range.clone()].to_owned();
+        }
+        let mut out = String::new();
+        let mut pos = range.start;
+        for (fragment, markdown) in &self.fragments {
+            if fragment.end <= pos {
+                continue;
+            }
+            if fragment.start >= range.end {
+                break;
+            }
+            let start = fragment.start.max(range.start);
+            let end = fragment.end.min(range.end);
+            if start > pos {
+                out.push_str(&text[pos..start]);
+            }
+            if fragment.start >= range.start && fragment.end <= range.end {
+                out.push_str(markdown);
+            } else {
+                out.push_str(&text[start..end]);
+            }
+            pos = end;
+        }
+        out.push_str(&text[pos..range.end]);
+        out
+    }
+}
+
 /// One element's slice of the selection, in document order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Span {
@@ -48,6 +97,25 @@ pub struct Span {
     /// True when this element starts a new block, so joined copy inserts a
     /// paragraph break rather than a single newline.
     pub block_break: bool,
+    /// The element's markdown mapping, snapshotted with `text`.
+    pub copy: Rc<CopySpec>,
+}
+
+impl Span {
+    /// The selected text as markdown: the element's wrap applies only when the
+    /// span covers it whole, so partial selections never emit half a fence or
+    /// a heading mark on a fragment of a word.
+    pub fn markdown(&self) -> String {
+        let mut out = String::new();
+        if self.range.start == 0 && self.range.end == self.text.len() {
+            out.push_str(&self.copy.prefix);
+        }
+        out.push_str(&self.copy.render(&self.text, &self.range));
+        if self.range.start == 0 && self.range.end == self.text.len() {
+            out.push_str(&self.copy.suffix);
+        }
+        out
+    }
 }
 
 /// The selection state for one transcript.
@@ -80,7 +148,13 @@ impl Selection {
     }
 
     /// Begin with an immediate span: double- or triple-click in one element.
-    pub fn begin_with_span(&mut self, key: TextKey, text: Rc<str>, range: Range<usize>) {
+    pub fn begin_with_span(
+        &mut self,
+        key: TextKey,
+        text: Rc<str>,
+        range: Range<usize>,
+        copy: Rc<CopySpec>,
+    ) {
         self.anchor = Some(key.clone());
         self.anchor_offset = range.start;
         self.dragging = true;
@@ -89,6 +163,7 @@ impl Selection {
             range,
             text,
             block_break: false,
+            copy,
         }];
         self.release_fallback = None;
     }
@@ -226,6 +301,30 @@ impl Selection {
         (!self.is_empty()).then(|| self.text())
     }
 
+    /// The selection as markdown, or `None` when nothing is selected.
+    /// Elements without a [`CopySpec`] contribute their flat text, so a
+    /// selection spanning plain surfaces still copies what it always did.
+    pub fn selected_markdown(&self) -> Option<String> {
+        (!self.is_empty()).then(|| self.markdown())
+    }
+
+    /// The selection as markdown, spans joined in document order.
+    pub fn markdown(&self) -> String {
+        let mut out = String::new();
+        let mut has_span = false;
+        for span in &self.spans {
+            if has_span {
+                out.push('\n');
+                if span.block_break {
+                    out.push('\n');
+                }
+            }
+            out.push_str(&span.markdown());
+            has_span = true;
+        }
+        out
+    }
+
     /// The full selected text, spans joined in document order.
     pub fn text(&self) -> String {
         let mut out = String::new();
@@ -260,6 +359,8 @@ pub struct RegisteredText<G = ()> {
     /// Commit references painted in this element: byte ranges paired with the
     /// SHA text as it appears in the message.
     pub commit_refs: Vec<(Range<usize>, String)>,
+    /// The element's markdown mapping for copy; default emits flat text.
+    pub copy: Rc<CopySpec>,
     pub geometry: G,
 }
 
@@ -330,6 +431,7 @@ impl<G> SelectionRegistry<G> {
                     range: from..to,
                     text: entry.text.clone(),
                     block_break: entry.block_break && !spans.is_empty(),
+                    copy: entry.copy.clone(),
                 });
             }
         }
@@ -533,6 +635,7 @@ mod tests {
                 block_break: index > 0,
                 annotation_refs: Vec::new(),
                 commit_refs: Vec::new(),
+                copy: Rc::default(),
                 geometry: (),
             });
         }
@@ -687,7 +790,7 @@ mod tests {
         let registry = registry(&[("r1", "hello world")]);
         let mut selection = Selection::default();
         let key = TextKey::new("r1", 0);
-        selection.begin_with_span(key.clone(), Rc::from("hello world"), 6..11);
+        selection.begin_with_span(key.clone(), Rc::from("hello world"), 6..11, Rc::default());
         selection.end_drag(&key);
 
         // The word's start is the stored anchor; clicking before it extends
@@ -735,6 +838,7 @@ mod tests {
                 range: 0..15,
                 text,
                 block_break: false,
+                copy: Rc::default(),
             },
         );
 
@@ -761,6 +865,7 @@ mod tests {
                 range: 0..15,
                 text,
                 block_break: false,
+                copy: Rc::default(),
             },
         );
         selection.set_spans(registry.resolve((0, 6), (1, 6)));
@@ -794,7 +899,7 @@ mod tests {
         let mut selection = Selection::default();
         let key = TextKey::new("r1", 0);
         let text: Rc<str> = Rc::from("hello world");
-        selection.begin_with_span(key.clone(), text.clone(), 6..11);
+        selection.begin_with_span(key.clone(), text.clone(), 6..11, Rc::default());
         assert_eq!(selection.wash_range(&key), Some(6..11));
         assert_eq!(selection.end_drag(&key).as_deref(), Some("world"));
     }
@@ -823,6 +928,67 @@ mod tests {
     }
 
     #[test]
+    fn markdown_copy_maps_fragments_and_wraps() {
+        let mut registry = SelectionRegistry::default();
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 0),
+            text: Rc::from("a bold call"),
+            block_break: false,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::from("## "),
+                suffix: Rc::default(),
+                fragments: vec![(2..6, Rc::from("**bold**"))],
+            }),
+            geometry: (),
+        });
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 1),
+            text: Rc::from("let x = 1;"),
+            block_break: true,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::from("```rust\n"),
+                suffix: Rc::from("\n```"),
+                fragments: Vec::new(),
+            }),
+            geometry: (),
+        });
+        let mut selection = Selection::default();
+        selection.set_spans(registry.resolve((0, 0), (1, 10)));
+        assert_eq!(
+            selection.markdown(),
+            "## a **bold** call\n\n```rust\nlet x = 1;\n```"
+        );
+        assert_eq!(selection.text(), "a bold call\n\nlet x = 1;");
+    }
+
+    #[test]
+    fn markdown_copy_partial_spans_emit_flat_text() {
+        let mut registry = SelectionRegistry::default();
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 0),
+            text: Rc::from("a bold call"),
+            block_break: false,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::from("## "),
+                suffix: Rc::default(),
+                fragments: vec![(2..6, Rc::from("**bold**"))],
+            }),
+            geometry: (),
+        });
+        let mut selection = Selection::default();
+        // Cutting the styled run mid-way drops its markers; clipping the
+        // element's start drops its heading mark.
+        selection.set_spans(registry.resolve((0, 3), (0, 8)));
+        assert_eq!(selection.markdown(), "old c");
+    }
+
+    #[test]
     fn registry_positions_survive_rebuilds() {
         let mut registry = SelectionRegistry::default();
         registry.push(RegisteredText {
@@ -831,6 +997,7 @@ mod tests {
             block_break: false,
             annotation_refs: Vec::new(),
             commit_refs: Vec::new(),
+            copy: Rc::default(),
             geometry: (),
         });
         assert_eq!(registry.position(&TextKey::new("row-a", 0)), Some(0));
