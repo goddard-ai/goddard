@@ -592,7 +592,19 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // the same depth, the chord wins the tie and only falls
         // through to creating a task when no draft can take it.
         KeyBinding::new("secondary-n", SwitchProjectForward, None),
-        KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
+        // ⌘⇧N belongs to ToggleWorkspace on a draft; the switcher
+        // keeps backward cycling on the chord only while an overlay
+        // that consumes it owns focus.
+        KeyBinding::new(
+            "secondary-shift-n",
+            SwitchProjectBackward,
+            Some("ProjectSwitcher"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-n",
+            SwitchProjectBackward,
+            Some("BigPicture"),
+        ),
         KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
         KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
         // Re-bound on the overlay context so the chord cancels when
@@ -643,6 +655,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // in ~ when none exists), and once a full-width terminal is
         // active it opens another in the same directory.
         KeyBinding::new("secondary-shift-t", ToggleTerminals, None),
+        // ⌘⇧N flips a draft's workspace between local and a new
+        // worktree — the old ⌘⇧T is the Terminals group chord now.
+        KeyBinding::new("secondary-shift-n", ToggleWorkspace, None),
         KeyBinding::new("secondary-u", ToggleUsagePanel, None),
         KeyBinding::new("secondary-s", SaveFile, None),
         // Font-size zoom follows focus: in the terminal it sizes the
