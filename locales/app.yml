@@ -761,6 +761,10 @@ settings.thick_borders:
   en: Thick borders
 settings.thick_borders_description:
   en: Draw borders and separators a full pixel thick instead of a half-pixel hairline
+settings.border_intensity:
+  en: Border intensity
+settings.border_intensity_description:
+  en: How strongly borders and separators read. 0% hides them; 100% is the original weight
 settings.high_contrast:
   en: High contrast borders
 settings.high_contrast_description:

@@ -170,6 +170,10 @@ fn default_sidebar_transparency_amount() -> f32 {
     DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
 }
 
+fn default_border_intensity() -> f32 {
+    DEFAULT_BORDER_INTENSITY
+}
+
 fn default_sidebar_shortcut_tags() -> bool {
     true
 }
@@ -647,6 +651,10 @@ pub struct AppSettings {
     /// Draw borders and separators a full pixel thick instead of the default
     /// half-pixel hairline.
     pub thick_borders: bool,
+    /// How strongly borders and separators read: 1.0 is the solved contrast
+    /// the palettes ship with, 0.0 erases the lines entirely. Hand-edited
+    /// values are clamped to `MAX_BORDER_INTENSITY` when applied.
+    pub border_intensity: f32,
     /// Solve border tiers against wider contrast floors, putting component
     /// outlines on WCAG's 3:1 non-text floor.
     pub high_contrast: bool,
@@ -721,6 +729,7 @@ impl Default for AppSettings {
             sidebar_transparency: default_sidebar_transparency(),
             sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
+            border_intensity: DEFAULT_BORDER_INTENSITY,
             high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
@@ -753,6 +762,11 @@ pub const DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT: f32 = 0.25;
 /// The vibrancy past ~60% of the mix starts losing text legibility on busy
 /// backdrops, so the slider stops there.
 pub const MAX_SIDEBAR_TRANSPARENCY: f32 = 0.6;
+/// Border weight out of the box: visibly fainter than the solved floors the
+/// slider's 100% restores — chrome stays quiet by default.
+pub const DEFAULT_BORDER_INTENSITY: f32 = 0.6;
+/// The slider tops out at the palettes' authored border contrast.
+pub const MAX_BORDER_INTENSITY: f32 = 1.0;
 
 /// Bounds a possibly hand-edited font size to something the layout survives.
 fn sanitized_font_size(size: f32, fallback: f32) -> f32 {
@@ -792,6 +806,15 @@ pub fn sanitized_sidebar_transparency_amount(amount: f32) -> f32 {
         amount.clamp(0.0, MAX_SIDEBAR_TRANSPARENCY)
     } else {
         DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
+    }
+}
+
+/// Bounds a possibly hand-edited intensity to the slider's range.
+pub fn sanitized_border_intensity(intensity: f32) -> f32 {
+    if intensity.is_finite() {
+        intensity.clamp(0.0, MAX_BORDER_INTENSITY)
+    } else {
+        DEFAULT_BORDER_INTENSITY
     }
 }
 
@@ -976,6 +999,10 @@ pub struct PersistedState {
     /// half-pixel hairline.
     #[serde(default)]
     pub thick_borders: bool,
+    /// How strongly borders and separators read: 1.0 is the solved contrast
+    /// the palettes ship with, 0.0 erases the lines entirely.
+    #[serde(default = "default_border_intensity")]
+    pub border_intensity: f32,
     /// Solve border tiers against wider contrast floors, putting component
     /// outlines on WCAG's 3:1 non-text floor.
     #[serde(default)]
@@ -1162,6 +1189,7 @@ impl PersistedState {
             sidebar_transparency: default_sidebar_transparency(),
             sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
+            border_intensity: DEFAULT_BORDER_INTENSITY,
             high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
@@ -1445,6 +1473,7 @@ impl PersistedState {
             sidebar_transparency: self.sidebar_transparency,
             sidebar_transparency_amount: self.sidebar_transparency_amount,
             thick_borders: self.thick_borders,
+            border_intensity: self.border_intensity,
             high_contrast: self.high_contrast,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
@@ -1528,6 +1557,7 @@ impl PersistedState {
         self.sidebar_transparency_amount =
             sanitized_sidebar_transparency_amount(settings.sidebar_transparency_amount);
         self.thick_borders = settings.thick_borders;
+        self.border_intensity = sanitized_border_intensity(settings.border_intensity);
         self.high_contrast = settings.high_contrast;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
@@ -2300,6 +2330,35 @@ mod tests {
             restored.sidebar_transparency_amount,
             MAX_SIDEBAR_TRANSPARENCY
         );
+    }
+
+    #[test]
+    fn border_intensity_defaults_persists_and_clamps() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.border_intensity, DEFAULT_BORDER_INTENSITY);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.border_intensity, DEFAULT_BORDER_INTENSITY);
+        state.border_intensity = 0.25;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(
+            settings["border_intensity"].as_f64().unwrap() as f32,
+            0.25
+        );
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("border_intensity")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.border_intensity, 0.25);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(AppSettings {
+            border_intensity: 9.0,
+            ..Default::default()
+        });
+        assert_eq!(restored.border_intensity, MAX_BORDER_INTENSITY);
     }
 
     #[test]

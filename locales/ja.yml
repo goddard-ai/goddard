@@ -296,6 +296,8 @@ settings.terminal_font_size: ターミナルのフォントサイズ
 settings.terminal_font_size_description: 内蔵ターミナルの文字サイズ。コードのフォントサイズと同じ間は連動します
 settings.thick_borders: 太い境界線
 settings.thick_borders_description: 境界線と区切り線を0.5ピクセルのヘアラインではなく1ピクセルで描画します
+settings.border_intensity: 境界線の強さ
+settings.border_intensity_description: 境界線と区切り線の見え方を調整します。0% で非表示、100% で元の強さです
 settings.render_math: 数式を描画
 settings.render_math_description: Markdown の数式を整形して表示します。オフにすると LaTeX ソースを表示します。
 settings.show_response_token_speed: 応答のトークン速度を表示

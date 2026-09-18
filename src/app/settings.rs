@@ -5108,6 +5108,44 @@ impl Waku {
             ))
             .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
             .child(settings_row(
+                tr!("settings.border_intensity"),
+                tr!("settings.border_intensity_description"),
+                {
+                    let intensity = self.state.border_intensity;
+                    let shown = self.border_intensity_slider.shown(intensity);
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(
+                            slider::slider(
+                                "border-intensity-slider",
+                                &self.border_intensity_slider,
+                                crate::persistence::MAX_BORDER_INTENSITY,
+                                intensity,
+                                cx,
+                                |this, intensity, window, cx| {
+                                    this.set_border_intensity(intensity, window, cx)
+                                },
+                            )
+                            .w(px(140.0))
+                            .flex_none(),
+                        )
+                        .child(
+                            div()
+                                .w(px(32.0))
+                                .flex_none()
+                                .flex()
+                                .justify_end()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(format!("{}%", (shown * 100.0).round() as i32)),
+                        )
+                },
+                theme,
+            ))
+            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+            .child(settings_row(
                 tr!("settings.high_contrast"),
                 tr!("settings.high_contrast_description"),
                 toggle_switch(
@@ -7251,6 +7289,31 @@ impl Waku {
         }
         self.state.thick_borders = enabled;
         crate::theme::set_thick_borders(enabled);
+        self.save();
+        cx.notify();
+    }
+
+    /// The intensity slider commits once per gesture; each commit rebuilds
+    /// the border tiers off the rescaled floors, like a contrast-mode flip.
+    fn set_border_intensity(
+        &mut self,
+        intensity: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let intensity = crate::persistence::sanitized_border_intensity(intensity);
+        if self.state.border_intensity == intensity {
+            return;
+        }
+        self.state.border_intensity = intensity;
+        crate::theme::set_border_intensity(intensity);
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }

@@ -2373,6 +2373,8 @@ pub struct Waku {
     completion_volume_slider: Rc<SliderState>,
     /// The sidebar-transparency slider's in-flight drag, same reason.
     sidebar_transparency_slider: Rc<SliderState>,
+    /// The border-intensity slider's in-flight drag, same reason.
+    border_intensity_slider: Rc<SliderState>,
     /// Set while a settings menu is previewing a theme it has not committed;
     /// the persisted settings go back on screen when the menu dismisses.
     theme_preview_active: bool,
@@ -3644,6 +3646,7 @@ impl Waku {
             ));
         }
         crate::theme::set_thick_borders(state.thick_borders);
+        crate::theme::set_border_intensity(state.border_intensity);
         crate::theme::set_high_contrast(state.high_contrast);
         crate::theme::apply_theme_preference(
             state.theme,
@@ -4900,6 +4903,7 @@ impl Waku {
                 archived_session_rows: RefCell::new(Vec::new()),
                 completion_volume_slider: SliderState::new(),
                 sidebar_transparency_slider: SliderState::new(),
+                border_intensity_slider: SliderState::new(),
                 theme_preview_active: false,
                 theme_preview_expanded: false,
                 header_drag_armed: false,

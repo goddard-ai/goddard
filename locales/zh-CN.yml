@@ -300,6 +300,8 @@ settings.terminal_font_size: 终端字号
 settings.terminal_font_size_description: 内置终端的文字大小。与代码字号相同时随之变化
 settings.thick_borders: 粗边框
 settings.thick_borders_description: 以 1 像素绘制边框与分隔线，而非 0.5 像素细线
+settings.border_intensity: 边框强度
+settings.border_intensity_description: 调整边框与分隔线的显眼程度。0% 完全隐藏，100% 为原始强度
 settings.render_math: 渲染数学公式
 settings.render_math_description: 在 Markdown 中显示排版后的公式。关闭后显示 LaTeX 源码。
 settings.show_response_token_speed: 显示回复的令牌速度
