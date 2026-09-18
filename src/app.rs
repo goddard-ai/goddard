@@ -80,8 +80,9 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    CycleReasoningEffort, DismissInbox, DismissProjectsLayer, ExitPanelFullscreen, FindNext,
-    FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
+    CycleReasoningEffort, DismissInbox, DismissProjectsLayer, EffortCycleDirection,
+    ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer, FocusProjectsFilter,
+    FocusTerminal, GoToNextTurn,
     GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
     NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
     OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, ReplaceAllMatches,

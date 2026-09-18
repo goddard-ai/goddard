@@ -2752,11 +2752,12 @@ impl Waku {
     }
 
     /// ⌘E steps the composer session's reasoning effort through the current
-    /// model's ladder, wrapping at the top. Providers that can return to a
-    /// base `default` variant include the unset step in the cycle.
+    /// model's ladder, ⌘⇧E the other way — both wrap at the ends. Providers
+    /// that can return to a base `default` variant include the unset step in
+    /// the cycle.
     pub(super) fn cycle_reasoning_effort_action(
         &mut self,
-        _: &CycleReasoningEffort,
+        action: &CycleReasoningEffort,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2785,12 +2786,18 @@ impl Waku {
         }) else {
             return;
         };
-        let position = steps
-            .iter()
-            .position(|step| *step == current)
-            // An unset or unlisted effort takes the ladder's first step.
-            .unwrap_or_else(|| steps.len().saturating_sub(1));
-        match steps[(position + 1) % steps.len()].clone() {
+        let position = steps.iter().position(|step| *step == current);
+        let next = match action.direction {
+            // An unset or unlisted effort takes the ladder's first step
+            // going forward, its last going backward.
+            EffortCycleDirection::Forward => {
+                (position.unwrap_or_else(|| steps.len().saturating_sub(1)) + 1) % steps.len()
+            }
+            EffortCycleDirection::Backward => {
+                (position.unwrap_or(0) + steps.len() - 1) % steps.len()
+            }
+        };
+        match steps[next].clone() {
             Some(effort) => self.set_reasoning_effort(effort, cx),
             None => self.clear_reasoning_effort(cx),
         }

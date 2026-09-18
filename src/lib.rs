@@ -114,7 +114,6 @@ actions!(
         FocusComposer,
         FocusTerminal,
         ToggleModelPicker,
-        CycleReasoningEffort,
         ToggleBranchPicker,
         ToggleRuntimeModePicker,
         ToggleUsagePanel,
@@ -190,6 +189,20 @@ pub struct SelectProjectsTab {
 #[action(namespace = waku, no_json)]
 pub struct SelectFavoriteModel {
     pub index: usize,
+}
+
+/// Step the composer session's reasoning effort through the current model's
+/// ladder, wrapping at the ends. ⌘E moves `Forward`, ⌘⇧E `Backward`.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct CycleReasoningEffort {
+    pub direction: EffortCycleDirection,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum EffortCycleDirection {
+    Forward,
+    Backward,
 }
 
 /// Step a surface's font size one preset in `direction`. The same ⌘= / ⌘-
@@ -617,10 +630,19 @@ pub(crate) fn bind_keys(cx: &mut App) {
             Some("Waku && !Terminal && !ProjectsPage"),
         ),
         // ⌘E cycles the composer session's reasoning effort through the
-        // current model's ladder.
+        // current model's ladder; ⌘⇧E walks it in reverse.
         KeyBinding::new(
             "secondary-e",
-            CycleReasoningEffort,
+            CycleReasoningEffort {
+                direction: EffortCycleDirection::Forward,
+            },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-e",
+            CycleReasoningEffort {
+                direction: EffortCycleDirection::Backward,
+            },
             Some("Waku && !Terminal && !ProjectsPage"),
         ),
         // Page-scoped list conventions — active only while focus is
