@@ -30,6 +30,12 @@ const ROW_HEIGHT: f32 = 34.0;
 const KEYBINDING_COL: f32 = 260.0;
 const WHEN_COL: f32 = 160.0;
 const CATEGORY_COL: f32 = 110.0;
+/// Geometry the column header and the rows must share so every label sits
+/// over its column: the table's outer inset, each row's own padding, and
+/// the gap between cells.
+const TABLE_INSET: f32 = 20.0;
+const ROW_PAD: f32 = 8.0;
+const COL_GAP: f32 = 12.0;
 const KEY_UNIT: f32 = 30.0;
 const KEY_GAP: f32 = 3.0;
 /// How long capture waits for the next stroke before committing — long
@@ -832,44 +838,9 @@ impl super::Waku {
                         }
                     )),
             )
+            .child(render_column_header(theme))
             .child(
-                // Column labels aligned with the rows below (row padding
-                // 20 + 8) — same layout as VS Code's keybinding editor.
-                div()
-                    .px(px(28.0))
-                    .h(px(26.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_tertiary)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(tr!("keybind.column.command")),
-                    )
-                    .child(
-                        div()
-                            .w(px(KEYBINDING_COL))
-                            .flex_none()
-                            .child(tr!("keybind.column.keybinding")),
-                    )
-                    .child(
-                        div()
-                            .w(px(WHEN_COL))
-                            .flex_none()
-                            .child(tr!("keybind.column.when")),
-                    )
-                    .child(
-                        div()
-                            .w(px(CATEGORY_COL))
-                            .flex_none()
-                            .child(tr!("keybind.column.category")),
-                    ),
-            )
-            .child(
-                div().flex_1().min_h_0().px(px(20.0)).child(
+                div().flex_1().min_h_0().px(px(TABLE_INSET)).child(
                     list(ui.list_state.clone(), move |index, _window, cx| {
                         let theme = Theme::current(cx);
                         let row_index = match filtered.get(index) {
@@ -1067,6 +1038,41 @@ fn render_keyboard_stage(
     stage
 }
 
+/// The pinned column header. It nests the same outer inset and row padding
+/// the rows carry, and reuses their gap and column widths, so each label
+/// sits over its column — the table's only alignment contract.
+fn render_column_header(theme: Theme) -> gpui::Div {
+    let cell = |width: f32, text: String| {
+        div()
+            .w(px(width))
+            .flex_none()
+            .min_w_0()
+            .truncate()
+            .child(text)
+    };
+    div().px(px(TABLE_INSET)).child(
+        div()
+            .w_full()
+            .h(px(26.0))
+            .px(px(ROW_PAD))
+            .flex()
+            .items_center()
+            .gap(px(COL_GAP))
+            .text_size(sp(11.0))
+            .text_color(theme.text_tertiary)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(tr!("keybind.column.command")),
+            )
+            .child(cell(KEYBINDING_COL, tr!("keybind.column.keybinding")))
+            .child(cell(WHEN_COL, tr!("keybind.column.when")))
+            .child(cell(CATEGORY_COL, tr!("keybind.column.category"))),
+    )
+}
+
 fn render_row(
     row: &CommandRow,
     index: usize,
@@ -1081,10 +1087,13 @@ fn render_row(
     div()
         .id(SharedString::from(row.descriptor.id))
         .h(px(ROW_HEIGHT))
+        // Without an explicit full width the row sizes to its content, so
+        // every row's fixed columns would land at a different x.
+        .w_full()
         .flex()
         .items_center()
-        .gap(px(12.0))
-        .px(px(8.0))
+        .gap(px(COL_GAP))
+        .px(px(ROW_PAD))
         .rounded(px(6.0))
         .when(selected, |element| element.bg(theme.sidebar_item_background))
         .hover(|element| element.bg(theme.overlay))
@@ -1114,6 +1123,7 @@ fn render_row(
             div()
                 .flex_1()
                 .min_w_0()
+                .truncate()
                 .text_size(sp(12.5))
                 .text_color(theme.text)
                 .child(title),
@@ -1122,8 +1132,8 @@ fn render_row(
             div()
                 .w(px(KEYBINDING_COL))
                 .flex_none()
+                .overflow_hidden()
                 .flex()
-                .flex_wrap()
                 .items_center()
                 .gap(px(4.0))
                 .children(
@@ -1148,6 +1158,8 @@ fn render_row(
                                     "{}:{binding_index}",
                                     row.descriptor.id
                                 )))
+                                .flex_none()
+                                .whitespace_nowrap()
                                 .px(px(6.0))
                                 .py(px(2.0))
                                 .rounded(px(4.0))
@@ -1164,6 +1176,7 @@ fn render_row(
                                 let this = this.clone();
                                 let remove_this = this.clone();
                                 div()
+                                    .flex_none()
                                     .flex()
                                     .items_center()
                                     .child(
@@ -1220,6 +1233,7 @@ fn render_row(
                             let this = this.clone();
                             div()
                                 .id(SharedString::from(format!("{}:add", row.descriptor.id)))
+                                .flex_none()
                                 .px(px(5.0))
                                 .py(px(2.0))
                                 .rounded(px(4.0))
@@ -1250,6 +1264,8 @@ fn render_row(
                         let this = this.clone();
                         div()
                             .id(SharedString::from(format!("{}:reset", row.descriptor.id)))
+                            .flex_none()
+                            .whitespace_nowrap()
                             .px(px(5.0))
                             .py(px(2.0))
                             .rounded(px(4.0))
@@ -1269,6 +1285,8 @@ fn render_row(
                 )
                 .children(row.descriptor.builtin_label.iter().map(|label| {
                     div()
+                        .flex_none()
+                        .whitespace_nowrap()
                         .px(px(6.0))
                         .py(px(2.0))
                         .rounded(px(4.0))
@@ -1282,6 +1300,7 @@ fn render_row(
             div()
                 .w(px(WHEN_COL))
                 .flex_none()
+                .truncate()
                 .text_size(sp(11.0))
                 .text_color(theme.text_secondary)
                 .child(
@@ -1295,6 +1314,7 @@ fn render_row(
             div()
                 .w(px(CATEGORY_COL))
                 .flex_none()
+                .truncate()
                 .text_size(sp(11.0))
                 .text_color(theme.text_tertiary)
                 .child(category),
