@@ -99,6 +99,14 @@ impl DriverHandle {
         self.inner.goal(operation);
     }
 
+    /// Ask the provider to compact the session's context. Admission,
+    /// progress, and the outcome arrive asynchronously through driver
+    /// events — a compaction activity card, a turn settle, or
+    /// `DriverEvent::Error`.
+    pub fn compact(&self) {
+        self.inner.compact();
+    }
+
     pub fn run_computer_tool(&self, request: ComputerToolRequest) {
         self.inner.run_computer_tool(request);
     }
@@ -144,6 +152,7 @@ pub trait DriverControl: Send + Sync {
     fn respond(&self, request_id: String, option_id: String);
     fn respond_user_input(&self, _request_id: String, _answers: Vec<UserInputAnswer>) {}
     fn goal(&self, _operation: GoalOperation) {}
+    fn compact(&self) {}
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}
     fn reject_computer_tool(&self, _request: ComputerToolRequest, _reason: String) {}
     fn apply_options(&self, _options: SessionOptions) -> bool {

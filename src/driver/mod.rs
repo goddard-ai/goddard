@@ -361,6 +361,10 @@ impl DriverControl for RemoteDriverControl {
         self.notify(waku_client::Command::Goal { operation });
     }
 
+    fn compact(&self) {
+        self.notify(waku_client::Command::Compact);
+    }
+
     fn run_computer_tool(&self, request: ComputerToolRequest) {
         self.notify(waku_client::Command::RunComputerTool {
             request: waku_client::WireComputerToolRequest {

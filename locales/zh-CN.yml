@@ -999,6 +999,7 @@ errors.codex_goals_unsupported: 此版本的 Codex 不支持线程目标
 errors.provider_receive_prompt: "%{provider} 未能接收消息"
 errors.provider_start_turn: "%{provider} 未能开始本轮"
 errors.provider_rejected_steer: "%{provider} 拒绝了补充指示：%{error}"
+errors.provider_rejected_compact: "%{provider} 拒绝了上下文压缩请求：%{error}"
 errors.provider_stopped_receiving: "%{provider} 已停止接收消息"
 errors.provider_initialize_session: "%{provider} 未能初始化此任务"
 errors.provider_rejected_prompt: "%{provider} 在开始处理前拒绝了消息"

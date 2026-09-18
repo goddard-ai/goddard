@@ -2140,6 +2140,8 @@ errors.provider_start_turn:
   en: "%{provider} could not start the turn"
 errors.provider_rejected_steer:
   en: "%{provider} rejected the steer: %{error}"
+errors.provider_rejected_compact:
+  en: "%{provider} rejected the compaction request: %{error}"
 errors.provider_stopped_receiving:
   en: "%{provider} stopped receiving messages"
 errors.provider_initialize_session:

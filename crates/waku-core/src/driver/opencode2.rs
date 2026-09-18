@@ -136,6 +136,7 @@ impl ContextWindows for HashMap<String, u64> {
 enum DriverCommand {
     Prompt(String),
     Steer(String),
+    Compact,
     Cancel,
     Respond {
         request_id: String,
@@ -266,6 +267,12 @@ struct StreamState {
     generation: u64,
     /// The session-level model, moved by `session.model.selected`.
     model: Option<ModelRef>,
+    /// A manual compaction admitted while idle opened the current turn —
+    /// `session.compaction.*` frames carry no `session.execution.*` wrapper,
+    /// and the app drops activities that land with no open turn. Only a turn
+    /// this flag marks is settled by a compaction outcome; a mid-execution
+    /// compaction leaves the real turn alone.
+    compaction_opened_turn: bool,
     /// Unknown event types are dropped and counted, never fatal.
     unknown: HashMap<String, u64>,
 }
@@ -290,6 +297,7 @@ impl StreamState {
             pending_input: None,
             generation,
             model,
+            compaction_opened_turn: false,
             unknown: HashMap::new(),
         }
     }
@@ -343,6 +351,15 @@ impl StreamState {
         self.parts.clear();
         self.step = None;
         self.settle(events, None);
+    }
+
+    /// A compaction outcome settles the synthetic turn an idle compaction
+    /// opened, and only that turn: a compaction running inside a real
+    /// execution leaves the flag unset and the turn alone.
+    fn settle_compaction_turn(&mut self, events: &impl DriverEventSink) {
+        if std::mem::take(&mut self.compaction_opened_turn) {
+            self.finish_turn(events);
+        }
     }
 }
 
@@ -780,6 +797,10 @@ impl DriverControl for OpenCode2Driver {
         let _ = self.commands.send(DriverCommand::Steer(prompt));
     }
 
+    fn compact(&self) {
+        let _ = self.commands.send(DriverCommand::Compact);
+    }
+
     fn cancel(&self) {
         self.cancel_computer_use();
         let _ = self.commands.send(DriverCommand::Cancel);
@@ -1138,6 +1159,18 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                         ),
                     });
                 }
+            }
+        }
+        DriverCommand::Compact => {
+            // Admission is durable but asynchronous: a 2xx only means the
+            // inbox item landed, and `session.compaction.*` events carry the
+            // rest — including a possible `failed` admission outcome.
+            if let Err(error) = opencode2_api::compact(&endpoint, &worker.session_id) {
+                let _ = events.send(DriverEvent::Error(tr!(
+                    "errors.provider_rejected_compact",
+                    provider = "OpenCode 2",
+                    error = error
+                )));
             }
         }
         DriverCommand::Cancel => {
@@ -1771,7 +1804,18 @@ fn handle_event(
         // Compaction deltas carry NO `assistantMessageID` and NO ordinal, so
         // routing them as a `TextDelta` would drop the compaction summary
         // inside the assistant's own reply. One row keyed on the session.
-        "session.compaction.started" => compaction_activity(state, events, None, false, false),
+        "session.compaction.started" => {
+            // A manually admitted compaction can run outside any execution —
+            // no `session.execution.*` frames wrap it and the app drops
+            // activities that land with no open turn. Open a synthetic one so
+            // the card has a home; the flag marks whose turn it is so an
+            // in-flight execution's turn is never settled by the outcome.
+            if matches!(state.turn, TurnState::Idle) {
+                state.begin_turn(events);
+                state.compaction_opened_turn = true;
+            }
+            compaction_activity(state, events, None, false, false);
+        }
         "session.compaction.delta" => compaction_activity(
             state,
             events,
@@ -1779,8 +1823,17 @@ fn handle_event(
             false,
             false,
         ),
-        "session.compaction.ended" => compaction_activity(state, events, None, true, false),
-        "session.compaction.failed" => compaction_activity(state, events, None, true, true),
+        "session.compaction.ended" => {
+            compaction_activity(state, events, None, true, false);
+            state.settle_compaction_turn(events);
+        }
+        "session.compaction.failed" => {
+            compaction_activity(state, events, None, true, true);
+            if state.compaction_opened_turn {
+                state.arm(false, Some(error_message(data.get("error"))));
+            }
+            state.settle_compaction_turn(events);
+        }
         // Activities, never user messages: a synthetic note is the harness
         // talking to the model, not the user.
         "session.synthetic" => {
@@ -2993,8 +3046,16 @@ mod tests {
         harness.feed(json!({"type": "session.compaction.delta", "data": {"sessionID": "ses_1", "text": "summarising"}}));
         harness.feed(json!({"type": "session.compaction.ended", "data": {"sessionID": "ses_1"}}));
 
+        // An idle compaction carries no `session.execution.*` wrapper, so the
+        // driver opens a synthetic turn to give the card a home and settles
+        // exactly that turn on the outcome.
         let seen = harness.drain();
-        assert_eq!(seen.len(), 3);
+        assert_eq!(seen.len(), 5);
+        assert!(matches!(seen[0], DriverEvent::TurnStarted));
+        assert!(matches!(
+            seen[4],
+            DriverEvent::TurnFinished { success: true, .. }
+        ));
         let ids = seen
             .iter()
             .filter_map(|event| match event {
@@ -3008,6 +3069,31 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, DriverEvent::TextDelta(_))),
             "a compaction summary is not the assistant's reply"
+        );
+    }
+
+    /// Inside a real execution the same frames ride the open turn: the
+    /// driver neither opens a second one nor settles the execution's.
+    #[test]
+    fn mid_turn_compaction_neither_opens_nor_settles_a_turn() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {"sessionID": "ses_1"}}));
+        harness.drain();
+
+        harness.feed(json!({"type": "session.compaction.started", "data": {"sessionID": "ses_1"}}));
+        harness.feed(json!({"type": "session.compaction.ended", "data": {"sessionID": "ses_1"}}));
+
+        let seen = harness.drain();
+        assert_eq!(seen.len(), 2);
+        assert!(
+            seen.iter().all(|event| {
+                matches!(
+                    event,
+                    DriverEvent::RichActivity(item)
+                        if item.source_id.as_deref() == Some("compaction:ses_1")
+                )
+            }),
+            "mid-execution compaction emits only its card updates"
         );
     }
 

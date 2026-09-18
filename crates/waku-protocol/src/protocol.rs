@@ -20,7 +20,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -120,6 +120,13 @@ pub enum Command {
     Steer {
         prompt: String,
     },
+    /// Ask the live provider runtime to compact the session's context.
+    /// Fire-and-forget like [`Self::Goal`]: admission, progress, and the
+    /// outcome arrive as driver events — Codex answers `thread/compact/start`
+    /// immediately while OpenCode 2 admits a durable inbox item that reports
+    /// through `session.compaction.*`. Drivers without a dedicated RPC fall
+    /// back to sending the provider's own `/compact` command.
+    Compact,
     Cancel,
     CancelComputerUse,
     RefreshBackgroundWork,
@@ -661,7 +668,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 9);
+        assert_eq!(PROTOCOL_VERSION, 10);
     }
 
     #[test]
@@ -670,7 +677,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 9);
+        assert_eq!(PROTOCOL_VERSION, 10);
     }
 
     #[test]
