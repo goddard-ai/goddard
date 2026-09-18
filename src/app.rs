@@ -950,6 +950,17 @@ struct RightPanelFileEditor {
     /// lands, `Some(Err)` on failure so the pane shows a fallback instead of
     /// re-requesting every frame.
     image: Option<Result<Arc<gpui::Image>, String>>,
+    /// Image-pixels → screen-pixels scale; `0.0` means "unset" until the
+    /// first layout can compute the fit-to-view zoom.
+    image_zoom: f32,
+    /// The image's top offset inside the viewport — `0` when it's shorter
+    /// than the pane (which then centers it), clamped into
+    /// `[viewport − scaled height, 0]` while it's taller.
+    image_pan_y: Pixels,
+    /// Viewport bounds and decoded pixel size recorded during prepaint —
+    /// the wheel handler needs both to clamp pan and zoom around the cursor.
+    image_viewport: Option<Bounds<Pixels>>,
+    image_natural: Option<(f32, f32)>,
     /// SVG only: edit the source instead of viewing the rendered preview.
     /// Other image formats have no meaningful text view.
     show_source: bool,

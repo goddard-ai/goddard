@@ -6,6 +6,17 @@ use super::*;
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
 const REVIEW_DIFF_FILE_HEADER_HEIGHT: f32 = 36.0;
 
+/// Image-preview zoom is image-pixels → screen-pixels. The bounds mirror
+/// Zed's image viewer, widened downward so tall thumbnails can shrink to
+/// fit narrow panes.
+const FILE_IMAGE_MIN_ZOOM: f32 = 0.05;
+const FILE_IMAGE_MAX_ZOOM: f32 = 32.0;
+/// Wheel deltas arrive in pixels on macOS; line-based wheels (Windows,
+/// Linux) use the same 20px-per-line convention as Zed.
+const FILE_IMAGE_SCROLL_LINE_PX: f32 = 20.0;
+/// ⌘+scroll zoom sensitivity: a 100px wheel tick scales by ~2.7×.
+const FILE_IMAGE_ZOOM_PER_PIXEL: f32 = 0.01;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct WorkingTreeEntry {
     relative_path: String,
@@ -3943,6 +3954,10 @@ impl Waku {
                 dirty: false,
                 text_loaded: false,
                 image: None,
+                image_zoom: 0.0,
+                image_pan_y: px(0.0),
+                image_viewport: None,
+                image_natural: None,
                 show_source: false,
                 reading: false,
                 read_epoch: 0,
@@ -4363,6 +4378,12 @@ impl Waku {
     /// `ReadBinaryFile` and wrapped as a `gpui::Image` off the UI thread. The
     /// frame path reads only the editor entry — `None` is "still loading"
     /// and a stored error is the fallback, never a reason to re-request.
+    ///
+    /// The viewport pans vertically and zooms on ⌘+scroll. It is a manual
+    /// pan, not a GPUI scroll region: panning is one-dimensional, so a
+    /// `ScrollHandle`'s clamp-and-offset bookkeeping would only add a second
+    /// axis to get wrong. Position is computed in `canvas` prepaint, where
+    /// the pane's bounds and the decoded pixel size are both known.
     fn render_file_image_preview(&mut self, relative_path: &str, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let image = self
@@ -4383,30 +4404,100 @@ impl Waku {
         };
 
         let body: AnyElement = match image {
-            Some(Ok(image)) => div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(16.0))
-                .child(
-                    img(image)
-                        .size_full()
-                        .object_fit(ObjectFit::Contain)
-                        .with_fallback(move || {
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .gap(px(8.0))
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_tertiary)
-                                .child(icon("icons/alert.svg", 18.0, theme.text_tertiary))
-                                .child(tr_cow!("attachments.preview_unavailable"))
-                                .into_any_element()
-                        }),
-                )
-                .into_any_element(),
+            Some(Ok(image)) => {
+                let path = relative_path.to_owned();
+                let entity = cx.entity();
+                let entity_id = entity.entity_id();
+                let weak = entity.downgrade();
+                div()
+                    .id("file-image-viewport")
+                    .size_full()
+                    .overflow_hidden()
+                    .cursor_default()
+                    .on_scroll_wheel({
+                        let path = path.clone();
+                        let weak = weak.clone();
+                        move |event: &gpui::ScrollWheelEvent, _, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.handle_file_image_scroll(entity_id, &path, event, cx)
+                            });
+                        }
+                    })
+                    .child(canvas(
+                        move |bounds, window, cx| {
+                            let natural = image
+                                .clone()
+                                .use_render_image(window, cx)
+                                .and_then(|render| {
+                                    let size = render.size(0);
+                                    (size.width.0 > 0 && size.height.0 > 0).then(|| {
+                                        (size.width.0 as f32, size.height.0 as f32)
+                                    })
+                                });
+                            weak.update(cx, |this, _| {
+                                let editor = this.right_panel_file_editors.get_mut(&path)?;
+                                editor.image_viewport = Some(bounds);
+                                editor.image_natural = natural;
+                                if editor.image_zoom == 0.0
+                                    && let Some((width, height)) = natural
+                                {
+                                    // First view fits the whole image, but
+                                    // never upscales past its pixel size.
+                                    editor.image_zoom = (f32::from(bounds.size.width) / width)
+                                        .min(f32::from(bounds.size.height) / height)
+                                        .min(1.0);
+                                }
+                                let (width, height) = natural?;
+                                let scaled_w = px(width * editor.image_zoom);
+                                let scaled_h = px(height * editor.image_zoom);
+                                let left = (bounds.size.width - scaled_w) / 2.0;
+                                let top = if scaled_h > bounds.size.height {
+                                    editor
+                                        .image_pan_y
+                                        .clamp(bounds.size.height - scaled_h, px(0.0))
+                                } else {
+                                    (bounds.size.height - scaled_h) / 2.0
+                                };
+                                Some((left, top, scaled_w, scaled_h))
+                            })
+                            .ok()
+                            .flatten()
+                            .map(|(left, top, width, height)| {
+                                let mut element = div()
+                                    .size_full()
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .left(left)
+                                            .top(top)
+                                            .w(width)
+                                            .h(height)
+                                            .child(
+                                                img(image.clone())
+                                                    .id(SharedString::from(format!(
+                                                        "file-image-{path}"
+                                                    )))
+                                                    .size_full(),
+                                            ),
+                                    )
+                                    .into_any_element();
+                                element.prepaint_as_root(
+                                    bounds.origin,
+                                    bounds.size.into(),
+                                    window,
+                                    cx,
+                                );
+                                element
+                            })
+                        },
+                        |_, element, window, cx| {
+                            if let Some(mut element) = element {
+                                element.paint(window, cx);
+                            }
+                        },
+                    ))
+                    .into_any_element()
+            }
             Some(Err(error)) => message(error).into_any_element(),
             None => message(tr!("files.loading_file")).into_any_element(),
         };
@@ -4417,6 +4508,62 @@ impl Waku {
             .min_h_0()
             .bg(theme.surface)
             .child(body)
+    }
+
+    /// Wheel handling for the image viewport: ⌘/Ctrl+scroll zooms around the
+    /// cursor, a bare scroll pans vertically. The event is always consumed —
+    /// a short image dead-zoning the transcript's scroll would feel broken.
+    fn handle_file_image_scroll(
+        &mut self,
+        entity_id: EntityId,
+        relative_path: &str,
+        event: &gpui::ScrollWheelEvent,
+        cx: &mut App,
+    ) {
+        cx.stop_propagation();
+        let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) else {
+            return;
+        };
+        let (Some(bounds), Some((_, natural_h))) = (editor.image_viewport, editor.image_natural)
+        else {
+            return;
+        };
+        let delta_y = match event.delta {
+            gpui::ScrollDelta::Pixels(delta) => f32::from(delta.y),
+            gpui::ScrollDelta::Lines(lines) => lines.y * FILE_IMAGE_SCROLL_LINE_PX,
+        };
+        let viewport_h = f32::from(bounds.size.height);
+        if event.modifiers.platform || event.modifiers.control {
+            let old_zoom = editor.image_zoom.max(0.001);
+            let zoom_factor = if delta_y > 0.0 {
+                1.0 + delta_y * FILE_IMAGE_ZOOM_PER_PIXEL
+            } else {
+                1.0 / (1.0 - delta_y * FILE_IMAGE_ZOOM_PER_PIXEL)
+            };
+            let new_zoom = (old_zoom * zoom_factor).clamp(FILE_IMAGE_MIN_ZOOM, FILE_IMAGE_MAX_ZOOM);
+            // Keep the image point under the cursor fixed: the content offset
+            // at the cursor scales by the zoom ratio.
+            let scaled_old = natural_h * old_zoom;
+            let top_old = if scaled_old > viewport_h {
+                f32::from(editor.image_pan_y)
+            } else {
+                (viewport_h - scaled_old) / 2.0
+            };
+            let cursor_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
+            let scaled_new = natural_h * new_zoom;
+            let top = cursor_y - (cursor_y - top_old) * (new_zoom / old_zoom);
+            editor.image_zoom = new_zoom;
+            editor.image_pan_y = px(top.clamp((viewport_h - scaled_new).min(0.0), 0.0));
+        } else {
+            let scaled_h = natural_h * editor.image_zoom.max(0.001);
+            if scaled_h <= viewport_h {
+                return;
+            }
+            editor.image_pan_y = px(
+                (f32::from(editor.image_pan_y) + delta_y).clamp(viewport_h - scaled_h, 0.0),
+            );
+        }
+        cx.notify(entity_id);
     }
 
     /// The maximized panel layer is on screen this frame — the mode is
