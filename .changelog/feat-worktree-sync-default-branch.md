@@ -1,1 +1,0 @@
-- New opt-in setting fast-forwards the local default branch — plus any extra branches you list — to its tracking branch before a new worktree is based on it

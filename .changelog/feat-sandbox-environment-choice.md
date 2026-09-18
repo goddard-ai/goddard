@@ -1,1 +1,0 @@
-- Add a sandbox environment choice to the composer's access menu

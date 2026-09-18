@@ -1,1 +1,0 @@
-- Open @-mention file references from user prompts in the right panel
