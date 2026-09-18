@@ -36,7 +36,7 @@ actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
     (
         SettingsPage::General,
         "settings.general",
