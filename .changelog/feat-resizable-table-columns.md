@@ -1,0 +1,1 @@
+- Markdown tables in the transcript can be resized: drag a column boundary (or focus it and use the arrow keys) to redistribute width between the neighboring columns

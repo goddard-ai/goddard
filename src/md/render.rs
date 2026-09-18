@@ -589,7 +589,55 @@ pub struct MarkdownView {
     /// outside the parsed/flattened caches so a three-second icon change never
     /// invalidates text shaping.
     copied_code_blocks: Rc<RefCell<HashMap<usize, u64>>>,
+    /// Drag-resized table column fractions and the in-flight drag. Shared
+    /// with the painted move/up listeners, which is why it lives behind `Rc`
+    /// like `copied_code_blocks`.
+    table_resize: Rc<RefCell<TableResize>>,
     streaming: Cell<bool>,
+}
+
+/// User-set column widths for one markdown body's tables, plus the drag that
+/// produces them. Widths are fractions of the table width keyed by the table
+/// block's base ordinal — stable across re-renders, same scheme as the
+/// flatten cache.
+#[derive(Default)]
+struct TableResize {
+    widths: HashMap<usize, Vec<f32>>,
+    drag: Option<TableDrag>,
+}
+
+/// An in-flight column-boundary drag. `original` holds the fractions at
+/// mouse-down so the gesture computes one delta from the press instead of
+/// accumulating error across repaints.
+struct TableDrag {
+    table: usize,
+    /// Left column of the resized pair; the boundary sits between it and
+    /// `column + 1`.
+    column: usize,
+    start_x: Pixels,
+    original: Vec<f32>,
+}
+
+/// Smallest share of the table a dragged column can take.
+const MIN_COLUMN_FRACTION: f32 = 0.06;
+
+/// Width of a resize handle's hit region, centered on the boundary.
+const RESIZE_HANDLE_WIDTH: f32 = 9.0;
+
+/// Arrow-key step for a focused resize handle, as a fraction of the table.
+const RESIZE_KEY_STEP: f32 = 0.04;
+
+/// The pair of fractions a boundary drag or key step produces: the left
+/// column takes `delta` from the right, both clamped to the floor while
+/// their sum stays constant.
+fn resized_pair(original: &[f32], column: usize, delta: f32) -> Option<(f32, f32)> {
+    let (left, right) = (*original.get(column)?, *original.get(column + 1)?);
+    let pair = left + right;
+    if pair < MIN_COLUMN_FRACTION * 2.0 {
+        return None;
+    }
+    let left = (left + delta).clamp(MIN_COLUMN_FRACTION, pair - MIN_COLUMN_FRACTION);
+    Some((left, pair - left))
 }
 
 impl Default for MarkdownView {
@@ -608,6 +656,7 @@ impl MarkdownView {
             style: RefCell::new(None),
             veil: RefCell::new(RowVeil::default()),
             copied_code_blocks: Rc::new(RefCell::new(HashMap::new())),
+            table_resize: Rc::new(RefCell::new(TableResize::default())),
             streaming: Cell::new(false),
         }
     }
@@ -2283,11 +2332,20 @@ fn render_table(
     if columns == 0 {
         return div().into_any_element();
     }
-    let widths = column_widths(header, rows, columns);
+    // The table's base ordinal doubles as its resize-state key: stable across
+    // re-renders, unique within the row.
+    let table_id = ctx.next_ordinal.get();
+    let resize = ctx.cache.map(|view| view.table_resize.clone());
+    let widths = resize
+        .as_ref()
+        .and_then(|state| state.borrow().widths.get(&table_id).cloned())
+        .filter(|stored| stored.len() == columns)
+        .unwrap_or_else(|| column_widths(header, rows, columns));
 
     let mut table = div()
         .w_full()
         .min_w_0()
+        .relative()
         .rounded(px(10.0))
         .border(hairline())
         .border_color(ctx.palette.border_subtle)
@@ -2316,7 +2374,167 @@ fn render_table(
             index + 1 < rows.len(),
         ));
     }
+    if let Some(state) = resize
+        && columns > 1
+    {
+        let mut boundary = 0.0;
+        for column in 0..columns - 1 {
+            boundary += widths[column];
+            table = table.child(table_resize_handle(
+                table_id, column, boundary, &widths, &state, ctx,
+            ));
+        }
+        table = table.child(table_resize_listeners(table_id, state));
+    }
     table.into_any_element()
+}
+
+/// The pointer target over one column boundary: a 9px strip centered on the
+/// edge, full table height, with a grip line that appears on hover, focus, and
+/// while its boundary is being dragged. `boundary` is the cumulative fraction
+/// of the table left of the edge.
+fn table_resize_handle(
+    table_id: usize,
+    column: usize,
+    boundary: f32,
+    widths: &[f32],
+    state: &Rc<RefCell<TableResize>>,
+    ctx: &Ctx,
+) -> impl IntoElement {
+    let group = SharedString::from(format!("table-resize-grip-{table_id}-{column}"));
+    let active = state.borrow().drag.as_ref().is_some_and(|drag| {
+        drag.table == table_id && drag.column == column
+    });
+    let pressed = widths.to_vec();
+    let drag_state = state.clone();
+    let key_state = state.clone();
+    let key_widths = widths.to_vec();
+    div()
+        .id(SharedString::from(format!(
+            "table-resize-{}-{table_id}-{column}",
+            ctx.row
+        )))
+        .tab_index(0)
+        .tab_stop(true)
+        .group(group.clone())
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(relative(boundary))
+        .w(px(RESIZE_HANDLE_WIDTH))
+        .ml(-px(RESIZE_HANDLE_WIDTH / 2.0))
+        .cursor_col_resize()
+        .flex()
+        .justify_center()
+        .focus_visible(|element| element.bg(ctx.palette.accent.opacity(0.12)))
+        .child(
+            div()
+                .w(px(1.5))
+                .h_full()
+                .rounded_full()
+                .when(active, |element| element.bg(ctx.palette.accent))
+                .group_hover(group, |element| element.bg(ctx.palette.accent)),
+        )
+        .on_mouse_down(MouseButton::Left, {
+            move |event: &MouseDownEvent, window, cx| {
+                drag_state.borrow_mut().drag = Some(TableDrag {
+                    table: table_id,
+                    column,
+                    start_x: event.position.x,
+                    original: pressed.clone(),
+                });
+                // Armed before the transcript's window-level selection
+                // listeners see the press, so it must not begin a text
+                // selection.
+                cx.stop_propagation();
+                window.refresh();
+            }
+        })
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if event.keystroke.modifiers.modified() {
+                return;
+            }
+            let delta = match event.keystroke.key.as_str() {
+                "left" => -RESIZE_KEY_STEP,
+                "right" => RESIZE_KEY_STEP,
+                _ => return,
+            };
+            let mut state = key_state.borrow_mut();
+            let stored = state
+                .widths
+                .entry(table_id)
+                .or_insert_with(|| key_widths.clone());
+            if stored.len() != key_widths.len() {
+                *stored = key_widths.clone();
+            }
+            if let Some((left, right)) = resized_pair(stored, column, delta) {
+                stored[column] = left;
+                stored[column + 1] = right;
+            }
+            drop(state);
+            cx.stop_propagation();
+            window.refresh();
+        })
+}
+
+/// An invisible canvas covering the table that installs the drag's window-level
+/// move/up listeners each paint — the same pattern as [`crate::ui::slider`].
+/// Element-level move handlers would stop receiving events once the pointer
+/// leaves the handle; these run for as long as a drag is armed.
+fn table_resize_listeners(
+    table_id: usize,
+    state: Rc<RefCell<TableResize>>,
+) -> impl IntoElement {
+    canvas(|_, _, _| (), {
+        move |bounds, _, window: &mut Window, _| {
+            window.on_mouse_event({
+                let state = state.clone();
+                move |event: &MouseMoveEvent, phase, window, _| {
+                    if phase != DispatchPhase::Bubble || !event.dragging() {
+                        return;
+                    }
+                    let mut state = state.borrow_mut();
+                    let Some(drag) = &state.drag else {
+                        return;
+                    };
+                    if drag.table != table_id {
+                        return;
+                    }
+                    let column = drag.column;
+                    let original = drag.original.clone();
+                    let delta = f32::from(event.position.x - drag.start_x)
+                        / f32::from(bounds.size.width).max(1.0);
+                    let stored = state
+                        .widths
+                        .entry(table_id)
+                        .or_insert_with(|| original.clone());
+                    if stored.len() != original.len() {
+                        *stored = original.clone();
+                    }
+                    if resized_pair(&original, column, delta).is_some_and(|(left, right)| {
+                        stored[column] = left;
+                        stored[column + 1] = right;
+                        true
+                    }) {
+                        drop(state);
+                        window.refresh();
+                    }
+                }
+            });
+            window.on_mouse_event({
+                move |_: &MouseUpEvent, phase, window, _| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    if state.borrow_mut().drag.take().is_some() {
+                        window.refresh();
+                    }
+                }
+            });
+        }
+    })
+    .absolute()
+    .inset_0()
 }
 
 fn table_row(
@@ -2796,6 +3014,26 @@ mod tests {
         // An empty table falls back to even columns.
         let even = column_widths(&[], &[], 3);
         assert!(even.iter().all(|width| (width - 1.0 / 3.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn resized_pair_shifts_the_boundary_and_keeps_the_sum() {
+        let widths = [0.5, 0.3, 0.2];
+        let (left, right) = resized_pair(&widths, 0, 0.1).unwrap();
+        assert!((left - 0.6).abs() < 1e-6);
+        assert!((right - 0.2).abs() < 1e-6);
+        assert!(((left + right) - 0.8).abs() < 1e-6);
+
+        // The floor clamps both directions instead of passing the pair sum.
+        let (left, right) = resized_pair(&widths, 1, 1.0).unwrap();
+        assert!((right - MIN_COLUMN_FRACTION).abs() < 1e-6);
+        assert!(((left + right) - 0.5).abs() < 1e-6);
+        let (left, _) = resized_pair(&widths, 1, -1.0).unwrap();
+        assert!((left - MIN_COLUMN_FRACTION).abs() < 1e-6);
+
+        // Out-of-range boundaries and starved pairs are refused.
+        assert!(resized_pair(&widths, 2, 0.1).is_none());
+        assert!(resized_pair(&[0.05, 0.05], 0, 0.1).is_none());
     }
 
     fn refs(text: &str, limit: usize) -> Vec<(Range<usize>, usize)> {
