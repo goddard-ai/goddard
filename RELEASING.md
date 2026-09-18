@@ -222,6 +222,11 @@ The workflow opens (or updates) a **draft** GitHub release with those files and
 the matching `CHANGELOG.md` section. Publishing the GitHub release syncs the
 assets — including every signed update feed — to R2.
 
+Every GitHub release's notes open with a **### Downloads** section — direct
+links to the macOS DMG, the Windows installers and portable zips, and the Linux
+tarballs plus the `install.sh` one-liner — above the changelog. Keep it there
+when editing a draft's notes, and add it when cutting a release by hand.
+
 `appcast.xml`, the architecture-specific Linux/Windows appcasts,
 `latest-linux.txt`, and `latest-windows.txt` are the bucket's mutable pointers
 and upload with a short cache lifetime; everything else is versioned and
