@@ -324,16 +324,6 @@ fn land_base(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<String
     Ok(None)
 }
 
-/// Where a land would send this checkout's commits. `None` when no base
-/// resolves or HEAD has no commits the base lacks — landing that checkout is
-/// a no-op the panel never offers.
-fn land_target(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<LandTarget>> {
-    let Some(base) = land_base(cwd, recorded)? else {
-        return Ok(None);
-    };
-    land_target_on_base(cwd, base)
-}
-
 fn land_target_on_base(cwd: &Path, base: String) -> anyhow::Result<Option<LandTarget>> {
     let ahead = git_optional_stdout(cwd, &["rev-list", "--count", &format!("{base}..HEAD")])?
         .and_then(|count| count.parse::<u64>().ok())

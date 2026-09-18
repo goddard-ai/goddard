@@ -414,12 +414,6 @@ impl Opencode2Service {
         self.generation.load(Ordering::Acquire)
     }
 
-    /// The service's own build id, surfaced so channel skew is visible in the
-    /// provider probe rather than silently rejected.
-    pub(crate) fn version(&self) -> Option<String> {
-        self.registration.read().version.clone()
-    }
-
     /// A miss means "not known yet", never "unlimited".
     pub(crate) fn model_context_window(&self, key: &str) -> Option<u64> {
         self.model_windows.read().get(key).copied()

@@ -44,6 +44,7 @@ use crate::opencode_session::encode_path_segment;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Health is on the start path, where a hung probe would eat the whole start
 /// budget, so it gets its own much tighter bound.
+#[cfg(test)]
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 /// A transcript page and a session export both walk stored messages, which for
 /// a long task is far more work than an ordinary request.
@@ -84,6 +85,7 @@ impl ApiError {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn tag(&self) -> Option<&str> {
         match self {
             Self::Tagged { tag, .. } => Some(tag),
@@ -98,6 +100,7 @@ impl ApiError {
     /// A location-scoped route handed a directory the service cannot resolve
     /// answers HTTP 500 with an EMPTY body. That is a bad workspace, not a
     /// server fault, and treating it as the latter would retry forever.
+    #[cfg(test)]
     pub(crate) fn is_unresolvable_location(&self) -> bool {
         matches!(self, Self::Http { status: 500, body } if body.trim().is_empty())
     }
@@ -158,6 +161,7 @@ pub(crate) enum Delivery {
     Queue,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub(crate) struct Health {
     pub healthy: bool,
@@ -622,6 +626,9 @@ pub(crate) struct PermissionRequest {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum PermissionReply {
     Once,
+    /// Never sent — [`reply_permission`] rejects it — but kept so the wire
+    /// vocabulary and that guard stay explicit.
+    #[allow(dead_code)]
     Always,
     Reject,
 }
@@ -849,6 +856,7 @@ pub(crate) struct SkillInfo {
     pub location: String,
 }
 
+#[cfg(test)]
 pub(crate) fn health(endpoint: &Endpoint) -> Result<Health> {
     // Bare payload: health is one of the routes with no `{ data }` envelope.
     let response = request(endpoint, "GET", "/api/health", None, HEALTH_TIMEOUT)?;
@@ -977,13 +985,6 @@ pub(crate) fn remove_instruction_entry(
     Ok(())
 }
 
-pub(crate) fn rename_session(endpoint: &Endpoint, session: &str, title: &str) -> Result<()> {
-    let path = format!("/api/session/{}/rename", encode_path_segment(session));
-    let body = json!({ "title": title });
-    request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
-    Ok(())
-}
-
 /// Lists sessions newest-first by default, returning the cursor for the next
 /// page or `None` once the listing is exhausted.
 pub(crate) fn list_sessions(
@@ -1092,27 +1093,6 @@ pub(crate) fn steer_inbox(endpoint: &Endpoint, session: &str, inbox_id: &str) ->
     Ok(())
 }
 
-/// Demotes an entry so it waits for the running turn to finish.
-pub(crate) fn queue_inbox(endpoint: &Endpoint, session: &str, inbox_id: &str) -> Result<()> {
-    let path = format!(
-        "/api/session/{}/inbox/{}/queue",
-        encode_path_segment(session),
-        encode_path_segment(inbox_id)
-    );
-    request(endpoint, "POST", &path, None, REQUEST_TIMEOUT)?;
-    Ok(())
-}
-
-pub(crate) fn cancel_inbox(endpoint: &Endpoint, session: &str, inbox_id: &str) -> Result<()> {
-    let path = format!(
-        "/api/session/{}/inbox/{}",
-        encode_path_segment(session),
-        encode_path_segment(inbox_id)
-    );
-    request(endpoint, "DELETE", &path, None, REQUEST_TIMEOUT)?;
-    Ok(())
-}
-
 /// Interrupts the running turn, answering whether there was one to interrupt.
 ///
 /// The route takes no body and answers a BARE `{ interrupted }` — it is inside
@@ -1207,16 +1187,6 @@ pub(crate) fn reply_form(
     );
     let body = json!({ "answer": answer });
     request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
-    Ok(())
-}
-
-pub(crate) fn cancel_form(endpoint: &Endpoint, session: &str, form_id: &str) -> Result<()> {
-    let path = format!(
-        "/api/session/{}/form/{}/cancel",
-        encode_path_segment(session),
-        encode_path_segment(form_id)
-    );
-    request(endpoint, "POST", &path, None, REQUEST_TIMEOUT)?;
     Ok(())
 }
 
