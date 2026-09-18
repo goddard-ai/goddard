@@ -2510,6 +2510,11 @@ impl Waku {
                 .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
         {
             self.right_panel_last_focused_terminal = Some(terminal_id);
+            // Holding focus is having seen the completion — the sidebar's
+            // unread dot retires here rather than on tab activation.
+            if self.unseen_terminal_completions.remove(&terminal_id) {
+                cx.notify();
+            }
         }
         let body = match self.active_right_panel_surface().cloned() {
             None => self.render_right_panel_chooser(cx).into_any_element(),

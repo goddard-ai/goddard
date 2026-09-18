@@ -134,6 +134,14 @@ impl DriverHandle {
         self.inner.goal(operation);
     }
 
+    /// Ask the provider to compact the session's context. Admission,
+    /// progress, and the outcome arrive asynchronously through driver
+    /// events — a compaction activity card, a turn settle, or
+    /// `DriverEvent::Error`.
+    pub fn compact(&self) {
+        self.inner.compact();
+    }
+
     pub fn run_computer_tool(&self, request: ComputerToolRequest) {
         self.inner.run_computer_tool(request);
     }
@@ -179,6 +187,14 @@ pub trait DriverControl: Send + Sync {
     /// Providers without persisted goals ignore the request; the UI only
     /// offers goal controls where the provider reports one.
     fn goal(&self, _operation: GoalOperation) {}
+    /// Ask the provider to compact the session's context. The default sends
+    /// the provider's own `/compact` command text, reusing each transport's
+    /// existing slash-command routing (registry commands, harness commands,
+    /// stream-json user messages). Transports with a dedicated compact RPC
+    /// override it.
+    fn compact(&self) {
+        self.prompt("/compact".to_owned());
+    }
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}
     fn reject_computer_tool(&self, _request: ComputerToolRequest, _reason: String) {}
     /// Applies changed turn options to the live session, returning whether the

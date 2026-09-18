@@ -45,6 +45,7 @@ const DISABLE_CODEX_NODE_REPL: &str = "mcp_servers.node_repl.enabled=false";
 enum CommandMessage {
     Prompt(String),
     Steer(String),
+    Compact,
     Cancel,
     Respond {
         request_id: String,
@@ -517,6 +518,25 @@ impl CodexDriver {
                                 });
                             }
                             continue;
+                        }
+                        CommandMessage::Compact => {
+                            // The response is `{}` on admit; progress arrives
+                            // as turn/item notifications with a
+                            // `contextCompaction` item. A request error
+                            // surfaces through the unmatched-response error
+                            // path in `handle_codex_message`.
+                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                                let _ = writer_events.send(DriverEvent::Error(tr!(
+                                    "errors.codex_thread_open_incomplete"
+                                )));
+                                continue;
+                            };
+                            next_request_id += 1;
+                            json!({
+                                "method": "thread/compact/start",
+                                "id": next_request_id,
+                                "params": {"threadId": thread_id}
+                            })
                         }
                         CommandMessage::Cancel => {
                             let (Some(thread_id), Some(turn_id)) = (
@@ -1059,6 +1079,10 @@ impl DriverControl for CodexDriver {
 
     fn goal(&self, operation: GoalOperation) {
         let _ = self.commands.send(CommandMessage::Goal(operation));
+    }
+
+    fn compact(&self) {
+        let _ = self.commands.send(CommandMessage::Compact);
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
@@ -1874,6 +1898,24 @@ fn handle_codex_message(
             if let Some(item) = params.get("item") {
                 stream_state.capture_citations(item);
                 let complete = method == "item/completed";
+                if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
+                    // `thread/compact/start` reports through the item's
+                    // started/completed lifecycle; the id is stable across
+                    // both so they update one card.
+                    let activity = ActivityItem::new(
+                        item.get("id").and_then(Value::as_str).map(str::to_owned),
+                        ActivityKind::Tool,
+                        if complete {
+                            tr!("activity.compacted_context")
+                        } else {
+                            tr!("activity.compacting_context")
+                        },
+                        None,
+                        complete,
+                    );
+                    let _ = events.send(DriverEvent::RichActivity(activity));
+                    return;
+                }
                 if let Some(work) = codex_command_work(item, complete) {
                     let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
                         work,
@@ -3590,6 +3632,49 @@ mod tests {
             assert_eq!(item.title, "List running apps via CUA");
             assert_eq!(item.tool_name.as_deref(), Some("js"));
             assert_eq!(item.mcp_server.as_deref(), Some("goddard_js_repl"));
+            assert_eq!(item.complete, method == "item/completed");
+        }
+    }
+
+    /// `thread/compact/start` reports through the `contextCompaction` item's
+    /// started/completed lifecycle; both updates share the item's id so they
+    /// land on one card.
+    #[test]
+    fn compaction_items_update_one_card_through_their_lifecycle() {
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-9".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-9".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+        for method in ["item/started", "item/completed"] {
+            handle_codex_message(
+                json!({
+                    "method": method, "params": {
+                        "threadId": "thread-1", "turnId": "turn-9", "item": {
+                            "id": "compact-1", "type": "contextCompaction"
+                        }
+                    }
+                }),
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                &mut stream_state,
+            );
+            let DriverEvent::RichActivity(item) = event_rx.try_recv().unwrap() else {
+                panic!("expected a compaction activity");
+            };
+            assert_eq!(item.source_id.as_deref(), Some("compact-1"));
             assert_eq!(item.complete, method == "item/completed");
         }
     }

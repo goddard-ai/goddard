@@ -202,6 +202,7 @@ impl Waku {
         self.custom_command_runs.remove(&terminal_id);
         self.terminal_records.remove(&terminal_id);
         self.terminal_order.retain(|id| *id != terminal_id);
+        self.unseen_terminal_completions.remove(&terminal_id);
         self.session_navigation.remove_terminal(terminal_id);
         if self.selected_terminal == Some(terminal_id) {
             self.selected_terminal = None;
@@ -252,6 +253,14 @@ impl Waku {
                     // next read refetches.
                     this.refresh_selected_branch_snapshot(cx);
                     this.custom_command_finished(terminal_id, *code, cx);
+                    // A clean exit off-screen earns the row an unread dot;
+                    // the terminal the user is watching needs none.
+                    if *code == Some(0)
+                        && !this.terminal_is_active_surface(terminal_id)
+                        && this.unseen_terminal_completions.insert(terminal_id)
+                    {
+                        cx.notify();
+                    }
                 }
                 TerminalViewEvent::LocalhostUrl(url) => {
                     this.on_localhost_url_detected(&view, url.clone(), cx);
@@ -422,6 +431,19 @@ impl Waku {
         Some(terminal_id)
     }
 
+    /// Whether the terminal is the surface on screen — the full-width
+    /// selection, or the visible right panel's active tab. An inactive tab
+    /// or a background session's surface counts as unseen even when its
+    /// stored strip still points at it.
+    fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
+        self.selected_terminal == Some(terminal_id)
+            || (self.right_panel_visible
+                && self
+                    .active_right_panel_surface()
+                    .and_then(RightPanelSurface::terminal_id)
+                    == Some(terminal_id))
+    }
+
     /// Show a terminal full-width in the main area. Entering terminal mode
     /// parks the session selection — composer draft, transcript scroll, and
     /// right-panel state are stored exactly as a session switch stores them.
@@ -484,6 +506,7 @@ impl Waku {
         self.projects_page = None;
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
+        self.unseen_terminal_completions.remove(&terminal_id);
         if let Some(terminal) = self.right_panel_terminals.get(&terminal_id) {
             let focus = terminal.read(cx).focus_handle(cx);
             window.focus(&focus, cx);
@@ -686,8 +709,9 @@ impl Waku {
             .unwrap_or_else(|| tr!("right_panel.terminal"));
         let cwd = self.terminal_cwd(terminal_id, cx);
         // The title line's trailing slot is the command's status: spinning
-        // while one runs, its exit mark after, empty when the shell
-        // reports nothing.
+        // while one runs, a failure mark or — for a clean exit the user
+        // has not seen — an unread dot after, empty when the shell reports
+        // nothing.
         let status_icon = terminal.and_then(|terminal| {
             let terminal = terminal.read(cx);
             if terminal.command_running() {
@@ -698,9 +722,19 @@ impl Waku {
                 )))
             } else {
                 match terminal.last_command_exit() {
-                    Some(0) => {
-                        Some(icon("icons/check.svg", 12.0, theme.success).into_any_element())
+                    Some(0)
+                        if self.unseen_terminal_completions.contains(&terminal_id)
+                            && !self.terminal_is_active_surface(terminal_id) =>
+                    {
+                        Some(
+                            div()
+                                .size(px(7.0))
+                                .rounded_full()
+                                .bg(theme.info)
+                                .into_any_element(),
+                        )
                     }
+                    Some(0) => None,
                     Some(_) => Some(icon("icons/x.svg", 12.0, theme.danger).into_any_element()),
                     None => None,
                 }

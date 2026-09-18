@@ -1071,6 +1071,17 @@ pub(crate) fn command(
     Ok(())
 }
 
+/// Durably admits a compaction request for the session. The service steers
+/// the admitted item by default, so it runs at the next step boundary rather
+/// than waiting behind queued prompts; progress and the outcome arrive on
+/// the event stream as `session.compaction.*` events.
+pub(crate) fn compact(endpoint: &Endpoint, session: &str) -> Result<()> {
+    let path = format!("/api/session/{}/compact", encode_path_segment(session));
+    let body = json!({"delivery": "steer"});
+    request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
+    Ok(())
+}
+
 /// Lists undelivered inbox entries.
 ///
 /// The entries are left as raw JSON because the union also carries synthetic,
