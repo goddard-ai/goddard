@@ -504,6 +504,9 @@ pub struct MenuChip {
     /// A second, separately coloured icon layer — see [`provider_mark`].
     badge: Option<(&'static str, Hsla)>,
     label: SharedString,
+    /// Overrides the label's `text_secondary` default — trait chips sit a
+    /// step dimmer than the model name they qualify.
+    label_color: Option<Hsla>,
     tooltip: Option<SharedString>,
     /// A shortcut rendered dim inside the tooltip.
     shortcut: Option<ShortcutHint>,
@@ -524,6 +527,7 @@ impl MenuChip {
             icon: None,
             badge: None,
             label: SharedString::default(),
+            label_color: None,
             tooltip: None,
             shortcut: None,
             caret: true,
@@ -572,6 +576,13 @@ impl MenuChip {
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = label.into();
+        self
+    }
+
+    /// Label color when the default `text_secondary` reads too strong —
+    /// trait labels dim a step below the model name beside them.
+    pub fn label_color(mut self, color: Hsla) -> Self {
+        self.label_color = Some(color);
         self
     }
 
@@ -688,7 +699,7 @@ impl RenderOnce for MenuChip {
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_color(theme.text_secondary)
+                    .text_color(self.label_color.unwrap_or(theme.text_secondary))
                     .child(self.label),
             )
             .when(self.caret, |element| {

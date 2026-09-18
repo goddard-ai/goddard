@@ -1841,7 +1841,7 @@ pub struct Waku {
     /// Keyboard cursor over the model picker's filtered rows. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
     model_picker_highlight: Option<usize>,
-    model_picker_scroll: ScrollHandle,
+    model_picker_list: ListState,
     model_picker_scrollbar: Rc<ScrollbarState>,
     /// The class-target picker's drawn selection and list state — same shape
     /// as the model picker's, shared by the three class menus.
@@ -4272,7 +4272,10 @@ impl Waku {
                             this.reveal_selected_picker_model();
                         } else {
                             this.model_picker_highlight = Some(0);
-                            this.model_picker_scroll.scroll_to_item(0);
+                            this.model_picker_list.scroll_to(ListOffset {
+                                item_ix: 0,
+                                offset_in_item: Pixels::ZERO,
+                            });
                         }
                         cx.notify();
                     }
@@ -4761,7 +4764,8 @@ impl Waku {
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
                 model_picker_highlight: None,
-                model_picker_scroll: ScrollHandle::new(),
+                model_picker_list: ListState::new(0, ListAlignment::Top, px(512.0))
+                    .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 model_picker_scrollbar: ScrollbarState::new(),
                 route_class_highlight: None,
                 route_class_scroll: ScrollHandle::new(),
