@@ -2073,21 +2073,21 @@ fn handle_codex_message(
                 title,
                 detail,
                 options: vec![
-                    PermissionOption {
-                        id: "accept".into(),
-                        label: tr!("permission.allow_once"),
-                        allow: true,
-                    },
-                    PermissionOption {
-                        id: "acceptForSession".into(),
-                        label: tr!("permission.allow_for_session"),
-                        allow: true,
-                    },
-                    PermissionOption {
-                        id: "decline".into(),
-                        label: tr!("common.deny"),
-                        allow: false,
-                    },
+                    PermissionOption::keyed(
+                        "accept",
+                        localized!("permission.allow_once"),
+                        true,
+                    ),
+                    PermissionOption::keyed(
+                        "acceptForSession",
+                        localized!("permission.allow_for_session"),
+                        true,
+                    ),
+                    PermissionOption::keyed(
+                        "decline",
+                        localized!("common.deny"),
+                        false,
+                    ),
                 ],
                 title_i18n: None,
                 detail_i18n: None,

@@ -222,7 +222,13 @@ impl Waku {
                     })
                     .active(|element| element.opacity(0.8))
                     .focus_visible(|style| style.border_color(theme.accent))
-                    .child(SharedString::from(option.label.clone()))
+                    .child(SharedString::from(
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone()),
+                    ))
                     .on_activation(cx, move |this, _, cx| {
                         this.respond_permission(request_id.clone(), option_id.clone(), cx);
                     }),

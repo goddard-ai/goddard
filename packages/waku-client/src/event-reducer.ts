@@ -19,7 +19,7 @@ export interface PendingPermission {
    * the client's translator when present, else the fallback strings. */
   titleI18n?: WireTranslation
   detailI18n?: WireTranslation
-  options: Array<{ id: string; label: string; allow: boolean }>
+  options: Array<{ id: string; label: string; labelI18n?: WireTranslation; allow: boolean }>
 }
 
 export interface PendingUserInput {
@@ -253,7 +253,7 @@ export function reduceRuntimeEvent(
         titleI18n: asWireTranslation(value.titleI18n),
         detailI18n: asWireTranslation(value.detailI18n),
         options: Array.isArray(value.options)
-          ? value.options.filter(isPermissionOption)
+          ? value.options.map(asPermissionOption).filter((o) => o !== null)
           : [],
       }
       session.status = 'waiting'
@@ -656,16 +656,22 @@ function isActivityKind(value: unknown): value is ActivityKind {
   )
 }
 
-function isPermissionOption(
+function asPermissionOption(
   value: unknown,
-): value is { id: string; label: string; allow: boolean } {
+): { id: string; label: string; labelI18n?: WireTranslation; allow: boolean } | null {
   const option = asRecord(value)
-  return Boolean(
-    option &&
-      typeof option.id === 'string' &&
-      typeof option.label === 'string' &&
-      typeof option.allow === 'boolean',
-  )
+  if (!option
+    || typeof option.id !== 'string'
+    || typeof option.label !== 'string'
+    || typeof option.allow !== 'boolean') {
+    return null
+  }
+  return {
+    id: option.id,
+    label: option.label,
+    labelI18n: asWireTranslation(option.labelI18n),
+    allow: option.allow,
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

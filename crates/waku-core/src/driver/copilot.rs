@@ -656,23 +656,23 @@ impl PermissionHandler for CopilotHandler {
         let key = request_id.to_string();
         let (sender, receiver) = oneshot::channel();
         self.shared.lock().permissions.insert(key.clone(), sender);
-        let mut options = vec![PermissionOption {
-            id: "allow".into(),
-            label: tr!("permission.allow_once"),
-            allow: true,
-        }];
+        let mut options = vec![PermissionOption::keyed(
+            "allow",
+            localized!("permission.allow_once"),
+            true,
+        )];
         if permission_for_session(&data).is_some() {
-            options.push(PermissionOption {
-                id: "allowSession".into(),
-                label: tr!("permission.allow_for_session"),
-                allow: true,
-            });
+            options.push(PermissionOption::keyed(
+                "allowSession",
+                localized!("permission.allow_for_session"),
+                true,
+            ));
         }
-        options.push(PermissionOption {
-            id: "deny".into(),
-            label: tr!("common.deny"),
-            allow: false,
-        });
+        options.push(PermissionOption::keyed(
+            "deny",
+            localized!("common.deny"),
+            false,
+        ));
         let (title, title_i18n) = permission_title(&data);
         let (detail, detail_i18n) = permission_detail(&data);
         let _ = self.events.send(DriverEvent::Permission {
@@ -762,16 +762,16 @@ impl ExitPlanModeHandler for CopilotHandler {
             title_i18n: Some(title_i18n),
             detail: data.summary,
             options: vec![
-                PermissionOption {
-                    id: "allow".into(),
-                    label: tr!("permission.allow_once"),
-                    allow: true,
-                },
-                PermissionOption {
-                    id: "deny".into(),
-                    label: tr!("common.deny"),
-                    allow: false,
-                },
+                PermissionOption::keyed(
+                    "allow",
+                    localized!("permission.allow_once"),
+                    true,
+                ),
+                PermissionOption::keyed(
+                    "deny",
+                    localized!("common.deny"),
+                    false,
+                ),
             ],
             detail_i18n: None,
         });

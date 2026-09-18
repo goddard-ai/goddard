@@ -2701,7 +2701,27 @@ impl<'de> Deserialize<'de> for ReportedCommand {
 pub struct PermissionOption {
     pub id: String,
     pub label: String,
+    /// The i18n semantic behind `label`, when the daemon composed it from a
+    /// known key rather than relaying provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_i18n: Option<crate::protocol::WireTranslation>,
     pub allow: bool,
+}
+
+impl PermissionOption {
+    /// A `localized!` pair supplies both the English label and its semantic.
+    pub fn keyed(
+        id: impl Into<String>,
+        pair: (String, crate::protocol::WireTranslation),
+        allow: bool,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: pair.0,
+            label_i18n: Some(pair.1),
+            allow,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

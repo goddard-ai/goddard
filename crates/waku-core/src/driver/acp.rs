@@ -2076,6 +2076,7 @@ fn handle_permission_request(
         .map(|option| PermissionOption {
             id: option.option_id.to_string(),
             label: option.name.clone(),
+            label_i18n: None,
             allow: matches!(
                 option.kind,
                 PermissionOptionKind::AllowOnce | PermissionOptionKind::AllowAlways

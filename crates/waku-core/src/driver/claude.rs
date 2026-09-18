@@ -1784,16 +1784,16 @@ fn request_permission(
         detail,
         detail_i18n,
         options: vec![
-            PermissionOption {
-                id: "allow".into(),
-                label: tr!("permission.allow_once"),
-                allow: true,
-            },
-            PermissionOption {
-                id: "deny".into(),
-                label: tr!("common.deny"),
-                allow: false,
-            },
+            PermissionOption::keyed(
+                "allow",
+                localized!("permission.allow_once"),
+                true,
+            ),
+            PermissionOption::keyed(
+                "deny",
+                localized!("common.deny"),
+                false,
+            ),
         ],
     });
 }

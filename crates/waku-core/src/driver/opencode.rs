@@ -1277,21 +1277,21 @@ fn request_permission(
         detail,
         detail_i18n: Some(detail_i18n),
         options: vec![
-            PermissionOption {
-                id: "once".into(),
-                label: tr!("permission.allow_once"),
-                allow: true,
-            },
-            PermissionOption {
-                id: "always".into(),
-                label: tr!("permission.always_allow"),
-                allow: true,
-            },
-            PermissionOption {
-                id: "reject".into(),
-                label: tr!("common.deny"),
-                allow: false,
-            },
+            PermissionOption::keyed(
+                "once",
+                localized!("permission.allow_once"),
+                true,
+            ),
+            PermissionOption::keyed(
+                "always",
+                localized!("permission.always_allow"),
+                true,
+            ),
+            PermissionOption::keyed(
+                "reject",
+                localized!("common.deny"),
+                false,
+            ),
         ],
     });
 }

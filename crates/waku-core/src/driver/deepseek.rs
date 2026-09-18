@@ -969,16 +969,16 @@ fn handle_approval_request(
         title: format!("Allow {tool_name}?"),
         detail: reason.to_owned(),
         options: vec![
-            PermissionOption {
-                id: "allow".into(),
-                label: tr!("permission.allow_once"),
-                allow: true,
-            },
-            PermissionOption {
-                id: "reject".into(),
-                label: tr!("common.deny"),
-                allow: false,
-            },
+            PermissionOption::keyed(
+                "allow",
+                localized!("permission.allow_once"),
+                true,
+            ),
+            PermissionOption::keyed(
+                "reject",
+                localized!("common.deny"),
+                false,
+            ),
         ],
         title_i18n: None,
         detail_i18n: None,

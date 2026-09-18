@@ -1343,6 +1343,7 @@ fn emit_permission(events: &DriverEventSender, params: &Value, approval_id: &str
                     Some(PermissionOption {
                         id: choice_id.to_owned(),
                         label: label.to_owned(),
+                        label_i18n: None,
                         allow: decision.starts_with("approved"),
                     })
                 })
