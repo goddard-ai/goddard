@@ -106,6 +106,12 @@ pub enum Command {
         turn_id: Option<Uuid>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message_id: Option<Uuid>,
+        /// Structured attachments staged with the submission. Their daemon-
+        /// host paths are already named by the `@mention` text folded into
+        /// `prompt`; drivers that accept binary content (image parts) read
+        /// the files themselves, and text-only drivers ignore this list.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<MessageAttachment>,
         /// The prompt is provider-facing only — the internal nudge a
         /// "continue" sends to an interrupted session. No client renders a
         /// transcript row for it.

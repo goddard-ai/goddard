@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
-    BackgroundWorkKey, DriverEvent, ProviderKind, ProviderResumeCursor, RuntimeEventCursor,
+    BackgroundWorkKey, DriverEvent, MessageAttachment, ProviderKind, ProviderResumeCursor,
+    RuntimeEventCursor,
 };
 use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
@@ -303,6 +304,7 @@ impl DriverControl for RemoteDriverControl {
             prompt,
             turn_id,
             message_id,
+            attachments,
             hidden,
             attachments,
         });

@@ -689,6 +689,17 @@ if [ "$1" = "serve" ]; then
           *'"turnId":"'*) ;;
           *) echo 'turn/unqueue without a turnId' >> "$VIOLATIONS" ;;
         esac ;;
+      *'"type":"image"'*)
+        case "$line" in
+          *'"base64Data":"'*) ;;
+          *) echo 'image part missing base64Data' >> "$VIOLATIONS" ;;
+        esac
+        case "$line" in
+          *'"mediaType":"'*) ;;
+          *) echo 'image part missing mediaType' >> "$VIOLATIONS" ;;
+        esac ;;
+      *'"type":"mention"'*)
+        echo 'reserved mention part sent on the wire' >> "$VIOLATIONS" ;;
     esac
     case "$line" in
       *'"initialize"'*)

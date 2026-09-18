@@ -19,14 +19,16 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
+use base64::Engine as _;
 use crossbeam_channel::{Sender, bounded, unbounded};
 use serde_json::{Value, json};
 
 use super::activity;
 use crate::driver::{DriverControl, DriverEventSender, DriverStartOptions, SessionOptions};
 use crate::model::{
-    ActivityItem, ActivityKind, DriverEvent, PermissionOption, ProviderResumeCursor, RuntimeMode,
-    ThreadGoal, ThreadGoalStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
+    ActivityItem, ActivityKind, DriverEvent, MessageAttachment, PermissionOption,
+    ProviderResumeCursor, RuntimeMode, ThreadGoal, ThreadGoalStatus, UserInputAnswer,
+    UserInputOption, UserInputQuestion,
 };
 use crate::muse_service::{self, MuseError, MuseFrame, MuseService, MuseSubscription};
 use crate::muse_session::{FinishedTurn, finished_turns, fork_boundary_id};
@@ -38,7 +40,10 @@ const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_DETAIL_CHARS: usize = 16_000;
 
 enum DriverCommand {
-    Prompt(String),
+    Prompt {
+        text: String,
+        attachments: Vec<MessageAttachment>,
+    },
     Steer(String),
     Cancel,
     Respond {
@@ -369,6 +374,53 @@ fn text_parts(text: &str) -> Value {
     json!([{ "type": "text", "text": text }])
 }
 
+/// Largest file inlined into an `image` part. The schema sets no bound, but
+/// base64 inflates the payload on a line the host must read whole; anything
+/// bigger keeps only its `@mention` path text like every other attachment.
+const MAX_IMAGE_PART_BYTES: usize = 8 * 1024 * 1024;
+
+/// A turn submission's ordered content parts: prompt text first, then one
+/// `image` part per staged image attachment the file system can still
+/// deliver. Width/height stay off — MSP accepts them only as a pair, and
+/// decoding dimensions just to fill them buys nothing.
+fn input_parts(text: &str, attachments: &[MessageAttachment]) -> Value {
+    let mut parts = vec![json!({ "type": "text", "text": text })];
+    for attachment in attachments {
+        if let Some(part) = image_part(attachment) {
+            parts.push(part);
+        }
+    }
+    Value::Array(parts)
+}
+
+fn image_part(attachment: &MessageAttachment) -> Option<Value> {
+    if !attachment.is_image {
+        return None;
+    }
+    let media_type = match attachment
+        .path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => return None,
+    };
+    let bytes = std::fs::read(&attachment.path).ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_PART_BYTES {
+        return None;
+    }
+    Some(json!({
+        "type": "image",
+        "mediaType": media_type,
+        "base64Data": base64::engine::general_purpose::STANDARD.encode(bytes),
+    }))
+}
+
 fn muse_error(context: &str, error: &MuseError) -> anyhow::Error {
     let message = error.message();
     if error.is_auth_failure() {
@@ -382,11 +434,11 @@ fn muse_error(context: &str, error: &MuseError) -> anyhow::Error {
 
 fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerState) -> bool {
     match message {
-        DriverCommand::Prompt(text) => {
+        DriverCommand::Prompt { text, attachments } => {
             let mut params = json!({
                 "commandId": worker.service.mint_command_id(),
                 "sessionId": state.session_id,
-                "input": text_parts(&text),
+                "input": input_parts(&text, &attachments),
                 "displayText": text,
                 // A second prompt during a running turn waits in the host's
                 // queue rather than erroring, matching steer-less providers.
@@ -1494,7 +1546,14 @@ fn truncate(text: &str, max: usize) -> String {
 
 impl DriverControl for MuseDriver {
     fn prompt(&self, prompt: String) {
-        let _ = self.commands.send(DriverCommand::Prompt(prompt));
+        self.prompt_with_attachments(prompt, Vec::new());
+    }
+
+    fn prompt_with_attachments(&self, prompt: String, attachments: Vec<MessageAttachment>) {
+        let _ = self.commands.send(DriverCommand::Prompt {
+            text: prompt,
+            attachments,
+        });
     }
 
     fn supports_steer(&self) -> bool {
@@ -1775,6 +1834,77 @@ mod tests {
         // The host's own queue record proves the reclaim reached it.
         let unqueued = fs::read_to_string(directory.join("unqueued.log")).unwrap_or_default();
         assert_eq!(unqueued.trim(), "t1");
+        drop(driver);
+        assert!(!directory.join("violations.log").exists());
+    }
+
+    fn attachment(path: &Path, is_image: bool) -> MessageAttachment {
+        MessageAttachment {
+            path: path.to_path_buf(),
+            mention: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            is_dir: false,
+            is_image,
+            blob_reference: None,
+        }
+    }
+
+    /// Staged image attachments travel as MSP `image` parts; anything the
+    /// file system or the media-type map declines keeps its `@mention`
+    /// text only — the same contract text-only providers get.
+    #[test]
+    fn muse_input_parts_carry_image_attachments() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let png = directory.join("shot.png");
+        fs::write(&png, [0x89, 0x50, 0x4e, 0x47]).unwrap();
+        let text_file = directory.join("notes.txt");
+        fs::write(&text_file, "hi").unwrap();
+
+        let parts = input_parts(
+            "look at this",
+            &[
+                attachment(&png, true),
+                attachment(&text_file, false),
+                attachment(&directory.join("missing.png"), true),
+            ],
+        );
+        let parts = parts.as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], json!({"type": "text", "text": "look at this"}));
+        assert_eq!(parts[1]["type"], "image");
+        assert_eq!(parts[1]["mediaType"], "image/png");
+        // 89 50 4e 47 is the PNG magic — the file's real bytes, encoded.
+        assert_eq!(parts[1]["base64Data"], "iVBORw==");
+        assert!(parts[1].get("width").is_none());
+    }
+
+    /// The structured prompt path must reach the host: the fake binary
+    /// validates the image part's wire shape itself.
+    #[test]
+    fn muse_prompt_sends_image_parts_to_the_host() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut start = options(&directory);
+        start.binary = fake_muse(&directory);
+        let png = directory.join("shot.png");
+        fs::write(&png, [0x89, 0x50, 0x4e, 0x47]).unwrap();
+
+        let (events, rx) = test_event_channel();
+        let driver = MuseDriver::start(start, events).unwrap();
+        driver.prompt_with_attachments(
+            "look".to_owned(),
+            vec![attachment(&png, true)],
+        );
+        collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::TurnFinished { .. })
+        });
         drop(driver);
         assert!(!directory.join("violations.log").exists());
     }
