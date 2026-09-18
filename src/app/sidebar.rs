@@ -220,7 +220,11 @@ fn updater_button_available_content(
 const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
 const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
-const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
+const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 30.0;
+/// Separation above each action button in the sidebar stack. Kept inside the
+/// list row — like the session row gap — so measured and estimated heights
+/// stay identical.
+const SIDEBAR_ACTION_ROW_GAP: f32 = 2.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 /// The session column's top bar. The empty-state hero drops by this much so
 /// it sits clear of the header instead of optically centering under it.
@@ -677,9 +681,11 @@ fn sidebar_shortcut_chip_label(index: usize) -> String {
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox => {
+            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP
+        }
         SidebarRow::Header(SidebarGroup::Terminals) => {
-            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
@@ -1215,7 +1221,8 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
+            .pt(px(SIDEBAR_ACTION_ROW_GAP))
             .flex_none()
             .child(search)
     }
@@ -1254,7 +1261,8 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
+            .pt(px(SIDEBAR_ACTION_ROW_GAP))
             .flex_none()
             .child(row)
     }
@@ -1311,7 +1319,8 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
+            .pt(px(SIDEBAR_ACTION_ROW_GAP))
             .flex_none()
             .child(row)
     }
@@ -2871,6 +2880,9 @@ impl Waku {
 
         div()
             .w_full()
+            .when(action_row, |element| {
+                element.pt(px(SIDEBAR_ACTION_ROW_GAP))
+            })
             .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
             .child(header)
     }
