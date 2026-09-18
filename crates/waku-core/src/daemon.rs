@@ -23,6 +23,7 @@ use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
 use waku_protocol::custom_commands::CustomCommand;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
+use waku_protocol::routing::RoutePolicyView;
 use waku_protocol::{decode_enum, event_to_wire};
 #[cfg(test)]
 use serde_json::json;
@@ -80,6 +81,8 @@ pub struct WakuBackend {
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
     /// friends command so tests and headless runs pay nothing.
     share: Arc<crate::share::ShareService>,
+    /// The hot-reloading view of the user's `route-policy.json`.
+    route_policy: crate::route_policy::PolicyStore,
 }
 
 impl WakuBackend {
@@ -96,20 +99,19 @@ impl WakuBackend {
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("attachments"),
         );
-        let usage_rates_dir = task_store
+        let data_dir = task_store
             .path()
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_owned();
-        let share_dir = task_store
-            .path()
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("share");
+        let share_dir = data_dir.join("share");
         let our_name = std::env::var("USER")
             .ok()
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Goddard".to_owned());
+        let usage_rates_dir = data_dir.clone();
+        let route_policy =
+            crate::route_policy::PolicyStore::open(data_dir.join("route-policy.json"));
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             terminals: Mutex::new(HashMap::new()),
@@ -127,6 +129,7 @@ impl WakuBackend {
             runtime_start_locks: Mutex::new(HashMap::new()),
             daemon_address: Mutex::new(None),
             usage_rates_dir,
+            route_policy,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             share: Arc::new(crate::share::ShareService::new(share_dir.clone(), our_name)),
         };
@@ -613,27 +616,70 @@ impl Backend for WakuBackend {
                     .ok_or_else(|| anyhow!("no evaluation backend is configured"))?;
                 let started = std::time::Instant::now();
                 let result = crate::eval::evaluate(&settings, &state, &questions);
-                let record = crate::eval::EvalDecisionRecord {
-                    ts: crate::model::unix_time(),
-                    feature: "evaluate",
-                    backend: settings.backend,
-                    latency_ms: started.elapsed().as_millis() as u64,
-                    model: result
-                        .as_ref()
-                        .ok()
-                        .map(|evaluation| evaluation.model.clone()),
-                    state,
-                    questions,
-                    answers: result
-                        .as_ref()
-                        .ok()
-                        .map(|evaluation| evaluation.answers.clone()),
-                    error: result.as_ref().err().map(|error| error.to_string()),
-                };
+                let mut record = crate::eval::EvalDecisionRecord::empty("evaluate");
+                record.backend = Some(settings.backend);
+                record.latency_ms = Some(started.elapsed().as_millis() as u64);
+                record.model = result
+                    .as_ref()
+                    .ok()
+                    .map(|evaluation| evaluation.model.clone());
+                record.state = Some(state);
+                record.questions = Some(questions);
+                record.answers = result
+                    .as_ref()
+                    .ok()
+                    .map(|evaluation| evaluation.answers.clone());
+                record.error = result.as_ref().err().map(|error| error.to_string());
                 crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
                 Ok(ResponsePayload::Evaluation {
                     evaluation: result?,
                 })
+            }
+            Command::RouteTask {
+                prompt,
+                project,
+                candidates,
+                last_used,
+            } => {
+                let settings = self.settings.get();
+                let policy = self.route_policy.get();
+                let run = crate::routing::route_task(
+                    settings.eval.as_ref(),
+                    &policy,
+                    &prompt,
+                    project.as_deref(),
+                    &candidates,
+                    last_used.as_ref(),
+                );
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &run.record);
+                Ok(ResponsePayload::RouteDecision {
+                    decision: run.decision,
+                })
+            }
+            Command::RecordRouteOverride { session_id, target } => {
+                let mut record = crate::eval::EvalDecisionRecord::empty("route-override");
+                record.session_id = Some(session_id);
+                record.resolved_provider = Some(target.provider);
+                record.resolved_model = target.model;
+                record.reason = Some("user-override".to_owned());
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+                Ok(ResponsePayload::Ack)
+            }
+            Command::GetRoutePolicy => {
+                let policy = self.route_policy.get();
+                Ok(ResponsePayload::RoutePolicy {
+                    view: RoutePolicyView {
+                        path: self.route_policy.path().to_path_buf(),
+                        valid: !policy.is_default,
+                        hash: policy.hash.clone(),
+                        classes: policy.classes_raw.clone(),
+                        default: policy.default_raw.clone(),
+                    },
+                })
+            }
+            Command::SetRouteClassTarget { class, target } => {
+                self.route_policy.set_class_target(class, &target)?;
+                Ok(ResponsePayload::Ack)
             }
             Command::LoadUsageHistory {
                 window,
@@ -2922,6 +2968,10 @@ fn handle_driver_command(
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::Evaluate { .. }
+        | Command::RouteTask { .. }
+        | Command::RecordRouteOverride { .. }
+        | Command::GetRoutePolicy
+        | Command::SetRouteClassTarget { .. }
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }

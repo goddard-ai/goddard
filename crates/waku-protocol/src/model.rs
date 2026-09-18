@@ -7,7 +7,11 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+use crate::routing::RouteDecision;
+
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
     Amp,
@@ -1328,6 +1332,16 @@ pub struct AgentSession {
     /// conversation history exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_preset: Option<String>,
+    /// The draft's model selection is Auto: the first submission routes the
+    /// task through the evaluation router instead of starting `provider`
+    /// directly. Meaningless once the session has started — `route_decision`
+    /// is the record of what routing chose.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto_route: bool,
+    /// The routing decision that produced this session's provider and model.
+    /// Present only on sessions that started through Auto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_decision: Option<RouteDecision>,
     pub status: SessionStatus,
     pub created_at: u64,
     /// Any mutation, including title edits and truncation. Use
@@ -1436,6 +1450,8 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             agent_preset: None,
+            auto_route: false,
+            route_decision: None,
             status: SessionStatus::Idle,
             created_at: now,
             updated_at: now,
@@ -1481,6 +1497,8 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             agent_preset: None,
+            auto_route: self.auto_route,
+            route_decision: self.route_decision.clone(),
             status: self.status,
             created_at: self.created_at,
             updated_at: self.updated_at,

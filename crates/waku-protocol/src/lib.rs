@@ -49,6 +49,7 @@ pub mod persistence;
 pub mod pid;
 pub mod projectless;
 pub mod provider_session;
+pub mod routing;
 pub mod settings;
 pub mod skills;
 pub mod theme;

@@ -48,25 +48,90 @@ const CURL_PATH: &str = "/usr/bin/curl";
 #[cfg(windows)]
 const CURL_PATH: &str = r"C:\Windows\System32\curl.exe";
 
-/// One line in the daemon's eval decision log.
+/// One line in the daemon's eval decision log. Eval-call fields and
+/// routing-outcome fields are both optional so one record type covers
+/// `evaluate`, `route`, and `route-override` events.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvalDecisionRecord {
     /// Unix seconds when the call was made.
     pub ts: u64,
-    /// Which eval-driven feature made the call ("evaluate" today; "route"
-    /// when the model router lands).
+    /// Which eval-driven feature made the call.
     pub feature: &'static str,
-    pub backend: EvalBackend,
-    pub latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<EvalBackend>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
     /// The versioned model id the backend reported, when it answered.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    pub state: Value,
-    pub questions: BTreeMap<String, EvalQuestion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub questions: Option<BTreeMap<String, EvalQuestion>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub answers: Option<BTreeMap<String, EvalAnswer>>,
     /// The failure summary when the call did not produce answers. Backend
     /// error bodies are never recorded — they can echo prompts.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The session a routing outcome belongs to, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<uuid::Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_provider: Option<waku_protocol::model::ProviderKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
+    /// The deterministic reason chain that produced the route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Hash of the policy document the decision was made under.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+}
+
+impl EvalDecisionRecord {
+    /// A record with every optional field unset; callers fill in what their
+    /// feature produced.
+    pub fn empty(feature: &'static str) -> Self {
+        Self {
+            ts: crate::model::unix_time(),
+            feature,
+            backend: None,
+            latency_ms: None,
+            model: None,
+            state: None,
+            questions: None,
+            answers: None,
+            error: None,
+            session_id: None,
+            resolved_provider: None,
+            resolved_model: None,
+            reason: None,
+            policy_hash: None,
+            family: None,
+            class: None,
+        }
+    }
+
+    /// Fold a routing decision's outcome into the record.
+    pub fn complete(&mut self, decision: &waku_protocol::routing::RouteDecision) {
+        self.resolved_provider = Some(decision.target.provider);
+        self.resolved_model = decision.target.model.clone();
+        self.reason = Some(decision.reason.clone());
+        self.family = decision.family.map(|family| family.id().to_owned());
+        self.class = decision.class.map(|class| class.id().to_owned());
+        if self.policy_hash.is_none() {
+            self.policy_hash = Some(decision.policy_hash.clone());
+        }
+        if self.latency_ms.is_none() {
+            self.latency_ms = decision.eval_latency_ms;
+        }
+    }
 }
 
 /// Where the decision log lives: beside the daemon's `settings.json`.

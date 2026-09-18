@@ -16,6 +16,7 @@ use crate::model::{
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
+use crate::routing::{RouteCandidate, RouteDecision, RoutePolicyView, RouteTarget, TaskClass};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
 use crate::usage::PlanUsage;
@@ -268,6 +269,35 @@ pub enum Command {
         #[ts(type = "unknown")]
         state: Value,
         questions: BTreeMap<String, EvalQuestion>,
+    },
+    /// Route a new session's first prompt: evaluate the task, resolve the
+    /// routing policy against `candidates`, and answer with the provider and
+    /// model to start on. `last_used` backs the policy's `last_used` default.
+    RouteTask {
+        prompt: String,
+        /// Lightweight project context for the classifier — the project
+        /// name only; filesystem drilling is deliberately out of scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        candidates: Vec<RouteCandidate>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_used: Option<RouteTarget>,
+    },
+    /// Append a route-override record to the decision log: the user changed
+    /// the model on a session that started through routing.
+    RecordRouteOverride {
+        session_id: Uuid,
+        target: RouteTarget,
+    },
+    /// Read the effective routing policy for the settings surface.
+    GetRoutePolicy,
+    /// Update one class-level target in the user's routing policy document,
+    /// preserving every other key. The JSON file stays the source of truth.
+    SetRouteClassTarget {
+        class: TaskClass,
+        /// "tier:fast" | "tier:default" | "tier:heavy" | "provider:model" |
+        /// "provider".
+        target: String,
     },
     LoadComposerDrafts,
     SaveComposerDrafts {
@@ -645,6 +675,12 @@ pub enum ResponsePayload {
     },
     Evaluation {
         evaluation: Evaluation,
+    },
+    RouteDecision {
+        decision: RouteDecision,
+    },
+    RoutePolicy {
+        view: RoutePolicyView,
     },
     BlobStored {
         reference: String,

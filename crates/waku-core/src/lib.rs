@@ -91,6 +91,8 @@ pub mod pi_session;
 pub mod projectless;
 pub mod pull_requests;
 pub mod repo;
+pub mod route_policy;
+pub mod routing;
 pub mod settings;
 pub mod share;
 pub mod shell_command;
