@@ -7,6 +7,7 @@ use ts_rs::TS;
 
 use crate::computer_use::ComputerAppGrant;
 use crate::custom_commands::CustomCommand;
+use crate::eval::EvalSettings;
 use crate::model::ProviderKind;
 
 /// A provider-native model/effort target for one subagent tier. Either side
@@ -67,6 +68,11 @@ pub struct DaemonSettings {
     pub subagent_tiers: BTreeMap<String, SubagentTier>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
+    /// Hosted evaluation-model configuration (backend + BYOK credentials).
+    /// `None` means no eval feature can run — callers degrade to their
+    /// default path rather than erroring.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eval: Option<EvalSettings>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -90,6 +96,7 @@ impl Default for DaemonSettings {
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
             provider_binary_overrides: HashMap::new(),
+            eval: None,
             extra: BTreeMap::new(),
         }
     }

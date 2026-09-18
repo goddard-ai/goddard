@@ -37,6 +37,7 @@ pub mod composer;
 pub mod computer_use;
 pub mod custom_commands;
 mod driver_wire;
+pub mod eval;
 pub mod friends;
 pub mod git;
 pub mod i18n;

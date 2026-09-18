@@ -1062,6 +1062,12 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render what will be injected.
     #[serde(default)]
     pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
+    /// Hosted evaluation-model settings. Daemon-owned; mirrored in memory so
+    /// the settings surface can read and edit it. Never written into the
+    /// client's own state — the credential-bearing document is the daemon's
+    /// `settings.json`.
+    #[serde(skip)]
+    pub eval: Option<waku_protocol::eval::EvalSettings>,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -1171,6 +1177,7 @@ impl PersistedState {
             agent_settings_enabled: true,
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
+            eval: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -1368,6 +1375,7 @@ impl PersistedState {
             subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
             custom_commands: self.custom_commands.clone(),
+            eval: self.eval.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -1387,6 +1395,7 @@ impl PersistedState {
         self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
         self.custom_commands = settings.custom_commands;
+        self.eval = settings.eval;
         self.daemon_settings_extra = settings.extra;
     }
 

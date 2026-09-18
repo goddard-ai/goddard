@@ -62,6 +62,7 @@ pub mod deepseek_pool;
 pub mod deepseek_session;
 pub mod devin_session;
 pub mod driver;
+pub mod eval;
 mod frontmatter;
 pub mod git_branch;
 pub mod git_commit;

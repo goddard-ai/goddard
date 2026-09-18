@@ -605,6 +605,36 @@ impl Backend for WakuBackend {
                     permissions: crate::computer_use::probe_permissions(prompt)?,
                 })
             }
+            Command::Evaluate { state, questions } => {
+                let settings = self
+                    .settings
+                    .get()
+                    .eval
+                    .ok_or_else(|| anyhow!("no evaluation backend is configured"))?;
+                let started = std::time::Instant::now();
+                let result = crate::eval::evaluate(&settings, &state, &questions);
+                let record = crate::eval::EvalDecisionRecord {
+                    ts: crate::model::unix_time(),
+                    feature: "evaluate",
+                    backend: settings.backend,
+                    latency_ms: started.elapsed().as_millis() as u64,
+                    model: result
+                        .as_ref()
+                        .ok()
+                        .map(|evaluation| evaluation.model.clone()),
+                    state,
+                    questions,
+                    answers: result
+                        .as_ref()
+                        .ok()
+                        .map(|evaluation| evaluation.answers.clone()),
+                    error: result.as_ref().err().map(|error| error.to_string()),
+                };
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+                Ok(ResponsePayload::Evaluation {
+                    evaluation: result?,
+                })
+            }
             Command::LoadUsageHistory {
                 window,
                 project_roots,
@@ -2891,6 +2921,7 @@ fn handle_driver_command(
         | Command::ProbeProvider { .. }
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }
+        | Command::Evaluate { .. }
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }

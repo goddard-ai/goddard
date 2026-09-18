@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ use uuid::Uuid;
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
+use crate::eval::{EvalQuestion, Evaluation};
 use crate::model::{
     AgentSession, GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe,
     ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
@@ -257,6 +259,15 @@ pub enum Command {
     LoadProviderSession {
         cursor: ProviderResumeCursor,
         cwd: PathBuf,
+    },
+    /// Run one hosted evaluation: `state` is the data under judgment and
+    /// `questions` are the typed decisions the model answers about it. The
+    /// daemon owns the backend call and the decision log; every eval-driven
+    /// feature (model routing today, agent tools later) shares this surface.
+    Evaluate {
+        #[ts(type = "unknown")]
+        state: Value,
+        questions: BTreeMap<String, EvalQuestion>,
     },
     LoadComposerDrafts,
     SaveComposerDrafts {
@@ -631,6 +642,9 @@ pub enum ResponsePayload {
     },
     ComposerDrafts {
         drafts: ComposerDrafts,
+    },
+    Evaluation {
+        evaluation: Evaluation,
     },
     BlobStored {
         reference: String,
