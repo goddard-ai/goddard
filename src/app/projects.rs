@@ -289,6 +289,12 @@ pub(super) struct ProjectsPageState {
     row_focuses: RefCell<HashMap<ProjectsRowKey, FocusHandle>>,
     selector_menu: ContextMenuHandle,
     work_item_state_menu: ContextMenuHandle,
+    /// Drag-resized widths for the Worktrees table's fixed columns
+    /// (branch, changes, tasks, updated); the name column stays flexible.
+    worktree_col_widths: [f32; 4],
+    /// Same for the Branches table (PR, divergence, updated).
+    branch_col_widths: [f32; 3],
+    col_resize: Rc<column_resize::ColumnResize>,
     /// Sessions bound per worktree path, folded once per frame so row
     /// builders read a map instead of re-scanning the session list.
     session_counts: RefCell<Rc<HashMap<PathBuf, usize>>>,
@@ -332,6 +338,18 @@ impl ProjectsPageState {
             row_focuses: RefCell::new(HashMap::new()),
             selector_menu: ContextMenuHandle::new(cx),
             work_item_state_menu: ContextMenuHandle::new(cx),
+            worktree_col_widths: [
+                PROJECTS_BRANCH_COL,
+                PROJECTS_COUNT_COL,
+                PROJECTS_COUNT_COL,
+                PROJECTS_UPDATED_COL,
+            ],
+            branch_col_widths: [
+                PROJECTS_PR_COL,
+                PROJECTS_DIVERGENCE_COL,
+                PROJECTS_UPDATED_COL,
+            ],
+            col_resize: column_resize::ColumnResize::new(),
             session_counts: RefCell::new(Rc::new(HashMap::new())),
             prs_by_head: RefCell::new(Rc::new(HashMap::new())),
             generation: 0,
@@ -2001,7 +2019,7 @@ impl Waku {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(projects_column_header(tab, &theme))
+            .child(projects_column_header(project_id, tab, state, &theme, cx))
             .child(
                 div()
                     .flex_1()
@@ -2275,7 +2293,7 @@ impl Waku {
 
         let branch_cell = div()
             .flex_none()
-            .w(px(PROJECTS_BRANCH_COL))
+            .w(px(state.worktree_col_widths[0]))
             .min_w_0()
             .flex()
             .items_center()
@@ -2296,7 +2314,7 @@ impl Waku {
         let dirty = entry.dirty_files.unwrap_or(0);
         let mut changes_cell = div()
             .flex_none()
-            .w(px(PROJECTS_COUNT_COL))
+            .w(px(state.worktree_col_widths[1]))
             .flex()
             .items_center()
             .gap(px(4.0));
@@ -2313,7 +2331,7 @@ impl Waku {
 
         let mut sessions_cell = div()
             .flex_none()
-            .w(px(PROJECTS_COUNT_COL))
+            .w(px(state.worktree_col_widths[2]))
             .flex()
             .items_center()
             .gap(px(4.0));
@@ -2330,7 +2348,7 @@ impl Waku {
 
         let updated_cell = div()
             .flex_none()
-            .w(px(PROJECTS_UPDATED_COL))
+            .w(px(state.worktree_col_widths[3]))
             .min_w_0()
             .truncate()
             .text_size(sp(14.0))
@@ -2423,7 +2441,7 @@ impl Waku {
 
         let mut pr_cell = div()
             .flex_none()
-            .w(px(PROJECTS_PR_COL))
+            .w(px(state.branch_col_widths[0]))
             .min_w_0()
             .flex()
             .items_center();
@@ -2450,7 +2468,7 @@ impl Waku {
 
         let mut divergence_cell = div()
             .flex_none()
-            .w(px(PROJECTS_DIVERGENCE_COL))
+            .w(px(state.branch_col_widths[1]))
             .min_w_0()
             .flex()
             .items_center();
@@ -2473,7 +2491,7 @@ impl Waku {
 
         let updated_cell = div()
             .flex_none()
-            .w(px(PROJECTS_UPDATED_COL))
+            .w(px(state.branch_col_widths[2]))
             .min_w_0()
             .truncate()
             .text_size(sp(14.0))
@@ -3230,8 +3248,28 @@ impl Waku {
 
 /// The pinned column header above a Worktrees/Branches table. Its cells use
 /// the same padding, gaps, and widths as the rows so each label sits over
-/// its column.
-fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
+/// its column. Fixed columns carry a drag handle on their trailing edge.
+fn projects_column_header(
+    project_id: Uuid,
+    tab: ProjectsTab,
+    state: &ProjectsPageState,
+    theme: &Theme,
+    cx: &mut Context<Waku>,
+) -> Div {
+    let set_width =
+        move |this: &mut Waku, column: usize, width: f32, cx: &mut Context<Waku>| {
+            if let Some(state) = this.projects_page_states.get_mut(&project_id) {
+                let widths = match tab {
+                    ProjectsTab::Worktrees => Some(&mut state.worktree_col_widths[..]),
+                    ProjectsTab::Branches => Some(&mut state.branch_col_widths[..]),
+                    _ => None,
+                };
+                if let Some(slot) = widths.and_then(|widths| widths.get_mut(column)) {
+                    *slot = width;
+                    cx.notify();
+                }
+            }
+        };
     let label = |text: String| {
         div()
             .min_w_0()
@@ -3240,14 +3278,24 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
             .text_color(theme.text_tertiary)
             .child(text)
     };
-    let cell = |width: f32, text: String| {
+    let cell = |index: usize, width: f32, text: String, cx: &mut Context<Waku>| {
         div()
             .flex_none()
             .w(px(width))
             .min_w_0()
+            .relative()
             .flex()
             .items_center()
             .child(label(text))
+            .child(column_resize::column_resize_handle(
+                SharedString::from(format!("projects-col-{tab:?}-{index}")),
+                &state.col_resize,
+                index,
+                width,
+                theme,
+                cx,
+                set_width,
+            ))
     };
     let row = div()
         .flex_none()
@@ -3261,9 +3309,10 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
         .border_color(theme.separator)
         // Covers the rows' leading icon so labels align with cell text.
         .child(div().flex_none().w(px(13.0)));
-    match tab {
-        ProjectsTab::Worktrees => row
-            .child(
+    let row = match tab {
+        ProjectsTab::Worktrees => {
+            let widths = state.worktree_col_widths;
+            row.child(
                 div()
                     .flex_1()
                     .min_w_0()
@@ -3271,12 +3320,14 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
                     .items_center()
                     .child(label(tr!("projects.col_name"))),
             )
-            .child(cell(PROJECTS_BRANCH_COL, tr!("projects.col_branch")))
-            .child(cell(PROJECTS_COUNT_COL, tr!("projects.col_changes")))
-            .child(cell(PROJECTS_COUNT_COL, tr!("projects.col_tasks")))
-            .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
-        ProjectsTab::Branches => row
-            .child(
+            .child(cell(0, widths[0], tr!("projects.col_branch"), cx))
+            .child(cell(1, widths[1], tr!("projects.col_changes"), cx))
+            .child(cell(2, widths[2], tr!("projects.col_tasks"), cx))
+            .child(cell(3, widths[3], tr!("projects.col_updated"), cx))
+        }
+        ProjectsTab::Branches => {
+            let widths = state.branch_col_widths;
+            row.child(
                 div()
                     .flex_1()
                     .min_w_0()
@@ -3284,11 +3335,8 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
                     .items_center()
                     .child(label(tr!("projects.col_branch"))),
             )
-            .child(cell(PROJECTS_PR_COL, tr!("projects.col_pull_request")))
-            .child(cell(
-                PROJECTS_DIVERGENCE_COL,
-                tr!("projects.col_divergence"),
-            ))
+            .child(cell(0, widths[0], tr!("projects.col_pull_request"), cx))
+            .child(cell(1, widths[1], tr!("projects.col_divergence"), cx))
             .child(
                 div()
                     .flex_1()
@@ -3297,9 +3345,18 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
                     .items_center()
                     .child(label(tr!("projects.col_last_commit"))),
             )
-            .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
+            .child(cell(2, widths[2], tr!("projects.col_updated"), cx))
+        }
         _ => row,
-    }
+    };
+    div()
+        .relative()
+        .child(row)
+        .child(column_resize::column_resize_listeners(
+            &state.col_resize,
+            cx,
+            set_width,
+        ))
 }
 
 /// A `list()`'s own padding joins its scroll extent, but

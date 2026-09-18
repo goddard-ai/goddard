@@ -1,1 +1,1 @@
-- Markdown tables in the transcript can be resized: drag a column boundary (or focus it and use the arrow keys) to redistribute width between the neighboring columns
+- Tables can be resized by dragging a column boundary (or focusing it and using the arrow keys): markdown tables in the transcript, the Keybinding Manager, the Projects page's Worktrees and Branches lists, and the Usage breakdown tables

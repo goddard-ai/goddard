@@ -22,9 +22,11 @@ use crate::keybindings::{
     snapshot_key_bindings,
 };
 use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::tooltip::Tooltip;
-use crate::ui::{icon, motion};
+use crate::ui::{column_resize, icon, motion};
 
 const ROW_HEIGHT: f32 = 34.0;
 /// Table columns (VS Code layout): Command | Keybinding | When | Category.
@@ -166,6 +168,10 @@ pub(super) struct KeybindingsUi {
     /// Focus handle for the command table so arrow-key navigation works
     /// without leaving the keyboard.
     table_focus: FocusHandle,
+    /// Drag-resized widths for the Keybinding/When/Category columns —
+    /// Command stays flexible and absorbs the difference.
+    col_widths: [f32; 3],
+    col_resize: Rc<column_resize::ColumnResize>,
     stage_collapsed: bool,
     layout: LayoutId,
     layout_source: LayoutSource,
@@ -224,6 +230,8 @@ impl KeybindingsUi {
             capture_intercept: None,
             capture_timeout: None,
             table_focus: cx.focus_handle(),
+            col_widths: [KEYBINDING_COL, WHEN_COL, CATEGORY_COL],
+            col_resize: column_resize::ColumnResize::new(),
             stage_collapsed: false,
             layout,
             layout_source,
@@ -718,6 +726,7 @@ impl super::Waku {
         let filtered = ui.filtered.clone();
         let selected = ui.selected;
         let hovered = ui.hovered;
+        let col_widths = ui.col_widths;
         let this = cx.weak_entity();
         // Hard conflicts only — same chord under the same context, so one
         // binding is silently unreachable. Shadowed and partial overlaps
@@ -892,7 +901,7 @@ impl super::Waku {
 
         page = page
             .child(strip)
-            .child(render_column_header(theme))
+            .child(render_column_header(ui, theme, cx))
             .child(
                 div().flex_1().min_h_0().px(px(TABLE_INSET)).child(
                     list(ui.list_state.clone(), move |index, _window, cx| {
@@ -911,6 +920,7 @@ impl super::Waku {
                             hovered == Some(index),
                             hard_conflicts.get(row.descriptor.id).cloned(),
                             this.clone(),
+                            col_widths,
                             theme,
                         )
                     })
@@ -1102,36 +1112,68 @@ fn render_keyboard_stage(
 /// The pinned column header. It nests the same outer inset and row padding
 /// the rows carry, and reuses their gap and column widths, so each label
 /// sits over its column — the table's only alignment contract.
-fn render_column_header(theme: Theme) -> gpui::Div {
-    let cell = |width: f32, text: String| {
+fn render_column_header(
+    ui: &KeybindingsUi,
+    theme: Theme,
+    cx: &mut Context<super::Waku>,
+) -> gpui::Div {
+    let set_width =
+        |this: &mut super::Waku, column: usize, width: f32, cx: &mut Context<super::Waku>| {
+            if let Some(ui) = this.keybindings.as_mut()
+                && let Some(slot) = ui.col_widths.get_mut(column)
+            {
+                *slot = width;
+                cx.notify();
+            }
+        };
+    let cell = |index: usize, text: String, cx: &mut Context<super::Waku>| {
         div()
-            .w(px(width))
+            .w(px(ui.col_widths[index]))
             .flex_none()
             .min_w_0()
-            .truncate()
-            .child(text)
-    };
-    div().px(px(TABLE_INSET)).child(
-        div()
-            .w_full()
-            .h(px(26.0))
-            .px(px(ROW_PAD))
+            .relative()
             .flex()
             .items_center()
-            .gap(px(COL_GAP))
-            .text_size(sp(11.0))
-            .text_color(theme.text_tertiary)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(tr!("keybind.column.command")),
-            )
-            .child(cell(KEYBINDING_COL, tr!("keybind.column.keybinding")))
-            .child(cell(WHEN_COL, tr!("keybind.column.when")))
-            .child(cell(CATEGORY_COL, tr!("keybind.column.category"))),
-    )
+            .child(div().min_w_0().truncate().child(text))
+            .child(column_resize::column_resize_handle(
+                SharedString::from(format!("keybindings-col-{index}")),
+                &ui.col_resize,
+                index,
+                ui.col_widths[index],
+                &theme,
+                cx,
+                set_width,
+            ))
+    };
+    div()
+        .relative()
+        .px(px(TABLE_INSET))
+        .child(
+            div()
+                .w_full()
+                .h(px(26.0))
+                .px(px(ROW_PAD))
+                .flex()
+                .items_center()
+                .gap(px(COL_GAP))
+                .text_size(sp(11.0))
+                .text_color(theme.text_tertiary)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(tr!("keybind.column.command")),
+                )
+                .child(cell(0, tr!("keybind.column.keybinding"), cx))
+                .child(cell(1, tr!("keybind.column.when"), cx))
+                .child(cell(2, tr!("keybind.column.category"), cx)),
+        )
+        .child(column_resize::column_resize_listeners(
+            &ui.col_resize,
+            cx,
+            set_width,
+        ))
 }
 
 /// One command's keybinding column: a single slot holding the chord, the
@@ -1142,6 +1184,7 @@ fn keybinding_cell(
     row: &CommandRow,
     conflict: Option<SharedString>,
     this: gpui::WeakEntity<super::Waku>,
+    width: f32,
     theme: Theme,
 ) -> AnyElement {
     let binding = row.bindings.first();
@@ -1155,7 +1198,7 @@ fn keybinding_cell(
         .or_else(|| row.descriptor.builtin_label.map(str::to_string));
     let cell = div()
         .id(SharedString::from(format!("{}:binding", row.descriptor.id)))
-        .w(px(KEYBINDING_COL))
+        .w(px(width))
         .h(px(24.0))
         .flex_none()
         .overflow_hidden()
@@ -1247,6 +1290,7 @@ fn render_row(
     // when the collision is a hard one.
     conflict: Option<SharedString>,
     this: gpui::WeakEntity<super::Waku>,
+    col_widths: [f32; 3],
     theme: Theme,
 ) -> AnyElement {
     let category = tr!(row.descriptor.category.title_key());
@@ -1306,11 +1350,11 @@ fn render_row(
             // The one keybinding slot: clicking it anywhere opens the
             // capture modal, which replaces the chord in place. Commands
             // with no binding show an empty slot that assigns one.
-            keybinding_cell(row, conflict, this.clone(), theme),
+            keybinding_cell(row, conflict, this.clone(), col_widths[0], theme),
         )
         .child(
             div()
-                .w(px(WHEN_COL))
+                .w(px(col_widths[1]))
                 .flex_none()
                 .truncate()
                 .text_size(sp(11.0))
@@ -1324,7 +1368,7 @@ fn render_row(
         )
         .child(
             div()
-                .w(px(CATEGORY_COL))
+                .w(px(col_widths[2]))
                 .flex_none()
                 .truncate()
                 .text_size(sp(11.0))

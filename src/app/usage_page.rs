@@ -1107,8 +1107,20 @@ impl Waku {
                     .child(toggle),
             )
             .child(match breakdown {
-                UsageBreakdown::Model => usage_model_table(history, theme),
-                UsageBreakdown::Day => usage_day_table(history, theme),
+                UsageBreakdown::Model => usage_model_table(
+                    history,
+                    self.usage_model_col_widths,
+                    &self.usage_col_resize,
+                    theme,
+                    cx,
+                ),
+                UsageBreakdown::Day => usage_day_table(
+                    history,
+                    self.usage_day_col_widths,
+                    &self.usage_col_resize,
+                    theme,
+                    cx,
+                ),
             })
     }
 
@@ -1789,22 +1801,55 @@ fn usage_cell(width: f32, text: String, color: Hsla) -> Div {
 }
 
 /// Per-model costs, largest first.
-fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
-    let mut table = div().flex().flex_col().text_size(sp(12.5)).child(
-        div()
-            .pb(px(7.0))
-            .border_b(hairline())
-            .border_color(theme.separator)
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .text_size(sp(12.5))
-            .text_color(theme.text_tertiary)
-            .child(div().flex_1().min_w_0().child(tr!("usage.model")))
-            .child(usage_cell(84.0, tr!("usage.cost"), theme.text_tertiary))
-            .child(usage_cell(64.0, tr!("usage.share"), theme.text_tertiary))
-            .child(usage_cell(84.0, tr!("usage.tokens"), theme.text_tertiary)),
-    );
+fn usage_model_table(
+    history: &UsageHistory,
+    widths: [f32; 3],
+    resize: &Rc<column_resize::ColumnResize>,
+    theme: &Theme,
+    cx: &mut Context<Waku>,
+) -> Div {
+    let set_width = |this: &mut Waku, column: usize, width: f32, cx: &mut Context<Waku>| {
+        if let Some(slot) = this.usage_model_col_widths.get_mut(column) {
+            *slot = width;
+            cx.notify();
+        }
+    };
+    let cell = |index: usize, text: String, cx: &mut Context<Waku>| {
+        usage_cell(widths[index], text, theme.text_tertiary)
+            .relative()
+            .child(column_resize::column_resize_handle(
+                SharedString::from(format!("usage-model-col-{index}")),
+                resize,
+                index,
+                widths[index],
+                theme,
+                cx,
+                set_width,
+            ))
+    };
+    let mut table = div()
+        .relative()
+        .flex()
+        .flex_col()
+        .text_size(sp(12.5))
+        .child(
+            div()
+                .pb(px(7.0))
+                .border_b(hairline())
+                .border_color(theme.separator)
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(div().flex_1().min_w_0().child(tr!("usage.model")))
+                .child(cell(0, tr!("usage.cost"), cx))
+                .child(cell(1, tr!("usage.share"), cx))
+                .child(cell(2, tr!("usage.tokens"), cx)),
+        )
+        .child(column_resize::column_resize_listeners(
+            resize, cx, set_width,
+        ));
     if history.models.is_empty() {
         return table.child(usage_table_empty_row(theme));
     }
@@ -1839,14 +1884,18 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
                                 .child(SharedString::from(model.model.clone())),
                         ),
                 )
-                .child(usage_cell(84.0, format_usd(model.cost_usd), theme.text))
                 .child(usage_cell(
-                    64.0,
+                    widths[0],
+                    format_usd(model.cost_usd),
+                    theme.text,
+                ))
+                .child(usage_cell(
+                    widths[1],
                     format_percent(model.cost_share),
                     theme.text_tertiary,
                 ))
                 .child(usage_cell(
-                    84.0,
+                    widths[2],
                     format_tokens_compact(model.total_tokens as f64),
                     theme.text_tertiary,
                 )),
@@ -1856,7 +1905,32 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
 }
 
 /// The most recent active days, newest first, with per-provider cost columns.
-fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
+fn usage_day_table(
+    history: &UsageHistory,
+    widths: [f32; 4],
+    resize: &Rc<column_resize::ColumnResize>,
+    theme: &Theme,
+    cx: &mut Context<Waku>,
+) -> Div {
+    let set_width = |this: &mut Waku, column: usize, width: f32, cx: &mut Context<Waku>| {
+        if let Some(slot) = this.usage_day_col_widths.get_mut(column) {
+            *slot = width;
+            cx.notify();
+        }
+    };
+    let cell = |index: usize, text: String, cx: &mut Context<Waku>| {
+        usage_cell(widths[index], text, theme.text_tertiary)
+            .relative()
+            .child(column_resize::column_resize_handle(
+                SharedString::from(format!("usage-day-col-{index}")),
+                resize,
+                index,
+                widths[index],
+                theme,
+                cx,
+                set_width,
+            ))
+    };
     let mut header = div()
         .pb(px(7.0))
         .border_b(hairline())
@@ -1867,18 +1941,23 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
         .text_size(sp(12.5))
         .text_color(theme.text_tertiary)
         .child(div().flex_1().min_w_0().child(tr!("usage.day")));
-    for provider in UsageProvider::ALL {
-        header = header.child(usage_cell(
-            84.0,
-            provider.label().to_owned(),
-            theme.text_tertiary,
-        ));
+    for (index, provider) in UsageProvider::ALL.iter().enumerate() {
+        header = header.child(cell(index, provider.label().to_owned(), cx));
     }
+    let provider_count = UsageProvider::ALL.len();
     header = header
-        .child(usage_cell(84.0, tr!("usage.total"), theme.text_tertiary))
-        .child(usage_cell(84.0, tr!("usage.tokens"), theme.text_tertiary));
+        .child(cell(provider_count, tr!("usage.total"), cx))
+        .child(cell(provider_count + 1, tr!("usage.tokens"), cx));
 
-    let mut table = div().flex().flex_col().text_size(sp(12.5)).child(header);
+    let mut table = div()
+        .relative()
+        .flex()
+        .flex_col()
+        .text_size(sp(12.5))
+        .child(header)
+        .child(column_resize::column_resize_listeners(
+            resize, cx, set_width,
+        ));
     if history.daily.is_empty() {
         return table.child(usage_table_empty_row(theme));
     }
@@ -1897,17 +1976,21 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
                     .text_color(theme.text)
                     .child(SharedString::from(format_day_short(day.day))),
             );
-        for provider in UsageProvider::ALL {
+        for (index, provider) in UsageProvider::ALL.iter().enumerate() {
             row = row.child(usage_cell(
-                84.0,
+                widths[index],
                 format_usd(day.by_provider[provider.index()].cost_usd),
                 theme.text_tertiary,
             ));
         }
         table = table.child(
-            row.child(usage_cell(84.0, format_usd(day.cost_usd), theme.text))
+            row.child(usage_cell(
+                    widths[provider_count],
+                    format_usd(day.cost_usd),
+                    theme.text,
+                ))
                 .child(usage_cell(
-                    84.0,
+                    widths[provider_count + 1],
                     format_tokens_compact(day.total_tokens as f64),
                     theme.text_tertiary,
                 )),

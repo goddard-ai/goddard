@@ -5,6 +5,7 @@ use gpui::{
     StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb, svg,
 };
 
+pub mod column_resize;
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;

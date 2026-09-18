@@ -72,9 +72,9 @@ use crate::terminal::{TerminalLaunch, TerminalView, TerminalViewEvent};
 use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
-    MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, contain_scroll, file_icon,
-    goddard_logo, icon, icon_button, motion, progress_ring, provider_color, provider_mark,
-    rem_scale, status_color, thinking, toggle_switch,
+    MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
+    file_icon, goddard_logo, icon, icon_button, motion, progress_ring, provider_color,
+    provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
@@ -1751,6 +1751,11 @@ pub struct Waku {
     usage_window: crate::usage_history::UsageWindow,
     usage_metric: UsageMetric,
     usage_breakdown: UsageBreakdown,
+    /// Drag-resized widths for the usage breakdown tables' fixed columns —
+    /// model (cost, share, tokens) and day (per-provider, total, tokens).
+    usage_model_col_widths: [f32; 3],
+    usage_day_col_widths: [f32; 4],
+    usage_col_resize: Rc<column_resize::ColumnResize>,
     /// Scroll position of the monthly statement card, which scrolls
     /// internally like the projects card so the two list views feel alike.
     usage_months_scroll: ScrollHandle,
@@ -4373,6 +4378,9 @@ impl Waku {
                 usage_window: crate::usage_history::UsageWindow::TrailingDays(30),
                 usage_metric: UsageMetric::Cost,
                 usage_breakdown: UsageBreakdown::Model,
+                usage_model_col_widths: [84.0, 64.0, 84.0],
+                usage_day_col_widths: [84.0; 4],
+                usage_col_resize: column_resize::ColumnResize::new(),
                 usage_months_scroll: ScrollHandle::new(),
                 usage_months_scrollbar: ScrollbarState::new(),
                 usage_project_filter,
