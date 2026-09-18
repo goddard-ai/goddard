@@ -684,6 +684,11 @@ if [ "$1" = "serve" ]; then
           *'"excludeItems":false'*) ;;
           *) echo 'session/read without excludeItems:false' >> "$VIOLATIONS" ;;
         esac ;;
+      *'"turn/unqueue"'*)
+        case "$line" in
+          *'"turnId":"'*) ;;
+          *) echo 'turn/unqueue without a turnId' >> "$VIOLATIONS" ;;
+        esac ;;
     esac
     case "$line" in
       *'"initialize"'*)
@@ -713,6 +718,11 @@ if [ "$1" = "serve" ]; then
         id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
         TURN=$((TURN + 1))
         tid="t$TURN"
+        if [ -f "$(dirname "$0")/queue-all" ]; then
+          # A queued admission emits no turn/started until launch.
+          echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"disposition\":\"queued\",\"startedNewTurn\":false,\"turnId\":\"$tid\"}}"
+          continue
+        fi
         echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"disposition\":\"started\",\"startedNewTurn\":true,\"turnId\":\"$tid\"}}"
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c1\"}}"
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/started\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c2\",\"item\":{\"itemId\":\"m$TURN\",\"kind\":\"agentMessage\",\"status\":\"inProgress\",\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c2\",\"revision\":0,\"recordedAt\":0}}}"
@@ -721,6 +731,14 @@ if [ "$1" = "serve" ]; then
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"sessionId\":\"$sid\",\"viewCursor\":\"c5\",\"sourceRange\":{},\"item\":{\"itemId\":\"m$TURN\",\"kind\":\"agentMessage\",\"status\":\"completed\",\"text\":\"hello world\",\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c5\",\"revision\":1,\"recordedAt\":0}}}"
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"session/contextUsage\",\"params\":{\"sessionId\":\"$sid\",\"usedTokens\":42,\"windowTokens\":1000,\"pressure\":\"normal\",\"viewCursor\":\"c6\",\"sourceRange\":{}}}"
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"terminal\":\"completed\",\"viewCursor\":\"c7\",\"sourceRange\":{}}}"
+        ;;
+      *'"turn/unqueue"'*)
+        sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        tid=$(echo "$line" | sed -n 's/.*"turnId":"\([^"]*\)".*/\1/p')
+        echo "$tid" >> "$(dirname "$0")/unqueued.log"
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"turnId\":\"$tid\"}}"
+        echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/unqueued\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c8\",\"sourceRange\":{}}}"
         ;;
       *)
         id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')

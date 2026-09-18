@@ -90,6 +90,10 @@ struct WorkerState {
     /// terminal, so the list lines up with Goddard's provider-turn count.
     /// Only `completed` entries are legal `session/fork` boundaries.
     finished_turns: Vec<FinishedTurn>,
+    /// Admitted-but-not-launched submits, in launch order. `turn/interrupt`
+    /// stops only the foreground turn, so Cancel must reclaim each of these
+    /// with `turn/unqueue` before they fire `turn/started` and take over.
+    queued_turns: Vec<String>,
     /// Turns with an open retry card, completed when the turn ends.
     retried_turns: HashSet<String>,
     items: HashMap<String, ItemState>,
@@ -215,6 +219,7 @@ impl MuseDriver {
             } else {
                 Vec::new()
             },
+            queued_turns: Vec::new(),
             retried_turns: HashSet::new(),
             items: HashMap::new(),
             approvals: HashMap::new(),
@@ -298,6 +303,16 @@ fn restore_snapshot(result: &Value, state: &mut WorkerState, events: &DriverEven
         && let Some(turn_id) = turn.get("turnId").and_then(Value::as_str)
     {
         state.active_turn = Some(turn_id.to_owned());
+    }
+    if let Some(queued) = snapshot.get("queuedTurns").and_then(Value::as_array) {
+        state.queued_turns = queued
+            .iter()
+            .filter_map(|turn| {
+                turn.get("turnId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect();
     }
 }
 
@@ -386,14 +401,18 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     // emits no TurnStarted until `turn/started` arrives at
                     // launch, so the local turn does not count as
                     // provider-started early.
-                    let started = result.get("disposition").and_then(Value::as_str)
-                        == Some("started")
+                    let disposition = result.get("disposition").and_then(Value::as_str);
+                    let started = disposition == Some("started")
                         || result.get("startedNewTurn").and_then(Value::as_bool) == Some(true);
                     if started {
                         if let Some(turn_id) = result.get("turnId").and_then(Value::as_str) {
                             state.active_turn = Some(turn_id.to_owned());
                         }
                         let _ = worker.events.send(DriverEvent::TurnStarted);
+                    } else if disposition == Some("queued")
+                        && let Some(turn_id) = result.get("turnId").and_then(Value::as_str)
+                    {
+                        state.queued_turns.push(turn_id.to_owned());
                     }
                 }
                 Err(error) => {
@@ -456,6 +475,38 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     provider = "Muse Code",
                     error = error.message()
                 )));
+            }
+            // Interrupt stops only the foreground turn; submits the host
+            // already queued would still launch after it. Reclaim each one
+            // this driver admitted — per the schema an admitted reclaim
+            // means the turn will not launch, so the ack settles the shell
+            // and the `turn/unqueued` event then finds nothing tracked.
+            for turn_id in std::mem::take(&mut state.queued_turns) {
+                match worker.service.call(
+                    "turn/unqueue",
+                    json!({
+                        "commandId": worker.service.mint_command_id(),
+                        "sessionId": state.session_id,
+                        "turnId": turn_id,
+                    }),
+                ) {
+                    Ok(_) => {
+                        let _ = worker.events.send(DriverEvent::TurnFinished {
+                            success: false,
+                            summary: None,
+                        });
+                    }
+                    Err(error) => {
+                        // Keep the id tracked so a later stop retries; a
+                        // `turn/started` or `turn/unqueued` event drops it.
+                        state.queued_turns.push(turn_id);
+                        let _ = worker.events.send(DriverEvent::Error(tr!(
+                            "errors.stop_provider",
+                            provider = "Muse Code",
+                            error = error.message()
+                        )));
+                    }
+                }
             }
         }
         DriverCommand::Respond {
@@ -604,6 +655,7 @@ fn switch_session(
     state.subscription = subscription;
     state.session_id = session_id.clone();
     state.active_turn = None;
+    state.queued_turns.clear();
     state.finished_turns = finished_turns(&worker.service, &session_id).unwrap_or_default();
     state.retried_turns.clear();
     state.items.clear();
@@ -688,14 +740,18 @@ fn handle_event(
         // already knows its own lifecycle result.
         "session/started" | "initialized" => {}
         "turn/started" => {
-            state.active_turn = params
-                .get("turnId")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
+            let turn_id = params.get("turnId").and_then(Value::as_str);
+            if let Some(turn_id) = turn_id {
+                // A queued submit reaching its launch boundary leaves the
+                // reclaimable set.
+                state.queued_turns.retain(|queued| queued != turn_id);
+            }
+            state.active_turn = turn_id.map(str::to_owned);
             let _ = events.send(DriverEvent::TurnStarted);
         }
         "turn/completed" => {
             if let Some(turn_id) = params.get("turnId").and_then(Value::as_str) {
+                state.queued_turns.retain(|queued| queued != turn_id);
                 if state.active_turn.as_deref() == Some(turn_id) {
                     state.active_turn = None;
                 }
@@ -727,6 +783,16 @@ fn handle_event(
         // open shell here — otherwise the turn spins forever.
         "turn/retracted" | "turn/unqueued" => {
             if let Some(turn_id) = params.get("turnId").and_then(Value::as_str) {
+                if method == "turn/unqueued"
+                    && state.active_turn.as_deref() != Some(turn_id)
+                    && !state.queued_turns.iter().any(|queued| queued == turn_id)
+                {
+                    // A reclaim naming nothing this driver admitted belongs
+                    // to another client's queue; no local turn is open, so
+                    // settling here would fail the wrong turn.
+                    return;
+                }
+                state.queued_turns.retain(|queued| queued != turn_id);
                 if state.active_turn.as_deref() == Some(turn_id) {
                     state.active_turn = None;
                 }
@@ -1679,6 +1745,40 @@ mod tests {
         assert!(!directory.join("violations.log").exists());
     }
 
+    /// A submit admitted with `disposition: "queued"` sits in the host's
+    /// queue, invisible to `turn/interrupt`. Stop must reclaim it with
+    /// `turn/unqueue` or it launches after the user thinks they stopped.
+    #[test]
+    fn muse_cancel_reclaims_queued_turns() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut start = options(&directory);
+        start.binary = fake_muse(&directory);
+        // The marker flips the fake host's turn/start acks to `queued`.
+        fs::write(directory.join("queue-all"), "").unwrap();
+
+        let (events, rx) = test_event_channel();
+        let driver = MuseDriver::start(start, events).unwrap();
+        driver.prompt("queued one".to_owned());
+        // Commands run in order on the worker, so the queued admission is
+        // already tracked by the time Cancel is handled.
+        driver.cancel();
+
+        let seen = collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::TurnFinished { .. })
+        });
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, DriverEvent::TurnFinished { success: false, .. })),
+            "turn/unqueued should settle the open turn"
+        );
+        // The host's own queue record proves the reclaim reached it.
+        let unqueued = fs::read_to_string(directory.join("unqueued.log")).unwrap_or_default();
+        assert_eq!(unqueued.trim(), "t1");
+        drop(driver);
+        assert!(!directory.join("violations.log").exists());
+    }
+
     #[test]
     fn muse_answers_map_to_the_question_shape() {
         let questions = vec![
@@ -1750,6 +1850,7 @@ mod tests {
             reasoning_effort: None,
             active_turn: None,
             finished_turns: Vec::new(),
+            queued_turns: Vec::new(),
             retried_turns: HashSet::new(),
             items: HashMap::new(),
             approvals: HashMap::new(),
