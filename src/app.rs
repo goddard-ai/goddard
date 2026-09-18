@@ -1078,9 +1078,9 @@ impl RightPanelSessionState {
     }
 }
 
-/// One choice in the model-traits menu: a label plus a badge marking the
-/// provider's own default, so the current selection and the default read apart.
-fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) -> MenuItem {
+/// One choice in the model-traits menu: a label, with a check on the
+/// current selection.
+fn traits_choice(theme: Theme, label: String, selected: bool) -> MenuItem {
     MenuItem::custom(move |_, _| {
         div()
             .w(px(190.0))
@@ -1096,24 +1096,6 @@ fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) 
                     .text_color(theme.text_secondary)
                     .child(label.clone()),
             )
-            .when(is_default, |element| {
-                element.child(
-                    div()
-                        .h(px(18.0))
-                        .px(px(5.0))
-                        .flex_none()
-                        .rounded(px(4.0))
-                        .border(hairline())
-                        .border_color(theme.border)
-                        .bg(theme.overlay)
-                        .flex()
-                        .items_center()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("common.default")),
-                )
-            })
             .when(selected, |element| {
                 element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
             })

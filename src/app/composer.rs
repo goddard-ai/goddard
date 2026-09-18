@@ -2150,14 +2150,8 @@ impl Waku {
             (label, None) => label,
         };
         let reasoning_efforts = model.reasoning_efforts.clone();
-        let default_effort = model.default_reasoning_effort.clone();
         let service_tiers = model.service_tiers.clone();
         let context_windows = model.context_windows.clone();
-        let default_window = model.default_context_window.clone();
-        let default_tier = model
-            .default_service_tier
-            .clone()
-            .unwrap_or_else(|| "default".to_owned());
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("model-traits", cx);
         Some(dropdown_menu(
@@ -2181,7 +2175,6 @@ impl Waku {
                             traits_choice(
                                 theme,
                                 tr!("common.default"),
-                                true,
                                 selected_effort.is_none(),
                             )
                             .on_click(move |_, cx| {
@@ -2199,11 +2192,9 @@ impl Waku {
                             .map(waku_client::WireTranslation::render)
                             .unwrap_or(option.label);
                         let effort = option.id;
-                        let is_default = !supports_default_reset
-                            && default_effort.as_deref() == Some(effort.as_str());
                         let selected = selected_effort.as_deref() == Some(effort.as_str());
                         items.push(
-                            traits_choice(theme, label, is_default, selected).on_click(
+                            traits_choice(theme, label, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_reasoning_effort(effort.clone(), cx);
@@ -2223,7 +2214,6 @@ impl Waku {
                         traits_choice(
                             theme,
                             tr!("models.standard"),
-                            default_tier == "default",
                             selected_tier == "default",
                         )
                         .on_click(move |_, cx| {
@@ -2240,10 +2230,9 @@ impl Waku {
                             .map(waku_client::WireTranslation::render)
                             .unwrap_or(option.label);
                         let tier = option.id;
-                        let is_default = default_tier == tier;
                         let selected = selected_tier == tier;
                         items.push(
-                            traits_choice(theme, label, is_default, selected).on_click(
+                            traits_choice(theme, label, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_service_tier(tier.clone(), cx);
@@ -2266,10 +2255,9 @@ impl Waku {
                             .map(waku_client::WireTranslation::render)
                             .unwrap_or(option.label);
                         let window = option.id;
-                        let is_default = default_window.as_deref() == Some(window.as_str());
                         let selected = selected_window.as_deref() == Some(window.as_str());
                         items.push(
-                            traits_choice(theme, label, is_default, selected).on_click(
+                            traits_choice(theme, label, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_context_window(window.clone(), cx);
