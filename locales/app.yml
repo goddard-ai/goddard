@@ -324,7 +324,7 @@ settings.commands_keywords:
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:
-  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page computer use
+  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page computer use auto model routing router evaluation jev
 settings.experiments_description:
   en: Unfinished features you can try early. Each is off by default, may change or disappear, and can be turned off at any time.
 settings.archived:
@@ -507,6 +507,76 @@ experiments.friends_title:
   en: Friends
 experiments.friends_description:
   en: A Settings → Friends page for friend-to-friend file transfers — share your friend code, accept incoming requests, and watch live transfer progress from a sidebar footer ring.
+experiments.model_router_title:
+  en: Auto model routing
+experiments.model_router_description:
+  en: Add Auto to the model picker. A task's first prompt is classified by the evaluation model, then routed to a provider and model from your routing policy.
+routing.backend:
+  en: Evaluation backend
+routing.backend_description:
+  en: The service that classifies each task's first prompt. All three answer the same typed evaluation questions; only credentials differ.
+routing.typesafe_key:
+  en: TypeSafe API key
+routing.typesafe_key_description:
+  en: Calls api.typesafe.ai directly. Leave empty to keep the stored key.
+routing.typesafe_key_placeholder:
+  en: ts_…
+routing.vercel_key:
+  en: AI Gateway key or OIDC token
+routing.vercel_key_description:
+  en: An AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN value, sent as the Bearer credential to the AI Gateway evaluation endpoint.
+routing.vercel_key_placeholder:
+  en: vck_… or OIDC token
+routing.vercel_team:
+  en: Team ID (optional)
+routing.vercel_team_description:
+  en: Sent as x-vercel-ai-gateway-team when your gateway is scoped to a Vercel team.
+routing.optional:
+  en: Optional
+routing.cloudflare_account:
+  en: Account ID
+routing.cloudflare_account_description:
+  en: The Cloudflare account owning the Workers AI evaluation binding.
+routing.cloudflare_account_placeholder:
+  en: Cloudflare account id
+routing.cloudflare_token:
+  en: API token
+routing.cloudflare_token_description:
+  en: A Workers AI–scoped token for the account above.
+routing.cloudflare_token_placeholder:
+  en: Cloudflare API token
+routing.class_routine:
+  en: Routine tasks
+routing.class_routine_description:
+  en: Mechanical, low-risk, or single-step work — routed cheap and fast.
+routing.class_general:
+  en: General tasks
+routing.class_general_description:
+  en: Ordinary tasks that benefit from a solid model — the default class.
+routing.class_demanding:
+  en: Demanding tasks
+routing.class_demanding_description:
+  en: Subtle, high-stakes, or long-horizon work — routed to the strongest tier.
+routing.tiers:
+  en: Tiers
+routing.tier_fast:
+  en: Fast tier
+routing.tier_default:
+  en: Default tier
+routing.tier_heavy:
+  en: Heavy tier
+routing.providers:
+  en: Providers
+routing.provider_default:
+  en: default
+routing.last_used:
+  en: Last used
+routing.in_progress:
+  en: Routing task…
+routing.policy_valid:
+  en: In effect
+routing.policy_invalid:
+  en: Invalid — using defaults
 daemon.not_configured:
   en: Not configured
 daemon.status:
@@ -1774,6 +1844,12 @@ composer.no_providers:
 
 models.none_found:
   en: No models found
+models.auto:
+  en: Auto (Jev)
+models.auto_subtitle:
+  en: Route each task to the best provider
+models.auto_routed:
+  en: "Auto (Jev) · %{model}"
 models.favorite_hint:
   en: Star a model to keep it here
 models.loading:

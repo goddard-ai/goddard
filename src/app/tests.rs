@@ -167,7 +167,12 @@ fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
     stale_remote.workspace = SessionWorkspace::Local;
 
     let mut catalog = vec![skeleton, hydrated];
-    merge_remote_session_catalog(&mut catalog, vec![remote, stale_remote], |_| false, |_| false);
+    merge_remote_session_catalog(
+        &mut catalog,
+        vec![remote, stale_remote],
+        |_| false,
+        |_| false,
+    );
 
     assert_eq!(
         catalog
@@ -2807,12 +2812,12 @@ fn model_picker_highlight_seeds_from_the_selected_model() {
         picker_probe(ProviderKind::Claude, "claude-b", &[], false),
         picker_probe(ProviderKind::Claude, "claude-c", &[], false),
     ];
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "");
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false);
 
     // The first arrow moves relative to the session's combo — the row the
     // reveal scrolled into view — rather than jumping to an end.
     let selection = (ProviderKind::Claude, "claude-b".to_owned(), None, false);
-    let seed = picker_selected_row_index(Some(&selection), &rows);
+    let seed = picker_selected_row_index(Some(&selection), false, &rows);
     assert_eq!(seed, Some(1));
     assert_eq!(next_picker_highlight(seed, rows.len(), "down"), Some(2));
     assert_eq!(next_picker_highlight(seed, rows.len(), "up"), Some(0));
@@ -2820,8 +2825,44 @@ fn model_picker_highlight_seeds_from_the_selected_model() {
     // A combo the list does not contain — another provider's row — leaves
     // the cursor unseeded so the arrows open on an edge as before.
     let other = (ProviderKind::Codex, "claude-b".to_owned(), None, false);
-    assert_eq!(picker_selected_row_index(Some(&other), &rows), None);
-    assert_eq!(picker_selected_row_index(None, &rows), None);
+    assert_eq!(picker_selected_row_index(Some(&other), false, &rows), None);
+    assert_eq!(picker_selected_row_index(None, false, &rows), None);
+}
+
+#[test]
+fn auto_route_seed_and_filter_follow_the_picker_row() {
+    use super::composer::{picker_selected_row_index, visible_picker_rows};
+    use crate::model::ProviderModel;
+    use crate::model::ProviderProbe;
+
+    let probe = ProviderProbe {
+        provider: ProviderKind::Codex,
+        installed: true,
+        path: Some(std::path::PathBuf::from("/bin/codex")),
+        models: vec![ProviderModel::new("gpt-5.6-sol", "gpt-5.6-sol")],
+        agent_presets: Vec::new(),
+    };
+    let probes = [probe];
+
+    // Auto heads the unfiltered list when the draft may route, and the
+    // routed selection seeds on it — never on a concrete model row.
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", true);
+    assert!(rows[0].auto);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(picker_selected_row_index(None, true, &rows), Some(0));
+
+    // The same query rules as models: "auto" or "jev" keeps the row,
+    // "sonnet" drops it.
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "aut", true);
+    assert!(rows[0].auto);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "jev", true);
+    assert!(rows[0].auto);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "sonnet", true);
+    assert!(rows.iter().all(|row| !row.auto));
+
+    // Without the flag the list is only concrete models.
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false);
+    assert!(rows.iter().all(|row| !row.auto));
 }
 
 #[test]
@@ -2978,10 +3019,10 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
 
     // The merged list offers only the provider left switched on — its star
     // or its search index cannot resurface the other one's rows.
-    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "");
+    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "", false);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].provider, ProviderKind::Codex);
-    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "claude");
+    let rows = visible_picker_rows(&probes, &favorites, &[], &disabled, None, "claude", false);
     assert!(rows.is_empty());
 
     // A session already locked to the provider keeps its models.
@@ -2992,6 +3033,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         Some(ProviderKind::Claude),
         "",
+        false,
     );
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].provider, ProviderKind::Claude);
@@ -3057,7 +3099,7 @@ fn picker_rows_expand_models_into_effort_and_fast_combos() {
         // A model with no effort metadata contributes exactly one row.
         picker_probe(ProviderKind::Cursor, "auto", &[], false),
     ];
-    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "");
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "", false);
 
     assert_eq!(rows.len(), 6);
     // Provider order first (Claude before Codex in `ProviderKind::ALL`),
@@ -3083,10 +3125,10 @@ fn picker_rows_expand_models_into_effort_and_fast_combos() {
     );
 
     // Effort ids and the fast flag are searchable.
-    let fast_rows = visible_picker_rows(&probes, &[], &[], &[], None, "fast");
+    let fast_rows = visible_picker_rows(&probes, &[], &[], &[], None, "fast", false);
     assert_eq!(fast_rows.len(), 2);
     assert!(fast_rows.iter().all(|row| row.fast));
-    let high_rows = visible_picker_rows(&probes, &[], &[], &[], None, "high");
+    let high_rows = visible_picker_rows(&probes, &[], &[], &[], None, "high", false);
     assert_eq!(high_rows.len(), 2);
 }
 
@@ -3124,7 +3166,7 @@ fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
         used_at: 0,
     }];
 
-    let rows = visible_picker_rows(&probes, &favorites, &recents, &[], None, "");
+    let rows = visible_picker_rows(&probes, &favorites, &recents, &[], None, "", false);
     let order: Vec<ProviderKind> = rows.iter().map(|row| row.provider).collect();
     // Favorites lead in their stored order, then the recent, then the rest.
     assert_eq!(
@@ -3156,7 +3198,7 @@ fn picker_rows_give_recency_to_the_fast_variant_last_started() {
         used_at: 0,
     }];
 
-    let rows = visible_picker_rows(&probes, &[], &recents, &[], None, "");
+    let rows = visible_picker_rows(&probes, &[], &recents, &[], None, "", false);
     assert_eq!(rows.len(), 2);
     assert!(rows[0].fast);
     assert_eq!(rows[0].recent_rank, Some(0));
@@ -3180,7 +3222,7 @@ fn picker_rows_match_a_bare_legacy_favorite_to_the_default_effort_row() {
         fast: false,
     }];
 
-    let rows = visible_picker_rows(&probes, &favorites, &[], &[], None, "");
+    let rows = visible_picker_rows(&probes, &favorites, &[], &[], None, "", false);
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].favorite_index, Some(0));
     assert_eq!(rows[0].effort.as_deref(), Some("high"));
@@ -3436,7 +3478,14 @@ fn workspace_subject_follows_the_overlay_composer() {
 
     // No destination project: no subject at all.
     assert_eq!(
-        workspace_subject_for(true, None, Some(selected_id), Some(project_a), None, &sessions),
+        workspace_subject_for(
+            true,
+            None,
+            Some(selected_id),
+            Some(project_a),
+            None,
+            &sessions
+        ),
         (None, None)
     );
 }

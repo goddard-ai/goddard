@@ -2513,9 +2513,17 @@ impl Waku {
                 .saturating_sub(turn.started_at)
             })
             .unwrap_or(0);
-        // A parked turn is waiting on detached work, not working.
+        // A parked turn is waiting on detached work, not working; a
+        // first-turn route call that has not answered yet reads as routing,
+        // not connecting.
         let label = if session.is_some_and(|session| session.status == SessionStatus::Background) {
             tr!("transcript.waiting_background")
+        } else if session.is_some_and(|session| {
+            session.status == SessionStatus::Connecting
+                && session.auto_route
+                && session.route_decision.is_none()
+        }) {
+            tr!("routing.in_progress")
         } else {
             tr!(
                 "transcript.working_for",

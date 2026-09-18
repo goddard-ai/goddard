@@ -269,6 +269,27 @@ pub struct RecentModelUse {
 /// How many selections the picker keeps in its recent section.
 const RECENT_MODEL_USES_LIMIT: usize = 32;
 
+/// The remembered (effort, tier, window) triple for a provider/model, from a
+/// snapshot — the same lookup [`PersistedState::model_traits_for`] performs,
+/// usable where the whole state is not at hand.
+pub fn remembered_model_traits_for(
+    traits: &[RememberedModelTraits],
+    provider: ProviderKind,
+    model: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
+    traits
+        .iter()
+        .find(|traits| traits.provider == provider && traits.model == model)
+        .map(|traits| {
+            (
+                traits.reasoning_effort.clone(),
+                traits.service_tier.clone(),
+                traits.context_window.clone(),
+            )
+        })
+        .unwrap_or_default()
+}
+
 /// Remote composer-draft proxy. Draft bytes and attachments remain owned by
 /// the daemon even though the desktop keeps an in-memory editing snapshot.
 /// With several daemons connected, each draft routes to the daemon that owns
@@ -669,6 +690,10 @@ pub struct AppSettings {
     /// Experimental: the Settings → Friends page and friend-to-friend file
     /// transfers. Defaults on in debug builds.
     pub friends_enabled: bool,
+    /// Experimental: Auto in the model picker routes a task's first prompt
+    /// through the daemon's evaluation model and starts on the resolved
+    /// provider/model. Defaults on in debug builds.
+    pub model_router_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -711,6 +736,7 @@ impl Default for AppSettings {
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
+            model_router_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -989,6 +1015,8 @@ pub struct PersistedState {
     pub projects_page_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub friends_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub model_router_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1149,6 +1177,7 @@ impl PersistedState {
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
+            model_router_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1304,17 +1333,13 @@ impl PersistedState {
         provider: ProviderKind,
         model: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        self.remembered_model_traits
-            .iter()
-            .find(|traits| traits.provider == provider && traits.model == model)
-            .map(|traits| {
-                (
-                    traits.reasoning_effort.clone(),
-                    traits.service_tier.clone(),
-                    traits.context_window.clone(),
-                )
-            })
-            .unwrap_or_default()
+        remembered_model_traits_for(&self.remembered_model_traits, provider, model)
+    }
+
+    /// Every remembered triple, for callers that must look up a model they
+    /// do not know yet — a routed start resolves its target off-thread.
+    pub fn remembered_model_traits(&self) -> &[RememberedModelTraits] {
+        &self.remembered_model_traits
     }
 
     /// Moves `provider`/`model`/`effort` to the front of the recent list. The
@@ -1435,6 +1460,7 @@ impl PersistedState {
             github_enabled: self.github_enabled,
             projects_page_enabled: self.projects_page_enabled,
             friends_enabled: self.friends_enabled,
+            model_router_enabled: self.model_router_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1518,6 +1544,7 @@ impl PersistedState {
         self.github_enabled = settings.github_enabled;
         self.projects_page_enabled = settings.projects_page_enabled;
         self.friends_enabled = settings.friends_enabled;
+        self.model_router_enabled = settings.model_router_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 

@@ -24,7 +24,10 @@ fn workspace_has_ref(
     }
 }
 
-fn start_driver(mut request: DriverStartRequest, cwd: PathBuf) -> anyhow::Result<PreparedDriver> {
+pub(super) fn start_driver(
+    mut request: DriverStartRequest,
+    cwd: PathBuf,
+) -> anyhow::Result<PreparedDriver> {
     request.options.cwd = cwd;
     let (event_tx, events) = driver::event_channel(request.event_wake);
     let handle = driver::start_remote(
@@ -238,7 +241,7 @@ fn prepare_submission(
     workspace_client: waku_client::WorkspaceClient,
     project: Project,
     workspace: SessionWorkspace,
-    driver_start: Option<anyhow::Result<DriverStartRequest>>,
+    driver_start: Option<routing::SessionStartPlan>,
     session_id: Uuid,
     turn_count: usize,
     sync_default_branch: bool,
@@ -366,9 +369,20 @@ fn prepare_submission(
     // Process startup can synchronously resolve executables, bind sockets,
     // and spawn children. It belongs behind the same animated preparation
     // boundary as Git work, otherwise the last spinner frame visibly freezes
-    // just before Stop appears.
-    let driver = driver_start.map(|request| {
-        request.and_then(|request| start_driver(request, project_path.to_path_buf()))
+    // just before Stop appears. A routed start prepends the evaluation call:
+    // same boundary, one extra daemon round trip.
+    let mut route_decision = None;
+    let driver = driver_start.map(|start| -> anyhow::Result<PreparedDriver> {
+        match start {
+            routing::SessionStartPlan::Direct(request) => {
+                request.and_then(|request| start_driver(request, project_path.to_path_buf()))
+            }
+            routing::SessionStartPlan::Routed(plan) => {
+                let (decision, driver) = plan.route_and_start(project_path.to_path_buf())?;
+                route_decision = decision;
+                Ok(driver)
+            }
+        }
     });
 
     Ok(PreparedSubmission {
@@ -376,6 +390,7 @@ fn prepare_submission(
         checkpoint_warning,
         worktree_restored,
         driver,
+        route_decision,
     })
 }
 
@@ -1561,6 +1576,9 @@ impl Waku {
             .collect();
         self.daemon.note_remote_settings(settings.clone());
         self.state.apply_daemon_settings(settings);
+        // Eval credentials ride the same document — the first settings
+        // broadcast is the earliest the editor can seed from.
+        self.seed_eval_inputs(cx);
         if let Some(name) = agent_added.first() {
             self.show_toast(tr!("commands.agent_added", name = name));
         }
@@ -3933,7 +3951,7 @@ impl Waku {
     /// `session_id`. A remote host resolves its own override or the bare
     /// command name against its own PATH — a locally probed absolute path is
     /// meaningless there. `None` means the local probe found no install.
-    fn provider_binary_for_session(
+    pub(super) fn provider_binary_for_session(
         &self,
         session_id: Uuid,
         provider: ProviderKind,
@@ -3955,7 +3973,7 @@ impl Waku {
         }
     }
 
-    fn driver_start_request_for_session(
+    pub(super) fn driver_start_request_for_session(
         &self,
         session: &AgentSession,
         cwd: PathBuf,
@@ -4062,7 +4080,7 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
-                        Some(driver_start),
+                        Some(routing::SessionStartPlan::Direct(driver_start)),
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -4105,6 +4123,7 @@ impl Waku {
             checkpoint_warning: _,
             worktree_restored,
             driver,
+            route_decision: _,
         } = prepared;
         if !self
             .state
@@ -4615,13 +4634,6 @@ impl Waku {
         let attachment_count = submission.attachments.len();
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
-        let driver_start = (!self.runtimes.contains_key(&session_id)).then(|| {
-            let provisional_cwd = self
-                .workspace_path_for_session(session)
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_default();
-            self.driver_start_request_for_session(session, provisional_cwd)
-        });
         let Some(project) = self
             .state
             .projects
@@ -4661,6 +4673,34 @@ impl Waku {
             cx.notify();
             return;
         }
+        // An Auto draft resolves its provider/model through the evaluation
+        // route inside `prepare_submission`; a concrete pick keeps the direct
+        // request. Either way the start waits for the daemon's answer on the
+        // background executor — the plan captured here is the UI-thread half.
+        let session_start = (!self.runtimes.contains_key(&session_id)).then(|| {
+            let provisional_cwd = self
+                .workspace_path_for_session(session)
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_default();
+            if session.auto_route {
+                self.route_start_plan_for_session(
+                    session,
+                    submission.human_prompt(),
+                    &project,
+                    provisional_cwd,
+                )
+                .map(|plan| routing::SessionStartPlan::Routed(Box::new(plan)))
+                .unwrap_or_else(|| {
+                    routing::SessionStartPlan::Direct(Err(anyhow::anyhow!(
+                        "the task's daemon is not connected"
+                    )))
+                })
+            } else {
+                routing::SessionStartPlan::Direct(
+                    self.driver_start_request_for_session(session, provisional_cwd),
+                )
+            }
+        });
         // Busy is visible before any Git work begins. The separate transient
         // set keeps this non-cancellable phase visually distinct from a
         // connecting provider, whose runtime already has a working Stop path.
@@ -4680,8 +4720,10 @@ impl Waku {
         };
         // A selection only counts as recently used once a session is actually
         // started with it, so the first turn records the picker's combo —
-        // keyed on model+effort, with fast remembered on that entry.
-        let first_model_use = (!session.has_started())
+        // keyed on model+effort, with fast remembered on that entry. An Auto
+        // draft's carryover never runs — the routed combo records instead,
+        // once the decision lands.
+        let first_model_use = (!session.has_started() && !session.auto_route)
             .then(|| self.session_model_combo(session))
             .flatten()
             .map(|(model_id, effort, fast)| (session.provider, model_id, effort, fast));
@@ -4785,7 +4827,7 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
-                        driver_start,
+                        session_start,
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -4861,6 +4903,7 @@ impl Waku {
             checkpoint_warning,
             worktree_restored,
             driver: prepared_driver,
+            route_decision,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
         // this preparation belongs to. Cancellation is blocked while the
@@ -4882,6 +4925,64 @@ impl Waku {
             self.drain_pending_workspace_cleanups(cx);
             cx.notify();
             return;
+        }
+
+        // An Auto submission's decision lands ahead of the provider start:
+        // the session adopts the routed provider, model, and remembered
+        // traits so transcript, chip, and session options all agree with what
+        // is about to run — the same fields `choose_model` maintains, plus
+        // the decision record itself.
+        if let Some(decision) = route_decision {
+            let target = decision.target.clone();
+            let (effort, tier, window) = target
+                .model
+                .as_deref()
+                .map(|model| self.state.model_traits_for(target.provider, model))
+                .unwrap_or_default();
+            let provider_changed = self
+                .state
+                .session_mut(session_id)
+                .map(|session| {
+                    let provider_changed = session.provider != target.provider;
+                    session.provider = target.provider;
+                    session.model.clone_from(&target.model);
+                    session.route_decision = Some(decision);
+                    session.auto_route = false;
+                    if provider_changed {
+                        session.agent_preset = None;
+                    }
+                    session.reasoning_effort.clone_from(&effort);
+                    session.service_tier.clone_from(&tier);
+                    session.context_window.clone_from(&window);
+                    session.updated_at = unix_time();
+                    provider_changed
+                })
+                .unwrap_or(false);
+            self.state.last_provider = target.provider;
+            self.state.last_model.clone_from(&target.model);
+            self.state.last_reasoning_effort.clone_from(&effort);
+            self.state.last_service_tier.clone_from(&tier);
+            self.state.last_context_window.clone_from(&window);
+            // Recency belongs to the combo that actually ran — the draft's
+            // carryover was only a hint, so the routed selection records here.
+            let routed_use = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| {
+                    self.session_model_combo(session)
+                        .map(|(model_id, effort, fast)| {
+                            (session.provider, model_id, effort, fast)
+                        })
+                });
+            if let Some((provider, model_id, effort, fast)) = routed_use {
+                self.state
+                    .record_model_use(provider, &model_id, effort, fast);
+            }
+            if provider_changed {
+                self.refresh_composer_sources(cx);
+            }
         }
 
         let workspace_changed = self.state.session_mut(session_id).is_some_and(|session| {
@@ -5031,6 +5132,7 @@ impl Waku {
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)
+            | self.drain_route_policy_events()
         {
             cx.notify();
         }

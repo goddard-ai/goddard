@@ -1143,8 +1143,19 @@ impl Waku {
         let theme = Theme::current(cx);
         let session = self.composer_session();
         let provider = session.map(|session| session.provider).unwrap_or_default();
+        let auto_route = session.is_some_and(|session| session.auto_route);
+        let routed = session.is_some_and(|session| session.route_decision.is_some());
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
-        let selected_model_name = self.model_display_name(provider, selected_model);
+        let selected_model_name = if auto_route {
+            tr!("models.auto")
+        } else if routed {
+            tr!(
+                "models.auto_routed",
+                model = self.model_display_name(provider, selected_model)
+            )
+        } else {
+            self.model_display_name(provider, selected_model)
+        };
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
@@ -1255,6 +1266,7 @@ impl Waku {
                 &disabled_providers,
                 locked_provider,
                 &normalized_query,
+                self.auto_route_available(),
             )
         } else {
             Vec::new()
@@ -1361,6 +1373,88 @@ impl Waku {
                 }
 
                 for (row_index, row) in available_rows.iter().enumerate() {
+                    let is_highlighted = highlight == Some(row_index);
+                    if row.auto {
+                        // The router row: same hit target and highlight
+                        // treatment as a model row, but the star slot stays
+                        // empty — there is no concrete model to favorite.
+                        let select_weak = weak.clone();
+                        let select_popover = popover.clone();
+                        rows = rows.child(
+                            div()
+                                .id("model-row-auto")
+                                .h(px(58.0))
+                                .px(px(12.0))
+                                .rounded(px(11.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(10.0))
+                                .cursor_default()
+                                .border(hairline())
+                                .border_color(gpui::transparent_black())
+                                .when(auto_route, |element| element.bg(theme.overlay_strong))
+                                .when(is_highlighted, |element| {
+                                    element.bg(theme.overlay).border_color(theme.accent)
+                                })
+                                .hover(|element| element.bg(theme.overlay))
+                                .active(|element| element.opacity(0.85))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.0))
+                                                .child(icon(
+                                                    "icons/provider-typesafe.svg",
+                                                    14.0,
+                                                    theme.accent.opacity(0.9),
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .truncate()
+                                                        .text_size(sp(13.0))
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .text_color(theme.text)
+                                                        .child(SharedString::from(tr!(
+                                                            "models.auto"
+                                                        ))),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .mt(px(4.0))
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(6.0))
+                                                .child(icon(
+                                                    "icons/sparkle.svg",
+                                                    10.5,
+                                                    theme.accent,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .truncate()
+                                                        .text_size(sp(12.5))
+                                                        .text_color(theme.text_tertiary)
+                                                        .child(SharedString::from(tr!(
+                                                            "models.auto_subtitle"
+                                                        ))),
+                                                ),
+                                        ),
+                                )
+                                .on_click(move |_, window, cx| {
+                                    let _ = select_weak.update(cx, |this, cx| {
+                                        this.choose_auto_route(cx);
+                                    });
+                                    select_popover.close(window, cx);
+                                }),
+                        );
+                        continue;
+                    }
                     let kind = row.provider;
                     let model = &row.model;
                     let is_selected = session_selection.as_ref().is_some_and(
@@ -1371,7 +1465,6 @@ impl Waku {
                                 && *fast == row.fast
                         },
                     );
-                    let is_highlighted = highlight == Some(row_index);
                     let favorite_index = row.favorite_index;
                     let is_favorite = favorite_index.is_some();
                     let model_id = model.id.clone();
@@ -1663,7 +1756,7 @@ impl Waku {
                 let selection = self
                     .session_model_combo(session)
                     .map(|(model, effort, fast)| (session.provider, model, effort, fast));
-                picker_selected_row_index(selection.as_ref(), rows)
+                picker_selected_row_index(selection.as_ref(), session.auto_route, rows)
             });
         let Some(next) = next_picker_highlight(current, rows.len(), key) else {
             return;
@@ -1693,12 +1786,15 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             "",
+            self.auto_route_available(),
         );
         let selection = session.and_then(|session| {
             self.session_model_combo(session)
                 .map(|(model, effort, fast)| (session.provider, model, effort, fast))
         });
-        let index = picker_selected_row_index(selection.as_ref(), &rows).unwrap_or(0);
+        let auto_route = session.is_some_and(|session| session.auto_route);
+        let index =
+            picker_selected_row_index(selection.as_ref(), auto_route, &rows).unwrap_or(0);
         self.model_picker_scroll.scroll_to_item(index);
     }
 
@@ -1708,6 +1804,10 @@ impl Waku {
         let Some(row) = rows.get(self.model_picker_highlight.unwrap_or(0)) else {
             return;
         };
+        if row.auto {
+            self.choose_auto_route(cx);
+            return;
+        }
         let (kind, model_id, effort, fast) = (
             row.provider,
             row.model.id.clone(),
@@ -5492,17 +5592,23 @@ pub(super) fn next_picker_highlight(
     }
 }
 
-/// The row the session's effective selection occupies, when it is listed.
+/// The row the session's effective selection occupies, when it is listed —
+/// the Auto row while the draft is routed, else the row matching its combo.
 /// Shared by the scroll reveal and by the keyboard cursor's seed so the
 /// filled "current" row and the first arrow press agree on where the
 /// selection sits.
 pub(super) fn picker_selected_row_index(
     selection: Option<&(ProviderKind, String, Option<String>, bool)>,
+    auto_route: bool,
     rows: &[ModelPickerRow],
 ) -> Option<usize> {
+    if auto_route {
+        return rows.iter().position(|row| row.auto);
+    }
     let (provider, model_id, effort, fast) = selection?;
     rows.iter().position(|row| {
-        row.provider == *provider
+        !row.auto
+            && row.provider == *provider
             && row.model.id == *model_id
             && row.effort == *effort
             && row.fast == *fast
@@ -5675,7 +5781,11 @@ pub(super) fn picker_has_no_providers(
 
 /// One selectable row in the merged model picker: a model pinned to a
 /// concrete effort and fast-tier choice. Favorites, recents, and the
-/// ⌘⌥1–⌘⌥9 chords all address rows, not bare models.
+/// ⌘⌥1–⌘⌥9 chords all address rows, not bare models. `auto` marks the
+/// router row, which heads the list while the session can still be routed —
+/// picking it defers the provider/model decision to the evaluation route at
+/// first submit. Its model/effort fields are placeholders; `auto` guards
+/// every read of them.
 pub(super) struct ModelPickerRow {
     pub provider: ProviderKind,
     pub model: ProviderModel,
@@ -5690,6 +5800,24 @@ pub(super) struct ModelPickerRow {
     /// that was actually started last, so one of `effort` and `effort-fast`
     /// ever carries it.
     pub recent_rank: Option<usize>,
+    /// The Auto router row, not a concrete combo.
+    pub auto: bool,
+}
+
+impl ModelPickerRow {
+    /// The router row placeholder — only ever built by `visible_picker_rows`
+    /// and always read through its `auto` guard.
+    fn auto() -> Self {
+        Self {
+            provider: ProviderKind::default(),
+            model: ProviderModel::new("", ""),
+            effort: None,
+            fast: false,
+            favorite_index: None,
+            recent_rank: None,
+            auto: true,
+        }
+    }
 }
 
 /// The model's effective effort when the user picks it without naming one:
@@ -5751,6 +5879,7 @@ fn picker_model_rows(provider: ProviderKind, model: ProviderModel) -> Vec<ModelP
                 fast: *fast,
                 favorite_index: None,
                 recent_rank: None,
+                auto: false,
             });
         }
     }
@@ -5776,13 +5905,16 @@ fn effort_sort_rank(row: &ModelPickerRow) -> usize {
         .unwrap_or(0)
 }
 
-/// The rows the picker lists, in display order: starred selections first in
-/// their drag order, then selections a session was actually started with —
-/// most recent first — then everything else by provider, model name, and the
-/// model's own effort ladder with the standard tier before its fast twin.
+/// The rows the picker lists, in display order: the Auto row first while the
+/// session can still be routed, then starred selections in their drag order,
+/// then selections a session was actually started with — most recent first —
+/// then everything else by provider, model name, and the model's own effort
+/// ladder with the standard tier before its fast twin.
 ///
 /// Shared by the panel body and by `enter`'s handler so a keyboard cursor
-/// index always means the same row in both.
+/// index always means the same row in both. `auto_route` prepends the router
+/// row; a query keeps it only while "auto" matches the same token rule models
+/// follow.
 pub(super) fn visible_picker_rows(
     probes: &[ProviderProbe],
     favorites: &[FavoriteModel],
@@ -5790,6 +5922,7 @@ pub(super) fn visible_picker_rows(
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
     normalized_query: &str,
+    auto_route: bool,
 ) -> Vec<ModelPickerRow> {
     let searching = !normalized_query.is_empty();
     let mut rows: Vec<ModelPickerRow> = probes
@@ -5847,7 +5980,6 @@ pub(super) fn visible_picker_rows(
                 && use_.fast == row.fast
         });
     }
-
     rows.sort_by_key(|row| {
         (
             row.favorite_index.is_none(),
@@ -5860,5 +5992,16 @@ pub(super) fn visible_picker_rows(
             row.fast,
         )
     });
-    rows
+
+    let router_row = auto_route
+        && (!searching
+            || normalized_query
+                .split_whitespace()
+                .all(|token| "auto jev".contains(token)));
+    let mut picker_rows = Vec::with_capacity(rows.len() + usize::from(router_row));
+    if router_row {
+        picker_rows.push(ModelPickerRow::auto());
+    }
+    picker_rows.extend(rows);
+    picker_rows
 }

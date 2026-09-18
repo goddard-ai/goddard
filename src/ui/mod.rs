@@ -840,6 +840,8 @@ mod tests {
             paths.push(provider_icon(provider));
             paths.extend(provider_badge(provider));
         }
+        // The Auto route's mark — not a ProviderKind, so no provider_icon arm.
+        paths.push("icons/provider-typesafe.svg");
         for kind in [
             ActivityKind::Reasoning,
             ActivityKind::Command,

@@ -75,7 +75,7 @@ use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
     file_icon, goddard_logo, icon, icon_button, motion, progress_ring, provider_color,
-    provider_mark, rem_scale, status_color, thinking, toggle_switch,
+    provider_icon, provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
@@ -789,6 +789,10 @@ struct PreparedSubmission {
     /// `None` reuses an already-live runtime. `Some` contains the result of a
     /// provider process start performed on the background executor.
     driver: Option<anyhow::Result<PreparedDriver>>,
+    /// The routing decision an Auto submission produced — `None` on direct
+    /// starts and on route-RPC failures (which fall back to the draft's own
+    /// provider).
+    route_decision: Option<waku_protocol::routing::RouteDecision>,
 }
 
 /// Everything needed to start a provider process, captured while the session
@@ -1705,6 +1709,15 @@ pub struct Waku {
     worktree_sync_branches_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
     daemon_token_revealed: bool,
+    /// The evaluation credentials editor's fields — one set per eval backend,
+    /// seeded from the daemon's settings mirror when the routing section
+    /// first shows. Secrets stay masked and never render elsewhere.
+    eval_typesafe_key_input: Entity<TextInput>,
+    eval_vercel_key_input: Entity<TextInput>,
+    eval_vercel_team_input: Entity<TextInput>,
+    eval_cloudflare_account_input: Entity<TextInput>,
+    eval_cloudflare_token_input: Entity<TextInput>,
+    eval_inputs_seeded: bool,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -1961,6 +1974,14 @@ pub struct Waku {
     /// Generation guard for the while-open presence re-probe loop — a new
     /// loop (or leaving the page) retires the previous one.
     friends_probe_generation: Cell<u64>,
+    /// GetRoutePolicy answers (and SetRouteClassTarget write+refreshes)
+    /// landing for the settings surface's routing section.
+    route_policy_tx: Sender<Result<waku_protocol::routing::RoutePolicyView, String>>,
+    route_policy_events: Receiver<Result<waku_protocol::routing::RoutePolicyView, String>>,
+    /// The newest policy view the settings page has; `None` until a fetch
+    /// answers, which also covers "routing not supported yet".
+    route_policy: Option<waku_protocol::routing::RoutePolicyView>,
+    route_policy_pending: bool,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -2665,6 +2686,7 @@ mod projects;
 mod relocate;
 mod render;
 mod right_panel;
+mod routing;
 mod run_script;
 mod runtime;
 mod sessions;
@@ -3459,6 +3481,43 @@ impl Waku {
             input.set_content(state.new_worktree_sync_branches.join(", "), cx);
             input
         });
+        let mut eval_secret_input =
+            |cx: &mut App, label: SharedString, placeholder: SharedString| {
+                cx.new(|cx| {
+                    TextInput::new(window, cx)
+                        .masked()
+                        .select_all_on_focus_click()
+                        .accessibility_label(label)
+                        .placeholder(placeholder)
+                })
+            };
+        let eval_typesafe_key_input = eval_secret_input(
+            cx,
+            tr!("routing.typesafe_key").into(),
+            tr!("routing.typesafe_key_placeholder").into(),
+        );
+        let eval_vercel_key_input = eval_secret_input(
+            cx,
+            tr!("routing.vercel_key").into(),
+            tr!("routing.vercel_key_placeholder").into(),
+        );
+        let eval_cloudflare_token_input = eval_secret_input(
+            cx,
+            tr!("routing.cloudflare_token").into(),
+            tr!("routing.cloudflare_token_placeholder").into(),
+        );
+        let eval_vercel_team_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("routing.vercel_team"))
+                .placeholder(tr!("routing.optional"))
+        });
+        let eval_cloudflare_account_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("routing.cloudflare_account"))
+                .placeholder(tr!("routing.cloudflare_account_placeholder"))
+        });
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -3689,6 +3748,7 @@ impl Waku {
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
+        let (route_policy_tx, route_policy_events) = unbounded();
         #[cfg(target_os = "macos")]
         if state.computer_use_experiment_enabled {
             let computer_permission_tx = computer_permission_tx.clone();
@@ -4212,6 +4272,23 @@ impl Waku {
                 },
             )
             .detach();
+            for input in [
+                &eval_typesafe_key_input,
+                &eval_vercel_key_input,
+                &eval_vercel_team_input,
+                &eval_cloudflare_account_input,
+                &eval_cloudflare_token_input,
+            ] {
+                cx.subscribe(
+                    input,
+                    |this: &mut Self, _, event: &InputEvent, cx| match event {
+                        InputEvent::Submit(_) => this.save_eval_credentials(cx),
+                        InputEvent::Edited => cx.notify(),
+                        _ => {}
+                    },
+                )
+                .detach();
+            }
             cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -4419,6 +4496,12 @@ impl Waku {
                 worktree_sync_branches_input,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
+                eval_typesafe_key_input,
+                eval_vercel_key_input,
+                eval_vercel_team_input,
+                eval_cloudflare_account_input,
+                eval_cloudflare_token_input,
+                eval_inputs_seeded: false,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,
@@ -4535,6 +4618,10 @@ impl Waku {
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,
+                route_policy_tx,
+                route_policy_events,
+                route_policy: None,
+                route_policy_pending: false,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),

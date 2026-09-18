@@ -2505,16 +2505,25 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let service_tier = fast.then(|| "fast".to_owned());
-        let Some((session_id, provider_changed)) = self
+        // Picking a concrete model exits an Auto draft even when provider and
+        // model happen to match the draft's last-used carryover.
+        let Some((session_id, provider_changed, was_routed)) = self
             .composer_session()
             .filter(|session| {
                 session.can_choose_model(provider)
-                    && (session.provider != provider
+                    && (session.auto_route
+                        || session.provider != provider
                         || session.model.as_deref() != Some(model.as_str())
                         || session.reasoning_effort != effort
                         || session.service_tier != service_tier)
             })
-            .map(|session| (session.id, session.provider != provider))
+            .map(|session| {
+                (
+                    session.id,
+                    session.provider != provider,
+                    session.route_decision.is_some(),
+                )
+            })
         else {
             return;
         };
@@ -2526,6 +2535,8 @@ impl Waku {
         if let Some(session) = self.composer_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
+            session.auto_route = false;
+            session.route_decision = None;
             if provider_changed {
                 session.agent_preset = None;
             }
@@ -2533,8 +2544,8 @@ impl Waku {
             session.service_tier.clone_from(&service_tier);
             session.context_window.clone_from(&context_window);
             self.state.last_provider = provider;
-            self.state.last_model = Some(model);
-            self.state.last_reasoning_effort = effort;
+            self.state.last_model = Some(model.clone());
+            self.state.last_reasoning_effort.clone_from(&effort);
             self.state.last_service_tier = service_tier;
             self.state.last_context_window = context_window;
             // A different provider is a different binary and protocol; only a
@@ -2549,9 +2560,32 @@ impl Waku {
             // The picked combo becomes the model's remembered traits, so a
             // later plain pick of the same model lands back on it.
             self.remember_selected_model_traits();
+            if was_routed {
+                self.record_route_override(session_id, provider, Some(model), cx);
+            }
             self.save();
             cx.notify();
         }
+    }
+
+    /// Pick the Auto row: the draft's provider/model stay as the last-used
+    /// hint, and the first submission's route call resolves what actually
+    /// runs. Only drafts reach here — a started session's picker does not
+    /// offer the row.
+    pub(super) fn choose_auto_route(&mut self, cx: &mut Context<Self>) {
+        if !self.auto_route_available() {
+            return;
+        }
+        let Some(session) = self.composer_session_mut() else {
+            return;
+        };
+        if session.auto_route {
+            return;
+        }
+        session.auto_route = true;
+        session.updated_at = unix_time();
+        self.save();
+        cx.notify();
     }
 
     /// Primary modifier + /: toggle the composer's model picker as if its chip were clicked.

@@ -80,6 +80,15 @@ impl Waku {
             self.probe_friends(cx);
             self.start_friends_presence_loop(cx);
         }
+        if page == SettingsPage::Experiments {
+            // The routing section renders from the daemon's settings mirror
+            // and the fetched policy view — both may be missing on a first
+            // visit, so warm them here rather than mid-render.
+            self.seed_eval_inputs(cx);
+            if self.state.model_router_enabled {
+                self.request_route_policy(cx);
+            }
+        }
         cx.notify();
     }
 

@@ -3,6 +3,7 @@ use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
 use gpui::{KeyBinding, actions};
+use waku_protocol::routing::TaskClass;
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -3194,8 +3195,20 @@ impl Waku {
                         theme,
                         cx,
                         |this, enabled, cx| this.set_friends_enabled(enabled, cx),
+                    ))
+                    .child(self.experiment_card(
+                        "model-router-experiment-toggle",
+                        "experiments.model_router_title",
+                        "experiments.model_router_description",
+                        self.state.model_router_enabled,
+                        theme,
+                        cx,
+                        |this, enabled, cx| this.set_model_router_enabled(enabled, cx),
                     )),
             )
+            .when(self.state.model_router_enabled, |element| {
+                element.child(self.render_model_routing_settings(theme, cx))
+            })
             .into_any_element()
     }
 
@@ -3308,6 +3321,415 @@ impl Waku {
         self.state.friends_enabled = enabled;
         self.save();
         cx.notify();
+    }
+
+    fn set_model_router_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.model_router_enabled = enabled;
+        if enabled {
+            // The section below the card reads the policy view and the eval
+            // mirror — warm both rather than waiting for the first frame to
+            // discover they are missing.
+            self.seed_eval_inputs(cx);
+            self.request_route_policy(cx);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Fill the evaluation credential fields from the daemon's settings
+    /// mirror, once. After that the fields own their contents until Apply —
+    /// re-seeding on every settings broadcast would eat in-progress edits.
+    pub(super) fn seed_eval_inputs(&mut self, cx: &mut Context<Self>) {
+        if self.eval_inputs_seeded {
+            return;
+        }
+        self.eval_inputs_seeded = true;
+        let eval = self.state.eval.clone().unwrap_or_default();
+        for (input, value) in [
+            (&self.eval_typesafe_key_input, eval.typesafe_api_key),
+            (&self.eval_vercel_key_input, eval.vercel_api_key),
+            (&self.eval_vercel_team_input, eval.vercel_team_id),
+            (
+                &self.eval_cloudflare_account_input,
+                eval.cloudflare_account_id,
+            ),
+            (&self.eval_cloudflare_token_input, eval.cloudflare_api_token),
+        ] {
+            if let Some(value) = value {
+                input.update(cx, |input, cx| input.set_content(value, cx));
+            }
+        }
+    }
+
+    fn set_eval_backend(
+        &mut self,
+        backend: waku_protocol::eval::EvalBackend,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.eval.get_or_insert_with(Default::default).backend = backend;
+        self.save();
+        cx.notify();
+    }
+
+    /// Whether any credential field differs from the mirror — the Apply
+    /// button's enabled state.
+    fn eval_credentials_dirty(&self, cx: &App) -> bool {
+        let eval = self.state.eval.clone().unwrap_or_default();
+        let content = |input: &Entity<TextInput>| {
+            let content = input.read(cx).content().trim().to_owned();
+            (!content.is_empty()).then_some(content)
+        };
+        content(&self.eval_typesafe_key_input) != eval.typesafe_api_key
+            || content(&self.eval_vercel_key_input) != eval.vercel_api_key
+            || content(&self.eval_vercel_team_input) != eval.vercel_team_id
+            || content(&self.eval_cloudflare_account_input) != eval.cloudflare_account_id
+            || content(&self.eval_cloudflare_token_input) != eval.cloudflare_api_token
+    }
+
+    /// Persist every credential field into the eval settings document — one
+    /// write so the daemon sees a consistent set. An empty field clears the
+    /// slot rather than storing whitespace.
+    pub(super) fn save_eval_credentials(&mut self, cx: &mut Context<Self>) {
+        let content = |input: &Entity<TextInput>| {
+            let content = input.read(cx).content().trim().to_owned();
+            (!content.is_empty()).then_some(content)
+        };
+        let eval = self.state.eval.get_or_insert_with(Default::default);
+        eval.typesafe_api_key = content(&self.eval_typesafe_key_input);
+        eval.vercel_api_key = content(&self.eval_vercel_key_input);
+        eval.vercel_team_id = content(&self.eval_vercel_team_input);
+        eval.cloudflare_account_id = content(&self.eval_cloudflare_account_input);
+        eval.cloudflare_api_token = content(&self.eval_cloudflare_token_input);
+        self.save();
+        cx.notify();
+    }
+
+    /// The routing configuration under the experiment card: the eval backend
+    /// and its credentials, then the three class-level targets the policy
+    /// document resolves through. The document stays authoritative — the
+    /// dropdowns write through `SetRouteClassTarget` and re-read the result.
+    fn render_model_routing_settings(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let weak = cx.entity().downgrade();
+        let eval = self.state.eval.clone().unwrap_or_default();
+        let backend = eval.backend;
+
+        let backend_handle = self.menu_handle("eval-backend-selector", cx);
+        let backend_selector = dropdown_menu(
+            MenuChip::new("eval-backend-selector")
+                .label(eval_backend_label(backend))
+                .outlined()
+                .selected(backend_handle.is_open())
+                .w(px(200.0))
+                .justify_between(),
+            "eval-backend-selector-menu",
+            &backend_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                [
+                    waku_protocol::eval::EvalBackend::TypeSafe,
+                    waku_protocol::eval::EvalBackend::VercelGateway,
+                    waku_protocol::eval::EvalBackend::Cloudflare,
+                ]
+                .into_iter()
+                .map(|option| {
+                    let weak = weak.clone();
+                    MenuItem::new(eval_backend_label(option), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| this.set_eval_backend(option, cx));
+                    })
+                    .selected(option == backend)
+                })
+                .collect()
+            },
+        );
+
+        let dirty = self.eval_credentials_dirty(cx);
+        let apply_button = div()
+            .id("apply-eval-credentials")
+            .tab_index(0)
+            .h(px(29.0))
+            .px(px(11.0))
+            .rounded(px(9.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if dirty { 1.0 } else { 0.55 })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when(dirty, |element| {
+                element
+                    .hover(|element| element.bg(theme.overlay))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.save_eval_credentials(cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.save_eval_credentials(cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(tr!("daemon.apply"));
+
+        let credential_rows: Vec<Div> = match backend {
+            waku_protocol::eval::EvalBackend::TypeSafe => vec![settings_row(
+                tr!("routing.typesafe_key"),
+                tr!("routing.typesafe_key_description"),
+                TextField::new("eval-typesafe-key", self.eval_typesafe_key_input.clone())
+                    .w(px(300.0)),
+                theme,
+            )],
+            waku_protocol::eval::EvalBackend::VercelGateway => vec![
+                settings_row(
+                    tr!("routing.vercel_key"),
+                    tr!("routing.vercel_key_description"),
+                    TextField::new("eval-vercel-key", self.eval_vercel_key_input.clone())
+                        .w(px(300.0)),
+                    theme,
+                ),
+                settings_row(
+                    tr!("routing.vercel_team"),
+                    tr!("routing.vercel_team_description"),
+                    TextField::new("eval-vercel-team", self.eval_vercel_team_input.clone())
+                        .w(px(300.0)),
+                    theme,
+                ),
+            ],
+            waku_protocol::eval::EvalBackend::Cloudflare => vec![
+                settings_row(
+                    tr!("routing.cloudflare_account"),
+                    tr!("routing.cloudflare_account_description"),
+                    TextField::new(
+                        "eval-cloudflare-account",
+                        self.eval_cloudflare_account_input.clone(),
+                    )
+                    .w(px(300.0)),
+                    theme,
+                ),
+                settings_row(
+                    tr!("routing.cloudflare_token"),
+                    tr!("routing.cloudflare_token_description"),
+                    TextField::new(
+                        "eval-cloudflare-token",
+                        self.eval_cloudflare_token_input.clone(),
+                    )
+                    .w(px(300.0)),
+                    theme,
+                ),
+            ],
+        };
+
+        let mut credentials = div()
+            .mt(px(10.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .rounded(px(16.0))
+            .overflow_hidden()
+            .bg(theme.raised)
+            .child(settings_row(
+                tr!("routing.backend"),
+                tr!("routing.backend_description"),
+                backend_selector,
+                theme,
+            ));
+        for (index, row) in credential_rows.into_iter().enumerate() {
+            credentials = credentials
+                .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+                .child(row);
+            let _ = index;
+        }
+        credentials = credentials.child(
+            div()
+                .px(px(20.0))
+                .pb(px(13.0))
+                .flex()
+                .justify_end()
+                .child(apply_button),
+        );
+
+        // The three class dropdowns. `classes` comes from the last
+        // GetRoutePolicy answer; before it lands the rows show the shipped
+        // defaults — the same values an unmodified document carries.
+        let policy = self.route_policy.clone();
+        let class_target = |class: TaskClass| {
+            policy
+                .as_ref()
+                .and_then(|view| view.classes.get(class.id()).cloned())
+                .unwrap_or_else(|| default_route_class_target(class).to_owned())
+        };
+        let mut classes = div()
+            .mt(px(10.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .rounded(px(16.0))
+            .overflow_hidden()
+            .bg(theme.raised);
+        let class_rows = [
+            (
+                TaskClass::Routine,
+                tr!("routing.class_routine"),
+                tr!("routing.class_routine_description"),
+            ),
+            (
+                TaskClass::General,
+                tr!("routing.class_general"),
+                tr!("routing.class_general_description"),
+            ),
+            (
+                TaskClass::Demanding,
+                tr!("routing.class_demanding"),
+                tr!("routing.class_demanding_description"),
+            ),
+        ];
+        for (index, (class, title, description)) in class_rows.into_iter().enumerate() {
+            if index > 0 {
+                classes = classes.child(div().mx(px(20.0)).h(hairline()).bg(theme.separator));
+            }
+            classes = classes.child(settings_row(
+                title,
+                description,
+                self.route_class_selector(class, &class_target(class), cx),
+                theme,
+            ));
+        }
+        if let Some(view) = &policy {
+            // The file is the source of truth; surface where it lives and
+            // whether the document in effect is the user's own or the shipped
+            // default their edit fell back to.
+            let path = compact_path(&view.path);
+            let status = if view.valid {
+                tr!("routing.policy_valid")
+            } else {
+                tr!("routing.policy_invalid")
+            };
+            classes = classes.child(
+                div()
+                    .px(px(20.0))
+                    .py(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(path)),
+                    )
+                    .child(
+                        div()
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .rounded_full()
+                            .text_color(if view.valid {
+                                theme.success
+                            } else {
+                                theme.warning
+                            })
+                            .bg(theme.overlay)
+                            .child(status),
+                    ),
+            );
+        }
+
+        div().child(credentials).child(classes).into_any_element()
+    }
+
+    /// One class-level target picker: tier aliases first, then every
+    /// installed provider's default and catalog models. Selecting writes the
+    /// raw target string into the policy document — same grammar hand edits
+    /// use.
+    fn route_class_selector(
+        &self,
+        class: TaskClass,
+        current: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let weak = cx.entity().downgrade();
+        let menu_id = format!("route-class-{}", class.id());
+        let handle = self.menu_handle(menu_id.clone(), cx);
+        let label = route_target_label(current, &self.probes);
+        // The same set Auto may pick between — a class target naming an
+        // uninstalled provider would resolve but could never start.
+        let probes: Vec<ProviderProbe> = self
+            .probes
+            .iter()
+            .filter(|probe| {
+                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
+            })
+            .cloned()
+            .collect();
+        let current = current.to_owned();
+        dropdown_menu(
+            MenuChip::new(format!("route-class-selector-{}", class.id()))
+                .label(label)
+                .outlined()
+                .selected(handle.is_open())
+                .w(px(240.0))
+                .justify_between(),
+            format!("{menu_id}-menu"),
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let mut items = vec![
+                    MenuItem::Header(tr!("routing.tiers").into()),
+                    route_target_item(
+                        &weak,
+                        class,
+                        "tier:fast",
+                        tr!("routing.tier_fast"),
+                        &current,
+                    ),
+                    route_target_item(
+                        &weak,
+                        class,
+                        "tier:default",
+                        tr!("routing.tier_default"),
+                        &current,
+                    ),
+                    route_target_item(
+                        &weak,
+                        class,
+                        "tier:heavy",
+                        tr!("routing.tier_heavy"),
+                        &current,
+                    ),
+                    MenuItem::Separator,
+                    MenuItem::Header(tr!("routing.providers").into()),
+                ];
+                for probe in &probes {
+                    let provider = probe.provider;
+                    let provider_label = format!(
+                        "{} ({})",
+                        provider.short_name(),
+                        tr!("routing.provider_default")
+                    );
+                    items.push(
+                        route_target_item(&weak, class, provider.id(), provider_label, &current)
+                            .icon(provider_icon(provider)),
+                    );
+                    for model in &probe.models {
+                        let target = format!("{}:{}", provider.id(), model.id);
+                        let label = format!("{} · {}", model.name, provider.short_name());
+                        items.push(
+                            route_target_item(&weak, class, target, label, &current)
+                                .icon(provider_icon(provider)),
+                        );
+                    }
+                }
+                items
+            },
+        )
+        .into_any_element()
     }
 
     fn daemon_exposure_from_fields(
@@ -6916,6 +7338,84 @@ fn settings_row(
                 ),
         )
         .child(control)
+}
+
+/// Display label for an eval backend in the routing section's selector.
+fn eval_backend_label(backend: waku_protocol::eval::EvalBackend) -> &'static str {
+    match backend {
+        waku_protocol::eval::EvalBackend::TypeSafe => "TypeSafe",
+        waku_protocol::eval::EvalBackend::VercelGateway => "Vercel AI Gateway",
+        waku_protocol::eval::EvalBackend::Cloudflare => "Cloudflare Workers AI",
+    }
+}
+
+/// The shipped default for a class — what an unmodified policy document
+/// carries, shown before the first GetRoutePolicy answer lands.
+fn default_route_class_target(class: TaskClass) -> &'static str {
+    match class {
+        TaskClass::Routine => "tier:fast",
+        TaskClass::General => "tier:default",
+        TaskClass::Demanding => "tier:heavy",
+    }
+}
+
+/// A friendly label for a raw policy target string, resolving provider and
+/// model ids against the probe catalog. Unknown strings pass through so a
+/// hand-edited value still shows what it says.
+fn route_target_label(target: &str, probes: &[ProviderProbe]) -> String {
+    match target {
+        "tier:fast" => tr!("routing.tier_fast"),
+        "tier:default" => tr!("routing.tier_default"),
+        "tier:heavy" => tr!("routing.tier_heavy"),
+        "last_used" => tr!("routing.last_used"),
+        other => {
+            let (provider_id, model_id) = other
+                .split_once(':')
+                .map(|(provider, model)| (provider, Some(model)))
+                .unwrap_or((other, None));
+            let Some(provider) = ProviderKind::ALL
+                .into_iter()
+                .find(|kind| kind.id() == provider_id)
+            else {
+                return other.to_owned();
+            };
+            match model_id {
+                Some(model_id) => {
+                    let name = probes
+                        .iter()
+                        .find(|probe| probe.provider == provider)
+                        .and_then(|probe| probe.model(model_id))
+                        .map(|model| model.name.clone())
+                        .unwrap_or_else(|| model_id.to_owned());
+                    format!("{} · {}", name, provider.short_name())
+                }
+                None => format!(
+                    "{} ({})",
+                    provider.short_name(),
+                    tr!("routing.provider_default")
+                ),
+            }
+        }
+    }
+}
+
+/// One dropdown row writing `target` into `class`'s policy slot.
+fn route_target_item(
+    weak: &WeakEntity<Waku>,
+    class: TaskClass,
+    target: impl Into<String>,
+    label: impl Into<SharedString>,
+    current: &str,
+) -> MenuItem {
+    let target = target.into();
+    let selected = target == current;
+    let weak = weak.clone();
+    MenuItem::new(label, move |_, cx| {
+        let _ = weak.update(cx, |this, cx| {
+            this.set_route_class_target(class, target.clone(), cx);
+        });
+    })
+    .selected(selected)
 }
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
