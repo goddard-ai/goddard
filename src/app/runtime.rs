@@ -2779,7 +2779,13 @@ impl Waku {
         };
         self.provider_probe(provider)
             .and_then(|probe| probe.model(model))
-            .map(|candidate| candidate.name.clone())
+            .map(|candidate| {
+                candidate
+                    .name_i18n
+                    .as_ref()
+                    .map(waku_client::WireTranslation::render)
+                    .unwrap_or_else(|| candidate.name.clone())
+            })
             .unwrap_or_else(|| model.to_owned())
     }
 

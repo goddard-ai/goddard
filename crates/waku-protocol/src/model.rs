@@ -572,8 +572,15 @@ impl RuntimeMode {
 pub struct ProviderModelOption {
     pub id: String,
     pub label: String,
+    /// The i18n semantic behind `label`, when the daemon composed it from a
+    /// known key rather than a provider name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_i18n: Option<crate::protocol::WireTranslation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The i18n semantic behind `description`, same contract as `label_i18n`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_i18n: Option<crate::protocol::WireTranslation>,
 }
 
 impl ProviderModelOption {
@@ -581,8 +588,38 @@ impl ProviderModelOption {
         Self {
             id: id.into(),
             label: label.into(),
+            label_i18n: None,
             description: None,
+            description_i18n: None,
         }
+    }
+
+    /// A `localized!` pair supplies both the English label and its semantic.
+    pub fn keyed(
+        id: impl Into<String>,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self {
+            label_i18n: Some(pair.1),
+            ..Self::new(id, pair.0)
+        }
+    }
+
+    /// An optional semantic for `label`, for sites where the pair itself is
+    /// conditional. A `Some` pairs with the already-set label text.
+    pub fn with_label_i18n(mut self, i18n: Option<crate::protocol::WireTranslation>) -> Self {
+        self.label_i18n = i18n;
+        self
+    }
+
+    /// A `localized!` pair for `description`, same contract as `keyed`.
+    pub fn keyed_description(
+        mut self,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        self.description = Some(pair.0);
+        self.description_i18n = Some(pair.1);
+        self
     }
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
@@ -598,6 +635,10 @@ impl ProviderModelOption {
 pub struct ProviderModel {
     pub id: String,
     pub name: String,
+    /// The i18n semantic behind `name`, when the daemon composed it from a
+    /// known key rather than a provider name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_i18n: Option<crate::protocol::WireTranslation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_provider: Option<String>,
     #[serde(default)]
@@ -734,6 +775,7 @@ impl ProviderModel {
         Self {
             id: id.into(),
             name: name.into(),
+            name_i18n: None,
             sub_provider: None,
             is_default: false,
             reasoning_efforts: Vec::new(),
@@ -742,6 +784,17 @@ impl ProviderModel {
             default_service_tier: None,
             context_windows: Vec::new(),
             default_context_window: None,
+        }
+    }
+
+    /// A `localized!` pair supplies both the English name and its semantic.
+    pub fn keyed(
+        id: impl Into<String>,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self {
+            name_i18n: Some(pair.1),
+            ..Self::new(id, pair.0)
         }
     }
 

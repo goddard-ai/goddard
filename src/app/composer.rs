@@ -1507,7 +1507,13 @@ impl Waku {
                                             .text_size(sp(13.0))
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(theme.text)
-                                            .child(SharedString::from(model.name.clone())),
+                                            .child(SharedString::from(
+                                                model
+                                                    .name_i18n
+                                                    .as_ref()
+                                                    .map(waku_client::WireTranslation::render)
+                                                    .unwrap_or_else(|| model.name.clone()),
+                                            )),
                                     )
                                     .child(
                                         div()
@@ -1809,7 +1815,13 @@ impl Waku {
                     .reasoning_efforts
                     .iter()
                     .find(|option| option.id == selected)
-                    .map(|option| option.label.clone())
+                    .map(|option| {
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone())
+                    })
             })
         };
 
@@ -1834,7 +1846,13 @@ impl Waku {
                 .service_tiers
                 .iter()
                 .find(|option| option.id == selected_tier)
-                .map(|option| option.label.clone())
+                .map(|option| {
+                    option
+                        .label_i18n
+                        .as_ref()
+                        .map(waku_client::WireTranslation::render)
+                        .unwrap_or_else(|| option.label.clone())
+                })
                 .unwrap_or_else(|| selected_tier.clone())
         };
         let selected_window = session
@@ -1864,7 +1882,13 @@ impl Waku {
                     .context_windows
                     .iter()
                     .find(|option| option.id == selected)
-                    .map(|option| option.label.clone())
+                    .map(|option| {
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone())
+                    })
             });
 
         let fast = selected_tier == "fast" || tier_label.eq_ignore_ascii_case("fast");
@@ -1919,12 +1943,17 @@ impl Waku {
                     }
                     for option in reasoning_efforts.clone() {
                         let weak = weak.clone();
+                        let label = option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or(option.label);
                         let effort = option.id;
                         let is_default = !supports_default_reset
                             && default_effort.as_deref() == Some(effort.as_str());
                         let selected = selected_effort.as_deref() == Some(effort.as_str());
                         items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
+                            traits_choice(theme, label, is_default, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_reasoning_effort(effort.clone(), cx);
@@ -1955,11 +1984,16 @@ impl Waku {
                     );
                     for option in service_tiers.clone() {
                         let weak = weak.clone();
+                        let label = option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or(option.label);
                         let tier = option.id;
                         let is_default = default_tier == tier;
                         let selected = selected_tier == tier;
                         items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
+                            traits_choice(theme, label, is_default, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_service_tier(tier.clone(), cx);
@@ -1976,11 +2010,16 @@ impl Waku {
                     items.push(MenuItem::Header(tr!("models.context_window").into()));
                     for option in context_windows.clone() {
                         let weak = weak.clone();
+                        let label = option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or(option.label);
                         let window = option.id;
                         let is_default = default_window.as_deref() == Some(window.as_str());
                         let selected = selected_window.as_deref() == Some(window.as_str());
                         items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
+                            traits_choice(theme, label, is_default, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_context_window(window.clone(), cx);
