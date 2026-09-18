@@ -37,6 +37,7 @@ const APP_STATE_VERSION: u32 = 1;
 
 pub const DEFAULT_SIDEBAR_WIDTH: f32 = 252.0;
 pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
+pub const DEFAULT_GIT_PANEL_TOP_HEIGHT: f32 = 280.0;
 
 /// How the desktop groups task history in the sidebar.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -191,6 +192,10 @@ fn default_sidebar_width() -> f32 {
 
 fn default_right_panel_width() -> f32 {
     DEFAULT_RIGHT_PANEL_WIDTH
+}
+
+fn default_git_panel_top_height() -> f32 {
+    DEFAULT_GIT_PANEL_TOP_HEIGHT
 }
 
 /// A daemon reachable over the network, shown in the same window as the
@@ -943,6 +948,10 @@ pub struct PersistedState {
     pub sidebar_ordering: SidebarOrdering,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
+    /// Height of the Git panel's top region — the commit box, or an open
+    /// commit's file tree — split from the commit log by a drag handle.
+    #[serde(default = "default_git_panel_top_height")]
+    pub git_panel_top_height: f32,
     /// Whether markdown files in the right panel open as a rendered preview
     /// instead of source. One global mode, not per file.
     #[serde(default)]
@@ -1079,6 +1088,7 @@ impl PersistedState {
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            git_panel_top_height: DEFAULT_GIT_PANEL_TOP_HEIGHT,
             markdown_preview: false,
             window_state: None,
             navigation_back: Vec::new(),

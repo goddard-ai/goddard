@@ -1605,6 +1605,7 @@ impl Waku {
         self.state.git_panel_visible = self.git_panel_visible;
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;
+        self.state.git_panel_top_height = self.git_panel_top_height;
         self.save();
     }
 
@@ -1661,7 +1662,7 @@ impl Waku {
         let (sidebar_width, right_panel_width) = self.effective_panel_widths(window);
         // A drag tracks the pointer directly; whatever slide was still
         // finishing would fight it for the same edge.
-        let start_width = match target {
+        let start_size = match target {
             PanelResizeTarget::Sidebar => {
                 self.sidebar_slide = None;
                 self.sidebar_width = sidebar_width;
@@ -1679,11 +1680,20 @@ impl Waku {
                 self.right_panel_file_tree_width = width;
                 width
             }
+            PanelResizeTarget::GitPanelTop => {
+                let height = fitted_git_panel_top_height(
+                    f32::from(window.viewport_size().height),
+                    self.git_panel_top_height,
+                );
+                self.git_panel_top_height = height;
+                height
+            }
         };
         self.panel_resize_drag = Some(PanelResizeDrag {
             target,
             start_mouse_x: f32::from(event.position.x),
-            start_width,
+            start_mouse_y: f32::from(event.position.y),
+            start_size,
         });
         cx.stop_propagation();
         cx.notify();
@@ -1706,7 +1716,7 @@ impl Waku {
                 let maximum = SIDEBAR_MAX_WIDTH
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - right_panel_width)
                     .max(SIDEBAR_MIN_WIDTH);
-                let width = (drag.start_width + delta).clamp(SIDEBAR_MIN_WIDTH, maximum);
+                let width = (drag.start_size + delta).clamp(SIDEBAR_MIN_WIDTH, maximum);
                 if (self.sidebar_width - width).abs() < 0.5 {
                     return;
                 }
@@ -1717,7 +1727,7 @@ impl Waku {
                 let maximum = RIGHT_PANEL_MAX_WIDTH
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - sidebar_width)
                     .max(RIGHT_PANEL_MIN_WIDTH);
-                let width = (drag.start_width - delta).clamp(RIGHT_PANEL_MIN_WIDTH, maximum);
+                let width = (drag.start_size - delta).clamp(RIGHT_PANEL_MIN_WIDTH, maximum);
                 if (self.right_panel_width - width).abs() < 0.5 {
                     return;
                 }
@@ -1727,11 +1737,22 @@ impl Waku {
                 let maximum = FILE_TREE_MAX_WIDTH
                     .min(right_panel_width - FILE_EDITOR_MIN_WIDTH)
                     .max(FILE_TREE_MIN_WIDTH);
-                let width = (drag.start_width - delta).clamp(FILE_TREE_MIN_WIDTH, maximum);
+                let width = (drag.start_size - delta).clamp(FILE_TREE_MIN_WIDTH, maximum);
                 if (self.right_panel_file_tree_width - width).abs() < 0.5 {
                     return;
                 }
                 self.right_panel_file_tree_width = width;
+            }
+            PanelResizeTarget::GitPanelTop => {
+                let delta = f32::from(event.position.y) - drag.start_mouse_y;
+                let height = fitted_git_panel_top_height(
+                    f32::from(window.viewport_size().height),
+                    drag.start_size + delta,
+                );
+                if (self.git_panel_top_height - height).abs() < 0.5 {
+                    return;
+                }
+                self.git_panel_top_height = height;
             }
         }
         cx.notify();

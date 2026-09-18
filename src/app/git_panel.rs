@@ -2237,10 +2237,10 @@ impl Waku {
             .min_w_0()
             .relative()
             .child(self.render_git_panel_header(window, cx));
-        if !commit_open {
-            column = column.child(self.render_git_panel_commit_area(cx));
+        if self.git_panel.is_some() {
+            column = column.child(self.render_git_panel_top(column_width, window, cx));
         }
-        column = column.child(self.render_git_panel_body(column_width, window, cx));
+        column = column.child(self.render_git_panel_body(column_width, cx));
         if !commit_open {
             column = column.child(self.render_panel_resize_handle(
                 "git-panel-resize-handle",
@@ -2581,14 +2581,98 @@ impl Waku {
         button.into_any_element()
     }
 
-    /// Working-tree sections above the paged commit list. Each scrolls inside
-    /// its own region so neither crowds the other off the panel.
-    fn render_git_panel_body(
-        &mut self,
+    /// The region above the commit log: the commit box and working-tree
+    /// changes, or the open commit's file tree while one is up. One slot,
+    /// one persisted height, so opening a commit never shifts the log —
+    /// its bottom edge is the drag handle that sizes both sides.
+    fn render_git_panel_top(
+        &self,
         width: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let height = fitted_git_panel_top_height(
+            f32::from(window.viewport_size().height),
+            self.git_panel_top_height,
+        );
+        let content = if self.git_panel_commit_diff.is_some() {
+            self.render_git_panel_commit_tree(cx)
+        } else {
+            let scroll = self
+                .git_panel
+                .as_ref()
+                .map(|panel| panel.changes_scroll.clone())
+                .unwrap_or_default();
+            let scrollbar_state = self
+                .git_panel
+                .as_ref()
+                .map(|panel| panel.changes_scrollbar.clone())
+                .unwrap_or_else(ScrollbarState::new);
+            let wheel = scroll.clone();
+            let mut inner = div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .child(self.render_git_panel_commit_area(cx));
+            if let Some(snapshot) = self
+                .git_panel
+                .as_ref()
+                .and_then(|panel| panel.snapshot.as_ref())
+                && (!snapshot.staged.is_empty() || !snapshot.unstaged.is_empty())
+            {
+                inner = inner.child(self.render_git_panel_changes(snapshot, width, window, cx));
+            }
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .relative()
+                .child(
+                    div()
+                        .id("git-panel-top")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&scroll)
+                        .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
+                        .child(inner),
+                )
+                .child(scrollbar::edge_fade(
+                    scroll.clone(),
+                    scrollbar::FadeEdge::Top,
+                    theme.surface,
+                ))
+                .child(scrollbar::edge_fade(
+                    scroll.clone(),
+                    scrollbar::FadeEdge::Bottom,
+                    theme.surface,
+                ))
+                .child(scrollbar::vertical(&scroll, &scrollbar_state))
+                .into_any_element()
+        };
+        div()
+            .flex_none()
+            .h(px(height))
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .relative()
+            .border_b(hairline())
+            .border_color(theme.separator)
+            .child(content)
+            .child(self.render_panel_resize_handle(
+                "git-panel-top-resize-handle",
+                PanelResizeTarget::GitPanelTop,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    /// The paged commit list under the top region, or the panel's empty and
+    /// non-repository states.
+    fn render_git_panel_body(&mut self, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(panel) = self.git_panel.as_ref() else {
             return div()
@@ -2638,15 +2722,7 @@ impl Waku {
                         .child(tr!("git_panel.not_a_repository")),
                 );
             }
-            Some(snapshot) => {
-                if self.git_panel_commit_diff.is_some() {
-                    // An open commit replaces the working-tree sections with
-                    // its file tree; the log below stays live.
-                    body = body.child(self.render_git_panel_commit_tree(cx));
-                } else if !snapshot.staged.is_empty() || !snapshot.unstaged.is_empty() {
-                    body = body.child(self.render_git_panel_changes(snapshot, width, window, cx));
-                }
-            }
+            Some(_) => {}
         }
         body.child(self.render_git_panel_commits(width, cx))
             .into_any_element()
@@ -2667,7 +2743,8 @@ impl Waku {
     }
 
     /// The two change groups: unstaged files (untracked included) first, then
-    /// a labeled Staged section whenever anything is staged.
+    /// a labeled Staged section whenever anything is staged. Rendered inside
+    /// the top region's shared scroll — the region owns the chrome.
     fn render_git_panel_changes(
         &self,
         snapshot: &GitPanelSnapshot,
@@ -2677,7 +2754,7 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let both_sections = !snapshot.staged.is_empty();
-        let mut list = div().w_full().min_h_0().flex().flex_col();
+        let mut list = div().w_full().flex().flex_col();
         if !snapshot.unstaged.is_empty() {
             if both_sections {
                 list = list.child(Self::git_panel_section_label(
@@ -2698,47 +2775,7 @@ impl Waku {
                 list = list.child(self.render_git_panel_file_row(file, true, width, window, cx));
             }
         }
-        let scroll = self
-            .git_panel
-            .as_ref()
-            .map(|panel| panel.changes_scroll.clone())
-            .unwrap_or_default();
-        let scrollbar_state = self
-            .git_panel
-            .as_ref()
-            .map(|panel| panel.changes_scrollbar.clone())
-            .unwrap_or_else(|| ScrollbarState::new());
-        let scroll_track = scroll.clone();
-        div()
-            .flex_none()
-            .max_h(gpui::relative(0.5))
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .border_b(hairline())
-            .border_color(theme.separator)
-            .relative()
-            .child(
-                div()
-                    .id("git-panel-changes")
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&scroll_track)
-                    .on_scroll_wheel(move |_, _, cx| contain_scroll(&scroll, cx))
-                    .child(list),
-            )
-            .child(scrollbar::edge_fade(
-                scroll_track.clone(),
-                scrollbar::FadeEdge::Top,
-                theme.surface,
-            ))
-            .child(scrollbar::edge_fade(
-                scroll_track.clone(),
-                scrollbar::FadeEdge::Bottom,
-                theme.surface,
-            ))
-            .child(scrollbar::vertical(&scroll_track, &scrollbar_state))
-            .into_any_element()
+        list.into_any_element()
     }
 
     /// The open commit's file tree, standing in for the commit box and
@@ -2788,13 +2825,10 @@ impl Waku {
         let scroll = modal.tree_scroll.clone();
         let wheel = scroll.clone();
         div()
-            .flex_none()
-            .max_h(gpui::relative(0.5))
+            .flex_1()
             .min_h_0()
             .flex()
             .flex_col()
-            .border_b(hairline())
-            .border_color(theme.separator)
             .relative()
             .child(Self::git_panel_section_label(
                 tr!("git_panel.files"),
@@ -2803,6 +2837,7 @@ impl Waku {
             .child(
                 div()
                     .id("git-panel-commit-tree")
+                    .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&scroll)

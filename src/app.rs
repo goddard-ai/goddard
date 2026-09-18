@@ -61,7 +61,8 @@ use crate::browser::BrowserView;
 use crate::persistence::{
     ArchiveNavigation, CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand,
     CustomCommandIcon,
-    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, PersistedDiffSource,
+    DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH,
+    PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedWindowState, SidebarGrouping, SidebarOrdering, StateStore,
@@ -122,6 +123,14 @@ const UPDATER_BUTTON_COLLAPSED_WIDTH: f32 = 20.0;
 const UPDATER_BUTTON_EXPANDED_WIDTH: f32 = 58.0;
 const RIGHT_PANEL_MIN_WIDTH: f32 = 280.0;
 const RIGHT_PANEL_MAX_WIDTH: f32 = 1000.0;
+/// The Git panel column's fixed header.
+const GIT_PANEL_HEADER_HEIGHT: f32 = 44.0;
+/// Drag bounds for the Git panel's top region — the commit box or an open
+/// commit's file tree — split from the commit log.
+const GIT_PANEL_TOP_MIN_HEIGHT: f32 = 140.0;
+const GIT_PANEL_TOP_MAX_HEIGHT: f32 = 1200.0;
+/// The commit log keeps at least this much room under the top region.
+const GIT_PANEL_COMMITS_MIN_HEIGHT: f32 = 140.0;
 const DEFAULT_FILE_TREE_WIDTH: f32 = 184.0;
 const FILE_TREE_MIN_WIDTH: f32 = 140.0;
 const FILE_TREE_MAX_WIDTH: f32 = 360.0;
@@ -321,13 +330,18 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    /// The horizontal divider between the Git panel's top region and its
+    /// commit log — the one drag that moves on the y axis.
+    GitPanelTop,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct PanelResizeDrag {
     target: PanelResizeTarget,
     start_mouse_x: f32,
-    start_width: f32,
+    start_mouse_y: f32,
+    /// Width for the vertical edges, height for `GitPanelTop`.
+    start_size: f32,
 }
 
 #[derive(Debug)]
@@ -631,6 +645,19 @@ fn widened_panel_width_for_review(panel_width: f32) -> f32 {
         RIGHT_PANEL_MAX_WIDTH,
     )
     .max(REVIEW_INITIAL_WIDTH)
+}
+
+/// The Git panel's top region as laid out this frame: the stored height
+/// clamped so the commit log below it keeps its minimum room.
+fn fitted_git_panel_top_height(viewport_height: f32, height: f32) -> f32 {
+    let maximum = (viewport_height - GIT_PANEL_HEADER_HEIGHT - GIT_PANEL_COMMITS_MIN_HEIGHT)
+        .clamp(GIT_PANEL_TOP_MIN_HEIGHT, GIT_PANEL_TOP_MAX_HEIGHT);
+    sanitize_panel_width(
+        height,
+        DEFAULT_GIT_PANEL_TOP_HEIGHT.clamp(GIT_PANEL_TOP_MIN_HEIGHT, maximum),
+        GIT_PANEL_TOP_MIN_HEIGHT,
+        maximum,
+    )
 }
 
 fn fitted_panel_widths(
@@ -2028,6 +2055,9 @@ pub struct Waku {
     /// The Git panel shares the right panel's slot and never shows with it:
     /// opening one dismisses the other. See `git_panel.rs`.
     git_panel_visible: bool,
+    /// The persisted height of the panel's top region — commit box or open
+    /// commit's file tree — before the frame's viewport clamp applies.
+    git_panel_top_height: f32,
     git_panel: Option<git_panel::GitPanelState>,
     /// The commit/push/sync the panel's action button is running, if any.
     git_panel_operation: Option<git_panel::GitPanelOperation>,
@@ -3445,8 +3475,15 @@ impl Waku {
             RIGHT_PANEL_MIN_WIDTH,
             RIGHT_PANEL_MAX_WIDTH,
         );
+        let git_panel_top_height = sanitize_panel_width(
+            state.git_panel_top_height,
+            DEFAULT_GIT_PANEL_TOP_HEIGHT,
+            GIT_PANEL_TOP_MIN_HEIGHT,
+            GIT_PANEL_TOP_MAX_HEIGHT,
+        );
         state.sidebar_width = sidebar_width;
         state.right_panel_width = right_panel_width;
+        state.git_panel_top_height = git_panel_top_height;
         // First launch has no persisted frame yet; seed from the freshly
         // opened window so an immediate zoom or fullscreen still has a
         // floating frame to restore to. The bounds observer keeps it current
@@ -4499,6 +4536,7 @@ impl Waku {
                 right_panel_visible,
                 right_panel_width,
                 git_panel_visible,
+                git_panel_top_height,
                 git_panel: None,
                 git_panel_operation: None,
                 git_panel_generation: 0,

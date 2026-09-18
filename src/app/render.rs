@@ -25,46 +25,64 @@ impl Waku {
         let active = self
             .panel_resize_drag
             .is_some_and(|drag| drag.target == target);
+        let bar = |element: Div| {
+            element
+                .bg(if active {
+                    theme.resize_handle
+                } else {
+                    gpui::transparent_black()
+                })
+                .group_hover("panel-resize-handle", |element| {
+                    element.bg(theme.resize_handle)
+                })
+        };
+        let mut strip = div().id(id).absolute().group("panel-resize-handle");
         // The right panel's left edge abuts the browser webview, a native view
         // that composites above every base-scene pixel at or beyond the edge.
         // Its bar and hover strip therefore sit entirely left of the edge,
         // where GPUI still owns rendering and input; the other edges keep the
-        // conventional straddle.
-        let (strip_left, strip_width) = match target {
-            PanelResizeTarget::RightPanel => (-7.0, 8.0),
-            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => (-5.0, 10.0),
+        // conventional straddle. The Git panel's top divider is horizontal and
+        // pinned inside the region's bottom edge.
+        strip = match target {
+            PanelResizeTarget::RightPanel => strip
+                .top_0()
+                .left(px(-7.0))
+                .w(px(8.0))
+                .h_full()
+                .cursor_col_resize()
+                .child(bar(
+                    div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full(),
+                )),
+            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => strip
+                .top_0()
+                .left(px(-5.0))
+                .w(px(10.0))
+                .h_full()
+                .cursor_col_resize()
+                .child(bar(
+                    div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full(),
+                )),
+            PanelResizeTarget::GitPanelTop => strip
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(px(8.0))
+                .cursor_row_resize()
+                .child(bar(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(px(3.0))
+                        .h(px(2.0)),
+                )),
         };
-        div()
-            .id(id)
-            .absolute()
-            .top_0()
-            .left(px(strip_left))
-            .w(px(strip_width))
-            .h_full()
-            .group("panel-resize-handle")
-            .cursor_col_resize()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(px(5.0))
-                    .w(px(2.0))
-                    .h_full()
-                    .bg(if active {
-                        theme.resize_handle
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .group_hover("panel-resize-handle", |element| {
-                        element.bg(theme.resize_handle)
-                    }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event, window, cx| {
-                    this.begin_panel_resize(target, event, window, cx);
-                }),
-            )
+        strip.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event, window, cx| {
+                this.begin_panel_resize(target, event, window, cx);
+            }),
+        )
     }
 }
 
