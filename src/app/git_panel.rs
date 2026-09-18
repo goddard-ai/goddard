@@ -1318,10 +1318,11 @@ impl Waku {
         .detach();
     }
 
-    /// The conflict modal's Resolve in chat: hand the agent the conflicted
-    /// integration and let it finish — a pull completes with `rebase
-    /// --continue`, a land still owes the base its fast-forward afterward.
-    fn git_panel_resolve_in_chat(&mut self, cx: &mut Context<Self>) {
+    /// The conflict modal's Resolve in chat: paste the resolution prompt
+    /// into the composer for the user to send — a pull completes with
+    /// `rebase --continue`, a land still owes the base its fast-forward
+    /// afterward.
+    fn git_panel_resolve_in_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = match self.git_panel_sync_conflict.take() {
             Some(SyncConflict::Pull {
                 in_progress: SyncInProgress::Rebase,
@@ -1343,7 +1344,11 @@ impl Waku {
             }) => tr!("git_panel.resolve_land_merge_prompt", base = base),
             None => return,
         };
-        self.route_composer_submission(ComposerSubmission::plain(prompt), cx);
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+        self.composer
+            .update(cx, |composer, cx| composer.insert_text(&prompt, cx));
+        self.schedule_composer_draft_save(cx);
         cx.notify();
     }
 
@@ -3686,12 +3691,12 @@ impl Waku {
     /// nothing-staged prompt, Resolve in chat for the conflicted sync — the
     /// same primary the archive dialog's bare Enter confirms. The commit-diff
     /// modal has no primary, so Enter there is a no-op.
-    fn confirm_git_panel_modal(&mut self, cx: &mut Context<Self>) {
+    fn confirm_git_panel_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.git_panel_commit_diff.is_some() {
             return;
         }
         if self.git_panel_sync_conflict.is_some() {
-            self.git_panel_resolve_in_chat(cx);
+            self.git_panel_resolve_in_chat(window, cx);
         } else if self.git_panel_unstaged_prompt {
             self.git_panel_unstaged_prompt = false;
             self.run_git_panel_commit(true, cx);
@@ -3822,7 +3827,7 @@ impl Waku {
             &self.git_panel_conflict_resolve_focus,
             theme,
             cx,
-            |this, _, cx| this.git_panel_resolve_in_chat(cx),
+            |this, window, cx| this.git_panel_resolve_in_chat(window, cx),
         );
         let abort = modal_button(
             "git-panel-abort-sync",
@@ -3923,8 +3928,8 @@ impl Waku {
             .tab_index(0)
             .key_context(MODAL_CONTEXT)
             .tab_group()
-            .on_action(cx.listener(|this, _: &ConfirmGitPanelModal, _, cx| {
-                this.confirm_git_panel_modal(cx);
+            .on_action(cx.listener(|this, _: &ConfirmGitPanelModal, window, cx| {
+                this.confirm_git_panel_modal(window, cx);
             }))
             .on_action(cx.listener(|this, _: &DismissGitPanelModal, _, cx| {
                 this.dismiss_git_panel_modal(cx);
