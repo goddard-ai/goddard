@@ -462,11 +462,13 @@ impl Backend for WakuBackend {
                     return Ok(ResponsePayload::SessionRuntime {
                         runtime_id: None,
                         supports_steer: false,
+                        supports_user_input_actions: false,
                     });
                 };
                 Ok(ResponsePayload::SessionRuntime {
                     runtime_id: Some(*runtime_id),
                     supports_steer: driver.supports_steer(),
+                    supports_user_input_actions: driver.supports_user_input_actions(),
                 })
             }
             Command::GetSettings => Ok(ResponsePayload::Settings {
@@ -1106,10 +1108,14 @@ impl Backend for WakuBackend {
                 let handle =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
                 let supports_steer = handle.supports_steer();
+                let supports_user_input_actions = handle.supports_user_input_actions();
                 self.sessions
                     .lock()
                     .insert(session_id, (runtime_id, handle));
-                Ok(ResponsePayload::Started { supports_steer })
+                Ok(ResponsePayload::Started {
+                    supports_steer,
+                    supports_user_input_actions,
+                })
             }
             Command::CloseSession => {
                 let removed = {
@@ -2787,6 +2793,11 @@ fn handle_driver_command(
             prompt, attachments, ..
         } => driver.prompt_with_attachments(prompt, attachments),
         Command::Steer { prompt } => driver.steer(prompt),
+        Command::ClarifyUserInput {
+            request_id,
+            content,
+        } => driver.clarify_user_input(request_id, content),
+        Command::CancelUserInput { request_id } => driver.cancel_user_input(request_id),
         Command::Cancel => driver.cancel(),
         Command::CancelComputerUse => driver.cancel_computer_use(),
         Command::RefreshBackgroundWork => driver.refresh_background_work(),

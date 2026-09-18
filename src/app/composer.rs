@@ -383,6 +383,88 @@ impl Waku {
             format!("user-input-{request_id}-{question_index}-continue"),
             cx,
         );
+        let supports_actions = self
+            .selected_runtime()
+            .is_some_and(|runtime| runtime.driver.supports_user_input_actions());
+        let dismiss = supports_actions.then(|| {
+            let focus = self.transcript_control_focus(
+                format!("user-input-{request_id}-{question_index}-dismiss"),
+                cx,
+            );
+            div()
+                .id(SharedString::from(format!(
+                    "user-input-{request_id}-{question_index}-dismiss"
+                )))
+                .track_focus(&focus)
+                .tab_index(0)
+                .tab_stop(true)
+                .h(px(26.0))
+                .px(px(8.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_tertiary)
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
+                .active(|style| style.opacity(0.8))
+                .child(tr!("user_input.dismiss"))
+                .on_click(cx.listener(|this, _, _, cx| this.dismiss_user_input(cx)))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.dismiss_user_input(cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
+        let clarify = supports_actions.then(|| {
+            let focus = self.transcript_control_focus(
+                format!("user-input-{request_id}-{question_index}-clarify"),
+                cx,
+            );
+            div()
+                .id(SharedString::from(format!(
+                    "user-input-{request_id}-{question_index}-clarify"
+                )))
+                .track_focus(&focus)
+                .tab_index(0)
+                .tab_stop(has_custom)
+                .h(px(26.0))
+                .px(px(10.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(if has_custom {
+                    theme.border_strong
+                } else {
+                    theme.border
+                })
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(if has_custom {
+                    theme.text
+                } else {
+                    theme.text_ghost
+                })
+                .when(has_custom, |button| {
+                    button
+                        .focus_visible(|style| style.border_color(theme.accent))
+                        .hover(|style| style.bg(theme.overlay))
+                        .active(|style| style.opacity(0.8))
+                        .on_click(cx.listener(|this, _, _, cx| this.clarify_user_input(cx)))
+                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.clarify_user_input(cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                })
+                .child(tr!("user_input.clarify"))
+        });
         let back = (question_index > 0).then(|| {
             let focus = self.transcript_control_focus(
                 format!("user-input-{request_id}-{question_index}-back"),
@@ -561,8 +643,11 @@ impl Waku {
                         .mt(px(8.0))
                         .flex()
                         .items_center()
+                        .gap(px(6.0))
                         .children(back)
+                        .children(dismiss)
                         .child(div().flex_1())
+                        .children(clarify)
                         .child(continue_button),
                 ),
         )

@@ -1906,6 +1906,10 @@ user_input.next:
   en: Next
 user_input.submit:
   en: Submit
+user_input.clarify:
+  en: Clarify
+user_input.dismiss:
+  en: Dismiss
 user_input.progress:
   en: "%{current} of %{total}"
 composer.preparing_task:

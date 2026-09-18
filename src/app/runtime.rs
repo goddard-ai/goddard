@@ -108,6 +108,7 @@ fn attach_driver(
     let waku_client::ResponsePayload::SessionRuntime {
         runtime_id,
         supports_steer,
+        supports_user_input_actions,
     } = response
     else {
         anyhow::bail!("Goddard daemon returned an invalid runtime attachment response");
@@ -122,6 +123,7 @@ fn attach_driver(
         session_id,
         runtime_id,
         supports_steer,
+        supports_user_input_actions,
         session.runtime_event_cursor,
         event_tx,
     )?;

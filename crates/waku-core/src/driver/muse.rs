@@ -54,6 +54,13 @@ enum DriverCommand {
         request_id: String,
         answers: Vec<UserInputAnswer>,
     },
+    ClarifyUserInput {
+        request_id: String,
+        content: String,
+    },
+    CancelUserInput {
+        request_id: String,
+    },
     ApplyOptions(SessionOptions, Sender<bool>),
     /// Fork only: the cursor names the new session; this driver stays put.
     Fork {
@@ -600,6 +607,54 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     "sessionId": state.session_id,
                     "userInputId": request_id,
                     "answers": answers,
+                }),
+            ) {
+                let _ = worker.events.send(DriverEvent::Error(tr!(
+                    "errors.answer_provider_question",
+                    provider = "Muse Code",
+                    error = error.message()
+                )));
+            }
+        }
+        DriverCommand::ClarifyUserInput {
+            request_id,
+            content,
+        } => {
+            if state.user_inputs.remove(&request_id).is_none() {
+                return true;
+            }
+            // `clarification` settles the request like an answer, but the
+            // model reads it as "let me explain" and re-decides the
+            // question — content is capped at 500 chars like freeText.
+            if let Err(error) = worker.service.call(
+                "userInput/clarify",
+                json!({
+                    "commandId": worker.service.mint_command_id(),
+                    "sessionId": state.session_id,
+                    "userInputId": request_id,
+                    "clarification": {
+                        "format": "text",
+                        "content": content.chars().take(500).collect::<String>(),
+                    },
+                }),
+            ) {
+                let _ = worker.events.send(DriverEvent::Error(tr!(
+                    "errors.answer_provider_question",
+                    provider = "Muse Code",
+                    error = error.message()
+                )));
+            }
+        }
+        DriverCommand::CancelUserInput { request_id } => {
+            if state.user_inputs.remove(&request_id).is_none() {
+                return true;
+            }
+            if let Err(error) = worker.service.call(
+                "userInput/cancel",
+                json!({
+                    "commandId": worker.service.mint_command_id(),
+                    "sessionId": state.session_id,
+                    "userInputId": request_id,
                 }),
             ) {
                 let _ = worker.events.send(DriverEvent::Error(tr!(
@@ -1582,6 +1637,23 @@ impl DriverControl for MuseDriver {
         });
     }
 
+    fn supports_user_input_actions(&self) -> bool {
+        true
+    }
+
+    fn clarify_user_input(&self, request_id: String, content: String) {
+        let _ = self.commands.send(DriverCommand::ClarifyUserInput {
+            request_id,
+            content,
+        });
+    }
+
+    fn cancel_user_input(&self, request_id: String) {
+        let _ = self
+            .commands
+            .send(DriverCommand::CancelUserInput { request_id });
+    }
+
     fn apply_options(&self, options: SessionOptions) -> bool {
         let (reply, answer) = bounded(1);
         if self
@@ -1883,6 +1955,84 @@ mod tests {
         // 89 50 4e 47 is the PNG magic — the file's real bytes, encoded.
         assert_eq!(parts[1]["base64Data"], "iVBORw==");
         assert!(parts[1].get("width").is_none());
+    }
+
+    /// The fake host issues one `userInput/request` after `session/start`
+    /// when its marker file exists; the driver settles it with a text
+    /// clarification — the wire shape is validated by the host itself.
+    #[test]
+    fn muse_clarify_settles_the_question() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut start = options(&directory);
+        start.binary = fake_muse(&directory);
+        fs::write(directory.join("ask-question"), "").unwrap();
+
+        let (events, rx) = test_event_channel();
+        let driver = MuseDriver::start(start, events).unwrap();
+        let seen = collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::UserInputRequested { .. })
+        });
+        let request_id = seen
+            .iter()
+            .find_map(|event| match event {
+                DriverEvent::UserInputRequested { request_id, .. } => Some(request_id.clone()),
+                _ => None,
+            })
+            .expect("the fake host's question reached the driver");
+        driver.clarify_user_input(request_id, "the second, but faster".to_owned());
+        let log = wait_for_log(&directory, "userinput.log", "u1");
+        assert!(log.contains("userInput/clarify"), "{log}");
+        assert!(log.contains("u1"), "{log}");
+        drop(driver);
+        assert!(!directory.join("violations.log").exists());
+    }
+
+    /// `userInput/cancel` dismisses the request unanswered.
+    #[test]
+    fn muse_dismiss_cancels_the_question() {
+        let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut start = options(&directory);
+        start.binary = fake_muse(&directory);
+        fs::write(directory.join("ask-question"), "").unwrap();
+
+        let (events, rx) = test_event_channel();
+        let driver = MuseDriver::start(start, events).unwrap();
+        let seen = collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
+            matches!(event, DriverEvent::UserInputRequested { .. })
+        });
+        let request_id = seen
+            .iter()
+            .find_map(|event| match event {
+                DriverEvent::UserInputRequested { request_id, .. } => Some(request_id.clone()),
+                _ => None,
+            })
+            .expect("the fake host's question reached the driver");
+        driver.cancel_user_input(request_id);
+        let log = wait_for_log(&directory, "userinput.log", "u1");
+        assert!(log.contains("userInput/cancel"), "{log}");
+        assert!(log.contains("u1"), "{log}");
+        drop(driver);
+        assert!(!directory.join("violations.log").exists());
+    }
+
+    /// The host's side-effect logs land asynchronously and a line at a
+    /// time; poll until the expected text is actually in the file.
+    fn wait_for_log(directory: &Path, name: &str, expected: &str) -> String {
+        let path = directory.join(name);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut log = String::new();
+        while Instant::now() < deadline {
+            if let Ok(contents) = fs::read_to_string(&path) {
+                log = contents;
+                if log.contains(expected) {
+                    return log;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        log
     }
 
     /// The structured prompt path must reach the host: the fake binary

@@ -93,6 +93,20 @@ impl DriverHandle {
         self.inner.respond_user_input(request_id, answers);
     }
 
+    /// Whether the provider can settle a user-input request without
+    /// structured answers — clarify and dismiss ride this bit.
+    pub fn supports_user_input_actions(&self) -> bool {
+        self.inner.supports_user_input_actions()
+    }
+
+    pub fn clarify_user_input(&self, request_id: String, content: String) {
+        self.inner.clarify_user_input(request_id, content);
+    }
+
+    pub fn cancel_user_input(&self, request_id: String) {
+        self.inner.cancel_user_input(request_id);
+    }
+
     /// Read or mutate the provider-persisted thread goal. Outcomes arrive
     /// asynchronously as `DriverEvent::GoalUpdated` or `DriverEvent::Error`.
     pub fn goal(&self, operation: GoalOperation) {
@@ -151,6 +165,14 @@ pub trait DriverControl: Send + Sync {
     fn stop_background_work(&self, _key: BackgroundWorkKey, _control_id: String) {}
     fn respond(&self, request_id: String, option_id: String);
     fn respond_user_input(&self, _request_id: String, _answers: Vec<UserInputAnswer>) {}
+    /// Whether the provider can settle a user-input request without
+    /// structured answers — clarify and dismiss ride this bit, reported
+    /// by the daemon in the attach/start response.
+    fn supports_user_input_actions(&self) -> bool {
+        false
+    }
+    fn clarify_user_input(&self, _request_id: String, _content: String) {}
+    fn cancel_user_input(&self, _request_id: String) {}
     fn goal(&self, _operation: GoalOperation) {}
     fn compact(&self) {}
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}

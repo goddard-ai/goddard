@@ -689,6 +689,16 @@ if [ "$1" = "serve" ]; then
           *'"turnId":"'*) ;;
           *) echo 'turn/unqueue without a turnId' >> "$VIOLATIONS" ;;
         esac ;;
+      *'"userInput/clarify"'*)
+        case "$line" in
+          *'"clarification"'*'"format":"text"'*) ;;
+          *) echo 'userInput/clarify without a text clarification' >> "$VIOLATIONS" ;;
+        esac ;;
+      *'"userInput/cancel"'*)
+        case "$line" in
+          *'"userInputId":"'*) ;;
+          *) echo 'userInput/cancel without a userInputId' >> "$VIOLATIONS" ;;
+        esac ;;
       *'"type":"image"'*)
         case "$line" in
           *'"base64Data":"'*) ;;
@@ -714,6 +724,12 @@ if [ "$1" = "serve" ]; then
           *'"session/read"'*) history='"mode":"snapshot","items":null,"snapshot":{"state":{}},"noneReason":null' ;;
         esac
         echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"session\":{\"sessionId\":\"$sid\",\"status\":\"idle\",\"turnCount\":0,\"path\":\"p\",\"providerId\":\"muse\",\"modelId\":\"muse-1\",\"forkedFrom\":null,\"activeTurnId\":null,\"workspaceRoot\":\"/tmp\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"},\"history\":{$history},\"pendingRequests\":[],\"viewCursor\":\"c9\"}}"
+        case "$line" in
+          *'"session/start"'*)
+            if [ -f "$(dirname "$0")/ask-question" ]; then
+              echo "{\"jsonrpc\":\"2.0\",\"id\":77,\"method\":\"userInput/request\",\"params\":{\"sessionId\":\"$sid\",\"userInputId\":\"u1\",\"questions\":[{\"id\":\"q1\",\"header\":\"Pick\",\"question\":\"Which?\",\"options\":[{\"label\":\"A\"},{\"label\":\"B\"}],\"selection\":{\"mode\":\"single\"}}]}}"
+            fi ;;
+        esac
         ;;
       *'"session/fork"'*)
         sid=$(echo "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
@@ -750,6 +766,13 @@ if [ "$1" = "serve" ]; then
         echo "$tid" >> "$(dirname "$0")/unqueued.log"
         echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"turnId\":\"$tid\"}}"
         echo "{\"jsonrpc\":\"2.0\",\"method\":\"turn/unqueued\",\"params\":{\"sessionId\":\"$sid\",\"turnId\":\"$tid\",\"viewCursor\":\"c8\",\"sourceRange\":{}}}"
+        ;;
+      *'"userInput/clarify"'*|*'"userInput/cancel"'*)
+        id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+        uid=$(echo "$line" | sed -n 's/.*"userInputId":"\([^"]*\)".*/\1/p')
+        echo "$line" | sed -n 's/.*"\(userInput\/[a-zA-Z]*\)".*/\1/p' >> "$(dirname "$0")/userinput.log"
+        echo "$uid" >> "$(dirname "$0")/userinput.log"
+        echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commandId\":\"c\",\"status\":\"accepted\",\"userInputId\":\"$uid\"}}"
         ;;
       *)
         id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')

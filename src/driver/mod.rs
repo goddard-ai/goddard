@@ -44,17 +44,22 @@ pub(crate) fn start_remote(
                 .transpose()?,
         },
     };
-    let supports_steer = match client.request(session_id, runtime_id, command) {
-        Ok(waku_client::ResponsePayload::Started { supports_steer }) => supports_steer,
-        Ok(_) => anyhow::bail!("Goddard daemon returned an invalid start response"),
-        Err(error) => return Err(error),
-    };
+    let (supports_steer, supports_user_input_actions) =
+        match client.request(session_id, runtime_id, command) {
+            Ok(waku_client::ResponsePayload::Started {
+                supports_steer,
+                supports_user_input_actions,
+            }) => (supports_steer, supports_user_input_actions),
+            Ok(_) => anyhow::bail!("Goddard daemon returned an invalid start response"),
+            Err(error) => return Err(error),
+        };
     connect_remote(
         daemon,
         client,
         session_id,
         runtime_id,
         supports_steer,
+        supports_user_input_actions,
         None,
         events,
     )
@@ -66,6 +71,7 @@ pub(crate) fn attach_remote(
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
     supports_steer: bool,
+    supports_user_input_actions: bool,
     replay_cursor: Option<RuntimeEventCursor>,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
@@ -75,6 +81,7 @@ pub(crate) fn attach_remote(
         session_id,
         runtime_id,
         supports_steer,
+        supports_user_input_actions,
         replay_cursor,
         events,
     )
@@ -86,6 +93,7 @@ fn connect_remote(
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
     supports_steer: bool,
+    supports_user_input_actions: bool,
     replay_cursor: Option<RuntimeEventCursor>,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
@@ -211,6 +219,7 @@ fn connect_remote(
         session_id,
         runtime_id,
         supports_steer,
+        supports_user_input_actions,
         events,
         closed,
         shutdown,
@@ -222,6 +231,7 @@ struct RemoteDriverControl {
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
     supports_steer: bool,
+    supports_user_input_actions: bool,
     events: DriverEventSender,
     closed: Arc<AtomicBool>,
     shutdown: Sender<()>,
@@ -357,6 +367,21 @@ impl DriverControl for RemoteDriverControl {
             request_id,
             answers,
         });
+    }
+
+    fn supports_user_input_actions(&self) -> bool {
+        self.supports_user_input_actions
+    }
+
+    fn clarify_user_input(&self, request_id: String, content: String) {
+        self.notify(waku_client::Command::ClarifyUserInput {
+            request_id,
+            content,
+        });
+    }
+
+    fn cancel_user_input(&self, request_id: String) {
+        self.notify(waku_client::Command::CancelUserInput { request_id });
     }
 
     fn goal(&self, operation: waku_protocol::model::GoalOperation) {

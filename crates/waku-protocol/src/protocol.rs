@@ -148,6 +148,19 @@ pub enum Command {
         request_id: String,
         answers: Vec<UserInputAnswer>,
     },
+    /// Settle a pending user-input request with free-form clarification
+    /// instead of structured answers — the "let me explain" path, after
+    /// which the provider re-decides the question. Providers without the
+    /// notion ignore it; the UI only offers it when the attach response
+    /// advertises user-input actions.
+    ClarifyUserInput {
+        request_id: String,
+        content: String,
+    },
+    /// Dismiss a pending user-input request without answering.
+    CancelUserInput {
+        request_id: String,
+    },
     /// Ask the live provider runtime to read or mutate its persisted thread
     /// goal. Fire-and-forget: the outcome arrives as a `goalUpdated` driver
     /// event, or an `error` event when the provider refuses.
@@ -541,9 +554,16 @@ pub enum ResponsePayload {
     SessionRuntime {
         runtime_id: Option<Uuid>,
         supports_steer: bool,
+        /// The transport can settle a user-input request without structured
+        /// answers — clarify and dismiss are both offered on this bit.
+        /// Absent on older daemons, where the card stays answer-only.
+        #[serde(default)]
+        supports_user_input_actions: bool,
     },
     Started {
         supports_steer: bool,
+        #[serde(default)]
+        supports_user_input_actions: bool,
     },
     OptionsApplied {
         applied: bool,

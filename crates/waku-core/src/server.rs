@@ -933,6 +933,8 @@ fn command_targets_runtime(command: &Command) -> bool {
             | Command::StopBackgroundWork { .. }
             | Command::Respond { .. }
             | Command::RespondUserInput { .. }
+            | Command::ClarifyUserInput { .. }
+            | Command::CancelUserInput { .. }
             | Command::RunComputerTool { .. }
             | Command::RejectComputerTool { .. }
             | Command::ApplyOptions { .. }
@@ -1277,11 +1279,13 @@ mod tests {
                     events.send(WireDriverEvent::new("connected", json!({})))?;
                     Ok(ResponsePayload::Started {
                         supports_steer: true,
+                        supports_user_input_actions: false,
                     })
                 }
                 Command::AttachSession => Ok(ResponsePayload::SessionRuntime {
                     runtime_id: self.runtimes.lock().get(&session_id).copied(),
                     supports_steer: true,
+                    supports_user_input_actions: false,
                 }),
                 Command::GetSettings => Ok(ResponsePayload::Settings {
                     settings: DaemonSettings::default(),
@@ -2090,7 +2094,8 @@ mod tests {
         assert!(matches!(
             response,
             ResponsePayload::Started {
-                supports_steer: true
+                supports_steer: true,
+                ..
             }
         ));
         // Start can emit before a refreshed app discovers and subscribes to
@@ -2170,6 +2175,7 @@ mod tests {
             ResponsePayload::SessionRuntime {
                 runtime_id: Some(attached),
                 supports_steer: true,
+                ..
             } if attached == runtime_id
         ));
         let late_events = late.subscribe(session_id, runtime_id);
@@ -2209,6 +2215,7 @@ mod tests {
             ResponsePayload::SessionRuntime {
                 runtime_id: None,
                 supports_steer: true,
+                ..
             }
         ));
         let stale_events = after_close.subscribe(session_id, runtime_id);
@@ -2303,6 +2310,7 @@ mod tests {
             ResponsePayload::SessionRuntime {
                 runtime_id: Some(attached),
                 supports_steer: true,
+                ..
             } if attached == runtime_id
         ));
 
@@ -2782,6 +2790,7 @@ mod tests {
                     }
                     return Ok(ResponsePayload::Started {
                         supports_steer: true,
+                        supports_user_input_actions: false,
                     });
                 }
                 Command::Prompt { .. } => "prompt",

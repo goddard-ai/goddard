@@ -3003,6 +3003,66 @@ impl Waku {
         cx.notify();
     }
 
+    /// Settle the pending questions with the typed clarification — the
+    /// provider reads it as "let me explain" and re-decides rather than
+    /// recording an answer. Only offered where the transport supports
+    /// user-input actions; the button itself gates on non-empty text.
+    pub(super) fn clarify_user_input(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            return;
+        };
+        let Some(content) = runtime
+            .pending_user_input
+            .as_ref()
+            .and_then(|pending| {
+                pending
+                    .current_question()
+                    .and_then(|question| pending.custom_answers.get(&question.id))
+            })
+            .cloned()
+            .filter(|content| !content.trim().is_empty())
+        else {
+            return;
+        };
+        let Some(pending) = runtime.pending_user_input.take() else {
+            return;
+        };
+        runtime
+            .driver
+            .clarify_user_input(pending.request_id, content);
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.status = SessionStatus::Working;
+        }
+        self.user_input_answer
+            .update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+    }
+
+    /// Dismiss the pending questions without answering. The provider stops
+    /// waiting on them; the card is gone either way, so a transport that
+    /// ignores the command leaves no dead UI.
+    pub(super) fn dismiss_user_input(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            return;
+        };
+        let Some(pending) = runtime.pending_user_input.take() else {
+            return;
+        };
+        runtime.driver.cancel_user_input(pending.request_id);
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.status = SessionStatus::Working;
+        }
+        self.user_input_answer
+            .update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+    }
+
     pub(super) fn respond_computer_permission(
         &mut self,
         decision: &'static str,

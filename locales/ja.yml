@@ -884,6 +884,8 @@ user_input.other_placeholder: 別の回答を入力
 user_input.back: 戻る
 user_input.next: 次へ
 user_input.submit: 送信
+user_input.clarify: 説明する
+user_input.dismiss: 閉じる
 user_input.progress: "%{current} / %{total}"
 composer.preparing_task: タスクを準備中…
 composer.queue_followup: フォローアップとしてキューに追加（⏎）

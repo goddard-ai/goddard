@@ -864,6 +864,8 @@ user_input.other_placeholder: 输入其他回答
 user_input.back: 上一步
 user_input.next: 下一步
 user_input.submit: 提交
+user_input.clarify: 澄清
+user_input.dismiss: 忽略
 user_input.progress: "%{current} / %{total}"
 composer.preparing_task: 正在准备任务…
 composer.queue_followup: 排队为后续消息（⏎）
