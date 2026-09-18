@@ -1,0 +1,1 @@
+- Render backticks glued to shortcut keycaps as literal keycaps instead of breaking inline code

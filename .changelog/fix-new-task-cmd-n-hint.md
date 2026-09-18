@@ -1,0 +1,1 @@
+- Restore the ⌘N hint on New Task surfaces

@@ -1,0 +1,1 @@
+- Restore the surface-entrance fade without its cutout drop shadow, and reveal menus and modals opaque instead of fading them in

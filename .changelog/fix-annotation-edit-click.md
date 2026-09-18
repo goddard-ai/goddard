@@ -1,0 +1,1 @@
+- Edit the annotation under an ⌥-click instead of stacking a new one on top

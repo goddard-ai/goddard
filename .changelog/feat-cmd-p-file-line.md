@@ -1,0 +1,1 @@
+- Jump to file:line[:column] straight from the ⌘P finder

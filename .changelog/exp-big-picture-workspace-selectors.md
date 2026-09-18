@@ -1,0 +1,1 @@
+- Mount the workspace selectors under the Big Picture composer

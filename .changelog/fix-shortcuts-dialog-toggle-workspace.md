@@ -1,0 +1,1 @@
+- Drop the unbound Toggle Workspace row from the shortcuts dialog

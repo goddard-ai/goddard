@@ -1,0 +1,1 @@
+- Dedicate ⌘T to a new terminal rooted in the current context — the on-screen terminal's directory, the selected session's workspace, or ~ — and bind ⌘⇧N to the workspace toggle on the new task page

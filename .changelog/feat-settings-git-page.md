@@ -1,0 +1,1 @@
+- Move worktree and branch settings into a dedicated Settings → Git page

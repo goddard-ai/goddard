@@ -1,0 +1,1 @@
+- Use the session's display title when dragging it in the sidebar

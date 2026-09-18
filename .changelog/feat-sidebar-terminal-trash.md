@@ -1,0 +1,1 @@
+- Show a hover trash control on sidebar terminal rows

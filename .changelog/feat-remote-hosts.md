@@ -1,0 +1,1 @@
+- Connect to remote hosts over SSH — managed from daemon settings, badged in the sidebar, with askpass prompts and port forwarding — so their sessions, skills, and usage appear alongside local tasks, and the daemon installs and upgrades itself on the host

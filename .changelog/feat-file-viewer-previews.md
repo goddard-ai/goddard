@@ -1,0 +1,1 @@
+- Preview images and SVGs in the file viewer — refreshed from just-saved bytes — and jump to a line with ctrl-g
