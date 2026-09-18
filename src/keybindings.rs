@@ -381,6 +381,7 @@ mod tests {
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);
+            crate::app::init_drafts_keys(cx);
             crate::app::init_shortcuts_dialog_keys(cx);
             crate::terminal::init_command_bar_keys(cx);
             crate::bind_keys(cx);

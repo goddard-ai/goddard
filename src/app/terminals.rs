@@ -647,9 +647,10 @@ impl Waku {
             self.restore_right_panel_state(detached, cx);
         }
         self.pending_session_activation = None;
-        // A terminal claims the main area too: an open Projects page folds,
-        // keeping its state for the next visit.
+        // A terminal claims the main area too: open pages fold, keeping
+        // their state for the next visit.
         self.projects_page = None;
+        self.drafts_page = false;
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);

@@ -4253,6 +4253,7 @@ impl Waku {
                         .children(self.render_model_traits_control(cx))
                         .children(self.render_agent_preset_control(cx))
                         .child(self.render_access_control(cx))
+                        .children(self.render_drafts_count_button(cx))
                         .children(self.render_goal_control(cx))
                         .child(div().flex_1())
                         .child(match submit_action {

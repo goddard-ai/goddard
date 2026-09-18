@@ -593,6 +593,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_fps_counter_action))
             .on_action(cx.listener(Self::navigate_back_action))
             .on_action(cx.listener(Self::navigate_forward_action))
+            .on_action(cx.listener(Self::undo_draft_use_action))
             .on_action(cx.listener(Self::go_to_next_unread_completion_action))
             .on_action(cx.listener(Self::mark_session_unread_action))
             .on_action(cx.listener(Self::mark_unread_and_go_to_next_idle_action))
@@ -710,6 +711,7 @@ impl Render for Waku {
                             && self.selected_terminal.is_none()
                             && self.projects_page.is_none()
                             && !self.notifications.open
+                            && !self.drafts_page
                             && !agy_surface,
                         |element| {
                             element
@@ -742,6 +744,8 @@ impl Render for Waku {
                                 self.chat_viewport_width(window),
                                 cx,
                             )
+                        } else if self.drafts_page {
+                            self.render_drafts_page(cx)
                         } else if projects_page.is_some() {
                             self.render_projects_page(window, cx)
                         } else if self.notifications.open {
@@ -769,6 +773,7 @@ impl Render for Waku {
                             && self.selected_terminal.is_none()
                             && self.projects_page.is_none()
                             && !self.notifications.open
+                            && !self.drafts_page
                             && !agy_surface,
                         |element| {
                             if self.big_picture.is_open() {

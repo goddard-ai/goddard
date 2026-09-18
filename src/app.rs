@@ -30,6 +30,7 @@ use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::git_branch::BranchSnapshot;
 use crate::input::{
     ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerTextPaste, InputEvent, TextInput,
+    Undo,
 };
 use crate::md;
 use crate::model::{
@@ -80,18 +81,18 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    CycleReasoningEffort, DismissInbox, DismissProjectsLayer, EffortCycleDirection,
-    ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer, FocusProjectsFilter,
-    FocusTerminal, GoToNextTurn,
-    GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
-    NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
-    OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, ReplaceAllMatches,
-    RunProjectScript, SaveFile, SelectAllProjectsRows, SelectFavoriteModel, SelectFirstProject,
-    SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
-    SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
-    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
+    CycleReasoningEffort, DismissDraftsLayer, DismissInbox, DismissProjectsLayer,
+    EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
+    FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
+    MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
+    NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
+    OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
+    SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
+    SelectProjectsTab, SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward,
+    SwitchTaskBackward, SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker,
+    ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder, ToggleFindCaseSensitive,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage,
+    ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
     ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
     ToggleWorkspace,
 };
@@ -1245,6 +1246,7 @@ enum NavigationLocation {
     Task(Uuid),
     Terminal(Uuid),
     ProjectsPage(Uuid),
+    DraftsPage,
 }
 
 #[derive(Debug, Default)]
@@ -1367,6 +1369,7 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
     match location {
         NavigationLocation::Task(id) => Some(PersistedNavigationLocation::Task(id)),
         NavigationLocation::ProjectsPage(id) => Some(PersistedNavigationLocation::ProjectsPage(id)),
+        NavigationLocation::DraftsPage => Some(PersistedNavigationLocation::DraftsPage),
         NavigationLocation::Terminal(_) => None,
     }
 }
@@ -2453,6 +2456,26 @@ pub struct Waku {
     last_projects_page_project: Option<Uuid>,
     /// Per-project page state kept across page toggles.
     projects_page_states: HashMap<Uuid, projects::ProjectsPageState>,
+    /// The Drafts page claiming the main column, like `projects_page`.
+    drafts_page: bool,
+    /// Drafts whose "Use" is still undoable: each was consumed from the
+    /// list, and ⌘Z puts it back and returns to the page.
+    draft_use_undos: Vec<saved_drafts::DraftUseUndo>,
+    /// Filter query over the Drafts page's cards.
+    drafts_search: Entity<TextInput>,
+    /// The page's shown/hidden switch — hidden drafts only appear under
+    /// the Hidden view.
+    drafts_show_hidden: bool,
+    /// Virtualized list over the filtered draft cards.
+    drafts_list_state: ListState,
+    drafts_scrollbar: Rc<ScrollbarState>,
+    /// The draft ids the current filter leaves visible, newest first —
+    /// refreshed once per frame so card builders read only this.
+    drafts_rows: RefCell<Vec<Uuid>>,
+    /// The card in inline-edit mode; its field lives in
+    /// `drafts_edit_input`.
+    drafts_editing: Option<Uuid>,
+    drafts_edit_input: Entity<TextInput>,
     /// The Settings → Git page's project selection — which repo's worktrees
     /// and branches the page lists.
     settings_git_project: Option<Uuid>,
@@ -2712,6 +2735,7 @@ mod right_panel;
 mod routing;
 mod run_script;
 mod runtime;
+mod saved_drafts;
 mod sessions;
 mod settings;
 mod shortcuts_dialog;
@@ -2744,6 +2768,7 @@ pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
+pub use saved_drafts::init as init_drafts_keys;
 pub use settings::init as init_settings_keys;
 pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -3575,6 +3600,20 @@ impl Waku {
                 .accessibility_label(tr!("skills.search"))
                 .placeholder(tr!("skills.search"))
         });
+        let drafts_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("drafts.search"))
+                .placeholder(tr!("drafts.search"))
+        });
+        let drafts_edit_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(12)
+                .accessibility_label(tr!("a11y.draft_edit"))
+                .placeholder(tr!("drafts.edit_placeholder"))
+        });
         let session_rename_input =
             cx.new(|cx| TextInput::new(window, cx).accessibility_label(tr!("a11y.task_name")));
         let provider_path_input = cx.new(|cx| {
@@ -4371,6 +4410,12 @@ impl Waku {
                 }
             })
             .detach();
+            cx.subscribe(&drafts_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
             cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -4955,6 +5000,15 @@ impl Waku {
                 projects_page: None,
                 last_projects_page_project: None,
                 projects_page_states: HashMap::new(),
+                drafts_page: false,
+                draft_use_undos: Vec::new(),
+                drafts_search,
+                drafts_show_hidden: false,
+                drafts_list_state: ListState::new(0, ListAlignment::Top, px(640.0)),
+                drafts_scrollbar: ScrollbarState::new(),
+                drafts_rows: RefCell::new(Vec::new()),
+                drafts_editing: None,
+                drafts_edit_input,
                 settings_git_project: None,
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),

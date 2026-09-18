@@ -182,6 +182,10 @@ command_palette.open_on_github:
   en: Open on GitHub
 command_palette.land_changes:
   en: Land changes
+command_palette.create_draft:
+  en: Create draft
+command_palette.view_drafts:
+  en: View drafts
 command_palette.new_custom_command:
   en: New custom command…
 command_palette.choose_model:
@@ -234,6 +238,60 @@ command_palette.agent:
   en: Agent
 command_palette.no_results:
   en: No matching tasks or commands
+drafts.title:
+  en: Drafts
+drafts.search:
+  en: Search drafts
+drafts.view_drafts:
+  en: Drafts
+drafts.view_hidden:
+  en: Hidden
+drafts.view_tooltip:
+  en: View drafts
+drafts.new_task_in:
+  en: New task in %{project}
+drafts.missing_task:
+  en: Deleted task
+drafts.missing_project:
+  en: Deleted project
+drafts.missing_target:
+  en: The task this draft was written in no longer exists
+drafts.no_composer:
+  en: No composer to save a draft from
+drafts.nothing_to_save:
+  en: The composer is empty — nothing to save
+drafts.saved_toast:
+  en: Saved to drafts
+drafts.attachments:
+  en: "%{count} attachments"
+drafts.edit_placeholder:
+  en: Edit draft
+drafts.edit_cancel:
+  en: Cancel
+drafts.edit_save:
+  en: Save
+drafts.menu.edit:
+  en: Edit
+drafts.menu.hide:
+  en: Hide
+drafts.menu.unhide:
+  en: Unhide
+drafts.menu.use:
+  en: Use
+drafts.menu.delete:
+  en: Delete
+drafts.empty_title:
+  en: No drafts
+drafts.empty_hint:
+  en: Use “Create draft” to park the composer’s contents here
+drafts.empty_hidden:
+  en: No hidden drafts
+drafts.empty_hidden_hint:
+  en: Hidden drafts stay parked here until you unhide or delete them
+drafts.no_match:
+  en: No matching drafts
+drafts.no_match_hint:
+  en: Try a different search
 command_palette.no_results_hint:
   en: Try a task title, message, project, setting, or command
 command_palette.no_matching_providers:
@@ -875,6 +933,8 @@ a11y.answer:
   en: Your answer
 a11y.comment:
   en: Comment
+a11y.draft_edit:
+  en: Draft text
 
 common.checking:
   en: Checking…

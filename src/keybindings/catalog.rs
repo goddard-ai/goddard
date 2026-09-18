@@ -255,6 +255,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "projects.select_all", action: || Box::new(crate::SelectAllProjectsRows), title_key: "menu.select_all", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.focus_filter", action: || Box::new(crate::FocusProjectsFilter), title_key: "shortcuts.find", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.dismiss_layer", action: || Box::new(crate::DismissProjectsLayer), title_key: "shortcuts.dismiss", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "drafts.dismiss_layer", action: || Box::new(crate::DismissDraftsLayer), title_key: "shortcuts.dismiss", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.tab.1", action: || Box::new(crate::SelectProjectsTab { index: 0 }), title_key: "keybind.command.projects_tab", title_index: Some(0), category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.tab.2", action: || Box::new(crate::SelectProjectsTab { index: 1 }), title_key: "keybind.command.projects_tab", title_index: Some(1), category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "model.favorite.1", action: || Box::new(crate::SelectFavoriteModel { index: 0 }), title_key: "keybind.command.favorite_model", title_index: Some(0), category: C::Workspace, editability: EDITABLE, builtin_label: None },
@@ -499,6 +500,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_skills_keys ================================================================
     e("menu.select_next", All, "down", SkillsSearch),
     e("menu.select_previous", All, "up", SkillsSearch),
+    // === app::init_drafts_keys ================================================================
+    e("text.undo", All, "secondary-z", Waku),
+    e("drafts.dismiss_layer", All, "escape", DraftsPage),
     // === app::init_shortcuts_dialog_keys ======================================================
     e("dialog.shortcuts.dismiss", All, "escape", ShortcutsDialog),
     // === terminal::init_command_bar_keys ======================================================
@@ -687,6 +691,7 @@ mod ctx {
     pub const ProjectsPage: &str = "ProjectsPage";
     pub const GitSettingsPage: &str = "GitSettingsPage";
     pub const InboxPage: &str = "InboxPage";
+    pub const DraftsPage: &str = "DraftsPage";
     pub const WakuNotTerminal: &str = "Waku && !Terminal";
     /// Where the composer session is reachable without covering the
     /// surfaces that own their own chords: the terminal (pty input) and

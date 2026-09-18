@@ -179,6 +179,8 @@ enum PaletteAction {
     ResumeProviderSession(waku_client::DaemonKey, ProviderSessionSummary),
     OpenProject,
     FocusComposer,
+    CreateDraft,
+    ViewDrafts,
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
     ToggleWorkspace,
@@ -1555,6 +1557,24 @@ impl Waku {
             Some(ShortcutHint::action(&FocusComposer)),
             PaletteAction::FocusComposer,
             "focus composer prompt input message",
+            next(),
+        ));
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("command_palette.create_draft"),
+            "icons/compose.svg",
+            None,
+            PaletteAction::CreateDraft,
+            "create save draft park stash composer message text",
+            next(),
+        ));
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("command_palette.view_drafts"),
+            "icons/compose.svg",
+            None,
+            PaletteAction::ViewDrafts,
+            "view open drafts list page saved",
             next(),
         ));
         for identifier in PaletteIdentifier::ALL {
@@ -3015,6 +3035,8 @@ impl Waku {
             PaletteAction::NewTaskInSameWorktree => self.new_task_in_same_worktree(window, cx),
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
+            PaletteAction::CreateDraft => self.create_saved_draft(window, cx),
+            PaletteAction::ViewDrafts => self.open_drafts_page(window, cx),
             PaletteAction::CopyIdentifier(identifier) => {
                 if let Some(value) = identifier.value(self.selected_session()) {
                     cx.write_to_clipboard(ClipboardItem::new_string(value));

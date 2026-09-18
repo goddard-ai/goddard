@@ -343,8 +343,9 @@ impl Waku {
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
-        // Projects page keeps its per-project state for the next visit.
+        // Projects and Drafts pages keep their state for the next visit.
         self.projects_page = None;
+        self.drafts_page = false;
         if let Some((
             project_id,
             provider,
@@ -526,6 +527,7 @@ impl Waku {
             PersistedNavigationLocation::ProjectsPage(id) => {
                 project_exists(&id).then_some(NavigationLocation::ProjectsPage(id))
             }
+            PersistedNavigationLocation::DraftsPage => Some(NavigationLocation::DraftsPage),
         };
         self.session_navigation.back = self
             .state
@@ -1792,10 +1794,13 @@ impl Waku {
     }
 
     /// Where the main column's back/forward history currently sits — the
-    /// Projects page while it claims the column, then the selected task's
-    /// transcript, then the full-width terminal that parked it.
+    /// Projects and Drafts pages while one claims the column, then the
+    /// selected task's transcript, then the full-width terminal that
+    /// parked it.
     pub(super) fn navigation_location(&self) -> Option<NavigationLocation> {
-        if let Some(project_id) = self.projects_page {
+        if self.drafts_page {
+            Some(NavigationLocation::DraftsPage)
+        } else if let Some(project_id) = self.projects_page {
             Some(NavigationLocation::ProjectsPage(project_id))
         } else if let Some(session_id) = self.state.selected_session {
             Some(NavigationLocation::Task(session_id))
@@ -1863,6 +1868,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_projects_page(project_id, window, cx);
             }
+            Some(NavigationLocation::DraftsPage) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_drafts_page(window, cx);
+            }
             None => {}
         }
     }
@@ -1903,6 +1912,10 @@ impl Waku {
             Some(NavigationLocation::ProjectsPage(project_id)) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_projects_page(project_id, window, cx);
+            }
+            Some(NavigationLocation::DraftsPage) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_drafts_page(window, cx);
             }
             None => {}
         }

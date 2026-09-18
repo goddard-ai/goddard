@@ -2209,6 +2209,9 @@ impl TextInput {
         }
         let Some((content, selection, selection_reversed)) = self.history.undo(&self.content)
         else {
+            // Nothing left to undo here — let a surrounding handler take it
+            // (the workspace restores a used draft on ⌘Z).
+            cx.propagate();
             return;
         };
         self.apply_history_step(content, selection, selection_reversed, cx);

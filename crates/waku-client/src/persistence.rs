@@ -468,6 +468,28 @@ fn collect_composer_draft_changes(
     }
 }
 
+/// A draft the user explicitly parked out of a composer, listed on the
+/// Drafts page until it is used or deleted. Unlike the automatic
+/// per-composer draft — which belongs to a session's slot and silently
+/// reappears there — a saved draft is named user data with its own
+/// lifetime, so it is app-local like the rest of `AppState`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SavedDraft {
+    pub id: Uuid,
+    /// The composer slot the text was written in: a started task, or a
+    /// project's new-task draft.
+    pub target: ComposerDraftTarget,
+    /// The owning task's project — the card's context label and the
+    /// fallback landing spot when `target`'s task no longer exists.
+    pub project_id: Uuid,
+    pub draft: ComposerDraft,
+    pub created_at: u64,
+    /// Hidden drafts leave the default list and the composer's count badge;
+    /// the page's Hidden view is the only way back to them.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub hidden: bool,
+}
+
 /// Last observed main-window frame in logical pixels. GPUI window bounds are
 /// relative to the display the window sits on, so the frame only means
 /// something together with `display` — the stable display UUID (Zed persists
@@ -494,6 +516,7 @@ pub struct PersistedWindowState {
 pub enum PersistedNavigationLocation {
     Task(Uuid),
     ProjectsPage(Uuid),
+    DraftsPage,
 }
 
 /// A virtualized list's logical scroll position — row index plus the pixel
@@ -902,6 +925,9 @@ struct AppState {
     right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fullscreen_surface: Option<PersistedFullscreenSurface>,
+    /// Drafts parked from a composer via "Create draft", newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    saved_drafts: Vec<SavedDraft>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1093,6 +1119,10 @@ pub struct PersistedState {
     pub right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fullscreen_surface: Option<PersistedFullscreenSurface>,
+    /// Drafts parked from a composer via "Create draft", newest first.
+    /// App-local — they persist through `AppState`, not the daemon.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_drafts: Vec<SavedDraft>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
     /// Experimental opt-in gating Computer Use entirely. Daemon-owned;
@@ -1225,6 +1255,7 @@ impl PersistedState {
             settings_page: None,
             right_panel_sessions: HashMap::new(),
             fullscreen_surface: None,
+            saved_drafts: Vec::new(),
             computer_use_enabled: false,
             computer_use_experiment_enabled: default_experiment_enabled(),
             computer_use_allowed_apps: Vec::new(),
@@ -1528,6 +1559,7 @@ impl PersistedState {
             settings_page: self.settings_page,
             right_panel_sessions: self.right_panel_sessions.clone(),
             fullscreen_surface: self.fullscreen_surface.clone(),
+            saved_drafts: self.saved_drafts.clone(),
         }
     }
 
@@ -1610,6 +1642,7 @@ impl PersistedState {
         self.settings_page = app_state.settings_page;
         self.right_panel_sessions = app_state.right_panel_sessions;
         self.fullscreen_surface = app_state.fullscreen_surface;
+        self.saved_drafts = app_state.saved_drafts;
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {
