@@ -198,8 +198,9 @@ fn flatten_branch_rows(
 }
 
 /// macOS list selection applied to `selection`: plain clicks isolate the row
-/// and move the anchor, ⌘ toggles in place, ⇧ ranges from the anchor through
-/// `ordered` — the tab's filtered row order.
+/// and move the anchor — or empty the selection when the row is all of it —
+/// ⌘ toggles in place, ⇧ ranges from the anchor through `ordered`, the
+/// tab's filtered row order.
 fn apply_row_select(
     selection: &mut HashSet<ProjectsRowKey>,
     anchor: &mut Option<ProjectsRowKey>,
@@ -230,8 +231,11 @@ fn apply_row_select(
         }
         *anchor = Some(key);
     } else {
+        let deselect_only = selection.len() == 1 && selection.contains(&key);
         selection.clear();
-        selection.insert(key.clone());
+        if !deselect_only {
+            selection.insert(key.clone());
+        }
         *anchor = Some(key);
     }
 }
@@ -3507,5 +3511,59 @@ mod tests {
             modifiers(true, false),
         );
         assert_eq!(selection, HashSet::from([ordered[4].clone()]));
+    }
+
+    #[test]
+    fn row_select_deselects_the_only_selected_row() {
+        let ordered: Vec<ProjectsRowKey> = (0..3)
+            .map(|index| ProjectsRowKey::branch(None, &format!("b{index}")))
+            .collect();
+        let mut selection = HashSet::new();
+        let mut anchor = None;
+
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, false),
+        );
+        assert_eq!(selection, HashSet::from([ordered[1].clone()]));
+
+        // Clicking the only selected row again clears the selection but
+        // keeps the anchor — ⇧ from it still ranges through the list.
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, false),
+        );
+        assert!(selection.is_empty());
+        assert_eq!(anchor, Some(ordered[1].clone()));
+
+        // With a multi-row selection, a plain click still isolates.
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[0].clone(),
+            modifiers(false, false),
+        );
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, true),
+        );
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, false),
+        );
+        assert_eq!(selection, HashSet::from([ordered[1].clone()]));
     }
 }
