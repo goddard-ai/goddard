@@ -416,6 +416,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # upload-artifact keeps each file's path below the common ancestor of
+      # the upload's paths. Every job but macOS uploads only under
+      # target/release/ and flattens cleanly; macOS spans dist/ and
+      # target/release/, so its files download under those directories.
+      # Flatten to the root the globs and appcast scripts below expect.
+      - name: Flatten artifact directories
+        run: find artifacts -mindepth 2 -type f -exec mv -f {} artifacts/ \;
+
       - name: Write the version pointers
         env:
           VERSION: ${{ needs.version.outputs.version }}
