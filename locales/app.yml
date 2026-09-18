@@ -156,6 +156,8 @@ command_palette.collapse_sidebar_groups:
   en: Collapse all sidebar groups
 command_palette.go_to_next_unread_completion:
   en: Go to next unread completion
+command_palette.mark_all_tasks_read:
+  en: Mark all tasks as read
 command_palette.show_sidebar:
   en: Show sidebar
 command_palette.hide_sidebar:

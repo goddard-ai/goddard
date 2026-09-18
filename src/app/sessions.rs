@@ -1868,6 +1868,17 @@ impl Waku {
         cx.notify();
     }
 
+    /// Command palette "Mark all tasks as read": drains the unseen-completion
+    /// set in one pass — the same stamps selection clears one row at a time.
+    pub(super) fn mark_all_sessions_read(&mut self, cx: &mut Context<Self>) {
+        if self.state.unseen_completions.is_empty() {
+            return;
+        }
+        self.state.unseen_completions.clear();
+        self.save();
+        cx.notify();
+    }
+
     /// ⌘⇧D: mark the viewed task unread — it stays a GoToNextUnreadCompletion
     /// candidate for a later ⌘D — then move to the next non-busy session
     /// below its row, wrapping to the top. The jump is positional rather
