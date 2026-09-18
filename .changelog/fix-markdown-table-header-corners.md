@@ -1,1 +1,0 @@
-- Round markdown table header corners to match the frame

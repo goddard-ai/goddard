@@ -1,1 +1,0 @@
-- `/land` shows a spinner toast while it runs and resolves it to the outcome, instead of giving no feedback until the land finished

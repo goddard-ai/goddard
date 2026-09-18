@@ -1,1 +1,0 @@
-- Detect rebase state directories in the git panel instead of relying on a stale REBASE_HEAD

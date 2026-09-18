@@ -1,1 +1,0 @@
-- Diff highlights and the scrollbar in the file-diff hover cards no longer paint past the card's rounded bottom corners

@@ -1,1 +1,0 @@
-- Rename the product to Goddard and migrate legacy Waku state

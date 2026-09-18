@@ -1,1 +1,0 @@
-- Archiving a task whose turn is still running now asks for confirmation first instead of silently stopping the turn
