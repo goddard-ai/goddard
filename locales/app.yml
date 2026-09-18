@@ -3494,7 +3494,7 @@ friends.open_chat:
 friends.show_in_finder:
   en: Show in Finder
 friends.transfers_active:
-  en: "{count} transfer(s) in progress — open Friends"
+  en: "%{count} transfer(s) in progress — open Friends"
 friends.quarantined_title:
   en: Quarantined files
 friends.quarantined_hint:
@@ -3502,7 +3502,7 @@ friends.quarantined_hint:
 friends.trust:
   en: Trust files
 friends.command_failed:
-  en: "Friend command failed: {error}"
+  en: "Friend command failed: %{error}"
 keybind.category.projects:
   en: Projects
 keybind.category.git:
