@@ -2284,8 +2284,10 @@ sync.ahead_one:
   en: 1 commit ahead
 sync.ahead_many:
   en: "%{count} commits ahead"
-sync.action:
-  en: Sync changes
+sync.pull:
+  en: Pull changes
+sync.push:
+  en: Push changes
 sync.command_hint:
   en: "Runs %{command} in a terminal"
 

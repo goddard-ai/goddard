@@ -5052,29 +5052,55 @@ impl Waku {
         let upstream = self
             .branch_snapshot_for_workspace(&workspace_path, cx)?
             .upstream
-            .filter(|upstream| upstream.behind > 0)?;
+            .filter(|upstream| upstream.behind > 0 || upstream.ahead > 0)?;
         let theme = Theme::current(cx);
-        let script = if self.state.sync_with_merge {
-            "git pull --no-rebase"
+        // `-c core.editor/sequence.editor` rather than an env prefix: the
+        // script is sourced by the user's shell, and `VAR=x cmd` is not
+        // portable to PowerShell, cmd, nushell, or older fish.
+        let pull_script = if self.state.sync_with_merge {
+            "git -c core.editor=true -c sequence.editor=true pull --no-rebase"
         } else {
-            "git pull --rebase"
+            "git -c core.editor=true -c sequence.editor=true pull --rebase"
         };
-        let mut summary = if upstream.behind == 1 {
-            tr!("sync.behind_one", upstream = upstream.name)
+        let behind = upstream.behind > 0;
+        let (script, action, action_icon, strip_icon, command_icon) = if behind {
+            (
+                pull_script,
+                tr!("sync.pull"),
+                "icons/rotate-cw.svg",
+                "icons/download.svg",
+                CustomCommandIcon::Refresh,
+            )
         } else {
-            tr!(
+            (
+                "git push",
+                tr!("sync.push"),
+                "icons/cloud-upload.svg",
+                "icons/cloud-upload.svg",
+                CustomCommandIcon::CloudUpload,
+            )
+        };
+        let mut summary = String::new();
+        if upstream.behind == 1 {
+            summary = tr!("sync.behind_one", upstream = upstream.name);
+        } else if upstream.behind > 1 {
+            summary = tr!(
                 "sync.behind_many",
                 count = upstream.behind,
                 upstream = upstream.name
-            )
-        };
+            );
+        }
         if upstream.ahead > 0 {
             let ahead = if upstream.ahead == 1 {
                 tr!("sync.ahead_one")
             } else {
                 tr!("sync.ahead_many", count = upstream.ahead)
             };
-            summary = format!("{summary} · {ahead}");
+            summary = if summary.is_empty() {
+                ahead
+            } else {
+                format!("{summary} · {ahead}")
+            };
         }
         let focus = self.transcript_control_focus("workspace-sync", cx);
         Some(
@@ -5087,7 +5113,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(icon("icons/download.svg", 12.0, theme.text_tertiary))
+                .child(icon(strip_icon, 12.0, theme.text_tertiary))
                 .child(
                     div()
                         .min_w_0()
@@ -5113,15 +5139,18 @@ impl Waku {
                         .bg(theme.overlay)
                         .hover(|element| element.bg(theme.overlay_strong))
                         .active(|element| element.opacity(0.8))
-                        .child(icon("icons/rotate-cw.svg", 11.0, theme.text_secondary))
-                        .child(tr!("sync.action"))
+                        .child(icon(action_icon, 11.0, theme.text_secondary))
+                        .child(action.clone())
                         .tooltip(Tooltip::text(tr!("sync.command_hint", command = script)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.sync_workspace(script, cx);
+                        .on_click(cx.listener({
+                            let action = action.clone();
+                            move |this, _, _, cx| {
+                                this.sync_workspace(script, action.clone(), command_icon, cx);
+                            }
                         }))
                         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                             if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.sync_workspace(script, cx);
+                                this.sync_workspace(script, action.clone(), command_icon, cx);
                                 cx.stop_propagation();
                             }
                         })),
@@ -5131,13 +5160,19 @@ impl Waku {
     }
 
     /// Run the checkout's sync command in a fresh terminal tab — the rebase
-    /// pull by default, the merge form when the setting says so. The tab
-    /// closes itself on success; a conflict or other failure stays open with
-    /// its output visible.
-    fn sync_workspace(&mut self, script: &'static str, cx: &mut Context<Self>) {
+    /// pull by default, the merge form when the setting says so, a push when
+    /// the checkout only leads upstream. The tab closes itself on success; a
+    /// conflict or other failure stays open with its output visible.
+    fn sync_workspace(
+        &mut self,
+        script: &'static str,
+        name: String,
+        icon: CustomCommandIcon,
+        cx: &mut Context<Self>,
+    ) {
         let mut command = CustomCommand::new(script.to_owned());
-        command.name = Some(tr!("sync.action"));
-        command.icon = CustomCommandIcon::Refresh;
+        command.name = Some(name);
+        command.icon = icon;
         command.close_on_success = true;
         self.run_custom_command(command, cx);
     }
