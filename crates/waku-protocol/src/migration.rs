@@ -16,7 +16,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::identity::{HOME_DIRECTORY_NAME, LEGACY_HOME_DIRECTORY_NAME};
+use crate::identity::{
+    DATA_DIRECTORY_NAME, HOME_DIRECTORY_NAME, LEGACY_DATA_DIRECTORY_NAME,
+    LEGACY_HOME_DIRECTORY_NAME,
+};
 
 /// In-flight file copies are named `.<item>.migrating-<pid>` beside their
 /// destination; older builds staged the whole tree under the same convention.
@@ -320,20 +323,33 @@ fn create_link(_target: &Path, _destination: &Path) -> io::Result<()> {
     ))
 }
 
+/// Directory names earlier builds could have staged beside `~/.goddard`.
+/// Only these are recognized in the home root, so an unrelated
+/// `.<item>.migrating-<pid>` entry another tool created is never touched
+/// outside our own tree.
+const SWEPT_SIBLING_NAMES: &[&str] = &[
+    HOME_DIRECTORY_NAME,
+    LEGACY_HOME_DIRECTORY_NAME,
+    DATA_DIRECTORY_NAME,
+    LEGACY_DATA_DIRECTORY_NAME,
+];
+
 /// Remove `.….migrating-<pid>` artifacts beside and inside `destination` whose
 /// owning process is gone. Earlier builds staged the entire copy in a sibling
 /// directory; current builds stage individual file copies — both use the same
-/// convention, so one sweep covers every era. A live pid's artifacts belong
-/// to a migrator that may still be running and are left alone.
+/// convention, so one sweep covers every era. The sibling sweep only accepts
+/// the recognized directory names above; inside `destination` itself any
+/// `.<item>.migrating-<pid>` entry is ours. A live pid's artifacts belong to
+/// a migrator that may still be running and are left alone.
 pub fn sweep_migration_artifacts(destination: &Path) {
     if let Some(parent) = destination.parent() {
-        sweep_directory(parent);
+        sweep_directory(parent, Some(SWEPT_SIBLING_NAMES));
     }
-    sweep_directory(destination);
+    sweep_directory(destination, None);
     let _ = fs::remove_file(destination.join(LEGACY_SENTINEL));
 }
 
-fn sweep_directory(directory: &Path) {
+fn sweep_directory(directory: &Path, allowed_items: Option<&[&str]>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
@@ -341,13 +357,13 @@ fn sweep_directory(directory: &Path) {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if is_migration_artifact(&name) {
+        if is_migration_artifact(&name, allowed_items) {
             remove_any(&entry.path());
         }
     }
 }
 
-fn is_migration_artifact(name: &str) -> bool {
+fn is_migration_artifact(name: &str, allowed_items: Option<&[&str]>) -> bool {
     if !name.starts_with('.') {
         return false;
     }
@@ -356,6 +372,16 @@ fn is_migration_artifact(name: &str) -> bool {
     };
     if item.is_empty() {
         return false;
+    }
+    // In directories we do not own, only names this family of builds could
+    // have produced count — anything else matching the pattern stays put.
+    // Compare bare names: the extracted item keeps the artifact's leading
+    // dot while the identity constants may or may not carry one.
+    if let Some(items) = allowed_items {
+        let bare = item.trim_start_matches('.');
+        if !items.iter().any(|known| known.trim_start_matches('.') == bare) {
+            return false;
+        }
     }
     let Ok(pid) = pid.parse::<u32>() else {
         return false;

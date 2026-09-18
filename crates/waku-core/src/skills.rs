@@ -478,7 +478,7 @@ mod tests {
         assert!(deploy.total_bytes > 0);
         assert!(deploy.modified_at.is_some());
         assert_eq!(deploy.installs.len(), 1);
-        assert_eq!(deploy.primary().source, SkillSource::Shared);
+        assert_eq!(deploy.primary().unwrap().source, SkillSource::Shared);
 
         let dormant = catalog.skills.iter().find(|s| s.name == "dormant").unwrap();
         assert!(!dormant.enabled);
@@ -534,7 +534,7 @@ mod tests {
         let skill = &catalog.skills[0];
         assert_eq!(skill.installs.len(), 3);
         assert_eq!(
-            skill.primary().source,
+            skill.primary().unwrap().source,
             SkillSource::Provider(ProviderKind::Codex)
         );
         assert_eq!(skill.sources_label(), "Codex · Cursor · OpenCode");

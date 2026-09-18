@@ -7,6 +7,7 @@ import type { SyncInProgress } from "./SyncInProgress";
  */
 export type LandOutcome = { "landed": { base: string, } } | { "alreadyLanded": { base: string, } } | { "conflict": { base: string, in_progress: SyncInProgress,
 /**
- * Working-tree paths still carrying conflict markers.
+ * Working-tree paths still carrying conflict markers. `[]` matches
+ * older writers that did not send the field.
  */
 files: Array<string>, } };

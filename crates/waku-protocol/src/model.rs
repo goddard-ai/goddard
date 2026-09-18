@@ -4741,7 +4741,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 15);
+        assert_eq!(ProviderKind::ALL.len(), 16);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

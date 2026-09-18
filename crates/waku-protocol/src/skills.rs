@@ -71,8 +71,11 @@ pub struct SkillEntry {
 }
 
 impl SkillEntry {
-    pub fn primary(&self) -> &SkillInstall {
-        &self.installs[0]
+    /// The install a row renders as its own. `None` when a payload carries
+    /// no installs — the daemon always emits at least one, but the wire type
+    /// does not enforce it.
+    pub fn primary(&self) -> Option<&SkillInstall> {
+        self.installs.first()
     }
 
     pub fn sources_label(&self) -> String {

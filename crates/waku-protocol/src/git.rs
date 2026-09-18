@@ -170,7 +170,9 @@ pub enum PullOutcome {
     /// The pull stopped on conflicts and an integration is still in progress.
     Conflict {
         in_progress: SyncInProgress,
-        /// Working-tree paths still carrying conflict markers.
+        /// Working-tree paths still carrying conflict markers. `[]` matches
+        /// older writers that did not send the field.
+        #[serde(default)]
         files: Vec<String>,
     },
 }
@@ -192,7 +194,9 @@ pub enum LandOutcome {
     Conflict {
         base: String,
         in_progress: SyncInProgress,
-        /// Working-tree paths still carrying conflict markers.
+        /// Working-tree paths still carrying conflict markers. `[]` matches
+        /// older writers that did not send the field.
+        #[serde(default)]
         files: Vec<String>,
     },
 }
