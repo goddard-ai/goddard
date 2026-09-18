@@ -44,23 +44,31 @@ pub fn conversation_id_for_cwd(cwd: &Path, seen_at: u64) -> Option<String> {
     let map: HashMap<String, String> = serde_json::from_str(&raw).ok()?;
     // The CLI keys the map by the cwd it was handed, which may be the
     // canonicalized path rather than the spelling the session stored
-    // (`/tmp` vs `/private/tmp` on macOS); try both.
-    let as_given = cwd.to_string_lossy().to_string();
-    let id = map
-        .get(&as_given)
-        .or_else(|| {
-            std::fs::canonicalize(cwd)
-                .ok()
-                .and_then(|canonical| map.get(&canonical.to_string_lossy().to_string()))
-        })?
-        .clone();
-    // A conversation still missing from the summaries db is new enough by
-    // definition; one present but unmodified since `seen_at` is stale.
-    match conversation_summary(&id) {
-        Some(summary) if summary.last_modified_unix + SEEN_AT_SLACK_SECS >= seen_at => Some(id),
-        None => Some(id),
-        _ => None,
+    // (`/tmp` vs `/private/tmp` on macOS). Both keys can exist with
+    // different conversations, so check each: a stale entry must not
+    // shadow a fresh one under the other spelling.
+    let mut keys = vec![cwd.to_string_lossy().to_string()];
+    if let Ok(canonical) = std::fs::canonicalize(cwd) {
+        let key = canonical.to_string_lossy().to_string();
+        if key != keys[0] {
+            keys.push(key);
+        }
     }
+    for key in keys {
+        let Some(id) = map.get(&key) else {
+            continue;
+        };
+        // A conversation still missing from the summaries db is new enough
+        // by definition; one present but unmodified since `seen_at` is stale.
+        match conversation_summary(id) {
+            Some(summary) if summary.last_modified_unix + SEEN_AT_SLACK_SECS >= seen_at => {
+                return Some(id.clone());
+            }
+            None => return Some(id.clone()),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// One row of `conversation_summaries`, normalized to what a session row
