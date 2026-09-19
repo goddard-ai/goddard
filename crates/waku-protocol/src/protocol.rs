@@ -275,6 +275,11 @@ pub enum Command {
         #[ts(type = "unknown")]
         state: Value,
         questions: BTreeMap<String, EvalQuestion>,
+        /// Which eval-driven feature made the call, recorded on the decision
+        /// log record. `None` — every caller before this field existed —
+        /// logs as a bare `"evaluate"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feature: Option<String>,
     },
     /// Route a new session's first prompt: evaluate the task, resolve the
     /// routing policy against `candidates`, and answer with the provider and

@@ -2027,6 +2027,17 @@ pub struct Waku {
     /// answers, which also covers "routing not supported yet".
     route_policy: Option<waku_protocol::routing::RoutePolicyView>,
     route_policy_pending: bool,
+    /// Turn-status-marker evaluations answered by the daemon, keyed by turn.
+    /// Runtime-only: the decision log is the durable record of these calls.
+    turn_status_markers: HashMap<Uuid, waku_protocol::eval::Evaluation>,
+    /// Turns that settled while their session was off screen, queued as
+    /// (turn, finish-summary) pairs per session until it is next opened.
+    pending_status_marker_turns: HashMap<Uuid, Vec<(Uuid, Option<String>)>>,
+    /// Turns with an evaluation in flight, so a queued drain cannot double-
+    /// request a turn whose answer is still outstanding.
+    status_marker_in_flight: HashSet<Uuid>,
+    status_marker_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
+    status_marker_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -2823,6 +2834,7 @@ mod settings;
 mod shortcuts_dialog;
 mod sidebar;
 mod skills_page;
+mod status_markers;
 mod streaming;
 mod sync_branch;
 mod task_switcher;
@@ -4015,6 +4027,7 @@ impl Waku {
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
         let (route_policy_tx, route_policy_events) = unbounded();
+        let (status_marker_tx, status_marker_events) = unbounded();
         #[cfg(target_os = "macos")]
         if state.computer_use_experiment_enabled {
             let computer_permission_tx = computer_permission_tx.clone();
@@ -4982,6 +4995,11 @@ impl Waku {
                 route_policy_events,
                 route_policy: None,
                 route_policy_pending: false,
+                turn_status_markers: HashMap::new(),
+                pending_status_marker_turns: HashMap::new(),
+                status_marker_in_flight: HashSet::new(),
+                status_marker_tx,
+                status_marker_events,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),

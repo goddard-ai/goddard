@@ -1639,6 +1639,9 @@ impl Waku {
         if let Some(changed_files) = self.render_changed_files_row(turn_id, theme, window, cx) {
             column = column.child(div().w_full().mb(px(3.0)).child(changed_files));
         }
+        if let Some(markers) = self.render_status_marker_row(turn_id, theme) {
+            column = column.child(div().w_full().mb(px(3.0)).child(markers));
+        }
         column
             .child(render_message_footer(
                 theme,
