@@ -89,6 +89,12 @@ impl Waku {
                 self.request_route_policy(cx);
             }
         }
+        // The sidebar's search field holds real focus for the whole settings
+        // visit, so landing on any page — from the sidebar, the palette, or a
+        // link — leaves typing ready to filter. The Keybindings page returned
+        // above and focuses its own search instead.
+        let focus = self.settings_search.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
         cx.notify();
     }
 

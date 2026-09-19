@@ -218,6 +218,9 @@ pub(super) struct SettingSearch {
     /// Trimmed, lowercased field content; empty means "not searching".
     query: Rc<str>,
     hits: Rc<Cell<usize>>,
+    /// Set when the query matched the section's own title: every row in the
+    /// section stays visible instead of only the ones matching the query.
+    force: bool,
 }
 
 impl SettingSearch {
@@ -225,12 +228,21 @@ impl SettingSearch {
         Self {
             query: Rc::from(query),
             hits: Rc::new(Cell::new(0)),
+            force: false,
         }
     }
 
     /// The unfiltered mode every row renders under outside a search.
     fn inactive() -> Self {
         Self::new("")
+    }
+
+    /// The section-forced mode, used when the query matched the section's
+    /// own title — the whole section renders rather than an empty shell.
+    fn forced(query: &str) -> Self {
+        let mut search = Self::new(query);
+        search.force = true;
+        search
     }
 
     pub(super) fn active(&self) -> bool {
@@ -252,7 +264,7 @@ impl SettingSearch {
         let title_ranges = settings_match_ranges(title, &self.query);
         let description_ranges = settings_match_ranges(description, &self.query);
         if self.active() {
-            if title_ranges.is_empty() && description_ranges.is_empty() {
+            if !self.force && title_ranges.is_empty() && description_ranges.is_empty() {
                 return None;
             }
             self.hits.set(self.hits.get() + 1);
@@ -932,7 +944,14 @@ impl Waku {
                 continue;
             };
             let label = crate::i18n::translate(label_key);
-            let search = SettingSearch::new(query);
+            // A query matching the section's own title keeps every row in
+            // it — the match is on the heading, not on any one setting.
+            let label_ranges = settings_match_ranges(&label, query);
+            let search = if label_ranges.is_empty() {
+                SettingSearch::new(query)
+            } else {
+                SettingSearch::forced(query)
+            };
             let content = match page {
                 SettingsPage::General => self.render_general_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
@@ -966,7 +985,7 @@ impl Waku {
                                     .text_size(sp(18.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(label),
+                                    .child(settings_search_text(label, label_ranges, theme)),
                             )
                             .child(content),
                     ),
@@ -8097,6 +8116,15 @@ mod tests {
         // A description-only match still keeps the row.
         assert!(search.matched("ignored", "the font used").is_some());
         assert!(search.matched("ignored", "also ignored").is_none());
+        assert_eq!(search.hits(), 2);
+    }
+
+    #[test]
+    fn setting_search_forced_keeps_every_row() {
+        let search = super::SettingSearch::forced("appearance");
+        assert!(search.matched("Theme", "ignored").is_some());
+        // Rows with no hit stay too — the match was on the section title.
+        assert!(search.matched("ignored", "also ignored").is_some());
         assert_eq!(search.hits(), 2);
     }
 

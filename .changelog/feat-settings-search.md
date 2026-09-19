@@ -1,0 +1,1 @@
+- Settings search focuses the field as soon as Settings opens, and matching a section's own title shows that whole section

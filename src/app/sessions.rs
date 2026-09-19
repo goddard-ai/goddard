@@ -1627,7 +1627,10 @@ impl Waku {
         // Warm the Usage page's transcript scan while the user is still on
         // General, so clicking Usage lands on data instead of a spinner.
         self.ensure_usage_history(false, cx);
-        window.focus(&self.settings_focus, cx);
+        // The search field holds real focus for the whole settings visit —
+        // typing filters immediately, and up/down step through the pages.
+        let focus = self.settings_search.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
         cx.notify();
     }
 
