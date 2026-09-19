@@ -1,0 +1,1 @@
+- [Experimental] Auto model routing gains a dedicated Settings → Jev page for the backend credentials and routing targets — reachable from the Auto row's gear button, which shows a warning badge while the selected backend has no API key
