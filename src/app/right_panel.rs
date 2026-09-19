@@ -2606,7 +2606,10 @@ impl Waku {
         if self.right_panel_visible
             && let Some(focus) = self.right_panel_pending_focus.take()
         {
-            window.focus(&focus, cx);
+            // Deferred like the file-editor pending: render runs inside
+            // prepaint, and moving focus here would let a second element
+            // claim the frame's a11y focus after an earlier one already did.
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         }
         let active_terminal_id = self
             .active_right_panel_surface()
@@ -2616,7 +2619,7 @@ impl Waku {
             && let Some(terminal) = self.right_panel_terminals.get(&terminal_id)
         {
             let focus_handle = terminal.read(cx).focus_handle(cx);
-            window.focus(&focus_handle, cx);
+            window.on_next_frame(move |window, cx| window.focus(&focus_handle, cx));
             self.right_panel_pending_terminal_focus = None;
         }
         // Record whichever terminal actually holds focus — pending requests
@@ -2680,7 +2683,10 @@ impl Waku {
                     .take_if(|pending| *pending == browser_id)
                     .is_some()
                 {
-                    browser.update(cx, |view, cx| view.focus_default(window, cx));
+                    let browser = browser.clone();
+                    window.on_next_frame(move |window, cx| {
+                        browser.update(cx, |view, cx| view.focus_default(window, cx));
+                    });
                 }
                 browser.into_any_element()
             }
