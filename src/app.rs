@@ -2079,6 +2079,13 @@ pub struct Waku {
     /// Sidebar terminal currently showing its inline rename field — the
     /// same `session_rename_input` editor serves both rows.
     terminal_rename: Option<Uuid>,
+    /// Sessions ⌘-clicked into the sidebar's multi-selection: a batch target
+    /// for row menus and session shortcuts that never steals the active
+    /// surface. Runtime-only — any unmodified click or Escape clears it.
+    sidebar_multi_selection: HashSet<Uuid>,
+    /// Pivot a ⌘⇧-click range grows from: the last row a modified click
+    /// touched, kept even when a toggle removed it from the set.
+    sidebar_multi_selection_anchor: Option<Uuid>,
     /// One stable field reused across sidebar rows so virtualization never
     /// replaces the focused editor while a rename is in progress.
     session_rename_input: Entity<TextInput>,
@@ -4894,6 +4901,8 @@ impl Waku {
                 session_navigation,
                 session_rename: None,
                 terminal_rename: None,
+                sidebar_multi_selection: HashSet::new(),
+                sidebar_multi_selection_anchor: None,
                 session_rename_input,
                 // The Terminals group starts folded every launch — its rows
                 // are opt-in, unlike the session history below them.

@@ -666,6 +666,7 @@ impl Render for Waku {
             .on_key_down(cx.listener(Self::enter_to_continue))
             .on_key_down(cx.listener(Self::type_to_focus_composer))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
+            .capture_any_mouse_down(cx.listener(Self::sidebar_multi_selection_mouse_down))
             .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
             .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
             .size_full()

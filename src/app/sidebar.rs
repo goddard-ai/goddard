@@ -2697,6 +2697,97 @@ impl Waku {
         })
     }
 
+    /// ⌘-click: toggle `session_id` in the multi-selection without making it
+    /// the active surface. The clicked row becomes the range anchor either
+    /// way — even when the toggle removed it — matching Finder's pivot.
+    fn toggle_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self.sidebar_multi_selection.remove(&session_id) {
+            self.sidebar_multi_selection.insert(session_id);
+        }
+        self.sidebar_multi_selection_anchor = Some(session_id);
+        cx.notify();
+    }
+
+    /// ⌘⇧-click: grow the multi-selection to cover every session row between
+    /// the anchor and `session_id` in the current sidebar order. The anchor
+    /// is the last row a modified click touched, then the active session,
+    /// and finally the clicked row itself.
+    fn extend_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let Some(target) = sidebar_session_row_index(&rows, session_id) else {
+            return;
+        };
+        let anchor = self
+            .sidebar_multi_selection_anchor
+            .or(self.state.selected_session)
+            .and_then(|session_id| sidebar_session_row_index(&rows, session_id))
+            .unwrap_or(target);
+        let (lo, hi) = (anchor.min(target), anchor.max(target));
+        for row in &rows[lo..=hi] {
+            if let SidebarRow::Session(id) = row {
+                self.sidebar_multi_selection.insert(*id);
+            }
+        }
+        self.sidebar_multi_selection_anchor = Some(session_id);
+        cx.notify();
+    }
+
+    /// Any unmodified left click and bare Escape land here; an empty set
+    /// clears for free.
+    pub(super) fn clear_sidebar_multi_selection(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_multi_selection.is_empty() {
+            return;
+        }
+        self.sidebar_multi_selection.clear();
+        self.sidebar_multi_selection_anchor = None;
+        cx.notify();
+    }
+
+    /// The multi-selection's members in sidebar row order — the batch a row
+    /// menu or session shortcut acts on. Members hidden by a folded group or
+    /// an unrevealed "show more" window follow in session order: the set's
+    /// contract is whole-set, not visible-rows-only.
+    pub(super) fn sidebar_multi_selection_targets(&self) -> Vec<Uuid> {
+        if self.sidebar_multi_selection.is_empty() {
+            return Vec::new();
+        }
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let mut targets: Vec<Uuid> = rows
+            .iter()
+            .filter_map(|row| match row {
+                SidebarRow::Session(session_id)
+                    if self.sidebar_multi_selection.contains(session_id) =>
+                {
+                    Some(*session_id)
+                }
+                _ => None,
+            })
+            .collect();
+        for session in &self.state.sessions {
+            if self.sidebar_multi_selection.contains(&session.id)
+                && !targets.contains(&session.id)
+            {
+                targets.push(session.id);
+            }
+        }
+        targets
+    }
+
+    /// The root's capture phase: a left mouse-down without the primary
+    /// modifier ends the multi-selection before the click lands — including
+    /// one inside an open row menu, whose item callbacks already captured
+    /// their target set when the menu opened.
+    pub(super) fn sidebar_multi_selection_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button == MouseButton::Left && !event.modifiers.secondary() {
+            self.clear_sidebar_multi_selection(cx);
+        }
+    }
+
     fn sidebar_row(
         &self,
         index: usize,
@@ -3354,6 +3445,7 @@ impl Waku {
                 .map(|pending| pending.session_id),
             session_id,
         );
+        let multi_selected = self.sidebar_multi_selection.contains(&session_id);
         let pinned = session.pinned_at.is_some();
         // While a ⌘n chip overlays the row, its trailing elements hide so
         // nothing competes with the chip; the gradient fades the rest.
@@ -3380,11 +3472,29 @@ impl Waku {
             .py(px(7.0))
             .rounded(px(9.0))
             .cursor_default()
-            .when(selected, |element| {
+            // The multi-selection wears an accent wash so it never reads as
+            // the active row's neutral highlight; hover and press deepen it
+            // instead of dropping back to the single-selection tint.
+            .when(multi_selected, |element| {
+                element.bg(theme.accent.opacity(0.14))
+            })
+            .when(!multi_selected && selected, |element| {
                 element.bg(theme.sidebar_item_background)
             })
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.sidebar_item_background))
+            .hover(|element| {
+                element.bg(if multi_selected {
+                    theme.accent.opacity(0.2)
+                } else {
+                    theme.sidebar_item_background
+                })
+            })
+            .active(|element| {
+                element.bg(if multi_selected {
+                    theme.accent.opacity(0.26)
+                } else {
+                    theme.sidebar_item_background
+                })
+            })
             .child(self.render_session_row_body(session_id, grouped_by_project, shortcut_hint, cx))
             .when(!renaming, |element| {
                 let drag_title = SharedString::from(localized_session_title(session));
@@ -3417,7 +3527,12 @@ impl Waku {
                         }
                     }))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                        if event.modifiers().shift {
+                        let modifiers = event.modifiers();
+                        if modifiers.secondary() && modifiers.shift {
+                            this.extend_sidebar_multi_selection(session_id, cx);
+                        } else if modifiers.secondary() {
+                            this.toggle_sidebar_multi_selection(session_id, cx);
+                        } else if modifiers.shift {
                             this.toggle_session_pin(session_id, cx);
                         } else {
                             this.select_session(session_id, cx);
@@ -3447,22 +3562,49 @@ impl Waku {
                     let move_waku = waku.clone();
                     let archive_waku = waku.clone();
                     let remove_waku = waku.clone();
-                    // A worktree task has nowhere to move to, so the row
-                    // disappears; a local-but-busy task keeps it disabled as
-                    // an explanation that the action exists.
-                    let (local_workspace, can_move) = waku
-                        .update(cx, |waku, _| {
-                            (
+                    // The batch settles at open: a menu on a member of the
+                    // multi-selection acts on the whole set, while a menu on
+                    // an outsider drops the set and acts on that row alone.
+                    // Item callbacks run after the root's plain-click capture
+                    // has cleared the set, so they close over the resolved
+                    // list instead of re-reading it.
+                    let (targets, local_workspace, any_movable, all_pinned) = waku
+                        .update(cx, |waku, cx| {
+                            let targets = if waku.sidebar_multi_selection.contains(&session_id) {
+                                waku.sidebar_multi_selection_targets()
+                            } else {
+                                waku.clear_sidebar_multi_selection(cx);
+                                vec![session_id]
+                            };
+                            let local_workspace = targets.iter().any(|target| {
                                 waku.state
                                     .sessions
                                     .iter()
-                                    .find(|session| session.id == session_id)
-                                    .is_some_and(|session| session.workspace.is_local()),
-                                waku.can_move_session_to_worktree(session_id),
-                            )
+                                    .find(|session| session.id == *target)
+                                    .is_some_and(|session| session.workspace.is_local())
+                            });
+                            let any_movable = targets
+                                .iter()
+                                .any(|target| waku.can_move_session_to_worktree(*target));
+                            let all_pinned = targets.iter().all(|target| {
+                                waku.state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == *target)
+                                    .is_some_and(|session| session.pinned_at.is_some())
+                            });
+                            (targets, local_workspace, any_movable, all_pinned)
                         })
-                        .unwrap_or((false, false));
+                        .unwrap_or((vec![session_id], false, false, pinned));
+                    let pin_targets = targets.clone();
+                    let unread_targets = targets.clone();
+                    let copy_targets = targets.clone();
+                    let move_targets = targets.clone();
+                    let archive_targets = targets.clone();
+                    let remove_targets = targets;
                     let mut items = vec![
+                        // Rename stays single-target: the inline field it
+                        // opens can only hold one title.
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_waku.update(cx, |waku, cx| {
                                 waku.begin_session_rename(session_id, window, cx);
@@ -3470,32 +3612,35 @@ impl Waku {
                         })
                         .icon("icons/pencil.svg"),
                         MenuItem::new(
-                            if pinned {
+                            if all_pinned {
                                 tr!("session.unpin")
                             } else {
                                 tr!("session.pin")
                             },
                             move |_, cx| {
-                                let _ = pin_waku
-                                    .update(cx, |waku, cx| waku.toggle_session_pin(session_id, cx));
+                                let _ = pin_waku.update(cx, |waku, cx| {
+                                    waku.set_sessions_pinned(&pin_targets, !all_pinned, cx)
+                                });
                             },
                         )
                         .shortcut_action(&ToggleSessionPin)
-                        .icon(if pinned {
+                        .icon(if all_pinned {
                             "icons/pin-off.svg"
                         } else {
                             "icons/pin.svg"
                         }),
                         MenuItem::new(tr!("session.mark_unread"), move |_, cx| {
                             let _ = unread_waku.update(cx, |waku, cx| {
-                                waku.mark_session_unread(session_id, cx);
+                                for target in &unread_targets {
+                                    waku.mark_session_unread(*target, cx);
+                                }
                             });
                         })
                         .shortcut_action(&MarkSessionUnread)
                         .icon("icons/eye-off.svg"),
                         MenuItem::new(tr!("session.copy_working_directory"), move |_, cx| {
                             let _ = copy_waku.update(cx, |waku, cx| {
-                                waku.copy_session_working_directory(session_id, cx);
+                                waku.copy_sessions_working_directory(&copy_targets, cx);
                             });
                         })
                         .shortcut_action(&CopyWorkingDirectory)
@@ -3505,25 +3650,32 @@ impl Waku {
                         items.push(
                             MenuItem::new(tr!("session.move_to_worktree"), move |_, cx| {
                                 let _ = move_waku.update(cx, |waku, cx| {
-                                    waku.move_session_to_worktree(session_id, None, cx);
+                                    for target in &move_targets {
+                                        waku.move_session_to_worktree(*target, None, cx);
+                                    }
                                 });
                             })
                             .icon("icons/fork.svg")
-                            .disabled(!can_move),
+                            .disabled(!any_movable),
                         );
                     }
                     items.extend([
                         MenuItem::new(tr!("session.archive"), move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
-                                waku.archive_session(session_id, window, cx)
+                                for target in &archive_targets {
+                                    waku.archive_session(*target, window, cx)
+                                }
                             });
                         })
                         .shortcut_action(&ArchiveSession)
                         .icon("icons/archive.svg"),
                         MenuItem::Separator,
                         MenuItem::new(tr!("common.remove"), move |window, cx| {
-                            let _ = remove_waku
-                                .update(cx, |waku, cx| waku.remove_session(session_id, window, cx));
+                            let _ = remove_waku.update(cx, |waku, cx| {
+                                for target in &remove_targets {
+                                    waku.remove_session(*target, window, cx)
+                                }
+                            });
                         })
                         .icon("icons/trash.svg"),
                     ]);
