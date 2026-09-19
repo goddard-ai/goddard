@@ -393,6 +393,9 @@ struct ToastAction {
 enum ToastActionKind {
     /// The unarchive confirmation's "View now" jump to the restored task.
     Session(Uuid),
+    /// The archive confirmation's Undo — restores every task the toast
+    /// covered; a multi-selection archives as one undoable group.
+    Unarchive(Vec<Uuid>),
     /// Open the detected localhost URL — externally, or in a browser tab
     /// when shift is held.
     LocalhostUrl,
@@ -3015,6 +3018,77 @@ impl Waku {
 
     pub(super) fn show_success_toast(&mut self, message: impl Into<String>) {
         self.show_toast_with_tone(message, ToastTone::Success, None);
+    }
+
+    /// Confirms an archive with an Undo that brings the task back. A
+    /// multi-selection archives its members one after another — each joins
+    /// the toast already showing instead of replacing it, so one Undo
+    /// restores the whole group.
+    pub(super) fn show_archived_toast(&mut self, session_id: Uuid) {
+        let joined = match self
+            .toast
+            .as_mut()
+            .and_then(|toast| toast.action.as_mut())
+        {
+            Some(ToastAction {
+                kind: ToastActionKind::Unarchive(session_ids),
+                ..
+            }) => {
+                if !session_ids.contains(&session_id) {
+                    session_ids.push(session_id);
+                }
+                Some(session_ids.len())
+            }
+            _ => None,
+        };
+        if let Some(count) = joined {
+            let toast = self.toast.as_mut().expect("toast checked above");
+            toast.message = tr!("session.archived_many", count = count);
+            // Restart the dismiss clock for the growing group without
+            // replaying the entrance animation.
+            toast.duration_remaining = DEFAULT_TOAST_DURATION;
+            toast.timer_started = None;
+            self.toast_generation = self.toast_generation.wrapping_add(1);
+            toast.timer_generation = self.toast_generation;
+            return;
+        }
+        self.show_toast_with_tone(
+            tr!("session.archived"),
+            ToastTone::Success,
+            Some(ToastAction {
+                label: tr!("common.undo").into(),
+                kind: ToastActionKind::Unarchive(vec![session_id]),
+            }),
+        );
+    }
+
+    /// The archive toast's Undo. A lone task gets the unarchived toast's
+    /// "View now" follow-up; a group reports how many came back.
+    pub(super) fn undo_archived_sessions(
+        &mut self,
+        session_ids: &[Uuid],
+        cx: &mut Context<Self>,
+    ) {
+        let restorable: Vec<Uuid> = session_ids
+            .iter()
+            .copied()
+            .filter(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == *session_id && session.archived_at.is_some())
+            })
+            .collect();
+        match restorable.as_slice() {
+            [] => self.hide_toast(),
+            [session_id] => self.unarchive_session(*session_id, true, cx),
+            many => {
+                for session_id in many {
+                    self.unarchive_session(*session_id, false, cx);
+                }
+                self.show_success_toast(tr!("session.unarchived_many", count = many.len()));
+            }
+        }
     }
 
     /// Confirms an unarchive with a "View now" jump to the restored task.

@@ -1293,8 +1293,9 @@ impl Waku {
             }
         } else {
             self.save();
-            cx.notify();
         }
+        self.show_archived_toast(session_id);
+        cx.notify();
     }
 
     /// Returns an archived task to the sidebar and search.

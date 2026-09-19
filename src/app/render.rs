@@ -1143,6 +1143,9 @@ impl Waku {
                             ToastActionKind::Session(session_id) => {
                                 this.open_toast_session(*session_id, cx)
                             }
+                            ToastActionKind::Unarchive(session_ids) => {
+                                this.undo_archived_sessions(session_ids, cx)
+                            }
                             ToastActionKind::LocalhostUrl => this.open_detected_localhost_url(
                                 event.modifiers().shift,
                                 window,
@@ -1172,6 +1175,9 @@ impl Waku {
                         match &kind {
                             ToastActionKind::Session(session_id) => {
                                 this.open_toast_session(*session_id, cx)
+                            }
+                            ToastActionKind::Unarchive(session_ids) => {
+                                this.undo_archived_sessions(session_ids, cx)
                             }
                             ToastActionKind::LocalhostUrl => this.open_detected_localhost_url(
                                 event.keystroke.modifiers.shift,

@@ -1088,6 +1088,8 @@ common.remove:
   en: Remove
 common.unarchive:
   en: Unarchive
+common.undo:
+  en: Undo
 common.rename:
   en: Rename
 
@@ -2525,8 +2527,14 @@ session.rewound:
   en: Rewound to before turn %{turn}
 session.rewound_with_stale_refs:
   en: "Rewound to before turn %{turn}; stale refs remain: %{error}"
+session.archived:
+  en: Task archived.
+session.archived_many:
+  en: "%{count} tasks archived."
 session.unarchived:
   en: Task unarchived.
+session.unarchived_many:
+  en: "%{count} tasks unarchived."
 session.view_now:
   en: View now
 session.worktree_recreated:

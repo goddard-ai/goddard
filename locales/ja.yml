@@ -406,6 +406,7 @@ common.copy: コピー
 common.delete: 削除
 common.remove: 削除
 common.unarchive: アーカイブ解除
+common.undo: 取り消す
 common.rename: 名前を変更
 
 session.new_task: 新規タスク
@@ -1099,7 +1100,10 @@ session.pre_turn_checkpoint_missing: メッセージのターン開始前の Git
 session.rewind_title: "%{title}（巻き戻し）"
 session.rewound: タスクをターン %{turn} の前まで巻き戻しました
 session.rewound_with_stale_refs: "タスクをターン %{turn} の前まで巻き戻しましたが、古い ref が残っています：%{error}"
+session.archived: タスクをアーカイブしました
+session.archived_many: "%{count} 件のタスクをアーカイブしました"
 session.unarchived: タスクのアーカイブを解除しました
+session.unarchived_many: "%{count} 件のタスクのアーカイブを解除しました"
 session.view_now: 今すぐ表示
 session.worktree_recreated: ワークツリーが見つからなかったため再作成しました — コミットされていない変更は失われている可能性があります
 session.moved_to_worktree: "ワークツリー %{name} へ移動しました"
