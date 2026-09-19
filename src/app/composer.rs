@@ -1623,11 +1623,21 @@ impl Waku {
                             // credential — flag it beside the
                             // settings shortcut that fixes it.
                             .when(jev_credential_missing, |element| {
-                                element.child(icon(
-                                    "icons/alert.svg",
-                                    13.0,
-                                    theme.warning,
-                                ))
+                                element.child(
+                                    div()
+                                        .id("jev-credential-warning")
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .tooltip(Tooltip::text(tr!(
+                                            "models.auto_missing_credential"
+                                        )))
+                                        .child(icon(
+                                            "icons/alert.svg",
+                                            13.0,
+                                            theme.warning,
+                                        )),
+                                )
                             })
                             .child(
                                 div()
