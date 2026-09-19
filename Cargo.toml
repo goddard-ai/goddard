@@ -213,9 +213,11 @@ strip = true
 # GPUI's text shaping and Taffy layout hot paths completely unoptimized.
 [profile.dev]
 opt-level = 1
+debug = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 # `block` 0.1.6 declares an extern static with an uninhabited type. This fork
 # is the crates.io release plus the future-incompatibility fix only.
