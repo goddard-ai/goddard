@@ -1412,16 +1412,48 @@ fn is_devin_auto_model(requested: &str) -> bool {
         || requested.eq_ignore_ascii_case("default")
 }
 
-fn resolve_devin_model(option: Option<&SessionConfigOption>, requested: &str) -> Option<String> {
+/// Devin spells effort and the fast tier inside the advertised model id
+/// (`swe-2-high`, `swe-2-high-fast`) while the picker stores them as separate
+/// traits, so a bare base must be repacked before it can match.
+fn devin_model_candidates(
+    requested: &str,
+    reasoning_effort: Option<&str>,
+    service_tier: Option<&str>,
+) -> Vec<String> {
+    let mut candidates = vec![requested.to_owned()];
+    let effort = reasoning_effort
+        .map(normalize_reasoning_effort)
+        .filter(|effort| !effort.is_empty() && effort != "default");
+    let fast = service_tier == Some("fast");
+    if let Some(effort) = effort {
+        if fast {
+            candidates.push(format!("{requested}-{effort}-fast"));
+        }
+        candidates.push(format!("{requested}-{effort}"));
+    }
+    if fast {
+        candidates.push(format!("{requested}-fast"));
+    }
+    candidates
+}
+
+fn resolve_devin_model(
+    option: Option<&SessionConfigOption>,
+    requested: &str,
+    reasoning_effort: Option<&str>,
+    service_tier: Option<&str>,
+) -> Option<String> {
     let Some(option) = option else {
         return (!is_devin_auto_model(requested)).then(|| requested.to_owned());
     };
     let values = session_config_select_values(option);
-    if let Some(value) = values
-        .iter()
-        .find(|value| value.eq_ignore_ascii_case(requested))
-    {
-        return Some((*value).to_owned());
+    for candidate in devin_model_candidates(requested, reasoning_effort, service_tier) {
+        if let Some(value) = values
+            .iter()
+            .find(|value| value.eq_ignore_ascii_case(&candidate))
+        {
+            return Some((*value).to_owned());
+        }
     }
     if is_devin_auto_model(requested) {
         return session_config_current_value(option)
@@ -1601,7 +1633,8 @@ async fn apply_model(
     if provider == ProviderKind::Devin {
         let options = config_options.unwrap_or_default();
         let option = advertised_model_option(options);
-        if let Some(resolved) = resolve_devin_model(option, model) {
+        if let Some(resolved) = resolve_devin_model(option, model, reasoning_effort, service_tier)
+        {
             if option.and_then(session_config_current_value) == Some(resolved.as_str()) {
                 return;
             }
@@ -2901,18 +2934,49 @@ mod tests {
             &["swe-1-6-slow", "swe-1-6"],
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "adaptive").as_deref(),
+            resolve_devin_model(Some(&option), "adaptive", None, None).as_deref(),
             Some("swe-1-6-slow")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-1-6").as_deref(),
+            resolve_devin_model(Some(&option), "swe-1-6", None, None).as_deref(),
             Some("swe-1-6")
         );
-        assert_eq!(resolve_devin_model(Some(&option), "opus"), None);
-        assert_eq!(resolve_devin_model(None, "adaptive"), None);
+        assert_eq!(resolve_devin_model(Some(&option), "opus", None, None), None);
+        assert_eq!(resolve_devin_model(None, "adaptive", None, None), None);
         assert_eq!(
-            resolve_devin_model(None, "swe-1-6-slow").as_deref(),
+            resolve_devin_model(None, "swe-1-6-slow", None, None).as_deref(),
             Some("swe-1-6-slow")
+        );
+    }
+
+    #[test]
+    fn devin_repacks_picker_effort_and_fast_tier_into_the_model_id() {
+        let option = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "swe-2-medium",
+            &[
+                "swe-2-medium",
+                "swe-2-high",
+                "swe-2-high-fast",
+                "swe-2-max",
+            ],
+        );
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", Some("high"), None).as_deref(),
+            Some("swe-2-high")
+        );
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", Some("high"), Some("fast")).as_deref(),
+            Some("swe-2-high-fast")
+        );
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", Some("xhigh"), Some("fast")),
+            None
+        );
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", Some("medium"), Some("fast")).as_deref(),
+            Some("swe-2-medium")
         );
     }
 
