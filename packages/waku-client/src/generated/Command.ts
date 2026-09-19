@@ -3,6 +3,7 @@ import type { AgentPromptDelivery } from "./AgentPromptDelivery";
 import type { AgentSession } from "./AgentSession";
 import type { AgentWorkspace } from "./AgentWorkspace";
 import type { AttachmentUpload } from "./AttachmentUpload";
+import type { AutomationInput } from "./AutomationInput";
 import type { ComposerDraftChange } from "./ComposerDraftChange";
 import type { ComposerDrafts } from "./ComposerDrafts";
 import type { CustomCommand } from "./CustomCommand";
@@ -63,7 +64,7 @@ feature?: string | null, } | { "type": "testEvalConnection", settings: EvalSetti
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.
  */
-project?: string | null, candidates: Array<RouteCandidate>, lastUsed?: RouteTarget | null, } | { "type": "recordRouteOverride", sessionId: string, target: RouteTarget, } | { "type": "getRoutePolicy" } | { "type": "setRouteClassTarget", class: TaskClass,
+project?: string | null, candidates: Array<RouteCandidate>, lastUsed?: RouteTarget | null, } | { "type": "recordRouteOverride", sessionId: string, target: RouteTarget, } | { "type": "listIntegrations" } | { "type": "connectIntegration", id: string, variantId: string, providers: Array<ProviderKind>, apiKey?: string | null, } | { "type": "setIntegrationProviders", id: string, providers: Array<ProviderKind>, } | { "type": "disconnectIntegration", id: string, } | { "type": "startIntegrationAuth", id: string, } | { "type": "getRoutePolicy" } | { "type": "setRouteClassTarget", class: TaskClass,
 /**
  * "tier:fast" | "tier:default" | "tier:heavy" | "provider:model" |
  * "provider".
@@ -104,7 +105,7 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, note: string | null, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "agentReadSession",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, note: string | null, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "getAutomations" } | { "type": "upsertAutomation", input: AutomationInput, } | { "type": "removeAutomation", automationId: string, } | { "type": "runAutomationNow", automationId: string, } | { "type": "agentReadSession",
 /**
  * Waku task id. Exactly one of `task_id` and `thread_id` is
  * required.

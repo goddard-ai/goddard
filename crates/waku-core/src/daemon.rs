@@ -79,6 +79,9 @@ pub struct WakuBackend {
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: Arc<DaemonSettingsStore>,
+    /// MCP integrations: catalog state, the credential store, and the local
+    /// proxy agents reach through `goddard_<id>` server entries.
+    integrations: crate::integrations::IntegrationService,
     task_store: Arc<StateStore>,
     task_state: Arc<Mutex<PersistedState>>,
     /// Project-memory scheduling and storage; sees every finished turn via
@@ -132,7 +135,13 @@ impl WakuBackend {
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_owned();
-        let share_dir = data_dir.join("share");
+        let share_dir = data_dir.clone().join("share");
+        let settings = Arc::new(settings);
+        let integrations = crate::integrations::IntegrationService::new(
+            settings.clone(),
+            data_dir.clone(),
+        )
+        .context("could not start the integrations service")?;
         let our_name = std::env::var("USER")
             .ok()
             .filter(|name| !name.is_empty())
@@ -144,7 +153,6 @@ impl WakuBackend {
             AutomationService::open(data_dir.join("automations.json"))
                 .context("could not load Goddard automations")?,
         );
-        let settings = Arc::new(settings);
         let task_state = Arc::new(Mutex::new(task_state));
         let task_store = Arc::new(task_store);
         let backend = Self {
@@ -159,6 +167,7 @@ impl WakuBackend {
                 task_store.clone(),
             ),
             settings,
+            integrations,
             task_store,
             task_state,
             removed_session_ids: Mutex::new(HashSet::new()),
@@ -740,6 +749,33 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::CustomCommands {
                     commands: self.settings.get().custom_commands,
                 })
+            }
+            Command::ListIntegrations => Ok(ResponsePayload::Integrations {
+                snapshots: self.integrations.snapshots(),
+            }),
+            Command::ConnectIntegration {
+                id,
+                variant_id,
+                providers,
+                api_key,
+            } => {
+                self.integrations
+                    .connect(&id, &variant_id, providers, api_key, &events)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SetIntegrationProviders { id, providers } => {
+                self.integrations.set_providers(&id, providers)?;
+                events.settings_changed(self.settings.get());
+                Ok(ResponsePayload::Ack)
+            }
+            Command::DisconnectIntegration { id } => {
+                self.integrations.disconnect(&id)?;
+                events.settings_changed(self.settings.get());
+                Ok(ResponsePayload::Ack)
+            }
+            Command::StartIntegrationAuth { id } => {
+                self.integrations.begin_auth(&id, &events)?;
+                Ok(ResponsePayload::Ack)
             }
             Command::ProbeProvider {
                 provider,
@@ -3510,6 +3546,11 @@ fn handle_driver_command(
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }
         | Command::ListCustomCommands
+        | Command::ListIntegrations
+        | Command::ConnectIntegration { .. }
+        | Command::SetIntegrationProviders { .. }
+        | Command::DisconnectIntegration { .. }
+        | Command::StartIntegrationAuth { .. }
         | Command::GetFriends
         | Command::SendFriendRequest { .. }
         | Command::RespondFriendRequest { .. }

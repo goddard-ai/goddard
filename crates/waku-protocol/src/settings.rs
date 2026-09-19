@@ -57,6 +57,18 @@ pub struct DaemonSettings {
     /// in the background, and injects it into each session's first prompt.
     /// Defaults on in development builds, opt-in in release builds.
     pub memory_experiment_enabled: bool,
+    /// Experimental opt-in for the MCP integrations pane and the daemon's
+    /// local MCP proxy. Defaults on in development builds, opt-in in release.
+    pub integrations_enabled: bool,
+    /// Connected integrations: which services are set up, on which variant,
+    /// and which providers receive them. Credentials never live here — the
+    /// daemon's secret store owns them; `auth` only records the state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub integrations: Vec<crate::integrations::IntegrationSetting>,
+    /// Bearer that agents present to the daemon's local MCP proxy. Minted
+    /// lazily; local-only, it authorizes proxy access and nothing upstream.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub integrations_proxy_token: String,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -82,6 +94,9 @@ impl Default for DaemonSettings {
             provider_binary_overrides: HashMap::new(),
             eval: None,
             memory_experiment_enabled: default_experiment_enabled(),
+            integrations_enabled: default_experiment_enabled(),
+            integrations: Vec::new(),
+            integrations_proxy_token: String::new(),
             extra: BTreeMap::new(),
         }
     }
