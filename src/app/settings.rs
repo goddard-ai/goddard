@@ -746,6 +746,7 @@ impl Waku {
             .flex_none()
             .flex()
             .flex_col()
+            .relative()
             .bg(theme.sidebar)
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
@@ -781,6 +782,12 @@ impl Waku {
             )
             .child(div().h(px(18.0)))
             .child(div().px(px(12.0)).child(navigation))
+            // The dock has no trigger zone on this page; it renders only while
+            // the pointer it was raised under is still on it, and drops on the
+            // first hover-off.
+            .when_some(self.render_sidebar_dock(cx), |sidebar, dock| {
+                sidebar.child(dock)
+            })
     }
 
     /// The search field's content, normalized the way the page filter expects.

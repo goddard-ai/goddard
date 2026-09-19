@@ -1,1 +1,1 @@
-- Hovering anywhere along the sidebar's bottom strip now raises a quick-action dock — Inbox, Archived chats, Shortcuts, and Settings (plus Friends when the experiment is on) as round buttons with hover labels
+- Hovering anywhere along the sidebar's bottom strip now raises a quick-action dock — Inbox, Archived chats, Shortcuts, and Settings (plus Friends when the experiment is on) as round buttons that overlap the strip with hover labels, and stay raised while the pointer is on them even when a button opens Settings

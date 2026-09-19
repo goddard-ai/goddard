@@ -1655,8 +1655,9 @@ impl Waku {
 
     /// The quick-action dock that rises above the footer while the sidebar's
     /// bottom strip is hovered. It keeps its own hover state so the pointer
-    /// can cross from the footer onto it without flicker.
-    fn render_sidebar_dock(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// can cross from the footer onto it without flicker — and so it survives
+    /// the sidebar swap when a button opens the settings page.
+    pub(super) fn render_sidebar_dock(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.sidebar_dock_zone_hovered && !self.sidebar_dock_hovered {
             return None;
         }
@@ -1670,16 +1671,25 @@ impl Waku {
         if self.state.friends_enabled {
             items.insert(0, SidebarDockItem::Friends);
         }
+        // Sketch "Dock": the buttons overlap the bar that raised them — their
+        // bottoms land 3.5px above the sidebar's bottom edge, and the row is
+        // anchored 4.5px off its leading edge. Occluding keeps clicks on the
+        // buttons (and the gaps between them) from leaking to the footer
+        // hitboxes they cover.
         Some(
             div()
                 .id("sidebar-dock")
                 .absolute()
-                .bottom(px(40.0))
-                .left_0()
-                .right_0()
+                .bottom(px(3.5))
+                .left(px(4.5))
+                .occlude()
                 .flex()
-                .justify_center()
-                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
+                    // Keyboard modality reports every hitbox as unhovered even
+                    // with the pointer still on it — that isn't a hover-off.
+                    if !*hovered && window.last_input_was_keyboard() {
+                        return;
+                    }
                     this.sidebar_dock_hovered = *hovered;
                     if !*hovered {
                         this.sidebar_dock_hover_item = None;
@@ -1764,7 +1774,7 @@ impl Waku {
             .flex()
             .flex_col()
             .items_center()
-            .w(px(48.0))
+            .w(px(45.0))
             .cursor_default()
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered {
@@ -1776,13 +1786,12 @@ impl Waku {
             }))
             .child(
                 div()
-                    .h(px(22.0))
+                    .h(px(20.5))
                     .flex()
-                    .items_center()
                     .when(hovered, |slot| {
                         slot.child(
                             div()
-                                .h(px(18.0))
+                                .h(px(17.5))
                                 .px(px(10.0))
                                 .rounded_full()
                                 .bg(pill_surface)
@@ -1800,7 +1809,7 @@ impl Waku {
             )
             .child(
                 div()
-                    .size(px(44.0))
+                    .size(px(45.0))
                     .rounded_full()
                     .bg(rgb(0xFFFFFF))
                     .relative()
@@ -2424,10 +2433,13 @@ impl Waku {
                 div()
                     .flex_none()
                     .relative()
+                    // The dock overlaps the footer it rises from, so it must
+                    // paint after it to stay on top — visually and in the
+                    // hit-test order.
+                    .child(self.render_sidebar_footer(cx))
                     .when_some(self.render_sidebar_dock(cx), |container, dock| {
                         container.child(dock)
-                    })
-                    .child(self.render_sidebar_footer(cx)),
+                    }),
             )
     }
 
