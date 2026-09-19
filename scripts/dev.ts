@@ -133,6 +133,12 @@ let lastDaemonSpawnAt = 0;
 let commandInput: readline.Interface | undefined;
 let stopping = false;
 let building = false;
+// Build output stays collapsed behind the progress bar. 'e' toggles live
+// expansion during a build and replays the last build's output afterward;
+// failures always dump everything.
+let buildLogExpanded = false;
+let liveBuildLog: { expand(): void } | undefined;
+let lastBuildLog: { label: string; lines: string[] } | undefined;
 let queuedBuild: BuildTarget | undefined;
 let debouncedBuild: BuildTarget | undefined;
 let appChangeRevision = 0;
@@ -434,6 +440,8 @@ function progressLine(
   expected: number | undefined,
   crate: string,
   startedAt: number,
+  warnings: number,
+  errors: number,
 ): string {
   let bar: string;
   let count: string;
@@ -454,13 +462,21 @@ function progressLine(
     count = `${done}`;
   }
   const detail = crate ? ` · ${crate}` : "";
-  return `[goddard-dev] Compiling ${label} ${bar} ${count} crate${done === 1 ? "" : "s"}${detail} · ${elapsedLabel(startedAt)}`;
+  const issues = [
+    errors > 0 ? `${errors} error${errors === 1 ? "" : "s"}` : "",
+    warnings > 0 ? `${warnings} warning${warnings === 1 ? "" : "s"}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const hint = issues ? " · press e + enter to expand" : "";
+  return `[goddard-dev] Compiling ${label} ${bar} ${count} crate${done === 1 ? "" : "s"}${detail}${issues ? ` · ${issues}${hint}` : ""} · ${elapsedLabel(startedAt)}`;
 }
 
 // Runs cargo with a live one-line progress bar on a TTY by parsing the
-// compiler's JSON stream; diagnostics still print rendered (with color) so
-// warnings and errors look exactly as they do today. Off a TTY cargo's own
-// output passes straight through.
+// compiler's JSON stream. Diagnostics stay buffered behind the bar — the
+// line reports warning/error counts — and 'e' expands them live or replays
+// them afterward. A failed build always dumps its full output. Off a TTY
+// cargo's own output passes straight through.
 async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   if (!stdoutIsTTY) {
     console.log(`[goddard-dev] Building ${label}...`);
@@ -486,13 +502,31 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   const startedAt = Date.now();
   let done = 0;
   let crate = "";
+  let warnings = 0;
+  let errors = 0;
+  const log: string[] = [];
+  let printed = 0;
   const draw = () =>
     process.stdout.write(
-      `\r\x1b[K${progressLine(label, done, expected, crate, startedAt)}`,
+      `\r\x1b[K${progressLine(label, done, expected, crate, startedAt, warnings, errors)}`,
     );
-  const print = (text: string) => {
-    process.stdout.write(`\r\x1b[K${text}${text.endsWith("\n") ? "" : "\n"}`);
-    draw();
+  const emit = (text: string) => {
+    const entry = text.endsWith("\n") ? text : `${text}\n`;
+    log.push(entry);
+    if (buildLogExpanded) {
+      process.stdout.write(`\r\x1b[K${entry}`);
+      printed += 1;
+      draw();
+    }
+  };
+  liveBuildLog = {
+    expand() {
+      while (printed < log.length) {
+        process.stdout.write(`\r\x1b[K${log[printed]}`);
+        printed += 1;
+      }
+      draw();
+    },
   };
   const ticker = setInterval(draw, 100);
   draw();
@@ -515,13 +549,17 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
             reason?: string;
             fresh?: boolean;
             target?: { name?: string };
-            message?: { rendered?: string | null; message?: string };
+            message?: {
+              rendered?: string | null;
+              message?: string;
+              level?: string;
+            };
             text?: string;
           };
           try {
             parsed = JSON.parse(line);
           } catch {
-            print(line);
+            emit(line);
             continue;
           }
           if (parsed.reason === "compiler-artifact") {
@@ -535,22 +573,44 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
           } else if (parsed.reason === "compiler-message") {
             const rendered =
               parsed.message?.rendered ?? parsed.message?.message;
-            if (rendered) print(rendered);
+            if (parsed.message?.level === "warning") warnings += 1;
+            if (
+              parsed.message?.level === "error" ||
+              parsed.message?.level === "error: internal compiler error"
+            ) {
+              errors += 1;
+            }
+            if (rendered) emit(rendered);
           } else if (parsed.reason === "text" && parsed.text) {
-            print(parsed.text);
+            emit(parsed.text);
           }
         }
       }
     }
   } finally {
     clearInterval(ticker);
+    liveBuildLog = undefined;
+    buildLogExpanded = false;
   }
   const exitCode = await child.exited;
   process.stdout.write("\r\x1b[K");
-  if (exitCode !== 0) return false;
+  lastBuildLog = { label, lines: log };
+  if (exitCode !== 0) {
+    while (printed < log.length) {
+      process.stdout.write(log[printed]);
+      printed += 1;
+    }
+    return false;
+  }
   recordBuildStats(label, done);
+  const issues = [
+    errors > 0 ? `${errors} error${errors === 1 ? "" : "s"}` : "",
+    warnings > 0 ? `${warnings} warning${warnings === 1 ? "" : "s"}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
   console.log(
-    `[goddard-dev] ${label === "app" ? "App" : "Daemon"} compiled in ${elapsedLabel(startedAt)}${done === 0 ? " (all fresh)" : ""}.`,
+    `[goddard-dev] ${label === "app" ? "App" : "Daemon"} compiled in ${elapsedLabel(startedAt)}${done === 0 ? " (all fresh)" : ""}${issues ? ` with ${issues} — press e + enter to show them` : ""}.`,
   );
   return true;
 }
@@ -1001,6 +1061,7 @@ function printShortcuts(): void {
       shortcutLine("d", "restart the daemon now"),
       shortcutLine("D", "restart the daemon once sessions go idle"),
       shortcutLine("m", "show mobile daemon address and token"),
+      shortcutLine("e", "expand build output (toggle live, replay after)"),
       shortcutLine("q", "quit the watcher, app, and daemon"),
       shortcutLine("h", "show this help"),
       "",
@@ -1038,6 +1099,21 @@ async function handleCommand(command: string): Promise<void> {
       return;
     case "m":
       await printMobileInfo();
+      return;
+    case "e":
+      if (liveBuildLog !== undefined) {
+        buildLogExpanded = !buildLogExpanded;
+        if (buildLogExpanded) liveBuildLog.expand();
+        return;
+      }
+      if (lastBuildLog === undefined || lastBuildLog.lines.length === 0) {
+        console.log("[goddard-dev] No build output to show.");
+        return;
+      }
+      console.log(
+        `[goddard-dev] Output from the last ${lastBuildLog.label} build:`,
+      );
+      process.stdout.write(lastBuildLog.lines.join(""));
       return;
     case "a":
       if (protocolDirty) {
