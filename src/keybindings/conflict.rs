@@ -34,7 +34,9 @@ pub struct Conflict {
     pub kind: ConflictKind,
     /// The other command involved.
     pub other: String,
-    /// The other binding's context predicate source.
+    /// The other binding's context predicate source. Surfaced by the
+    /// manager UI when it renders conflict rows.
+    #[allow(dead_code)]
     pub other_context: Option<String>,
 }
 

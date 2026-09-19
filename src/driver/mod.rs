@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
-    BackgroundWorkKey, DriverEvent, MessageAttachment, ProviderKind, ProviderResumeCursor,
-    RuntimeEventCursor,
+    BackgroundWorkKey, DriverEvent, ProviderKind, ProviderResumeCursor, RuntimeEventCursor,
 };
 use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
