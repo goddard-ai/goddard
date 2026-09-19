@@ -3879,20 +3879,22 @@ impl Waku {
                     .any(|option| option.id == *window)
             })
         });
-        if session.provider == ProviderKind::Cursor
-            && let Some(requested) = model.as_deref()
+        if let Some(requested) = model.as_deref()
             && let Some(probe) = self.provider_probe(session.provider)
-            && let Some(matched) =
-                waku_protocol::model_catalog::cursor_catalog_model(&probe.models, requested)
+            && let Some(matched) = waku_protocol::model_catalog::packed_catalog_model(
+                &probe.models,
+                requested,
+                session.provider,
+            )
         {
             if reasoning_effort.is_none() {
-                reasoning_effort = waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
+                reasoning_effort = waku_protocol::model_catalog::packed_suffix_reasoning_effort(
                     &matched.suffix,
                     &matched.model.reasoning_efforts,
                 );
             }
             if service_tier.is_none() {
-                service_tier = waku_protocol::model_catalog::cursor_suffix_service_tier(
+                service_tier = waku_protocol::model_catalog::packed_suffix_service_tier(
                     &matched.suffix,
                     &matched.model.service_tiers,
                 );

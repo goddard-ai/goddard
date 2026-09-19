@@ -2661,7 +2661,7 @@ impl Waku {
     }
 
     /// The session's effective model+effort+fast selection, in picker-row
-    /// terms: the catalog model id (a suffix-encoded Cursor id resolves to
+    /// terms: the catalog model id (a suffix-encoded packed alias resolves to
     /// its base), the effort a turn would run at, and whether the fast tier
     /// is on. `None` when no model can be named at all.
     pub(super) fn session_model_combo(
@@ -2670,24 +2670,27 @@ impl Waku {
     ) -> Option<(String, Option<String>, bool)> {
         let model_id = self.catalog_model_id_for_session(session)?.to_owned();
         let metadata = self.model_metadata_for_session(session);
-        // Mirror the traits chip's suffix decode: Cursor packs the choice
-        // into the model id, so the suffix fills what the session fields
+        // Mirror the traits chip's suffix decode: a packed alias carries the
+        // choice in the model id, so the suffix fills what the session fields
         // leave unset.
-        let (suffix_effort, suffix_tier) = (session.provider == ProviderKind::Cursor)
-            .then(|| self.model_for_session(session))
-            .flatten()
+        let (suffix_effort, suffix_tier) = self
+            .model_for_session(session)
             .and_then(|requested| {
                 self.provider_probe(session.provider).and_then(|probe| {
-                    crate::model_catalog::cursor_catalog_model(&probe.models, requested)
+                    crate::model_catalog::packed_catalog_model(
+                        &probe.models,
+                        requested,
+                        session.provider,
+                    )
                 })
             })
             .map(|matched| {
                 (
-                    crate::model_catalog::cursor_suffix_reasoning_effort(
+                    crate::model_catalog::packed_suffix_reasoning_effort(
                         &matched.suffix,
                         &matched.model.reasoning_efforts,
                     ),
-                    crate::model_catalog::cursor_suffix_service_tier(
+                    crate::model_catalog::packed_suffix_service_tier(
                         &matched.suffix,
                         &matched.model.service_tiers,
                     ),

@@ -2140,22 +2140,27 @@ impl Waku {
             return None;
         }
 
-        let cursor_suffix = (session.provider == ProviderKind::Cursor)
-            .then(|| self.model_for_session(session))
-            .flatten()
+        // A stored packed alias carries its traits in the id's suffix — decode
+        // them so the chip shows what the session would run at.
+        let packed_suffix = self
+            .model_for_session(session)
             .and_then(|requested| {
                 self.provider_probe(session.provider).and_then(|probe| {
-                    waku_protocol::model_catalog::cursor_catalog_model(&probe.models, requested)
+                    waku_protocol::model_catalog::packed_catalog_model(
+                        &probe.models,
+                        requested,
+                        session.provider,
+                    )
                 })
             })
             .map(|matched| matched.suffix)
             .unwrap_or_default();
-        let suffix_effort = waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
-            &cursor_suffix,
+        let suffix_effort = waku_protocol::model_catalog::packed_suffix_reasoning_effort(
+            &packed_suffix,
             &model.reasoning_efforts,
         );
-        let suffix_tier = waku_protocol::model_catalog::cursor_suffix_service_tier(
-            &cursor_suffix,
+        let suffix_tier = waku_protocol::model_catalog::packed_suffix_service_tier(
+            &packed_suffix,
             &model.service_tiers,
         );
 
@@ -6478,35 +6483,26 @@ pub(super) fn visible_picker_rows(
         })
         .collect();
 
-    // Stored selections may name a packed Cursor alias (`grok-4.6-xhigh-fast`)
-    // from before the catalog folded aliases into base models — resolve each
-    // back to base plus the traits its suffix carries so stars and recents
-    // still land on their combo row.
-    let cursor_ids: Vec<&str> = probes
-        .iter()
-        .find(|probe| probe.provider == ProviderKind::Cursor)
-        .map(|probe| {
-            probe
-                .models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect()
-        })
-        .unwrap_or_default();
-    let cursor_combo = |provider: ProviderKind,
+    // Stored selections may name a packed alias (`grok-4.6-xhigh-fast`) from
+    // before the catalog folded aliases into base models — resolve each back
+    // to base plus the traits its suffix carries so stars and recents still
+    // land on their combo row.
+    let packed_combo = |provider: ProviderKind,
                         stored: &str,
                         effort: &Option<String>,
                         fast: bool,
                         model: &ProviderModel|
      -> (String, Option<String>, bool) {
-        let Some(selection) = (provider == ProviderKind::Cursor)
-            .then(|| {
-                waku_protocol::model_catalog::resolve_cursor_model(
-                    cursor_ids.iter().copied(),
+        let Some(selection) = probes
+            .iter()
+            .find(|probe| probe.provider == provider)
+            .and_then(|probe| {
+                waku_protocol::model_catalog::resolve_packed_model(
+                    probe.models.iter().map(|model| model.id.as_str()),
                     stored,
+                    provider,
                 )
             })
-            .flatten()
             .filter(|selection| !selection.suffix.is_empty())
         else {
             return (stored.to_owned(), effort.clone(), fast);
@@ -6514,12 +6510,12 @@ pub(super) fn visible_picker_rows(
         (
             selection.value,
             effort.clone().or_else(|| {
-                waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
+                waku_protocol::model_catalog::packed_suffix_reasoning_effort(
                     &selection.suffix,
                     &model.reasoning_efforts,
                 )
             }),
-            fast || waku_protocol::model_catalog::cursor_suffix_service_tier(
+            fast || waku_protocol::model_catalog::packed_suffix_service_tier(
                 &selection.suffix,
                 &model.service_tiers,
             )
@@ -6529,7 +6525,7 @@ pub(super) fn visible_picker_rows(
     for row in &mut rows {
         let default_effort = model_default_effort(&row.model);
         row.favorite_index = favorites.iter().position(|favorite| {
-            let (model, effort, fast) = cursor_combo(
+            let (model, effort, fast) = packed_combo(
                 favorite.provider,
                 &favorite.model,
                 &favorite.effort,
@@ -6552,7 +6548,7 @@ pub(super) fn visible_picker_rows(
             )
         });
         row.recent_rank = recents.iter().position(|use_| {
-            let (model, effort, fast) = cursor_combo(
+            let (model, effort, fast) = packed_combo(
                 use_.provider,
                 &use_.model,
                 &use_.effort,
