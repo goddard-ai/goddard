@@ -1637,6 +1637,7 @@ impl Waku {
             &rows,
             selected,
             pending,
+            None,
         )
         .or_else(|| sessions::next_idle_session(&self.state.sessions, &rows, selected, pending))
         .is_some()
