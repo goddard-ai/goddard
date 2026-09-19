@@ -16,19 +16,28 @@ jobs:
     name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
+      # Ubuntu runs on every push and PR. macOS and Windows cost 20-40 minutes
+      # each, so they join the matrix only on pushes to main or on PRs carrying
+      # the matching `macos` / `windows` label. (`matrix` isn't available in
+      # `jobs.<id>.if`, so the gate lives in the matrix itself.)
       matrix:
-        os: [macos-latest, ubuntu-24.04, windows-latest]
+        os: >-
+          ${{
+            github.ref == 'refs/heads/main' &&
+              fromJSON('["macos-latest", "ubuntu-24.04", "windows-latest"]')
+            ||
+            github.event_name == 'pull_request' &&
+              fromJSON(format(
+                '["ubuntu-24.04"{0}{1}]',
+                contains(join(github.event.pull_request.labels.*.name, ','), 'macos')
+                  && ',"macos-latest"' || '',
+                contains(join(github.event.pull_request.labels.*.name, ','), 'windows')
+                  && ',"windows-latest"' || ''))
+            ||
+            fromJSON('["ubuntu-24.04"]')
+          }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    # Ubuntu runs on every push and PR. macOS and Windows cost 20-40 minutes
-    # each, so they run on pushes to main, or on PRs carrying the `macos` /
-    # `windows` label.
-    if: >-
-      matrix.os == 'ubuntu-24.04' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'pull_request' &&
-        ((matrix.os == 'macos-latest' && contains(github.event.pull_request.labels.*.name, 'macos')) ||
-         (matrix.os == 'windows-latest' && contains(github.event.pull_request.labels.*.name, 'windows'))))
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
