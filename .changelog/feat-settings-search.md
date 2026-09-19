@@ -1,1 +1,1 @@
-- Settings search focuses the field as soon as Settings opens, matching a section's own title shows that whole section, and clicking a section or setting title jumps to it on its own page
+- Settings search improvements: the field is focused as soon as Settings opens, matching a section's own title shows that whole section, and clicking a section or setting title jumps to it on its own page
