@@ -804,9 +804,9 @@ pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
 /// Fraction of the Sidebar vibrancy let through the sidebar's tint by
 /// default — visible without competing with row text.
 pub const DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT: f32 = 0.25;
-/// Past ~90% of the mix the tint contributes almost nothing, so the slider
-/// stops there.
-pub const MAX_SIDEBAR_TRANSPARENCY: f32 = 0.9;
+/// At 100% the tint contributes nothing — the sidebar is pure desktop
+/// material, legibility on busy backdrops notwithstanding.
+pub const MAX_SIDEBAR_TRANSPARENCY: f32 = 1.0;
 /// Border weight out of the box: visibly fainter than the solved floors the
 /// slider's 100% restores — chrome stays quiet by default.
 pub const DEFAULT_BORDER_INTENSITY: f32 = 0.6;
