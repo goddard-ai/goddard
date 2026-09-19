@@ -174,6 +174,8 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "dialog.archive.dismiss", action: || Box::new(crate::app::DismissArchiveDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "dialog.goal.confirm", action: || Box::new(crate::app::ConfirmGoalDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.goal.dismiss", action: || Box::new(crate::app::DismissGoalDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.send_file.confirm", action: || Box::new(crate::app::ConfirmSendFileDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.send_file.dismiss", action: || Box::new(crate::app::DismissSendFileDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.image_preview.dismiss", action: || Box::new(crate::app::DismissImagePreview), title_key: "shortcuts.dismiss", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "dialog.shortcuts.dismiss", action: || Box::new(crate::app::DismissShortcutsDialog), title_key: "shortcuts.dismiss", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "sidebar.cancel_rename", action: || Box::new(crate::app::CancelSessionRename), title_key: "shortcuts.dismiss", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
@@ -505,6 +507,11 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.goal.confirm", All, "secondary-enter", GoalInput),
     e("dialog.goal.confirm", All, "secondary-enter", GoalDialog),
     e("dialog.goal.dismiss", All, "escape", GoalDialog),
+    // === app::init_send_file_dialog_keys =================================================
+    e("dialog.send_file.confirm", All, "secondary-enter", SendFileInput),
+    e("dialog.send_file.confirm", All, "secondary-enter", SendFileDialog),
+    e("dialog.send_file.confirm", All, "enter", SendFileDialog),
+    e("dialog.send_file.dismiss", All, "escape", SendFileDialog),
     // === app::init_annotation_keys ========================================================
     e("menu.dismiss", All, "escape", WakuAnnotation),
     // === app::init_image_preview_keys ======================================================
@@ -695,6 +702,8 @@ mod ctx {
     pub const BigPicture: &str = "BigPicture";
     pub const GoalInput: &str = "GoalDialog > TextInput";
     pub const GoalDialog: &str = "GoalDialog";
+    pub const SendFileInput: &str = "SendFileDialog > TextInput";
+    pub const SendFileDialog: &str = "SendFileDialog";
     pub const WakuAnnotation: &str = "WakuAnnotation";
     pub const ImagePreview: &str = "ImagePreview";
     pub const SessionRenameField: &str = "SessionRename > TextInput";

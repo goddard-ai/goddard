@@ -382,9 +382,10 @@ fn migrate_projectless_state(
 }
 
 /// Materialize a transfer's agent session: a task under the synthetic
-/// "Friends" project whose first message is the receipt — peer, title,
-/// sender note, and where the files landed. The session stays quarantined
-/// (idle, no turn started) until the user chooses to trust it.
+/// "Friends" project whose first messages are the sender's note and the
+/// receipt — peer, title, and where the files landed — rendered as
+/// assistant messages, not a sent bubble. The session stays quarantined
+/// (idle, no provider turn started) until the user chooses to trust it.
 fn create_transfer_session(
     task_state: &Arc<Mutex<PersistedState>>,
     task_store: &Arc<StateStore>,
@@ -412,25 +413,24 @@ fn create_transfer_session(
     };
     let mut session = AgentSession::new(project_id, ProviderKind::Claude);
     session.title = format!("{} from {}", transfer.title, transfer.peer_name);
-    let mut receipt = format!(
-        "{} sent you \"{}\".",
-        transfer.peer_name, transfer.title
-    );
+    // The receipt is a notification, not a prompt awaiting a reply — a
+    // provider turn holds the assistant messages so they render like an
+    // agent reply (bot style), not a sent bubble. The sender's note rides
+    // above the delivery details.
+    session.begin_provider_turn();
     if let Some(note) = transfer.note.as_deref().filter(|note| !note.is_empty()) {
-        receipt.push_str(&format!("\n\n{note}"));
+        session.push_message(crate::model::MessageRole::Assistant, note);
     }
-    receipt.push_str(&format!(
-        "\n\nFiles are in {}\n\nThe files have not been opened or executed — decide whether you trust them before asking me to work with them.",
-        dest_dir.display()
-    ));
-    session.adopt_submitted_prompt(&receipt, Uuid::new_v4(), Uuid::new_v4(), None, false);
-    // The receipt is a notification, not a turn awaiting a reply — close it
-    // out so the session renders Idle instead of an eternal spinner.
-    let now = crate::model::unix_time();
-    if let Some(turn) = session.turns.last_mut() {
-        turn.status = TurnStatus::Completed;
-        turn.completed_at = Some(now);
-    }
+    session.push_message(
+        crate::model::MessageRole::Assistant,
+        format!(
+            "{} sent you \"{}\".\n\nFiles are in {}\n\nThe files have not been opened or executed — decide whether you trust them before asking me to work with them.",
+            transfer.peer_name,
+            transfer.title,
+            dest_dir.display()
+        ),
+    );
+    session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
     session.quarantined = true;
     // Received files stay in the sandbox VM even once trusted — the agent
@@ -3448,14 +3448,25 @@ mod tests {
             assert_eq!(session.title, "design.pdf from maya");
             let receipt = &session.turns[0];
             assert_eq!(receipt.status, crate::model::TurnStatus::Completed);
-            let receipt_text = session
+            // Note and receipt are assistant messages — bot-style blocks,
+            // not a sent bubble — with the note above the delivery details.
+            assert!(
+                session
+                    .messages
+                    .iter()
+                    .all(|message| message.role == crate::model::MessageRole::Assistant)
+            );
+            let note_index = session
                 .messages
                 .iter()
-                .map(|message| message.content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(receipt_text.contains("here's the new mockups"));
-            assert!(receipt_text.contains("transfers/x"));
+                .position(|message| message.content == "here's the new mockups")
+                .expect("the sender's note message");
+            let receipt_index = session
+                .messages
+                .iter()
+                .position(|message| message.content.contains("transfers/x"))
+                .expect("the delivery receipt message");
+            assert!(note_index < receipt_index, "the note lands above the file");
         }
 
         // A second transfer reuses the same Friends project.

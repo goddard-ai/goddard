@@ -1,0 +1,1 @@
+- Attach an optional message when sending a file or folder to a friend — the receiver's chat shows the note above the delivered file as an agent-style message

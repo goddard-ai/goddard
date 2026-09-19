@@ -1905,6 +1905,9 @@ pub struct Waku {
     shortcuts_dialog: Option<shortcuts_dialog::ShortcutsDialogState>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
     goal_dialog_request: Option<goal_dialog::GoalDialogRequest>,
+    /// Window-modal note composer for Settings → Friends file sends, opened
+    /// once the file picker returns a path.
+    send_file_dialog: Option<send_file_dialog::SendFileDialogState>,
     /// Goal operations accepted before the session's runtime exists. Goals
     /// attach to the provider thread, not to any turn, so `/goal` on a fresh
     /// task starts the provider and these drain once it installs.
@@ -2764,6 +2767,7 @@ mod routing;
 mod run_script;
 mod runtime;
 mod saved_drafts;
+mod send_file_dialog;
 mod sessions;
 mod settings;
 mod shortcuts_dialog;
@@ -2798,6 +2802,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
 pub use saved_drafts::init as init_drafts_keys;
+pub use send_file_dialog::init as init_send_file_dialog_keys;
 pub use settings::init as init_settings_keys;
 pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -2819,6 +2824,7 @@ pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog};
 pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
+pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
 pub use sidebar::CancelSessionRename;
@@ -4818,6 +4824,7 @@ impl Waku {
                 shortcuts_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,
+                send_file_dialog: None,
                 pending_goal_operations: HashMap::new(),
                 goal_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),
