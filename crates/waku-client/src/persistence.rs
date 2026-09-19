@@ -156,10 +156,6 @@ fn default_render_math() -> bool {
     true
 }
 
-fn default_open_at_last_prompt() -> bool {
-    true
-}
-
 /// Sidebar transparency rides on macOS Sidebar vibrancy — a real backdrop
 /// blur. Where no blur exists the feature stays off by default.
 fn default_sidebar_transparency() -> bool {
@@ -652,9 +648,6 @@ pub struct AppSettings {
     pub render_math: bool,
     /// Append an estimated "N tok/s" readout to settled response footers.
     pub show_response_token_speed: bool,
-    /// Open a task that is not mid-turn scrolled to its last prompt instead
-    /// of the end of the transcript.
-    pub open_at_last_prompt: bool,
     /// Integrate upstream changes with `git pull --no-rebase` (a merge)
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
@@ -773,7 +766,6 @@ impl Default for AppSettings {
             code_font_family: None,
             render_math: true,
             show_response_token_speed: false,
-            open_at_last_prompt: true,
             sync_with_merge: false,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
@@ -1062,8 +1054,6 @@ pub struct PersistedState {
     /// Append an estimated "N tok/s" readout to settled response footers.
     #[serde(default)]
     pub show_response_token_speed: bool,
-    #[serde(default = "default_open_at_last_prompt")]
-    pub open_at_last_prompt: bool,
     /// Integrate upstream changes with `git pull --no-rebase` (a merge)
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
@@ -1312,7 +1302,6 @@ impl PersistedState {
             code_font_family: None,
             render_math: true,
             show_response_token_speed: false,
-            open_at_last_prompt: true,
             sync_with_merge: false,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
@@ -1612,7 +1601,6 @@ impl PersistedState {
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
             show_response_token_speed: self.show_response_token_speed,
-            open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
             auto_resolve_in_chat: self.auto_resolve_in_chat,
             auto_resolve_land_conflicts: self.auto_resolve_land_conflicts,
@@ -1704,7 +1692,6 @@ impl PersistedState {
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
         self.show_response_token_speed = settings.show_response_token_speed;
-        self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.auto_resolve_land_conflicts = settings.auto_resolve_land_conflicts;

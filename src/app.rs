@@ -2752,10 +2752,6 @@ pub struct Waku {
     /// that lands after activation resets the rows again, so the same landing
     /// is re-applied there rather than snapping the transcript to its tail.
     transcript_landing: Option<(Uuid, TranscriptLanding)>,
-    /// Sessions whose persisted scroll position still claims the first
-    /// post-launch activation; consumed by `apply_transcript_landing` so a
-    /// later plain visit lands at the last prompt like usual.
-    startup_scroll_restores: HashSet<Uuid>,
     /// The sidebar scroll offset waiting for the list's first rows.
     pending_sidebar_scroll: Cell<Option<ListOffset>>,
     /// Last decided visibility of the scroll-to-tail affordance. The tail's
@@ -5418,7 +5414,6 @@ impl Waku {
                 transcript_last_wheel_scroll,
                 transcript_scroll_positions: HashMap::new(),
                 transcript_landing: None,
-                startup_scroll_restores: HashSet::new(),
                 pending_sidebar_scroll: Cell::new(None),
                 transcript_scroll_to_bottom_visible: Cell::new(false),
                 transcript_scrollbar_dragging: Cell::new(false),

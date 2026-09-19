@@ -1346,23 +1346,6 @@ impl Waku {
                 theme,
                 search,
             ))
-            .children(setting_card(
-                tr!("settings.open_at_last_prompt"),
-                tr!("settings.open_at_last_prompt_description"),
-                toggle_switch(
-                    "open-at-last-prompt-toggle",
-                    self.state.open_at_last_prompt,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.open_at_last_prompt;
-                        move |this, _, cx| this.set_open_at_last_prompt(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
             .children({
                 let navigation = self.state.archive_navigation;
                 let weak = cx.entity().downgrade();
@@ -6558,15 +6541,6 @@ impl Waku {
             return;
         }
         self.state.markdown_preview = enabled;
-        self.save();
-        cx.notify();
-    }
-
-    fn set_open_at_last_prompt(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if self.state.open_at_last_prompt == enabled {
-            return;
-        }
-        self.state.open_at_last_prompt = enabled;
         self.save();
         cx.notify();
     }
