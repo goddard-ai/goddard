@@ -238,10 +238,14 @@ pub fn edge_fade(
         move |bounds, _, _| {
             let scrolled = scroll.scrolled();
             let max_offset = scroll.max_offset();
-            let visible = match side {
-                FadeEdge::Top => scrolled > px(0.5),
-                FadeEdge::Bottom => max_offset - scrolled > px(0.5),
-            };
+            // A dissolve needs a surface that can cover the rows; over a
+            // translucent surface the gradient only stacks a darker band —
+            // it reads as a shadow, not a fade.
+            let visible = surface.a >= 1.0
+                && match side {
+                    FadeEdge::Top => scrolled > px(0.5),
+                    FadeEdge::Bottom => max_offset - scrolled > px(0.5),
+                };
             visible.then(|| {
                 let transparent = surface.opacity(0.0);
                 let background = match side {
