@@ -4030,6 +4030,8 @@ automations.timezone_placeholder:
   en: System zone
 automations.model_placeholder:
   en: Default
+automations.model_default:
+  en: Provider default
 automations.precheck_placeholder:
   en: Shell command that must exit 0
 automations.grace_placeholder:
