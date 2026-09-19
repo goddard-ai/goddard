@@ -1396,8 +1396,8 @@ mod windows {
         /// below came from that script with a throwaway key.
         #[test]
         fn a_signature_from_the_release_script_verifies_here() {
-            const PUBLIC: &str = "7gZ3dbx+MPQD4vc2dk7olL9QU66JIjpJ1iqNNafU2lQ=";
-            const SIGNATURE: &str = "eBIPKGvQSxFIVNwOzNjzHYs/AGiYFIe3pGulv0TeocoMN0+0l28OJZrlJ2ZuQnNBfif10VW3virGo+7GP3TwCw==";
+            const PUBLIC: &str = "JMzgAP64e3nwnTXiFhOPL02EctNN7lLMV+wwkaBZulU=";
+            const SIGNATURE: &str = "9/YmWayjUG5td2E4C3MG7G+l7hoIeYDNSGn5Fp0NxEZ7W1t/vjVTCLxjHEQPRi3q6lfUTR8sTMoEuvQN0v95Ag==";
             const PAYLOAD: &[u8] = b"Goddard-0.0.0-x86_64-Setup.exe contents";
 
             let decode = |value: &str| {

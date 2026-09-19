@@ -1,1 +1,0 @@
-- Settings search now matches setting titles and descriptions across all pages: every section with a match renders in one scrollable list with the matching text highlighted, and the sidebar filters to those sections (clicking one scrolls to it)

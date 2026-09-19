@@ -205,13 +205,17 @@ pub fn plain_command(program: impl AsRef<OsStr>) -> Command {
 // a second process still working the session. The wrapper watches both the
 // daemon pid and its own pid so a daemon death AND a direct `kill()` on the
 // wrapper (which destructors also cannot intercept under SIGKILL) both reach
-// the real child. `<&0` is load-bearing: a non-interactive shell hands a
-// background job /dev/null for stdin, which would starve stdio providers.
+// the real child. The fd-9 dance is load-bearing: a non-interactive shell
+// hands a background job /dev/null for stdin, which would starve stdio
+// providers. `<&0` fixes that under bash but not dash — dash assigns
+// /dev/null first, so `<&0` duplicates the dead fd — while `<&9` dup's the
+// original stdin saved before the backgrounded command runs.
 #[cfg(unix)]
 pub(crate) const DAEMON_GUARDIAN_SCRIPT: &str = r#"
 daemon=$PPID
 wrapper=$$
-"$@" <&0 &
+exec 9<&0
+"$@" <&9 &
 child=$!
 (
   while kill -0 "$daemon" 2>/dev/null && kill -0 "$wrapper" 2>/dev/null; do

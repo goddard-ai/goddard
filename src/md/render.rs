@@ -571,7 +571,9 @@ fn file_references(flat: &FlatText, workspace: &Path) -> Vec<(Range<usize>, Stri
             } else {
                 workspace.join(path)
             };
-            Some((range, resolved.to_string_lossy().into_owned()))
+            // Mentions spell paths with forward slashes; keep the resolved
+            // target consistent on Windows, where `join` would mix in `\`.
+            Some((range, resolved.to_string_lossy().replace('\\', "/")))
         })
         .collect()
 }

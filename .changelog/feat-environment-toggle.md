@@ -1,1 +1,0 @@
-- ⌘⇧. flips a draft's environment between this Mac and the sandbox VM — the Environment section of the ⌘. mode menu, without opening it

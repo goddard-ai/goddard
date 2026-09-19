@@ -1,1 +1,0 @@
-- “Create draft” parks the composer’s contents — text, attachments, and annotations — as a saved draft tied to its chat or project; a count button beside the composer’s access control opens the new Drafts page, where drafts can be searched, edited inline, hidden, deleted, or dropped back into their composer (⌘Z restores a used draft)

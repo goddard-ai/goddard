@@ -400,7 +400,7 @@ mod tests {
         run_git(&repository, &["branch", "feature"]);
         // `git worktree list` reports canonical paths; match them on macOS,
         // where the temporary directory lives behind `/var` -> `/private/var`.
-        fs::canonicalize(&repository).unwrap()
+        dunce::canonicalize(&repository).unwrap()
     }
 
     fn non_repository() -> PathBuf {
@@ -436,7 +436,7 @@ mod tests {
         assert!(main.last_commit_at.is_some());
         let linked_entry = &entries[1];
         assert!(!linked_entry.is_main);
-        assert_eq!(linked_entry.path, fs::canonicalize(&linked).unwrap());
+        assert_eq!(linked_entry.path, dunce::canonicalize(&linked).unwrap());
         assert_eq!(linked_entry.branch.as_deref(), Some("occupied"));
         assert_eq!(linked_entry.dirty_files, Some(1));
         assert_eq!(linked_entry.ahead, None, "no upstream is configured");

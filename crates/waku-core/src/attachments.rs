@@ -70,7 +70,7 @@ impl AttachmentStore {
                 "daemon attachment path must be absolute",
             ));
         }
-        let source = fs::canonicalize(path)?;
+        let source = dunce::canonicalize(path)?;
         let name = source
             .file_name()
             .and_then(|name| name.to_str())

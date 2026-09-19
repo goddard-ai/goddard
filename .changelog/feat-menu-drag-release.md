@@ -1,1 +1,0 @@
-- Menus support the native press-drag-release gesture: hold a menu trigger (or right-click for a context menu), drag onto an item, and release to pick it — releasing over nothing dismisses

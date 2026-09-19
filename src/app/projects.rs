@@ -3519,7 +3519,10 @@ mod tests {
     fn modifiers(shift: bool, secondary: bool) -> gpui::Modifiers {
         gpui::Modifiers {
             shift,
+            #[cfg(target_os = "macos")]
             platform: secondary,
+            #[cfg(not(target_os = "macos"))]
+            control: secondary,
             ..Default::default()
         }
     }

@@ -38,7 +38,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
             .trim()
             .to_owned(),
     );
-    let repository = fs::canonicalize(&repository).unwrap_or(repository);
+    let repository = dunce::canonicalize(&repository).unwrap_or(repository);
 
     let current =
         optional_stdout(cwd, &["branch", "--show-current"])?.filter(|branch| !branch.is_empty());
@@ -70,7 +70,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
                 false
             } else {
                 let worktree_path = PathBuf::from(worktree_path);
-                let worktree_path = fs::canonicalize(&worktree_path).unwrap_or(worktree_path);
+                let worktree_path = dunce::canonicalize(&worktree_path).unwrap_or(worktree_path);
                 worktree_path != repository
             };
             Some(BranchEntry {
