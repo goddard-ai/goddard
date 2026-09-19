@@ -799,7 +799,7 @@ impl super::Waku {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .border_b_1()
+                    .border_b(hairline())
                     .border_color(theme.border)
                     .child(
                         div()
@@ -962,7 +962,7 @@ impl super::Waku {
                 .w(px(420.0))
                 .p(px(16.0))
                 .rounded(px(12.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border)
                 .bg(theme.canvas)
                 .shadow_xl()
@@ -982,7 +982,7 @@ impl super::Waku {
                         .h(px(32.0))
                         .px(px(10.0))
                         .rounded(px(6.0))
-                        .border_1()
+                        .border(hairline())
                         .border_color(theme.accent)
                         .flex()
                         .items_center()
@@ -1058,7 +1058,7 @@ fn render_keyboard_stage(
             .px(px(20.0))
             .flex()
             .items_center()
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .child(
                 div()
@@ -1078,7 +1078,7 @@ fn render_keyboard_stage(
         .flex()
         .flex_col()
         .gap(px(KEY_GAP))
-        .border_b_1()
+        .border_b(hairline())
         .border_color(theme.border)
         .child(
             div()
@@ -1106,7 +1106,7 @@ fn render_keyboard_stage(
                     .items_center()
                     .justify_center()
                     .text_size(sp(10.5))
-                    .border_1()
+                    .border(hairline())
                     .border_color(if active { theme.text } else { theme.border })
                     .bg(if active {
                         theme.sidebar_item_background
@@ -1235,7 +1235,7 @@ fn keybinding_cell(
                 .px(px(6.0))
                 .py(px(2.0))
                 .rounded(px(4.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border)
                 .text_size(sp(11.0))
                 .text_color(theme.text)
