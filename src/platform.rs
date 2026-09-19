@@ -619,6 +619,16 @@ pub fn hide_window(window: &mut Window) {
 thread_local! {
     static SIDEBAR_TINT_VIEW: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSView>>> =
         const { std::cell::RefCell::new(None) };
+    static SIDEBAR_GLASS_VIEW: std::cell::RefCell<
+        Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+/// NSGlassEffectView ships with macOS 26; the class lookup is the availability
+/// check, so older systems keep the vibrancy + tint path untouched.
+#[cfg(target_os = "macos")]
+fn glass_effect_supported() -> bool {
+    objc2::runtime::AnyClass::get(c"NSGlassEffectView").is_some()
 }
 
 #[cfg(target_os = "macos")]
@@ -651,11 +661,14 @@ pub fn titlebar_double_click(window: &Window) {
 /// Metal target to blend two translucent quads. The semantic tint is a native
 /// view above active Sidebar vibrancy, painted with the active theme's solid
 /// sidebar color; GPUI paints clear sidebar chrome and one translucent
-/// interaction layer above it. `transparency_amount` is the fraction of
-/// vibrancy the tint lets through — 0 repaints the sidebar's solid color at
-/// full strength. With `transparent` off the effect view stops rendering and
-/// the tint view hides; GPUI's sidebar fill is opaque by then and covers the
-/// strip itself.
+/// interaction layer above it. On macOS 26 an `NSGlassEffectView` fills the
+/// strip instead and the vibrancy view deactivates — glass lenses whatever is
+/// composited beneath it, and leaving vibrancy on would have it refract
+/// already-blurred material, which reads as plain blur. `transparency_amount`
+/// is the fraction of the material the tint lets through — 0 repaints the
+/// sidebar's solid color at full strength. With `transparent` off the effect
+/// view stops rendering and the tint and glass views hide; GPUI's sidebar
+/// fill is opaque by then and covers the strip itself.
 #[cfg(target_os = "macos")]
 pub fn configure_sidebar_material(
     window: &Window,
@@ -672,6 +685,7 @@ pub fn configure_sidebar_material(
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     let transparent = transparent && !reduce_transparency();
+    let glass_active = transparent && glass_effect_supported();
     let Ok(handle) = HasWindowHandle::window_handle(window) else {
         return;
     };
@@ -720,7 +734,11 @@ pub fn configure_sidebar_material(
             };
             effect_view.setMaterial(NSVisualEffectMaterial::Sidebar);
             effect_view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-            effect_view.setState(if transparent {
+            // Glass samples the window backdrop beneath it; with vibrancy
+            // active it would refract already-blurred material, so when the
+            // glass surface owns the strip the vibrancy view turns off and
+            // the glass lenses the desktop directly.
+            effect_view.setState(if transparent && !glass_active {
                 NSVisualEffectState::Active
             } else {
                 NSVisualEffectState::Inactive
@@ -735,6 +753,55 @@ pub fn configure_sidebar_material(
         // tint; the settings slider clamps it to MAX_SIDEBAR_TRANSPARENCY.
         let tint_opacity = 1.0 - f64::from(transparency_amount.clamp(0.0, 1.0));
         let tint = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, tint_opacity);
+
+        // macOS 26 swaps the tint layer for a real liquid-glass surface:
+        // `tintColor` carries the same theme wash, so the separate tint view
+        // stays hidden on that path. Allocation itself is gated — the class
+        // is absent on older systems and `class!` would panic.
+        if glass_effect_supported() {
+            // Glass tints must stay light — the vibrancy-path opacity (up to
+            // 100%) would repaint the flat look over the lensing. The slider
+            // keeps its direction: more transparency, clearer glass.
+            let glass_tint = NSColor::colorWithSRGBRed_green_blue_alpha(
+                r,
+                g,
+                b,
+                tint_opacity * 0.35,
+            );
+            SIDEBAR_GLASS_VIEW.with_borrow_mut(|slot| {
+                let needs_new_view = slot.as_ref().is_none_or(|glass_view| {
+                    glass_view
+                        .window()
+                        .as_deref()
+                        .is_none_or(|window| !std::ptr::eq(window, native_window.as_ref()))
+                });
+                if needs_new_view {
+                    let mut frame = content_view.bounds();
+                    frame.size.width = SIDEBAR_WIDTH;
+                    let glass_view = objc2_app_kit::NSGlassEffectView::initWithFrame(
+                        objc2_app_kit::NSGlassEffectView::alloc(main_thread),
+                        frame,
+                    );
+                    glass_view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewHeightSizable);
+                    // The strip reaches the window edge; a capsule radius would
+                    // round the wrong corners.
+                    glass_view.setCornerRadius(0.0);
+                    content_view.addSubview_positioned_relativeTo(
+                        &glass_view,
+                        NSWindowOrderingMode::Below,
+                        Some(view),
+                    );
+                    *slot = Some(glass_view);
+                }
+
+                if let Some(glass_view) = slot.as_ref() {
+                    glass_view.setHidden(!glass_active);
+                    if glass_active {
+                        glass_view.setTintColor(Some(&glass_tint));
+                    }
+                }
+            });
+        }
 
         SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
@@ -758,7 +825,7 @@ pub fn configure_sidebar_material(
             }
 
             if let Some(tint_view) = slot.as_ref() {
-                tint_view.setHidden(!transparent);
+                tint_view.setHidden(!transparent || glass_active);
                 if let Some(layer) = tint_view.layer() {
                     layer.setBackgroundColor(Some(&tint.CGColor()));
                 }
@@ -803,6 +870,19 @@ pub fn set_sidebar_material_width(window: &Window, width: f32) {
             let mut frame = tint_view.frame();
             frame.size.width = width.into();
             tint_view.setFrame(frame);
+        });
+        SIDEBAR_GLASS_VIEW.with_borrow(|slot| {
+            let Some(glass_view) = slot.as_ref().filter(|glass_view| {
+                glass_view
+                    .window()
+                    .as_deref()
+                    .is_some_and(|window| std::ptr::eq(window, native_window.as_ref()))
+            }) else {
+                return;
+            };
+            let mut frame = glass_view.frame();
+            frame.size.width = width.into();
+            glass_view.setFrame(frame);
         });
     }
 }
