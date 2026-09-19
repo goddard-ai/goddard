@@ -1579,6 +1579,36 @@ projects.tab_worktrees:
   en: Worktrees
 projects.tab_branches:
   en: Branches
+projects.tab_review:
+  en: Review
+projects.filter_review:
+  en: Filter commits
+projects.review_no_queue:
+  en: No qa branch on origin
+projects.review_empty:
+  en: Nothing proposed on qa
+projects.review_train:
+  en: "%{approved} of %{total} commits promote"
+projects.review_pending_count:
+  en: "%{count} awaiting review"
+projects.review_promote:
+  en: "Promote to %{branch}"
+projects.review_frontier:
+  en: promotes
+projects.review_approve:
+  en: Approve
+projects.review_reject:
+  en: Reject and revert
+projects.review_needs_review:
+  en: Needs review
+projects.review_approved:
+  en: Approved
+projects.review_auto:
+  en: Auto-approved
+projects.review_rejected:
+  en: Rejected
+projects.review_reverted:
+  en: Reverted
 projects.filter_worktrees:
   en: Filter worktrees
 projects.filter_branches:

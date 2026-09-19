@@ -1307,6 +1307,7 @@ impl Waku {
         let settings_updates = self.daemon_settings_tx.clone();
         let friends_updates = self.friends_tx.clone();
         let automations_updates = self.automations_tx.clone();
+        let review_updates = self.review_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
@@ -1322,6 +1323,7 @@ impl Waku {
                     let settings = client.subscribe_settings();
                     let friends = client.subscribe_friends();
                     let automations = client.subscribe_automations();
+                    let review = client.subscribe_review();
                     // Seed the document before broadcasts arrive — a client
                     // connecting after the last change sees no event until
                     // something mutates friends state again.
@@ -1418,6 +1420,18 @@ impl Waku {
                                 }
                                 signal_event_pump(&event_wake);
                             }
+                            recv(review) -> review => {
+                                let Ok(origin_url) = review else {
+                                    let Ok(replacement) = clients.recv() else {
+                                        return;
+                                    };
+                                    break replacement;
+                                };
+                                if review_updates.send((key, origin_url)).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
                         }
                     };
                 }
@@ -1458,6 +1472,29 @@ impl Waku {
         }
         for (key, settings) in latest {
             self.apply_remote_daemon_settings(key, settings, cx);
+        }
+        true
+    }
+
+    /// `reviewChanged` broadcasts — an origin's `qa` state moved here or
+    /// on a friend's machine. Matching the URL to a project would take a
+    /// git call on the UI thread, so refresh the open Review tab; it is
+    /// the only surface that reads the queue.
+    fn drain_review_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while self.review_events.try_recv().is_ok() {
+            changed = true;
+        }
+        if !changed {
+            return false;
+        }
+        if let Some(project_id) = self.projects_page
+            && self
+                .projects_page_states
+                .get(&project_id)
+                .is_some_and(|state| state.tab == crate::app::projects::ProjectsTab::Review)
+        {
+            self.projects_refresh_review(project_id, cx);
         }
         true
     }
@@ -5261,6 +5298,7 @@ impl Waku {
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)
             | self.drain_automations_events(cx)
+            | self.drain_review_events(cx)
             | self.drain_route_policy_events()
             | self.drain_status_marker_events()
         {

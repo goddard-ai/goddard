@@ -2114,6 +2114,10 @@ pub struct Waku {
         waku_client::DaemonKey,
         waku_client::automations::AutomationsState,
     )>,
+    /// `reviewChanged` broadcasts forwarded by the task-state sync worker —
+    /// `(daemon, origin_url)` whose `qa` review state moved.
+    review_tx: Sender<(waku_client::DaemonKey, String)>,
+    review_events: Receiver<(waku_client::DaemonKey, String)>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
     /// The Settings → Friends display-name field — the name friends see on
@@ -4223,6 +4227,7 @@ impl Waku {
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
+        let (review_tx, review_events) = unbounded();
         let (route_policy_tx, route_policy_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
         #[cfg(target_os = "macos")]
@@ -5216,6 +5221,8 @@ impl Waku {
                 friends_events,
                 automations_tx,
                 automations_events,
+                review_tx,
+                review_events,
                 route_policy_tx,
                 route_policy_events,
                 route_policy: None,
