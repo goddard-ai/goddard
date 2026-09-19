@@ -2294,6 +2294,9 @@ pub enum ActivityKind {
     Search,
     Plan,
     Tool,
+    /// The daemon-injected structural workspace map, prepended to a fresh
+    /// session's first prompt while the project-map experiment is on.
+    ProjectMap,
 }
 
 impl ActivityKind {
@@ -2413,6 +2416,30 @@ pub fn is_delegation_tool_name(name: &str) -> bool {
     )
 }
 
+/// The daemon's project-map state for one session, streamed while the
+/// experiment opt-in is on. Clients surface it as a small status chip and,
+/// for `Sent`, a transcript artifact carrying the injected text.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ProjectMapStatus {
+    /// The workspace index is building.
+    Building,
+    /// The index is ready — a session's first prompt can be mapped.
+    Ready { indexed_files: usize },
+    /// A settled turn triggered an incremental refresh; a previously sent
+    /// map may lag the code until it finishes.
+    Refreshing,
+    /// The map was prepended to the session's first prompt. `text` is the
+    /// rendered map itself, so clients can show exactly what the provider
+    /// received.
+    Sent {
+        mapped_files: usize,
+        indexed_files: usize,
+        estimated_tokens: usize,
+        text: String,
+    },
+}
+
 #[derive(Clone, Debug)]
 pub enum DriverEvent {
     /// Client-only acknowledgement that every daemon event through this
@@ -2520,6 +2547,10 @@ pub enum DriverEvent {
     /// or (`None`) cleared. Carries the whole goal so late subscribers need
     /// no earlier event.
     GoalUpdated(Option<ThreadGoal>),
+    /// Project-map state for this session while the experiment is on:
+    /// index lifecycle updates plus the `Sent` record of the map that rode
+    /// the first prompt.
+    ProjectMap(ProjectMapStatus),
     TurnFinished {
         success: bool,
         summary: Option<String>,

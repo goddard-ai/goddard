@@ -1618,7 +1618,7 @@ pub(super) fn activity_display_title(activity: &ActivityItem) -> String {
             }
         }
         ActivityKind::Tool => activity_tool_display_name(activity),
-        ActivityKind::Reasoning => activity.title.clone(),
+        ActivityKind::ProjectMap | ActivityKind::Reasoning => activity.title.clone(),
     }
 }
 
@@ -1635,6 +1635,7 @@ pub(super) fn activity_action_label(activity: &ActivityItem) -> String {
         ActivityKind::Plan => tr!("activity.action_plan"),
         ActivityKind::Tool if is_ask_user_question(activity) => tr!("activity.ask_questions"),
         ActivityKind::Tool => tr!("activity.tool"),
+        ActivityKind::ProjectMap => tr!("project_map.action_label"),
     }
 }
 
@@ -1686,6 +1687,9 @@ pub(super) fn activity_row_detail(activity: &ActivityItem, reasoning_live: bool)
                 .then(|| activity_tool_display_name(activity))
                 .unwrap_or_default()
         }
+        // The title already says files and tokens; the map itself lives in
+        // the disclosure's detail section.
+        ActivityKind::ProjectMap => String::new(),
     }
 }
 

@@ -3848,6 +3848,16 @@ impl Waku {
                         |this, enabled, cx| this.set_computer_use_experiment_enabled(enabled, cx),
                     ))
                     .children(self.experiment_card(
+                        "project-map-experiment-toggle",
+                        "experiments.project_map_title",
+                        "experiments.project_map_description",
+                        self.state.project_map_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_project_map_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
                         "friends-experiment-toggle",
                         "experiments.friends_title",
                         "experiments.friends_description",
@@ -3979,6 +3989,15 @@ impl Waku {
 
     fn set_subagents_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.subagents_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The project-map experiment opt-in is daemon-owned like subagents: the
+    /// flag travels with the settings document `save()` already syncs, and
+    /// only sessions started afterwards pick it up.
+    fn set_project_map_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.project_map_enabled = enabled;
         self.save();
         cx.notify();
     }

@@ -1,0 +1,1 @@
+- [Experimental] Project map: opt in under Settings → Experiments to give every new session a compact structural map of its workspace — the top-level symbols of the most-referenced files, budgeted near 1,000 tokens and prepended to the first prompt — so the agent skips cold repo exploration. A composer chip tracks indexing, and the sent map lands as a collapsible transcript row.

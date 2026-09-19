@@ -455,6 +455,33 @@ impl Waku {
                 // `accepts_turn_output` deliberately.
                 self.handle_background_work_event(session_id, event);
             }
+            DriverEvent::ProjectMap(status) => {
+                // `Sent` doubles as the transcript artifact: the row carries
+                // the exact text the provider received. Status otherwise just
+                // moves the composer chip.
+                if let crate::model::ProjectMapStatus::Sent {
+                    mapped_files,
+                    estimated_tokens,
+                    text,
+                    ..
+                } = &status
+                    && self.accepts_turn_output(session_id)
+                {
+                    let item = ActivityItem::new(
+                        Some("goddard-project-map".to_owned()),
+                        ActivityKind::ProjectMap,
+                        tr!(
+                            "project_map.artifact_title",
+                            files = *mapped_files,
+                            tokens = *estimated_tokens
+                        ),
+                        Some(text.clone()),
+                        true,
+                    );
+                    self.update_activity(session_id, runtime, item);
+                }
+                runtime.project_map = Some(status);
+            }
             DriverEvent::Permission {
                 request_id,
                 title,

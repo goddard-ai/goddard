@@ -462,6 +462,11 @@ impl RepoMapIndex {
         Ok(index)
     }
 
+    /// Files currently in the index — what `Ready` announcements report.
+    pub fn indexed_files(&self) -> usize {
+        self.files.len()
+    }
+
     /// Re-walk the workspace; re-parse only files whose content hash changed.
     pub fn refresh(&mut self) -> anyhow::Result<()> {
         let specs = language_specs();

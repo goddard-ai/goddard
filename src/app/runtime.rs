@@ -4271,6 +4271,7 @@ impl Waku {
                 last_background_refresh_at: Instant::now()
                     .checked_sub(BACKGROUND_WORK_REFRESH_INTERVAL)
                     .unwrap_or_else(Instant::now),
+                project_map: None,
             },
         );
         // Startup can emit before the background task hands this receiver to

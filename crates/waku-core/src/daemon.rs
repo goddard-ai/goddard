@@ -17,8 +17,9 @@ use crate::attachments::AttachmentStore;
 use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, DriverEvent, Project, ProviderKind,
-    ProviderResumeCursor, SessionStatus, SessionWorkspace, TurnStatus,
+    AgentSession, Checkpoint, CheckpointStatus, DriverEvent,
+    Project, ProjectMapStatus, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace,
+    TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -58,9 +59,10 @@ fn trim_resident_transcripts(state: &mut PersistedState, pinned: &HashSet<Uuid>)
 /// bounded moment instead of always sending unmapped.
 #[derive(Default)]
 struct RepoMaps {
-    /// Session → workspace root for runtimes launched while the experiment
-    /// is on. Drives first-prompt injection and turn-settle refresh.
-    sessions: HashMap<Uuid, PathBuf>,
+    /// Session → its workspace root and runtime, recorded for runtimes
+    /// launched while the experiment is on. Drives first-prompt injection,
+    /// turn-settle refresh, and `Ready` broadcasts to same-root sessions.
+    sessions: HashMap<Uuid, (PathBuf, Uuid)>,
     /// Sessions still owed a map on their first visible prompt. Fresh
     /// sessions only — a resumed one already carries its transcript.
     pending: HashSet<Uuid>,
@@ -1421,7 +1423,14 @@ impl Backend for WakuBackend {
                     && !*hidden
                 {
                     *prompt = self.memory.prompt_with_memory(session_id, prompt);
-                    *prompt = self.inject_repo_map(session_id, std::mem::take(prompt));
+                    let (mapped, status) =
+                        self.inject_repo_map(session_id, std::mem::take(prompt));
+                    *prompt = mapped;
+                    if let Some(status) = status
+                        && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status))
+                    {
+                        let _ = events.send(wire);
+                    }
                 }
                 handle_driver_command(&driver, command)
             }
@@ -2414,14 +2423,31 @@ impl WakuBackend {
         // workspace for first-prompt injection and warm the index in the
         // background so it can beat the provider's launch.
         if daemon_settings.project_map_enabled {
-            {
+            let ready = {
                 let mut maps = self.repo_maps.0.lock();
-                maps.sessions.insert(session_id, options.cwd.clone());
+                maps.sessions
+                    .insert(session_id, (options.cwd.clone(), runtime_id));
                 if options.provider_cursor.is_none() {
                     maps.pending.insert(session_id);
                 }
+                maps.indexes
+                    .get(&options.cwd)
+                    .map(|index| index.indexed_files())
+            };
+            let status = match ready {
+                Some(indexed_files) => ProjectMapStatus::Ready { indexed_files },
+                None => {
+                    spawn_repo_map_refresh(
+                        &self.repo_maps,
+                        options.cwd.clone(),
+                        Some(events.clone()),
+                    );
+                    ProjectMapStatus::Building
+                }
+            };
+            if let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status)) {
+                let _ = events.send_ephemeral(wire);
             }
-            spawn_repo_map_refresh(&self.repo_maps, options.cwd.clone());
         }
         // A launch that never came up keeps no credential.
         let handle = match driver::start_local(provider, options, event_sender) {
@@ -2700,26 +2726,41 @@ impl WakuBackend {
             sent_by_task: sender,
             hidden: false,
         })?)?;
-        driver.prompt(
-            self.inject_repo_map(session_id, self.memory.prompt_with_memory(session_id, &prompt)),
-        );
+        let (prompt, status) = self
+            .inject_repo_map(session_id, self.memory.prompt_with_memory(session_id, &prompt));
+        if let Some(status) = status
+            && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status))
+        {
+            let _ = sink.send(wire);
+        }
+        driver.prompt(prompt);
         Ok(session_id)
     }
 
     /// Prefix `prompt` with the session's project map when the session is
     /// owed one — its first visible prompt. A cold index gets a bounded
     /// moment to finish building, then the prompt goes out unmapped rather
-    /// than stalling the turn.
-    fn inject_repo_map(&self, session_id: Uuid, prompt: String) -> String {
+    /// than stalling the turn. The `Sent` status comes back for the caller
+    /// to publish on the session's stream, so clients can show the
+    /// provider-facing artifact.
+    fn inject_repo_map(
+        &self,
+        session_id: Uuid,
+        prompt: String,
+    ) -> (String, Option<ProjectMapStatus>) {
         const WAIT_FOR_COLD_INDEX: std::time::Duration =
             std::time::Duration::from_millis(1_500);
         let (lock, cvar) = &*self.repo_maps;
         let mut maps = lock.lock();
         if !maps.pending.remove(&session_id) {
-            return prompt;
+            return (prompt, None);
         }
-        let Some(cwd) = maps.sessions.get(&session_id).cloned() else {
-            return prompt;
+        let Some(cwd) = maps
+            .sessions
+            .get(&session_id)
+            .map(|(cwd, _)| cwd.clone())
+        else {
+            return (prompt, None);
         };
         let deadline = std::time::Instant::now() + WAIT_FOR_COLD_INDEX;
         while !maps.indexes.contains_key(&cwd) && maps.building.contains(&cwd) {
@@ -2732,20 +2773,29 @@ impl WakuBackend {
             }
         }
         let Some(index) = maps.indexes.get(&cwd) else {
-            return prompt;
+            return (prompt, None);
         };
         let map = index.render(crate::repo_map::DEFAULT_TOKEN_BUDGET);
         drop(maps);
         if map.text.is_empty() {
-            return prompt;
+            return (prompt, None);
         }
-        format!(
-            "<project-map>\n\
-             A structural map of this workspace, most-referenced files first. \
-             It is partial — open files to verify before relying on it. \
-             Paths are workspace-relative.\n\
-             {}</project-map>\n\n{prompt}",
-            map.text
+        let status = ProjectMapStatus::Sent {
+            mapped_files: map.mapped_files,
+            indexed_files: map.indexed_files,
+            estimated_tokens: map.estimated_tokens,
+            text: map.text.clone(),
+        };
+        (
+            format!(
+                "<project-map>\n\
+                 A structural map of this workspace, most-referenced files first. \
+                 It is partial — open files to verify before relying on it. \
+                 Paths are workspace-relative.\n\
+                 {}</project-map>\n\n{prompt}",
+                map.text
+            ),
+            Some(status),
         )
     }
 
@@ -3274,12 +3324,17 @@ fn ensure_shell_environment() {
 /// Kick a build or refresh of one workspace's project-map index on a
 /// background thread. Already-building roots are skipped; the index steps
 /// out of the map while it parses so readers never wait on a refresh — a
-/// missing entry just means "send unmapped" that turn.
-fn spawn_repo_map_refresh(repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>, root: PathBuf) {
+/// missing entry just means "send unmapped" that turn. Returns whether a
+/// build actually started; `sink`, when given, hears the `Ready` update.
+fn spawn_repo_map_refresh(
+    repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>,
+    root: PathBuf,
+    sink: Option<EventSink>,
+) -> bool {
     {
         let mut maps = repo_maps.0.lock();
         if !maps.building.insert(root.clone()) {
-            return;
+            return false;
         }
     }
     let repo_maps = repo_maps.clone();
@@ -3296,7 +3351,26 @@ fn spawn_repo_map_refresh(repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>, root: Pat
             match result {
                 Ok(()) => {
                     if let Some(index) = index {
+                        let indexed_files = index.indexed_files();
                         maps.indexes.insert(root.clone(), index);
+                        if let Some(sink) = &sink
+                            && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(
+                                ProjectMapStatus::Ready { indexed_files },
+                            ))
+                        {
+                            // Every session in this root moves to ready —
+                            // including one that joined the build late and
+                            // never got its own thread.
+                            for (session_id, (_, runtime_id)) in maps
+                                .sessions
+                                .iter()
+                                .filter(|(_, (cwd, _))| *cwd == root)
+                            {
+                                let _ = sink
+                                    .for_session(*session_id, *runtime_id)
+                                    .send_ephemeral(wire.clone());
+                            }
+                        }
                     }
                 }
                 Err(error) => {
@@ -3312,6 +3386,7 @@ fn spawn_repo_map_refresh(repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>, root: Pat
             maps.building.remove(&root);
             repo_maps.1.notify_all();
         });
+    true
 }
 
 /// Pump provider events for one runtime into the client's event stream.
@@ -3371,9 +3446,18 @@ fn forward_driver_events(
         // whatever the turn edited lands in the index before the next
         // session's first prompt reads it.
         if matches!(&event, DriverEvent::TurnFinished { .. }) {
-            let cwd = repo_maps.0.lock().sessions.get(&session_id).cloned();
-            if let Some(cwd) = cwd {
-                spawn_repo_map_refresh(&repo_maps, cwd);
+            let cwd = repo_maps
+                .0
+                .lock()
+                .sessions
+                .get(&session_id)
+                .map(|(cwd, _)| cwd.clone());
+            if let Some(cwd) = cwd
+                && spawn_repo_map_refresh(&repo_maps, cwd, Some(events.clone()))
+                && let Ok(wire) =
+                    event_to_wire(DriverEvent::ProjectMap(ProjectMapStatus::Refreshing))
+            {
+                let _ = events.send_ephemeral(wire);
             }
         }
         let process_exited = matches!(&event, DriverEvent::ProcessExited);
@@ -3929,7 +4013,8 @@ mod tests {
         // What spawn_runtime records for a fresh session, plus a built index.
         {
             let mut maps = backend.repo_maps.0.lock();
-            maps.sessions.insert(session_id, root.clone());
+            maps.sessions
+                .insert(session_id, (root.clone(), Uuid::new_v4()));
             maps.pending.insert(session_id);
             maps.indexes.insert(
                 root.clone(),
@@ -3939,19 +4024,28 @@ mod tests {
 
         // The payload the driver receives leads with the map block; the
         // user's own text follows it untouched.
-        let prompt = backend.inject_repo_map(session_id, "fix the bug".to_owned());
+        let (prompt, status) = backend.inject_repo_map(session_id, "fix the bug".to_owned());
         assert!(prompt.starts_with("<project-map>"));
         assert!(prompt.contains("src/lib.rs:"));
         assert!(prompt.contains("pub fn entry() {}"));
         assert!(prompt.ends_with("</project-map>\n\nfix the bug"));
+        assert!(matches!(
+            status,
+            Some(ProjectMapStatus::Sent {
+                mapped_files: 1,
+                indexed_files: 1,
+                ..
+            })
+        ));
 
         // Consumed once — the next prompt goes out as typed, and a session
         // that was never registered is untouched too.
-        let follow_up = backend.inject_repo_map(session_id, "follow up".to_owned());
+        let (follow_up, status) = backend.inject_repo_map(session_id, "follow up".to_owned());
         assert_eq!(follow_up, "follow up");
+        assert!(status.is_none());
         assert_eq!(
             backend.inject_repo_map(Uuid::new_v4(), "hi".to_owned()),
-            "hi"
+            ("hi".to_owned(), None)
         );
     }
 }
