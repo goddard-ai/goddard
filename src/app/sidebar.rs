@@ -2958,7 +2958,11 @@ impl Waku {
                     cx.stop_propagation();
                 }
                 "left" if !collapsed => {
-                    this.set_sidebar_group_collapsed(group, true, cx);
+                    if group == SidebarGroup::Terminals {
+                        this.collapse_terminals_group(window, cx);
+                    } else {
+                        this.set_sidebar_group_collapsed(group, true, cx);
+                    }
                     cx.stop_propagation();
                 }
                 "right" if collapsed => {
@@ -3075,9 +3079,14 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         // Opening the Terminals group is a selection, not just disclosure:
-        // the last-shown terminal takes the main area.
-        if group == SidebarGroup::Terminals && self.sidebar_collapsed_groups.contains(&group) {
-            self.expand_terminals_group(window, cx);
+        // the last-shown terminal takes the main area, and folding it back
+        // returns to the previous location.
+        if group == SidebarGroup::Terminals {
+            if self.sidebar_collapsed_groups.contains(&group) {
+                self.expand_terminals_group(window, cx);
+            } else {
+                self.collapse_terminals_group(window, cx);
+            }
             return;
         }
         let collapsed = !self.sidebar_collapsed_groups.contains(&group);

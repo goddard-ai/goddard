@@ -153,7 +153,7 @@ impl Waku {
         self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
     }
 
-    fn request_session_activation(
+    pub(super) fn request_session_activation(
         &mut self,
         session_id: Uuid,
         transition: SessionActivationTransition,
@@ -1892,7 +1892,7 @@ impl Waku {
 
     /// Drop page targets whose project is gone — or whose experiment is off;
     /// a stale entry would leave a live-looking button that does nothing.
-    fn prune_navigation_stack(
+    pub(super) fn prune_navigation_stack(
         projects: &[Project],
         projects_page_enabled: bool,
         stack: &mut Vec<NavigationLocation>,

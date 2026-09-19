@@ -687,6 +687,47 @@ impl Waku {
         }
     }
 
+    /// Folding the group while a terminal holds the main area also leaves
+    /// terminal mode: the selection returns to wherever the history came
+    /// from — the previous chat, a page, or an earlier terminal. With no
+    /// back target the terminal keeps the column; the fold alone changes.
+    pub(super) fn collapse_terminals_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, true, cx);
+        if self.selected_terminal.is_none() {
+            return;
+        }
+        let Some(current) = self.navigation_location() else {
+            return;
+        };
+        Self::prune_navigation_stack(
+            &self.state.projects,
+            self.state.projects_page_enabled,
+            &mut self.session_navigation.back,
+        );
+        match self.session_navigation.back_target() {
+            Some(NavigationLocation::Task(target)) => {
+                self.request_session_activation(
+                    target,
+                    SessionActivationTransition::Back { from: current },
+                    cx,
+                );
+            }
+            Some(NavigationLocation::Terminal(target)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.activate_terminal(target, false, window, cx);
+            }
+            Some(NavigationLocation::ProjectsPage(project_id)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_projects_page(project_id, window, cx);
+            }
+            Some(NavigationLocation::DraftsPage) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_drafts_page(window, cx);
+            }
+            None => {}
+        }
+    }
+
     /// `secondary-t` — always a fresh terminal, rooted where the user is:
     /// the selected terminal's directory and scope, the selected session's
     /// workspace, or a global terminal in ~ when the main area shows
