@@ -1993,7 +1993,6 @@ mod tests {
             blob_reference: None,
             pasted_text_preview: None,
             session_id: None,
-            pasted_text_preview: None,
         }
     }
 
