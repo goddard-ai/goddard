@@ -1,1 +1,0 @@
-- Large pastes collapse less eagerly (20 lines or 4 KB, up from 4 lines or 500 bytes), and collapsed pastes now show as a compact "Pasted text" chip that previews the leading characters on hover.

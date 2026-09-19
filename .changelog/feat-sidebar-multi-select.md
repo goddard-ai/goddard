@@ -1,1 +1,0 @@
-- Select multiple sidebar tasks with ⌘-click (⌘⇧-click extends the range) and act on them together — row menus and task shortcuts like pin, mark unread, archive, and copy working directory apply to the whole selection

@@ -1,1 +1,0 @@
-- Sidebar transparency gains an Amount slider (Settings → Appearance): dial how much of the desktop shows through the sidebar, 0–60%. The default moves from a barely-visible tint to 25%.

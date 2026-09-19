@@ -1,1 +1,0 @@
-- New "Border intensity" slider (Settings → Appearance) fades borders and separators from invisible up to their original contrast — the default lands fainter than before

@@ -1,1 +1,0 @@
-- A global terminal now remembers its own right panel — switching away from a task no longer leaves the task's panel open over the terminal, and the panel's tabs and visibility return as they were left

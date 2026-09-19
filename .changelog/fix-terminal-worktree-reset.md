@@ -1,1 +1,0 @@
-- A sidebar terminal no longer resets into the selected task's worktree after a `cd` — session terminals only respawn when the workspace itself moves, and terminals opened at a chosen directory keep it
