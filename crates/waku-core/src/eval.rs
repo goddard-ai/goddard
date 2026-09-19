@@ -182,9 +182,12 @@ pub fn evaluate(
         serde_json::from_slice(&raw).context("evaluation backend returned invalid JSON")?;
     // Cloudflare wraps the model output in `result`; the other backends answer
     // the envelope directly.
-    let envelope = parsed.get("result").unwrap_or(&parsed);
+    let mut envelope = parsed.get("result").unwrap_or(&parsed).clone();
+    if settings.backend == EvalBackend::VercelGateway {
+        translate_vercel_envelope(&mut envelope);
+    }
     let mut evaluation: Evaluation =
-        serde_json::from_value(envelope.clone()).context("invalid evaluation answer envelope")?;
+        serde_json::from_value(envelope).context("invalid evaluation answer envelope")?;
     evaluation.latency_ms = latency_ms;
     Ok(evaluation)
 }
@@ -239,10 +242,20 @@ fn backend_request(
             {
                 headers.push(format!("x-vercel-ai-gateway-team: {team}"));
             }
+            // The spec's question discriminator is `choice | score | boolean`;
+            // TypeSafe's `noul` must be renamed on the way out (and back on
+            // the answer side — see `translate_vercel_envelope`).
+            let mut questions_json = serde_json::to_value(questions)?;
+            if let Some(map) = questions_json.as_object_mut() {
+                for question in map.values_mut() {
+                    if question.get("type").and_then(Value::as_str) == Some("noul") {
+                        question["type"] = json!("boolean");
+                    }
+                }
+            }
             let body = json!({
                 "state": state,
-                "questions": questions,
-                "providerOptions": { "gateway": { "zeroDataRetention": true } },
+                "questions": questions_json,
             });
             Ok((
                 VERCEL_EVALUATION_URL.to_owned(),
@@ -265,6 +278,31 @@ fn backend_request(
                 bearer_headers(token),
                 serde_json::to_vec(&body)?,
             ))
+        }
+    }
+}
+
+/// Normalize a Vercel answer envelope into the shared `Evaluation` shape:
+/// boolean answers carry `probability` instead of `noul`, and the answering
+/// model id lives under `providerMetadata.gateway.routing.canonicalSlug`
+/// rather than a top-level `model` field.
+fn translate_vercel_envelope(envelope: &mut Value) {
+    if let Some(answers) = envelope.get_mut("answers").and_then(Value::as_object_mut) {
+        for answer in answers.values_mut() {
+            if answer.get("type").and_then(Value::as_str) == Some("boolean") {
+                let probability = answer.get("probability").cloned().unwrap_or(Value::Null);
+                *answer = json!({ "type": "noul", "noul": probability });
+            }
+        }
+    }
+    if envelope.get("model").is_none() {
+        let model = envelope
+            .pointer("/providerMetadata/gateway/routing/canonicalSlug")
+            .and_then(Value::as_str)
+            .unwrap_or(GATEWAY_MODEL_ID)
+            .to_owned();
+        if let Some(map) = envelope.as_object_mut() {
+            map.insert("model".to_owned(), json!(model));
         }
     }
 }
@@ -424,8 +462,16 @@ mod tests {
             vercel_team_id: Some("team_1".into()),
             ..Default::default()
         };
+        let mut questions = BTreeMap::new();
+        questions.insert(
+            "planning".to_owned(),
+            EvalQuestion::Noul {
+                instructions: "needs a plan?".into(),
+                criteria: None,
+            },
+        );
         let (url, headers, body) =
-            backend_request(&settings, &json!({"task": "x"}), &BTreeMap::new()).unwrap();
+            backend_request(&settings, &json!({"task": "x"}), &questions).unwrap();
         assert_eq!(url, VERCEL_EVALUATION_URL);
         assert!(
             headers
@@ -438,10 +484,42 @@ mod tests {
                 .any(|h| h == "x-vercel-ai-gateway-team: team_1")
         );
         let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["questions"]["planning"]["type"], "boolean");
+    }
+
+    #[test]
+    fn vercel_envelope_maps_boolean_answers_and_model() {
+        let mut envelope = json!({
+            "answers": {
+                "planning": { "type": "boolean", "probability": 0.17 },
+                "class": {
+                    "type": "choice",
+                    "choice": "routine",
+                    "probabilities": { "routine": 1.0 }
+                }
+            },
+            "providerMetadata": {
+                "gateway": { "routing": { "canonicalSlug": "typesafe-ai/jev" } }
+            }
+        });
+        translate_vercel_envelope(&mut envelope);
+        let evaluation: Evaluation = serde_json::from_value(envelope).unwrap();
+        assert_eq!(evaluation.model, "typesafe-ai/jev");
         assert_eq!(
-            body["providerOptions"]["gateway"]["zeroDataRetention"],
-            true
+            evaluation.answers["planning"],
+            EvalAnswer::Noul { noul: 0.17 }
         );
+        assert!(matches!(
+            evaluation.answers["class"],
+            EvalAnswer::Choice { .. }
+        ));
+    }
+
+    #[test]
+    fn vercel_envelope_falls_back_to_gateway_model_id() {
+        let mut envelope = json!({ "answers": {} });
+        translate_vercel_envelope(&mut envelope);
+        assert_eq!(envelope["model"], GATEWAY_MODEL_ID);
     }
 
     #[test]

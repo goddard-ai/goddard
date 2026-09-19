@@ -1,0 +1,1 @@
+- Fixed Vercel AI Gateway evaluation calls failing with HTTP 400: `noul` questions are now translated to the spec's `boolean` type (and back on answers), the answering model id is read from gateway routing metadata, and the request no longer forces Zero Data Retention, which requires a Pro or Enterprise plan.

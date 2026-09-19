@@ -120,7 +120,9 @@ pub struct Evaluation {
     pub answers: BTreeMap<String, EvalAnswer>,
     #[serde(default)]
     pub usage: EvalUsage,
-    /// Client-observed round trip in milliseconds.
+    /// Client-observed round trip in milliseconds; backends don't report it,
+    /// so callers fill it in after parsing.
+    #[serde(default)]
     pub latency_ms: u64,
     /// Provider-specific metadata (e.g. TypeSafe's separate `confidence`
     /// statistic), passed through uninterpreted.
