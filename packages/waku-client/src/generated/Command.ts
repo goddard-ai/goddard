@@ -102,4 +102,15 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, note: string | null, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, };
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, note: string | null, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "agentReadSession",
+/**
+ * Waku task id. Exactly one of `task_id` and `thread_id` is
+ * required.
+ */
+taskId?: string | null,
+/**
+ * Provider-native Agent CLI thread id, resolved against
+ * daemon-known tasks. `provider` disambiguates when more than one
+ * task carries the id.
+ */
+threadId?: string | null, provider?: ProviderKind | null, };

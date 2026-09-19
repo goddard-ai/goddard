@@ -1015,6 +1015,7 @@ impl RightPanelSurface {
             Self::PullRequest { number } => format!("#{number}"),
             Self::File(path) => path.rsplit('/').next().unwrap_or(path).to_owned(),
             Self::GitHub(_) => tr!("right_panel.github"),
+            Self::SideChat(_) => tr!("right_panel.side_chat"),
         }
     }
 
@@ -1028,6 +1029,7 @@ impl RightPanelSurface {
             Self::Diff => "icons/file-diff.svg",
             Self::File(path) => file_icon_for_path(path),
             Self::GitHub(_) => "icons/github.svg",
+            Self::SideChat(_) => "icons/chat.svg",
         }
     }
 }
@@ -1068,6 +1070,9 @@ fn reusable_surface_index(
         }),
         RightPanelSurface::GitHub(project_id) => surfaces.iter().position(|surface| {
             matches!(surface, RightPanelSurface::GitHub(candidate) if candidate == project_id)
+        }),
+        RightPanelSurface::SideChat(session_id) => surfaces.iter().position(|surface| {
+            matches!(surface, RightPanelSurface::SideChat(candidate) if candidate == session_id)
         }),
         RightPanelSurface::Files
         | RightPanelSurface::Diff
@@ -2009,6 +2014,21 @@ impl Waku {
         }
         self.ensure_right_panel_terminals(cx);
         self.retain_right_panel_browsers();
+        // A side-chat tab persists only while its session does — an unsent
+        // one is never catalogued, and one deleted elsewhere stays gone.
+        let dead: Vec<Uuid> = self
+            .right_panel_surfaces
+            .iter()
+            .filter_map(|surface| match surface {
+                RightPanelSurface::SideChat(id) => {
+                    (!self.state.sessions.iter().any(|session| session.id == *id)).then_some(*id)
+                }
+                _ => None,
+            })
+            .collect();
+        for id in dead {
+            self.remove_side_chat_surface(id, cx);
+        }
         if self.right_panel_visible {
             self.request_active_terminal_focus();
             self.request_active_browser_focus();
@@ -2039,6 +2059,10 @@ impl Waku {
                     && let Some(browser) = self.github_browsers.get_mut(project_id)
                 {
                     browser.detail = None;
+                }
+                if let RightPanelSurface::SideChat(id) = surface {
+                    self.side_chat_views.remove(id);
+                    self.side_chat_composers.remove(id);
                 }
             }
         }
@@ -2323,6 +2347,10 @@ impl Waku {
             // terminal follows the workspace when it moves.
             self.register_terminal(terminal_id, self.state.selected_session, None);
         }
+        if let RightPanelSurface::SideChat(session_id) = surface {
+            self.ensure_session_loaded(session_id, cx);
+            self.right_panel_pending_side_chat_focus = Some(session_id);
+        }
         // Browser views are created on the surface's first render, which has
         // the `Window` their webview must attach to.
         let index = match reusable_index {
@@ -2440,6 +2468,13 @@ impl Waku {
         ) {
             self.right_panel_pr_states.remove(&(session_id, *number));
         }
+        // A side-chat tab IS the session: closing it deletes the chat. The
+        // removal runs after the strip update so the re-entrant surface sweep
+        // in `remove_session_inner` finds this tab already gone.
+        let side_chat_id = match self.right_panel_surfaces[index] {
+            RightPanelSurface::SideChat(id) => Some(id),
+            _ => None,
+        };
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
             None
@@ -2461,7 +2496,42 @@ impl Waku {
             self.right_panel_pending_browser_focus = None;
             self.set_right_panel_visible(false, cx);
         }
+        if let Some(id) = side_chat_id {
+            self.side_chat_views.remove(&id);
+            self.side_chat_composers.remove(&id);
+            self.remove_side_chat_session(id, cx);
+        }
         cx.notify();
+    }
+
+    /// Drop a side chat's tab wherever it lives — the active strip or a
+    /// parked session's surface list — without deleting the session; the
+    /// caller owns that. The `close_terminal`/`remove_parked_github_surfaces`
+    /// shape.
+    pub(super) fn remove_side_chat_surface(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if let Some(index) = self.right_panel_surfaces.iter().position(
+            |surface| matches!(surface, RightPanelSurface::SideChat(id) if *id == session_id),
+        ) {
+            self.close_right_panel_surface(index, cx);
+        }
+        for state in self.right_panel_session_states.values_mut() {
+            let Some(index) = state.surfaces.iter().position(
+                |surface| matches!(surface, RightPanelSurface::SideChat(id) if *id == session_id),
+            ) else {
+                continue;
+            };
+            state.surfaces.remove(index);
+            state.active_surface = if state.surfaces.is_empty() {
+                None
+            } else {
+                Some(match state.active_surface {
+                    Some(active) if active > index => active - 1,
+                    Some(active) if active == index => index.saturating_sub(1),
+                    Some(active) => active.min(state.surfaces.len() - 1),
+                    None => 0,
+                })
+            };
+        }
     }
 
     pub(super) fn close_window_or_right_panel_tab_action(
@@ -2594,6 +2664,9 @@ impl Waku {
             Some(RightPanelSurface::PullRequest { number }) => self
                 .render_pull_request_panel(number, window, cx)
                 .into_any_element(),
+            Some(RightPanelSurface::SideChat(session_id)) => self
+                .render_side_chat_panel(session_id, window, cx)
+                .into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
                 if self
@@ -2632,6 +2705,360 @@ impl Waku {
                     cx,
                 ))
             })
+    }
+
+    /// One side-chat composer per session, created on the tab's first
+    /// render. Submissions route to that session — never the selected one —
+    /// through the ordinary submission path, so queueing and steering behave
+    /// the way they do in the main composer.
+    fn ensure_side_chat_composer(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ComposerInput> {
+        if let Some(composer) = self.side_chat_composers.get(&session_id) {
+            return composer.clone();
+        }
+        let composer = cx.new(|cx| {
+            ComposerInput::new(window, cx)
+                .padding_x(px(10.0), cx)
+                .collapsed_paste(cx)
+        });
+        composer.update(cx, |composer, cx| {
+            composer.set_placeholder(tr!("side_chat.placeholder"), cx);
+        });
+        let side_composer = composer.clone();
+        cx.subscribe(
+            &composer,
+            move |this: &mut Self, _, event: &ComposerEvent, cx| match event {
+                ComposerEvent::Submit(prompt) => {
+                    // `/side` is reserved even here: a side chat cannot nest
+                    // one, and the text must not reach the provider as a
+                    // literal prompt.
+                    if crate::composer_complete::parse_side_submission(prompt).is_some() {
+                        side_composer.update(cx, |composer, cx| composer.clear(cx));
+                        this.show_toast(tr!("side_chat.no_nesting"));
+                        return;
+                    }
+                    this.submit_composer_submission_to(
+                        session_id,
+                        ComposerSubmission::plain(prompt.clone()),
+                        cx,
+                    );
+                }
+                ComposerEvent::SubmitSteer(prompt) => {
+                    this.steer_session_submission(
+                        session_id,
+                        ComposerSubmission::plain(prompt.clone()),
+                        cx,
+                    );
+                }
+                _ => {}
+            },
+        )
+        .detach();
+        self.side_chat_composers
+            .insert(session_id, composer.clone());
+        composer
+    }
+
+    /// A `/side` chat lane in its parent's panel: the compact transcript a
+    /// Big Picture card draws, bottom-pinned, plus its own composer. The
+    /// session is a sibling — never the selected one — so every row is built
+    /// from `session_id` rather than the lane's selected-session helpers.
+    fn render_side_chat_panel(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            return self
+                .render_right_panel_empty_message(
+                    tr!("right_panel.side_chat_unavailable"),
+                    tr!("right_panel.side_chat_unavailable_description"),
+                    cx,
+                )
+                .into_any_element();
+        };
+        self.ensure_session_loaded(session_id, cx);
+        let composer = self.ensure_side_chat_composer(session_id, window, cx);
+        if self
+            .right_panel_pending_side_chat_focus
+            .take_if(|pending| *pending == session_id)
+            .is_some()
+        {
+            let focus = composer.read(cx).focus();
+            window.focus(&focus, cx);
+        }
+
+        // The row kinds are fingerprinted and spliced exactly like a card's:
+        // appends keep position, a refold re-measures, and the tail re-measures
+        // while the session works so fresh text is never clipped.
+        let fingerprint = transcript_rows_fingerprint(&session, &self.expanded_turns);
+        let view = self
+            .side_chat_views
+            .entry(session_id)
+            .or_insert_with(|| SideChatView {
+                rows: {
+                    let rows = ListState::new(0, ListAlignment::Bottom, px(2048.0));
+                    rows.set_scroll_handler(|_, window, _| window.refresh());
+                    rows
+                },
+                scrollbar: ScrollbarState::new(),
+                kinds: (0, Rc::new(Vec::new())),
+            });
+        let (kinds, refolded) = if view.kinds.0 != fingerprint {
+            let mut folded = folded_transcript_row_kinds(&session, &self.expanded_turns);
+            folded.retain(|kind| {
+                !matches!(
+                    kind,
+                    TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_)
+                )
+            });
+            let kinds = Rc::new(folded);
+            view.kinds = (fingerprint, kinds.clone());
+            (kinds, true)
+        } else {
+            (view.kinds.1.clone(), false)
+        };
+        let count = kinds.len();
+        let current = view.rows.item_count();
+        if count > current {
+            view.rows.splice(current..current, count - current);
+            if refolded {
+                view.rows.remeasure_items(0..current);
+            }
+        } else if count < current {
+            view.rows.reset(count);
+        } else if refolded {
+            view.rows.remeasure_items(0..count);
+        }
+        if session.status.is_busy() {
+            view.rows
+                .remeasure_items(count.saturating_sub(STREAM_REMEASURE_TAIL_ROWS)..count);
+        }
+        let rows_state = view.rows.clone();
+        let scrollbar = view.scrollbar.clone();
+        let entity = cx.entity().downgrade();
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .px(px(4.0))
+                    .child(
+                        list(rows_state.clone(), move |index, window, cx| {
+                            entity
+                                .upgrade()
+                                .map(|entity| {
+                                    entity.update(cx, |this, cx| {
+                                        this.side_chat_row(session_id, index, window, cx)
+                                    })
+                                })
+                                .unwrap_or_else(|| div().into_any_element())
+                        })
+                        .size_full(),
+                    )
+                    .child(scrollbar::edge_fade(
+                        rows_state.clone(),
+                        scrollbar::FadeEdge::Top,
+                        theme.surface,
+                    ))
+                    .child(scrollbar::edge_fade(
+                        rows_state.clone(),
+                        scrollbar::FadeEdge::Bottom,
+                        theme.surface,
+                    ))
+                    .child(scrollbar::vertical(&rows_state, &scrollbar)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .border_t(hairline())
+                    .border_color(theme.separator)
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .child(composer),
+            )
+            .into_any_element()
+    }
+
+    /// One row of a side chat's transcript. `index` is a position in the
+    /// view's `kinds` vector, synced this frame by `render_side_chat_panel`.
+    /// Row bodies reuse the card renderers — the panel is the same compact
+    /// read of a non-selected session.
+    fn side_chat_row(
+        &self,
+        session_id: Uuid,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let palette = MarkdownPalette::from_theme(&theme);
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return div().into_any_element();
+        };
+        let (row_count, kind, starts_followup_turn) = {
+            let Some(view) = self.side_chat_views.get(&session_id) else {
+                return div().into_any_element();
+            };
+            (
+                view.kinds.1.len(),
+                view.kinds
+                    .1
+                    .get(index)
+                    .copied()
+                    .unwrap_or(TranscriptRowKind::Message(index)),
+                row_starts_followup_turn(session, &view.kinds.1, index),
+            )
+        };
+        let inner = match kind {
+            TranscriptRowKind::Message(message_index) => session
+                .messages
+                .get(message_index)
+                .cloned()
+                .map(|message| {
+                    let copied = self.copied_message_feedback.contains_key(&message.id);
+                    let menu = self.menu_handle(format!("side-chat-message-{}", message.id), cx);
+                    let attachment_menus = (0..message.attachments.len())
+                        .map(|index| {
+                            self.menu_handle(
+                                format!("side-chat-message-{}-attachment-{index}", message.id),
+                                cx,
+                            )
+                        })
+                        .collect();
+                    let attachment_images = message
+                        .attachments
+                        .iter()
+                        .map(|attachment| {
+                            if !attachment.is_image {
+                                return None;
+                            }
+                            let reference = attachment.blob_reference.as_deref()?;
+                            self.image_for_reference(
+                                reference,
+                                Some(&attachment.path),
+                                Some(&attachment.name),
+                                cx,
+                            )
+                        })
+                        .collect();
+                    let metrics =
+                        self.scaled_markdown_metrics(if message.role == MessageRole::User {
+                            MarkdownMetrics::USER_MESSAGE
+                        } else {
+                            MarkdownMetrics::BODY
+                        });
+                    let animate_streaming = message.streaming && !cx.reduce_motion();
+                    let ctx = self.markdown_ctx(
+                        format!("side-chat-message-{}", message.id),
+                        &palette,
+                        metrics,
+                        animate_streaming,
+                        cx,
+                    );
+                    let work_item_refs = (message.role == MessageRole::User)
+                        .then(|| {
+                            self.work_item_refs_for_content(
+                                self.workspace_path_for_session(session),
+                                message.visible_content(),
+                            )
+                        })
+                        .unwrap_or_default();
+                    let mut markdown = self.message_markdown.borrow_mut();
+                    let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
+                        .then(|| {
+                            // Seeded like a card's: the side chat's replies
+                            // arrive while its tab may not be on screen, so
+                            // they paint at full opacity rather than
+                            // dissolving on first open.
+                            let view = markdown
+                                .entry(message.id)
+                                .or_insert_with(MarkdownView::seeded);
+                            view.set_text(message.visible_content(), message.streaming);
+                            &*view
+                        });
+                    let rendered = render_message(
+                        MessageRender {
+                            theme: &theme,
+                            message: &message,
+                            assistant_footer_copy_content: None,
+                            assistant_footer_time: None,
+                            copied,
+                            show_response_token_speed: false,
+                            assistant_message_action: None,
+                            user_message_action: None,
+                            user_message_viewport: None,
+                            user_message_expanded: false,
+                            user_message_expand_focus: None,
+                            message_edit_input: None,
+                            attachment_menus,
+                            attachment_images,
+                            attachments_can_reveal: !self.is_remote_session(session_id),
+                            markdown: view,
+                            work_item_refs,
+                            ctx: &ctx,
+                            menu,
+                            waku: cx.entity().downgrade(),
+                            composer: self.composer.clone(),
+                        },
+                        cx,
+                    );
+                    if animate_streaming && view.is_some_and(MarkdownView::is_fading) {
+                        motion::pulse_lease(window.current_view(), cx);
+                    }
+                    rendered
+                })
+                .unwrap_or_else(|| div().into_any_element()),
+            TranscriptRowKind::TurnBlock(block_index) => {
+                self.render_card_activities_row(session, block_index, &theme)
+            }
+            TranscriptRowKind::TurnFold(turn_id) => {
+                self.render_card_turn_fold_row(session, turn_id, &theme)
+            }
+            TranscriptRowKind::WorkingIndicator => {
+                self.render_card_working_indicator_row(session, &theme)
+            }
+            // Folded out of the kinds list entirely; the fallback renders
+            // nothing.
+            TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
+                div().into_any_element()
+            }
+        };
+        div()
+            .id(SharedString::from(format!(
+                "side-chat-row-{session_id}-{index}"
+            )))
+            .w_full()
+            .py(px(4.0))
+            .when(index == 0, |element| element.pt(px(6.0)))
+            .when(starts_followup_turn, |element| {
+                element.pt(px(FOLLOWUP_TURN_TOP_GAP))
+            })
+            .when(index + 1 == row_count, |element| element.pb(px(6.0)))
+            .child(inner)
+            .into_any_element()
     }
 
     fn ensure_right_panel_browser(
@@ -3067,6 +3494,15 @@ impl Waku {
                     .unwrap_or_else(|| surface.label()),
                 // Work-item tabs name the open item: "#123".
                 RightPanelSurface::GitHub(project_id) => self.github_surface_label(*project_id),
+                // A side-chat tab names its session once a title exists.
+                RightPanelSurface::SideChat(session_id) => self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *session_id)
+                    .map(|session| session.display_title().to_owned())
+                    .filter(|title| title != AgentSession::DEFAULT_TITLE)
+                    .unwrap_or_else(|| surface.label()),
                 _ => {
                     right_panel_tab_label(&surface, self.right_panel_files_selected_path.as_deref())
                 }

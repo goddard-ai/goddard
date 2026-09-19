@@ -37,6 +37,7 @@ goddard-agent — Goddard's scoped agent surface inside a session
 USAGE
     goddard-agent create '<json>'            Create a task and start its first prompt
     goddard-agent prompt '<json>'            Send a prompt to an existing task
+    goddard-agent read '<json>'              Read a task's transcript
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
     goddard-agent command remove '<json>'    Remove a custom command
@@ -46,10 +47,12 @@ USAGE
 USAGE CONTRACT
     `command` manages the user's settings — today their custom commands —
     and is available whenever changing a setting would help them.
-    `create` and `prompt` are the cross-task surface: only invoke them when
-    the human you are working for has explicitly asked you to create another
-    task or to send a message to one. Do not use them for exploration,
-    convenience, or self-orchestration.
+    `create`, `prompt`, and `read` are the cross-task surface: invoke
+    `create` or `prompt` only when the human you are working for has
+    explicitly asked you to create another task or to send a message to one.
+    `read` is the read half of that surface — use it when another task's
+    transcript holds context you need, for example when GODDARD_PARENT_TASK_ID
+    names the task this session is a side chat of.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
@@ -58,6 +61,7 @@ ENVIRONMENT
     GODDARD_DAEMON_ADDRESS   Daemon WebSocket address (injected by the daemon)
     GODDARD_AGENT_TOKEN      Per-session scoped credential (injected)
     GODDARD_TASK_ID          This session's task id (injected)
+    GODDARD_PARENT_TASK_ID   Parent task id — side-chat sessions only (injected)
 
 Run `goddard-agent schema` for the accepted payloads.";
 
@@ -92,6 +96,16 @@ fn schema() -> serde_json::Value {
             },
             "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"queue\"}",
             "returns": {"ok": true}
+        },
+        "read": {
+            "description": "Read a task's transcript: its title, provider, status, and visible messages in order. Addressed like `prompt`. Use it to pull another task's context — a side chat's parent task id is in GODDARD_PARENT_TASK_ID.",
+            "fields": {
+                "task_id": {"type": "string", "notes": "Goddard task UUID; exactly one of task_id and thread_id is required"},
+                "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
+                "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"}
+            },
+            "example": "{\"task_id\":\"<uuid>\"}",
+            "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "messages": [{"role": "user|assistant|system", "content": "string"}]}
         },
         "command": {
             "description": "Manage the user's custom commands — shell scripts they can run from the command palette in a terminal. Commands are daemon-owned and shared across the user's clients.",
@@ -149,6 +163,16 @@ struct PromptPayload {
     prompt: String,
     #[serde(default)]
     delivery: DeliveryArg,
+}
+
+#[derive(Deserialize)]
+struct ReadPayload {
+    #[serde(default)]
+    task_id: Option<Uuid>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -212,7 +236,7 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" => {
+        "create" | "prompt" | "read" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -224,6 +248,9 @@ fn run() -> anyhow::Result<()> {
             match response {
                 ResponsePayload::AgentSessionCreated { session_id } => {
                     println!("{}", serde_json::json!({ "task_id": session_id }));
+                }
+                ResponsePayload::AgentSessionTranscript { transcript } => {
+                    println!("{}", serde_json::to_string_pretty(&transcript)?);
                 }
                 ResponsePayload::Ack => {
                     println!("{}", serde_json::json!({ "ok": true }));
@@ -328,6 +355,16 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 },
             })
         }
+        "read" => {
+            let payload: ReadPayload = serde_json::from_str(payload)
+                .context("`read` takes a JSON object; run `goddard-agent schema` for its shape")?;
+            let provider = payload.provider.as_deref().map(provider_kind).transpose()?;
+            Ok(Command::AgentReadSession {
+                task_id: payload.task_id,
+                thread_id: payload.thread_id,
+                provider,
+            })
+        }
         _ => unreachable!("checked by run()"),
     }
 }
@@ -416,6 +453,26 @@ mod tests {
                 assert_eq!(delivery, AgentPromptDelivery::Queue);
             }
             other => panic!("expected AgentPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_read_payload_becomes_an_agent_read_command() {
+        let task_id = Uuid::new_v4();
+        let payload = format!(r#"{{"task_id":"{task_id}"}}"#);
+        let command = build_command("read", &payload).expect("a task-id read parses");
+
+        match command {
+            Command::AgentReadSession {
+                task_id: target,
+                thread_id,
+                provider,
+            } => {
+                assert_eq!(target, Some(task_id));
+                assert_eq!(thread_id, None);
+                assert_eq!(provider, None);
+            }
+            other => panic!("expected AgentReadSession, got {other:?}"),
         }
     }
 

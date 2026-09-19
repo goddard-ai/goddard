@@ -1311,7 +1311,7 @@ impl StateStore {
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
-                        dormant_at, dormant_exempt_until, landed_at, workspace
+                        dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1335,6 +1335,7 @@ impl StateStore {
                     row.get::<_, Option<i64>>(13)?,
                     row.get::<_, Option<i64>>(14)?,
                     row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<String>>(16)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1428,6 +1429,7 @@ impl StateStore {
         session.turns = stored.turns;
         session.queued_messages = stored.queued_messages;
         session.workspace = stored.workspace;
+        session.side_chat_of = stored.side_chat_of;
         session.provider_cursor = stored.provider_cursor;
         session.runtime_mode = stored.runtime_mode;
         session.reasoning_effort = stored.reasoning_effort;
@@ -1698,6 +1700,7 @@ type SessionColumns = (
     Option<i64>,
     Option<i64>,
     Option<String>,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -1723,6 +1726,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         dormant_exempt_until,
         landed_at,
         workspace,
+        side_chat_of,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -1738,6 +1742,9 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         project_id: Uuid::parse_str(&project_id).ok()?,
         workspace,
         workspace_moved_from: None,
+        // Same duplication story as `workspace`: the daemon's side-chat
+        // cascade and launch environment need it without a hydrate.
+        side_chat_of: side_chat_of.and_then(|id| Uuid::parse_str(&id).ok()),
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
         // Hydration replaces these; the list never reads them.
@@ -2025,8 +2032,8 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
-         dormant_at, dormant_exempt_until, landed_at, workspace
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2042,7 +2049,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          dormant_at    = excluded.dormant_at,
          dormant_exempt_until = excluded.dormant_exempt_until,
          landed_at     = excluded.landed_at,
-         workspace     = excluded.workspace";
+         workspace     = excluded.workspace,
+         side_chat_of  = excluded.side_chat_of";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary)
@@ -2106,6 +2114,9 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         } else {
             serde_json::to_string(&session.workspace).map_or(Value::Null, Value::Text)
         },
+        session
+            .side_chat_of
+            .map_or(Value::Null, |id| Value::Text(id.to_string())),
     ]
 }
 
@@ -2543,6 +2554,44 @@ mod tests {
                 .any(|message| message.content == "an answer")
         );
         assert!(!session.quarantined);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_side_chat_round_trips_its_parent_link_in_the_list_projection() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let parent_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("Ask");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let mut side_chat = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
+        side_chat.side_chat_of = Some(parent_id);
+        side_chat.begin_turn("look at the parent");
+        side_chat.finish_active_turn(crate::model::TurnStatus::Completed);
+        let side_chat_id = side_chat.id;
+        state.sessions.push(side_chat);
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let restored = reopened.load().unwrap();
+        // The list projection carries the link without hydrating — the
+        // daemon's cascade and the app's list filters both read it there.
+        let side_chat = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == side_chat_id)
+            .unwrap();
+        assert_eq!(side_chat.side_chat_of, Some(parent_id));
+        assert!(side_chat.is_side_chat());
+        let parent = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == parent_id)
+            .unwrap();
+        assert_eq!(parent.side_chat_of, None);
+        assert!(!parent.is_side_chat());
 
         fs::remove_dir_all(directory).ok();
     }

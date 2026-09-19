@@ -62,11 +62,11 @@ mod protocol;
 
 pub use driver_wire::{decode_enum, encode_enum, event_from_wire, event_to_wire};
 pub use protocol::{
-    AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace,
-    ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
-    MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome,
-    ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireComputerToolRequest,
-    WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
+    AGENT_PARENT_TASK_ENV, AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV,
+    AgentPromptDelivery, AgentWorkspace, ClientMessage, Command, DAEMON_ADDRESS_ENV,
+    DAEMON_TOKEN_ENV, DaemonReady, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor, Request,
+    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
+    WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;

@@ -955,6 +955,7 @@ fn is_agent_command(command: &Command) -> bool {
         command,
         Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
+            | Command::AgentReadSession { .. }
             | Command::UpsertCustomCommand { .. }
             | Command::RemoveCustomCommand { .. }
             | Command::ListCustomCommands

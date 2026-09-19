@@ -188,7 +188,11 @@ pub(super) fn workspace_subject_for(
     let project_id = new_task_project;
     let session_id = sessions
         .iter()
-        .find(|session| Some(session.project_id) == project_id && !session.has_started())
+        .find(|session| {
+            Some(session.project_id) == project_id
+                && !session.has_started()
+                && !session.is_side_chat()
+        })
         .map(|session| session.id);
     (session_id, project_id)
 }
@@ -3331,6 +3335,7 @@ impl Waku {
         self.execute_resume_composer_command(prompt, cx)
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
+            || self.execute_side_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
     }
@@ -3411,6 +3416,37 @@ impl Waku {
         };
         runtime.driver.compact();
         cx.notify();
+    }
+
+    /// `/side [prompt]` — open a fresh side chat in this task's right panel.
+    /// A bare invocation opens an empty one; a prompt submits as its first
+    /// turn. The chat is a new session linked to this task, not a provider
+    /// fork: the agent reads the parent's transcript through
+    /// `goddard-agent read` when it needs it.
+    fn execute_side_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let Some(side_prompt) = crate::composer_complete::parse_side_submission(prompt) else {
+            return false;
+        };
+        let Some(parent_id) = self.composer_session().map(|session| session.id) else {
+            self.show_toast(tr!("side_chat.no_task"));
+            return true;
+        };
+        if self
+            .composer_session()
+            .is_some_and(AgentSession::is_side_chat)
+        {
+            self.show_toast(tr!("side_chat.no_nesting"));
+            return true;
+        }
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        let Some(side_chat_id) = self.create_side_chat(parent_id, cx) else {
+            return true;
+        };
+        self.open_right_panel_surface(RightPanelSurface::SideChat(side_chat_id), cx);
+        if let Some(prompt) = side_prompt {
+            self.submit_composer_submission_to(side_chat_id, ComposerSubmission::plain(prompt), cx);
+        }
+        true
     }
 
     /// Bridge Codex's native `/goal` command without starting a turn. Reads run

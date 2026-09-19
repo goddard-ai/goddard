@@ -7,6 +7,8 @@ export type { ActivityKind } from "./ActivityKind";
 export type { AgentInvocation } from "./AgentInvocation";
 export type { AgentPromptDelivery } from "./AgentPromptDelivery";
 export type { AgentSession } from "./AgentSession";
+export type { AgentSessionTranscript } from "./AgentSessionTranscript";
+export type { AgentTranscriptMessage } from "./AgentTranscriptMessage";
 export type { AgentTurn } from "./AgentTurn";
 export type { AgentWorkspace } from "./AgentWorkspace";
 export type { ArchivePreview } from "./ArchivePreview";
