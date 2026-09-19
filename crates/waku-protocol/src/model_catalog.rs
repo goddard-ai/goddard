@@ -134,21 +134,21 @@ pub fn grok_model_reasoning_efforts(id: &str) -> Option<&'static [&'static str]>
     }
 }
 
-/// A Cursor CLI or session model id resolved against advertised base values.
+/// A CLI or session model id resolved against advertised base values.
 ///
-/// Cursor's public IDs are often a base slug plus a hyphenated suffix
-/// (`thinking`, `xhigh`, `fast`). The parameterized ACP picker advertises the
+/// Providers often ship public IDs that are a base slug plus a hyphenated
+/// suffix (`thinking`, `xhigh`, `fast`). A parameterized picker advertises the
 /// base slug, and the unconsumed suffix is applied as separate config options.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CursorModelSelection {
+pub struct PackedModelSelection {
     pub value: String,
     pub suffix: String,
 }
 
-/// Catalog entry that matches a stored Cursor model id, including exploded
-/// CLI aliases such as `cursor-grok-4.6-xhigh-fast`.
+/// Catalog entry that matches a stored model id, including exploded aliases
+/// such as `grok-4.6-xhigh-fast`.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CursorCatalogMatch<'a> {
+pub struct PackedCatalogMatch<'a> {
     pub model: &'a ProviderModel,
     pub suffix: String,
 }
@@ -187,19 +187,33 @@ pub fn cursor_model_aliases(requested: &str) -> Vec<String> {
     aliases
 }
 
-/// Resolves a requested Cursor model id against advertised base values.
+/// The spellings a stored id can take for `provider` — its own id for most,
+/// plus Cursor's re-spelled families (`claude-4.6-sonnet-*` for
+/// `claude-sonnet-4-6`, `cursor-` prefixes, `auto`/`default`).
+fn packed_model_aliases(provider: ProviderKind, requested: &str) -> Vec<String> {
+    match provider {
+        ProviderKind::Cursor => cursor_model_aliases(requested),
+        _ => vec![requested.to_owned()],
+    }
+}
+
+/// Resolves a requested model id against advertised base values.
 ///
 /// Exact matches win. Otherwise the longest advertised value that is a hyphen
 /// prefix of an alias is used, and the remainder is the variant suffix.
-pub fn resolve_cursor_model<'a, I>(values: I, requested: &str) -> Option<CursorModelSelection>
+pub fn resolve_packed_model<'a, I>(
+    values: I,
+    requested: &str,
+    provider: ProviderKind,
+) -> Option<PackedModelSelection>
 where
     I: IntoIterator<Item = &'a str>,
 {
     let values: Vec<&str> = values.into_iter().collect();
-    let aliases = cursor_model_aliases(requested);
+    let aliases = packed_model_aliases(provider, requested);
     for alias in &aliases {
         if let Some(value) = values.iter().find(|value| **value == *alias) {
-            return Some(CursorModelSelection {
+            return Some(PackedModelSelection {
                 value: (*value).to_owned(),
                 suffix: String::new(),
             });
@@ -212,7 +226,7 @@ where
                 alias
                     .strip_prefix(*value)
                     .and_then(|suffix| suffix.strip_prefix('-'))
-                    .map(|suffix| CursorModelSelection {
+                    .map(|suffix| PackedModelSelection {
                         value: (*value).to_owned(),
                         suffix: suffix.to_owned(),
                     })
@@ -221,21 +235,26 @@ where
         .max_by_key(|selection| selection.value.len())
 }
 
-pub fn cursor_catalog_model<'a>(
+pub fn packed_catalog_model<'a>(
     models: &'a [ProviderModel],
     requested: &str,
-) -> Option<CursorCatalogMatch<'a>> {
-    let selection = resolve_cursor_model(models.iter().map(|model| model.id.as_str()), requested)?;
+    provider: ProviderKind,
+) -> Option<PackedCatalogMatch<'a>> {
+    let selection = resolve_packed_model(
+        models.iter().map(|model| model.id.as_str()),
+        requested,
+        provider,
+    )?;
     let model = models.iter().find(|model| model.id == selection.value)?;
-    Some(CursorCatalogMatch {
+    Some(PackedCatalogMatch {
         model,
         suffix: selection.suffix,
     })
 }
 
-/// Cursor advertises extra-high as both `xhigh` and `extra-high`. Goddard stores
-/// the former so the picker label and Codex-style ladder stay one vocabulary.
-pub fn normalize_cursor_reasoning_effort(value: &str) -> String {
+/// `extra-high` and `xhigh` spell the same rung. Goddard stores the latter so
+/// the picker label and Codex-style ladder stay one vocabulary.
+pub fn normalize_reasoning_effort(value: &str) -> String {
     let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
     match normalized.as_str() {
         "extra-high" | "xhigh" => "xhigh".to_owned(),
@@ -243,31 +262,31 @@ pub fn normalize_cursor_reasoning_effort(value: &str) -> String {
     }
 }
 
-pub fn cursor_suffix_has(suffix: &str, value: &str) -> bool {
+pub fn packed_suffix_has(suffix: &str, value: &str) -> bool {
     suffix.split('-').any(|part| part == value)
 }
 
-pub fn cursor_suffix_reasoning_effort(
+pub fn packed_suffix_reasoning_effort(
     suffix: &str,
     efforts: &[ProviderModelOption],
 ) -> Option<String> {
     if suffix.is_empty() || efforts.is_empty() {
         return None;
     }
-    if (suffix.contains("extra-high") || cursor_suffix_has(suffix, "xhigh"))
+    if (suffix.contains("extra-high") || packed_suffix_has(suffix, "xhigh"))
         && efforts.iter().any(|option| option.id == "xhigh")
     {
         return Some("xhigh".to_owned());
     }
     efforts.iter().find_map(|option| {
-        (cursor_suffix_has(suffix, &option.id)
+        (packed_suffix_has(suffix, &option.id)
             || (option.id == "xhigh" && suffix.contains("extra-high")))
         .then(|| option.id.clone())
     })
 }
 
-pub fn cursor_suffix_service_tier(suffix: &str, tiers: &[ProviderModelOption]) -> Option<String> {
-    (cursor_suffix_has(suffix, "fast") && tiers.iter().any(|option| option.id == "fast"))
+pub fn packed_suffix_service_tier(suffix: &str, tiers: &[ProviderModelOption]) -> Option<String> {
+    (packed_suffix_has(suffix, "fast") && tiers.iter().any(|option| option.id == "fast"))
         .then(|| "fast".to_owned())
 }
 
@@ -330,32 +349,39 @@ mod tests {
     #[test]
     fn cursor_aliases_resolve_cli_and_acp_spellings() {
         assert_eq!(
-            resolve_cursor_model(["default", "grok-4.6", "composer-2.5"], "auto"),
-            Some(CursorModelSelection {
+            resolve_packed_model(
+                ["default", "grok-4.6", "composer-2.5"],
+                "auto",
+                ProviderKind::Cursor,
+            ),
+            Some(PackedModelSelection {
                 value: "default".into(),
                 suffix: String::new(),
             })
         );
         assert_eq!(
-            resolve_cursor_model(["auto", "grok-4.6"], "default").map(|selection| selection.value),
+            resolve_packed_model(["auto", "grok-4.6"], "default", ProviderKind::Cursor)
+                .map(|selection| selection.value),
             Some("auto".into())
         );
         assert_eq!(
-            resolve_cursor_model(
+            resolve_packed_model(
                 ["default", "grok-4.6", "composer-2.5", "claude-sonnet-4-6"],
                 "cursor-grok-4.6-xhigh-fast",
+                ProviderKind::Cursor,
             ),
-            Some(CursorModelSelection {
+            Some(PackedModelSelection {
                 value: "grok-4.6".into(),
                 suffix: "xhigh-fast".into(),
             })
         );
         assert_eq!(
-            resolve_cursor_model(
+            resolve_packed_model(
                 ["default", "claude-sonnet-4-6"],
                 "claude-4.6-sonnet-medium-thinking",
+                ProviderKind::Cursor,
             ),
-            Some(CursorModelSelection {
+            Some(PackedModelSelection {
                 value: "claude-sonnet-4-6".into(),
                 suffix: "medium-thinking".into(),
             })
@@ -363,7 +389,24 @@ mod tests {
     }
 
     #[test]
-    fn cursor_suffix_traits_prefer_extra_high_over_high() {
+    fn packed_aliases_resolve_without_cursor_spellings_for_other_providers() {
+        // A non-Cursor provider resolves only its own spelling — no
+        // `cursor-` prefix, family re-spelling, or auto/default swap.
+        assert_eq!(
+            resolve_packed_model(["grok-4.6", "composer-2.5"], "grok-4.6-xhigh", ProviderKind::Grok),
+            Some(PackedModelSelection {
+                value: "grok-4.6".into(),
+                suffix: "xhigh".into(),
+            })
+        );
+        assert_eq!(
+            resolve_packed_model(["default", "grok-4.6"], "auto", ProviderKind::Grok),
+            None
+        );
+    }
+
+    #[test]
+    fn packed_suffix_traits_prefer_extra_high_over_high() {
         let efforts = [
             ProviderModelOption::new("low", "Low"),
             ProviderModelOption::new("high", "High"),
@@ -371,23 +414,25 @@ mod tests {
         ];
         let tiers = [ProviderModelOption::new("fast", "Fast")];
         assert_eq!(
-            cursor_suffix_reasoning_effort("thinking-extra-high-fast", &efforts).as_deref(),
+            packed_suffix_reasoning_effort("thinking-extra-high-fast", &efforts).as_deref(),
             Some("xhigh")
         );
         assert_eq!(
-            cursor_suffix_service_tier("thinking-extra-high-fast", &tiers).as_deref(),
+            packed_suffix_service_tier("thinking-extra-high-fast", &tiers).as_deref(),
             Some("fast")
         );
-        assert_eq!(cursor_suffix_service_tier("thinking-high", &tiers), None);
+        assert_eq!(packed_suffix_service_tier("thinking-high", &tiers), None);
     }
 
     #[test]
-    fn cursor_catalog_match_keeps_exploded_ids_when_they_are_catalogued() {
+    fn packed_catalog_match_keeps_exploded_ids_when_they_are_catalogued() {
         let models = [
             ProviderModel::new("auto", "Auto").default(),
             ProviderModel::new("claude-opus-5-thinking-high", "Opus 5 Thinking"),
         ];
-        let matched = cursor_catalog_model(&models, "claude-opus-5-thinking-high").unwrap();
+        let matched =
+            packed_catalog_model(&models, "claude-opus-5-thinking-high", ProviderKind::Cursor)
+                .unwrap();
         assert_eq!(matched.model.id, "claude-opus-5-thinking-high");
         assert!(matched.suffix.is_empty());
     }

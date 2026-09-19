@@ -13,7 +13,7 @@ use agent_client_protocol::{Agent, Client, ConnectionTo, UntypedMessage};
 use serde_json::{Map, Value, json};
 
 use crate::model::{ProviderAgentPreset, ProviderKind, ProviderModel, ProviderModelOption};
-use waku_protocol::model_catalog::normalize_cursor_reasoning_effort;
+use waku_protocol::model_catalog::normalize_reasoning_effort;
 
 const CODEX_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -175,9 +175,11 @@ pub fn discover_catalog(
     let models = if discovered.is_empty() {
         // A failed or empty probe keeps the last successful discovery over
         // the hardcoded catalog, so one bad CLI run can't shrink the picker.
-        cached_models(provider).unwrap_or_else(|| fallback_models(provider))
+        fold_packed_aliases(cached_models(provider).unwrap_or_else(|| fallback_models(provider)))
     } else {
-        let models = deduplicate(discovered);
+        // Any provider's listing can pack traits into alias spellings — fold
+        // them into base models the way Cursor's exploded CLI output does.
+        let models = fold_packed_aliases(deduplicate(discovered));
         write_cached_models(provider, &models);
         models
     };
@@ -480,7 +482,7 @@ fn with_cursor_config_options(mut model: ProviderModel, options: &[Value]) -> Pr
     if let Some(effort) = find_cursor_effort_json(options) {
         let mut efforts = Vec::new();
         for (id, name) in json_select_choices(effort) {
-            let id = normalize_cursor_reasoning_effort(&id);
+            let id = normalize_reasoning_effort(&id);
             if id.is_empty()
                 || efforts
                     .iter()
@@ -493,7 +495,7 @@ fn with_cursor_config_options(mut model: ProviderModel, options: &[Value]) -> Pr
         }
         if !efforts.is_empty() {
             let current =
-                json_current_string(effort).map(|value| normalize_cursor_reasoning_effort(&value));
+                json_current_string(effort).map(|value| normalize_reasoning_effort(&value));
             let default = current
                 .filter(|id| efforts.iter().any(|option| option.id == *id))
                 .or_else(|| {
@@ -702,7 +704,7 @@ fn cursor_select_pair(id: &str, name: &str) -> (String, Option<waku_protocol::Wi
 }
 
 fn parse_cursor_models(output: &str) -> Vec<ProviderModel> {
-    let listings: Vec<CursorListing> = strip_ansi(output)
+    let listings: Vec<ProviderModel> = strip_ansi(output)
         .lines()
         .filter_map(|line| {
             let mut line = line.trim();
@@ -746,25 +748,17 @@ fn parse_cursor_models(output: &str) -> Vec<ProviderModel> {
             } else {
                 label.to_owned()
             };
-            Some(CursorListing {
-                id: id.to_owned(),
-                name,
-                is_default,
-            })
+            let mut model = ProviderModel::new(id, name);
+            model.is_default = is_default;
+            Some(model)
         })
         .collect();
-    group_cursor_listings(listings)
+    fold_packed_aliases(listings)
 }
 
-struct CursorListing {
-    id: String,
-    name: String,
-    is_default: bool,
-}
-
-/// Words `cursor-agent` folds into a model slug as reasoning effort —
+/// Words a provider can fold into a model slug as reasoning effort —
 /// `extra` only ever appears glued to `high`.
-const CURSOR_EFFORT_WORDS: &[&str] = &[
+const PACKED_EFFORT_WORDS: &[&str] = &[
     "none",
     "minimal",
     "low",
@@ -781,30 +775,30 @@ const CURSOR_EFFORT_WORDS: &[&str] = &[
 /// is part of the model's name rather than a trait — `xhigh-fast` reads as
 /// effort `xhigh` plus the fast tier, `codex-low` as nothing when `codex` is
 /// not a listed base.
-fn cursor_listing_traits(suffix: &str) -> Option<(Option<String>, bool)> {
+fn packed_suffix_traits(suffix: &str) -> Option<(Option<String>, bool)> {
     let mut effort = Vec::new();
     let mut fast = false;
     for token in suffix.split('-') {
         match token {
             "fast" => fast = true,
             "thinking" => {}
-            word if CURSOR_EFFORT_WORDS.contains(&word) => effort.push(word),
+            word if PACKED_EFFORT_WORDS.contains(&word) => effort.push(word),
             _ => return None,
         }
     }
     Some((
-        (!effort.is_empty()).then(|| normalize_cursor_reasoning_effort(&effort.join("-"))),
+        (!effort.is_empty()).then(|| normalize_reasoning_effort(&effort.join("-"))),
         fast,
     ))
 }
 
 /// Strip the trailing trait words off a slug that has no listed base —
 /// `swe-2-high-fast` gives base `swe-2` and suffix `high-fast`.
-fn cursor_self_strip(id: &str) -> Option<(&str, &str)> {
+fn packed_self_strip(id: &str) -> Option<(&str, &str)> {
     let mut cut = id.len();
     while let Some(before) = id[..cut].rfind('-') {
         let token = &id[before + 1..cut];
-        if !matches!(token, "fast" | "thinking") && !CURSOR_EFFORT_WORDS.contains(&token) {
+        if !matches!(token, "fast" | "thinking") && !PACKED_EFFORT_WORDS.contains(&token) {
             break;
         }
         cut = before;
@@ -814,11 +808,11 @@ fn cursor_self_strip(id: &str) -> Option<(&str, &str)> {
 
 /// A synthesized base needs its own name: the alias label minus the trait
 /// words its suffix names, so "SWE-2 High Fast" becomes "SWE-2".
-fn cursor_stripped_name(label: &str, suffix: &str) -> String {
+fn packed_stripped_name(label: &str, suffix: &str) -> String {
     let mut trait_words: Vec<String> = Vec::new();
     for token in suffix.split('-') {
         trait_words.push(token.to_ascii_lowercase());
-        let (label, _) = reasoning_effort_pair(&normalize_cursor_reasoning_effort(token));
+        let (label, _) = reasoning_effort_pair(&normalize_reasoning_effort(token));
         trait_words.extend(label.split_whitespace().map(|word| word.to_ascii_lowercase()));
     }
     let mut words: Vec<&str> = label.split_whitespace().collect();
@@ -835,22 +829,32 @@ fn cursor_stripped_name(label: &str, suffix: &str) -> String {
     }
 }
 
-/// `cursor-agent models` still prints exploded CLI aliases — `grok-4.6-xhigh-fast`
-/// next to `grok-4.6` — while the ACP listing returns the base slug plus its
-/// config options. Fold each alias back into its base so the fallback offers
-/// the same plain name, effort ladder, and fast tier the picker draws for
-/// every other provider. An alias whose base is not itself listed folds only
-/// under a synthesized base its stripped slug shares with a sibling, or whose
-/// slug still looks like a model (a digit or a second word); anything else —
-/// a name part mistaken for a trait — stays its own row.
-fn group_cursor_listings(listings: Vec<CursorListing>) -> Vec<ProviderModel> {
+/// Merge a listing's declared options into the group by id — aliases and the
+/// listed base can each carry part of the ladder.
+fn merge_model_options(target: &mut Vec<ProviderModelOption>, source: &[ProviderModelOption]) {
+    for option in source {
+        if !target.iter().any(|existing| existing.id == option.id) {
+            target.push(option.clone());
+        }
+    }
+}
+
+/// Catalogs can spell one model as exploded aliases — `grok-4.6-xhigh-fast`
+/// next to `grok-4.6`, the way `cursor-agent models` prints its CLI spellings
+/// while ACP returns the base slug plus config options. Fold each alias back
+/// into its base so the picker offers the same plain name, effort ladder, and
+/// fast tier a parameterized listing would. An alias whose base is not itself
+/// listed folds only under a synthesized base its stripped slug shares with a
+/// sibling, or whose slug still looks like a model (a digit or a second word);
+/// anything else — a name part mistaken for a trait — stays its own row.
+fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
     let ids: Vec<String> = listings
         .iter()
         .map(|listing| listing.id.clone())
         .collect();
     // (base id, effort, fast) — `synthetic` when the base is inferred rather
     // than listed.
-    let mut keyed: Vec<(String, CursorListing, Option<String>, bool, bool)> =
+    let mut keyed: Vec<(String, ProviderModel, Option<String>, bool, bool)> =
         Vec::with_capacity(listings.len());
     for listing in listings {
         let resolved = ids
@@ -862,7 +866,7 @@ fn group_cursor_listings(listings: Vec<CursorListing>) -> Vec<ProviderModel> {
                     .strip_prefix(base.as_str())
                     .and_then(|suffix| suffix.strip_prefix('-'))
                     .and_then(|suffix| {
-                        cursor_listing_traits(suffix)
+                        packed_suffix_traits(suffix)
                             .map(|(effort, fast)| (base.clone(), effort, fast, false))
                     })
             })
@@ -871,8 +875,8 @@ fn group_cursor_listings(listings: Vec<CursorListing>) -> Vec<ProviderModel> {
             // the `grok-4.6-xhigh` alias listed beside it.
             .min_by_key(|(base, _, _, _)| base.len())
             .or_else(|| {
-                cursor_self_strip(&listing.id).and_then(|(base, suffix)| {
-                    cursor_listing_traits(suffix)
+                packed_self_strip(&listing.id).and_then(|(base, suffix)| {
+                    packed_suffix_traits(suffix)
                         .map(|(effort, fast)| (base.to_owned(), effort, fast, true))
                 })
             });
@@ -903,34 +907,57 @@ fn group_cursor_listings(listings: Vec<CursorListing>) -> Vec<ProviderModel> {
             && !plausible_base(&base)
         {
             if seen.insert(listing.id.clone()) {
-                let mut model = ProviderModel::new(listing.id, listing.name);
-                if listing.is_default {
-                    model.is_default = true;
-                }
-                models.push(model);
+                models.push(listing);
             }
             continue;
         }
         let index = match group_index.get(&base) {
             Some(index) => *index,
             None => {
-                // A base's own listing names it; an alias alone synthesizes
-                // the name by stripping the trait words its suffix carries.
-                let name = if listing.id == base {
-                    listing.name.clone()
-                } else {
-                    cursor_stripped_name(&listing.name, &listing.id[base.len() + 1..])
-                };
                 let index = models.len();
-                models.push(ProviderModel::new(base.clone(), name));
+                let group = if listing.id == base {
+                    // The listing IS the base — keep its catalog metadata.
+                    listing.clone()
+                } else {
+                    // An alias alone synthesizes the base: its label minus the
+                    // trait words the suffix names, and its metadata since it
+                    // is the only description the listing gave of the model.
+                    let mut group = listing.clone();
+                    group.id = base.clone();
+                    group.name =
+                        packed_stripped_name(&listing.name, &listing.id[base.len() + 1..]);
+                    group.name_i18n = None;
+                    group
+                };
+                models.push(group);
                 group_index.insert(base.clone(), index);
                 index
             }
         };
         let model = &mut models[index];
         if listing.id == base {
-            model.name = listing.name;
+            // A listed base arriving after its aliases applies its own
+            // metadata — its name and default mark beat anything synthesized.
+            model.name = listing.name.clone();
+            model.name_i18n = listing.name_i18n.clone();
             model.is_default = listing.is_default;
+            model.sub_provider = listing.sub_provider.clone();
+            model.context_windows = listing.context_windows.clone();
+            model.default_context_window = listing.default_context_window.clone();
+            merge_model_options(&mut model.reasoning_efforts, &listing.reasoning_efforts);
+            merge_model_options(&mut model.service_tiers, &listing.service_tiers);
+            if let Some(default) = &listing.default_reasoning_effort {
+                model.default_reasoning_effort = Some(default.clone());
+            }
+            if let Some(default) = &listing.default_service_tier {
+                model.default_service_tier = Some(default.clone());
+            }
+        } else {
+            // A folded alias that was itself the provider's default marks its
+            // base row, and ladders the listing declared for it merge in.
+            model.is_default |= listing.is_default;
+            merge_model_options(&mut model.reasoning_efforts, &listing.reasoning_efforts);
+            merge_model_options(&mut model.service_tiers, &listing.service_tiers);
         }
         if let Some(effort) = effort
             && !model
@@ -2963,6 +2990,70 @@ opencode/big-pickle
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "grok-max");
         assert!(models[0].reasoning_efforts.is_empty());
+    }
+
+    #[test]
+    fn folds_packed_aliases_for_any_provider_listing() {
+        // The fold is provider-neutral: `provider/model` spellings, an
+        // unlisted base corroborated by siblings, and a base listing that
+        // already carries its own ladder all take the same shape.
+        let mut codex = ProviderModel::new("openai/gpt-5.3-codex", "GPT-5.3 Codex");
+        codex = codex.sub_provider("OpenAI");
+        let mut base_with_ladder =
+            ProviderModel::new("kimi-k3", "Kimi K3").sub_provider("Managed");
+        base_with_ladder.reasoning_efforts =
+            vec![ProviderModelOption::new("high", "High")];
+        let models = fold_packed_aliases(vec![
+            codex,
+            ProviderModel::new("openai/gpt-5.3-codex-low", "GPT-5.3 Codex Low"),
+            ProviderModel::new("openai/gpt-5.3-codex-high-fast", "GPT-5.3 Codex High Fast"),
+            ProviderModel::new("swe-2-high-fast", "SWE-2 High Fast"),
+            ProviderModel::new("swe-2-low", "SWE-2 Low"),
+            ProviderModel::new("qwen-max", "Qwen Max"),
+            base_with_ladder,
+            ProviderModel::new("kimi-k3-max", "Kimi K3 Max"),
+        ]);
+        assert_eq!(
+            models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
+            ["openai/gpt-5.3-codex", "swe-2", "qwen-max", "kimi-k3"]
+        );
+        let codex = &models[0];
+        assert_eq!(codex.sub_provider.as_deref(), Some("OpenAI"));
+        assert_eq!(
+            codex
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "high"]
+        );
+        assert_eq!(codex.default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(codex.service_tiers[0].id, "fast");
+        // Siblings corroborate the unlisted `swe-2` base.
+        let swe = &models[1];
+        assert_eq!(swe.name, "SWE-2");
+        assert_eq!(
+            swe.reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "high"]
+        );
+        assert_eq!(swe.service_tiers[0].id, "fast");
+        // `qwen-max` is a model, not an effort variant — it stays its own row.
+        let qwen = &models[2];
+        assert_eq!(qwen.id, "qwen-max");
+        assert!(qwen.reasoning_efforts.is_empty());
+        // A listed base keeps its declared ladder; the alias's `max` merges in.
+        let kimi = &models[3];
+        assert_eq!(kimi.sub_provider.as_deref(), Some("Managed"));
+        assert_eq!(
+            kimi.reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["high", "max"]
+        );
     }
 
     #[test]

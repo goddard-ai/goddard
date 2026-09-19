@@ -39,8 +39,7 @@ use crate::model::{
     RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 use waku_protocol::model_catalog::{
-    CursorModelSelection, cursor_suffix_has, normalize_cursor_reasoning_effort,
-    resolve_cursor_model,
+    PackedModelSelection, normalize_reasoning_effort, packed_suffix_has, resolve_packed_model,
 };
 
 enum CommandMessage {
@@ -1013,8 +1012,8 @@ fn session_config_select_values(option: &SessionConfigOption) -> Vec<&str> {
 fn cursor_model_selection(
     option: &SessionConfigOption,
     requested: &str,
-) -> Option<CursorModelSelection> {
-    resolve_cursor_model(session_config_select_values(option), requested)
+) -> Option<PackedModelSelection> {
+    resolve_packed_model(session_config_select_values(option), requested, ProviderKind::Cursor)
 }
 
 fn cursor_option_id(option: &SessionConfigOption) -> String {
@@ -1094,16 +1093,16 @@ fn find_cursor_effort_option(options: &[SessionConfigOption]) -> Option<&Session
 }
 
 fn cursor_matching_select_value<'a>(values: &[&'a str], requested: &str) -> Option<&'a str> {
-    let normalized = normalize_cursor_reasoning_effort(requested);
+    let normalized = normalize_reasoning_effort(requested);
     values
         .iter()
-        .find(|value| normalize_cursor_reasoning_effort(value) == normalized)
+        .find(|value| normalize_reasoning_effort(value) == normalized)
         .copied()
 }
 
 fn cursor_desired_effort_value(
     option: &SessionConfigOption,
-    selection: &CursorModelSelection,
+    selection: &PackedModelSelection,
     reasoning_effort: Option<&str>,
 ) -> Option<String> {
     let values = session_config_select_values(option);
@@ -1115,34 +1114,34 @@ fn cursor_desired_effort_value(
     if selection.suffix.contains("extra-high")
         && let Some(value) = values
             .iter()
-            .find(|value| normalize_cursor_reasoning_effort(value) == "xhigh")
+            .find(|value| normalize_reasoning_effort(value) == "xhigh")
     {
         return Some((*value).to_owned());
     }
     values
         .iter()
-        .find(|value| cursor_suffix_has(&selection.suffix, value))
+        .find(|value| packed_suffix_has(&selection.suffix, value))
         .map(|value| (*value).to_owned())
 }
 
 fn cursor_desired_thinking(
-    selection: &CursorModelSelection,
+    selection: &PackedModelSelection,
     reasoning_effort: Option<&str>,
 ) -> Option<bool> {
     if let Some(effort) = reasoning_effort {
-        return Some(normalize_cursor_reasoning_effort(effort) != "none");
+        return Some(normalize_reasoning_effort(effort) != "none");
     }
-    cursor_suffix_has(&selection.suffix, "thinking").then_some(true)
+    packed_suffix_has(&selection.suffix, "thinking").then_some(true)
 }
 
 fn cursor_desired_fast(
-    selection: &CursorModelSelection,
+    selection: &PackedModelSelection,
     service_tier: Option<&str>,
 ) -> Option<bool> {
     match service_tier {
         Some("fast") => Some(true),
         Some(_) => Some(false),
-        None if cursor_suffix_has(&selection.suffix, "fast") => Some(true),
+        None if packed_suffix_has(&selection.suffix, "fast") => Some(true),
         None => None,
     }
 }
@@ -1203,7 +1202,7 @@ async fn apply_cursor_variant_configs(
     connection: &ConnectionTo<Agent>,
     session_id: &SessionId,
     mut options: Vec<SessionConfigOption>,
-    selection: &CursorModelSelection,
+    selection: &PackedModelSelection,
     reasoning_effort: Option<&str>,
     service_tier: Option<&str>,
     context_window: Option<&str>,
@@ -2953,28 +2952,28 @@ mod tests {
 
         assert_eq!(
             cursor_model_selection(&option, "auto"),
-            Some(CursorModelSelection {
+            Some(PackedModelSelection {
                 value: "default".into(),
                 suffix: String::new(),
             })
         );
         assert_eq!(
             cursor_model_selection(&option, "composer-2.5"),
-            Some(CursorModelSelection {
+            Some(PackedModelSelection {
                 value: "composer-2.5".into(),
                 suffix: String::new(),
             })
         );
         assert_eq!(
             cursor_model_selection(&option, "cursor-grok-4.6-xhigh-fast"),
-            Some(CursorModelSelection {
+            Some(PackedModelSelection {
                 value: "grok-4.6".into(),
                 suffix: "xhigh-fast".into(),
             })
         );
         assert_eq!(
             cursor_model_selection(&option, "claude-4.6-sonnet-medium-thinking"),
-            Some(CursorModelSelection {
+            Some(PackedModelSelection {
                 value: "claude-sonnet-4-6".into(),
                 suffix: "medium-thinking".into(),
             })
@@ -2983,7 +2982,7 @@ mod tests {
 
     #[test]
     fn cursor_model_suffix_selects_dynamic_effort_thinking_and_fast_options() {
-        let selection = CursorModelSelection {
+        let selection = PackedModelSelection {
             value: "claude-opus-5".into(),
             suffix: "thinking-extra-high-fast".into(),
         };

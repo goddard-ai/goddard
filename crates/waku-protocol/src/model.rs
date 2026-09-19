@@ -896,12 +896,8 @@ impl ProviderProbe {
     }
 
     pub fn model(&self, requested: &str) -> Option<&ProviderModel> {
-        if self.provider == ProviderKind::Cursor {
-            crate::model_catalog::cursor_catalog_model(&self.models, requested)
-                .map(|matched| matched.model)
-        } else {
-            self.models.iter().find(|model| model.id == requested)
-        }
+        crate::model_catalog::packed_catalog_model(&self.models, requested, self.provider)
+            .map(|matched| matched.model)
     }
 
     pub fn preferred_agent_preset(&self) -> Option<&ProviderAgentPreset> {
