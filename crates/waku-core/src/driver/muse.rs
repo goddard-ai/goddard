@@ -1994,6 +1994,7 @@ mod tests {
                 .unwrap_or_default(),
             is_dir: false,
             is_image,
+            pasted_text_preview: None,
             blob_reference: None,
             pasted_text_preview: None,
             session_id: None,
