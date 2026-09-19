@@ -95,7 +95,7 @@ export function createSession(
       : { kind: 'local' },
     provider,
     model: options.model ?? null,
-    runtime_mode: options.runtimeMode ?? 'fullAccess',
+    runtime_mode: options.runtimeMode ?? 'autoAcceptEdits',
     reasoning_effort: options.reasoningEffort ?? null,
     service_tier: options.serviceTier ?? null,
     context_window: options.contextWindow ?? null,

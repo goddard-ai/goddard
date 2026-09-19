@@ -2807,7 +2807,7 @@ mod tests {
 
         assert_eq!(state.sidebar_grouping, SidebarGrouping::Date);
         assert_eq!(state.sidebar_ordering, SidebarOrdering::LastUpdated);
-        assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
+        assert_eq!(state.last_runtime_mode, RuntimeMode::AutoAcceptEdits);
 
         let state: AppState = serde_json::from_str(
             r#"{"app_state_version":1,"sidebar_grouping":"updated","sidebar_ordering":"oldest"}"#,
