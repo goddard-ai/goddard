@@ -38,7 +38,8 @@ use gpui::{
     LayoutId, Length, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Position, RenderOnce, SharedString, Size, StatefulInteractiveElement, Style, Styled, Window,
     actions,
-    anchored, canvas, deferred, div, img, prelude::FluentBuilder, px,
+    anchored, canvas, deferred, div, img, linear_color_stop, linear_gradient,
+    prelude::FluentBuilder, px,
 };
 
 actions!(
@@ -1220,6 +1221,25 @@ where
         .into_any_element()
 }
 
+/// The menu card's liquid-glass-style fill: the raised surface let through
+/// enough that content ghosts beneath it, plus a specular sheen at the top
+/// edge — the lit-from-above rim glass is recognized by. Reduce
+/// Transparency keeps the solid card since translucency is the effect.
+fn glass_card_bg(theme: &Theme) -> gpui::Background {
+    if crate::platform::reduce_transparency() {
+        return theme.raised.into();
+    }
+    let mut sheen = theme.raised;
+    sheen.l = (sheen.l + if theme.is_dark { 0.12 } else { 0.05 }).min(1.0);
+    sheen.a = 0.95;
+    let base = theme.raised.opacity(if theme.is_dark { 0.88 } else { 0.9 });
+    linear_gradient(
+        180.0,
+        linear_color_stop(sheen, 0.0),
+        linear_color_stop(base, 1.0),
+    )
+}
+
 #[derive(IntoElement)]
 struct MenuCard {
     id: ElementId,
@@ -1269,7 +1289,7 @@ impl RenderOnce for MenuCard {
             .rounded(px(11.0))
             .border(hairline())
             .border_color(theme.border_subtle)
-            .bg(theme.raised)
+            .bg(glass_card_bg(&theme))
             .shadow_lg()
             .flex()
             .flex_col();
@@ -1343,7 +1363,7 @@ impl RenderOnce for MenuCard {
                 .rounded(px(11.0))
                 .border(hairline())
                 .border_color(theme.border_subtle)
-                .bg(theme.raised)
+                .bg(glass_card_bg(&theme))
                 .shadow_lg()
                 .flex()
                 .flex_col();

@@ -1,1 +1,1 @@
-- On macOS 26, transparent chrome renders as real Liquid Glass (`NSGlassEffectView`): the sidebar and the chat composer card float on glass that lenses the desktop, tinted by the active theme. Older macOS keeps the existing vibrancy path unchanged.
+- On macOS 26, the transparent sidebar renders as real Liquid Glass (`NSGlassEffectView`) that lenses the desktop, tinted by the active theme; older macOS keeps the existing vibrancy path unchanged. Context menus and dropdowns get a glass treatment too — a translucent card with a specular top sheen over whatever lies beneath.
