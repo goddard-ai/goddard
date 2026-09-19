@@ -657,6 +657,10 @@ pub struct AppSettings {
     /// starts a fresh chat on the checkout with the resolution prompt
     /// already sent.
     pub auto_resolve_in_chat: bool,
+    /// When a land stops on rebase or merge conflicts, send the resolution
+    /// prompt to the owning task's chat instead of showing the conflict
+    /// dialog.
+    pub auto_resolve_land_conflicts: bool,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     pub new_worktree_default_branch: bool,
@@ -756,6 +760,7 @@ impl Default for AppSettings {
             open_at_last_prompt: true,
             sync_with_merge: false,
             auto_resolve_in_chat: false,
+            auto_resolve_land_conflicts: false,
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
@@ -1025,6 +1030,11 @@ pub struct PersistedState {
     /// already sent.
     #[serde(default)]
     pub auto_resolve_in_chat: bool,
+    /// When a land stops on rebase or merge conflicts, send the resolution
+    /// prompt to the owning task's chat instead of showing the conflict
+    /// dialog.
+    #[serde(default)]
+    pub auto_resolve_land_conflicts: bool,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     #[serde(default)]
@@ -1241,6 +1251,7 @@ impl PersistedState {
             open_at_last_prompt: true,
             sync_with_merge: false,
             auto_resolve_in_chat: false,
+            auto_resolve_land_conflicts: false,
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
@@ -1531,6 +1542,7 @@ impl PersistedState {
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
             auto_resolve_in_chat: self.auto_resolve_in_chat,
+            auto_resolve_land_conflicts: self.auto_resolve_land_conflicts,
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
             new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
@@ -1618,6 +1630,7 @@ impl PersistedState {
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
+        self.auto_resolve_land_conflicts = settings.auto_resolve_land_conflicts;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
         self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
@@ -2492,6 +2505,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sync_with_merge);
+    }
+
+    #[test]
+    fn auto_resolve_land_conflicts_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.auto_resolve_land_conflicts);
+        let mut state = PersistedState::empty();
+        assert!(!state.auto_resolve_land_conflicts);
+        state.auto_resolve_land_conflicts = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["auto_resolve_land_conflicts"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("auto_resolve_land_conflicts")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.auto_resolve_land_conflicts);
     }
 
     #[test]
