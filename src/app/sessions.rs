@@ -944,6 +944,10 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
+        self.sidebar_multi_selection.remove(&session_id);
+        if self.sidebar_multi_selection_anchor == Some(session_id) {
+            self.sidebar_multi_selection_anchor = None;
+        }
         self.transcript_scroll_positions.remove(&session_id);
         if self
             .transcript_landing
@@ -1230,6 +1234,10 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
+        self.sidebar_multi_selection.remove(&session_id);
+        if self.sidebar_multi_selection_anchor == Some(session_id) {
+            self.sidebar_multi_selection_anchor = None;
+        }
         self.transcript_scroll_positions.remove(&session_id);
         if self
             .transcript_landing
@@ -1326,6 +1334,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A sidebar multi-selection archives as a batch; each member keeps
+        // its own row position for the neighbor-selection fallback.
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            for session_id in targets {
+                self.archive_session(session_id, window, cx);
+            }
+            return;
+        }
         if let Some(session_id) = self.composer_session_id() {
             self.archive_session(session_id, window, cx);
         }
@@ -1373,6 +1390,43 @@ impl Waku {
         cx.notify();
     }
 
+    /// Pin or unpin a batch outright — the multi-selection's uniform result,
+    /// where a per-row toggle would leave a mixed set still mixed.
+    pub(super) fn set_sessions_pinned(
+        &mut self,
+        session_ids: &[Uuid],
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.hold_sidebar_peek();
+        let now = unix_time();
+        let mut changed = false;
+        for session_id in session_ids {
+            let Some(current) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id)
+                .filter(|session| session.has_started() && session.archived_at.is_none())
+                .map(|session| session.pinned_at.is_some())
+            else {
+                continue;
+            };
+            if current == pinned {
+                continue;
+            }
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.pinned_at = pinned.then_some(now);
+                session.updated_at = now;
+            }
+            changed = true;
+        }
+        if changed {
+            self.save();
+            cx.notify();
+        }
+    }
+
     pub(super) fn toggle_session_pin_action(
         &mut self,
         _: &ToggleSessionPin,
@@ -1402,6 +1456,20 @@ impl Waku {
             });
         if let Some(terminal_id) = focused_terminal {
             self.toggle_terminal_pin(terminal_id, cx);
+            return;
+        }
+        // A sidebar multi-selection pins as a batch: pin every member unless
+        // all are already pinned, in which case the chord unpins the set.
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            let pin = targets.iter().any(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *session_id)
+                    .is_some_and(|session| session.pinned_at.is_none())
+            });
+            self.set_sessions_pinned(&targets, pin, cx);
             return;
         }
         if let Some(session_id) = self.state.selected_session {
@@ -2024,8 +2092,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_id) = self.composer_session_id() {
-            self.mark_session_unread(session_id, cx);
+        let targets = self.sidebar_multi_selection_targets();
+        if targets.is_empty() {
+            if let Some(session_id) = self.composer_session_id() {
+                self.mark_session_unread(session_id, cx);
+            }
+        } else {
+            for session_id in targets {
+                self.mark_session_unread(session_id, cx);
+            }
         }
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
@@ -2049,6 +2124,13 @@ impl Waku {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            for session_id in targets {
+                self.mark_session_unread(session_id, cx);
+            }
+            return;
+        }
         if let Some(session_id) = self.composer_session_id() {
             self.mark_session_unread(session_id, cx);
         }
@@ -2238,12 +2320,41 @@ impl Waku {
         ));
     }
 
+    /// Every batch member's agent directory, one path per line — the same
+    /// payload [`Self::copy_session_working_directory`] writes for one task.
+    pub(super) fn copy_sessions_working_directory(
+        &self,
+        session_ids: &[Uuid],
+        cx: &mut App,
+    ) {
+        let paths = session_ids
+            .iter()
+            .filter_map(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *session_id)
+            })
+            .filter_map(|session| self.workspace_path_for_session(session))
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !paths.is_empty() {
+            cx.write_to_clipboard(ClipboardItem::new_string(paths));
+        }
+    }
+
     pub(super) fn copy_working_directory_action(
         &mut self,
         _: &CopyWorkingDirectory,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            self.copy_sessions_working_directory(&targets, cx);
+            return;
+        }
         if let Some(session_id) = self.composer_session_id() {
             self.copy_session_working_directory(session_id, cx);
         }
@@ -2281,6 +2392,12 @@ impl Waku {
         }
         if self.message_edit.is_some() {
             self.cancel_message_edit(window, cx);
+            return;
+        }
+        // Bare Escape drops the sidebar's multi-selection before it arms the
+        // stop confirmation; ⌥Escape remains a deliberate one-press stop.
+        if !action.immediate && !self.sidebar_multi_selection.is_empty() {
+            self.clear_sidebar_multi_selection(cx);
             return;
         }
         // ⌥Escape is a deliberate chord, so it stops on a single press
