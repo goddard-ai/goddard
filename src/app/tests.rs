@@ -7,6 +7,7 @@ use super::runtime::{merge_remote_session_catalog, session_has_active_provider_t
 use super::sessions::{next_idle_session, next_non_busy_session, next_unread_completion};
 use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::sidebar::SidebarRow;
+use super::streaming::session_accepts_steer_result;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
@@ -302,6 +303,23 @@ fn foreground_output_recovers_a_missed_provider_turn_start_for_steering() {
     assert!(session_accepts_turn_output(&mut session));
     assert_eq!(session.status, SessionStatus::Working);
     assert!(session_has_active_provider_turn(&session));
+}
+
+#[test]
+fn steer_results_are_only_accepted_into_a_running_turn() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
+    assert!(!session_accepts_steer_result(&session));
+
+    session.begin_turn("inspect the project");
+    assert!(session_accepts_steer_result(&session));
+
+    session.turns.last_mut().unwrap().status = TurnStatus::Interrupted;
+    assert!(!session_accepts_steer_result(&session));
+
+    session.begin_turn("follow up");
+    assert!(session_accepts_steer_result(&session));
+    session.turns.last_mut().unwrap().status = TurnStatus::Completed;
+    assert!(!session_accepts_steer_result(&session));
 }
 
 #[test]

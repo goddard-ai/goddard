@@ -3130,6 +3130,10 @@ impl Waku {
             runtime.pending_permission = None;
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
+            // A steer still awaiting its provider echo must not acknowledge
+            // into the settled session; the user asked to stop, not to
+            // continue.
+            runtime.pending_steers.clear();
             runtime.computer_use_previews.clear();
         }
         if has_active_turn {

@@ -501,6 +501,19 @@ impl Waku {
                 message,
                 sent_by_task,
             } => {
+                // An accepted steer folds into the running turn; one that
+                // lands after the turn ended — after Stop, say — would
+                // otherwise append a loose user message to the settled
+                // session.
+                let accepts = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(session_accepts_steer_result);
+                if !accepts {
+                    return true;
+                }
                 let submission = runtime
                     .pending_steers
                     .iter()
@@ -962,6 +975,13 @@ pub(super) fn session_accepts_turn_output(session: &mut AgentSession) -> bool {
         session.status = SessionStatus::Working;
     }
     true
+}
+
+/// A steer can only fold into a turn that is still running; after it ends —
+/// completed, interrupted, or stopped — a late acceptance is a straggler
+/// that must not inject a message into the settled session.
+pub(super) fn session_accepts_steer_result(session: &AgentSession) -> bool {
+    session.active_turn_id().is_some()
 }
 
 /// A completed edit or shell command is the earliest provider-neutral point at
