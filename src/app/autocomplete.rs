@@ -799,7 +799,6 @@ impl Waku {
                                 this.dismiss_autocomplete(cx);
                             }))
                             .child(list),
-                        anchor,
                     )),
             )
             .with_priority(crate::ui::menu::MENU_PAINT_PRIORITY)

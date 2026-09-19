@@ -47,13 +47,12 @@ const HINT_HEIGHT: f32 = 16.0;
 const COMPOSER_BOTTOM_MARGIN: f32 = 28.0;
 const HINT_BOTTOM_MARGIN: f32 = 10.0;
 const CARD_TRANSITION: Duration = Duration::from_millis(220);
-/// Each card waits this long past its left neighbor before rising on open.
+/// Each card waits this long past its left neighbor before fading in on open.
 const CARD_STAGGER: Duration = Duration::from_millis(55);
 /// A leaving card outlives its transition by a hair so the timer never cuts
 /// the last frames.
 const CARD_EXIT_LINGER: Duration = Duration::from_millis(260);
-/// How far the composer travels on open, and how long that takes.
-const COMPOSER_RISE: f32 = 28.0;
+/// How long the composer's fade-in runs on open.
 const COMPOSER_TRANSITION: Duration = Duration::from_millis(300);
 /// Card transcripts render the lane's row kinds at this fraction of its
 /// sizes — the same transcript, small enough to glance across a grid.
@@ -114,9 +113,9 @@ struct BigPictureSlot {
     height: f32,
     from_height: f32,
     leaving: bool,
-    /// Fresh mounts fade up; reordered or surviving cards only slide.
+    /// Fresh mounts fade in; reordered or surviving cards only slide.
     entering: bool,
-    /// How long a fresh mount waits before it starts rising — the stagger.
+    /// How long a fresh mount waits before it starts fading in — the stagger.
     enter_delay: Duration,
     /// Bumped per transition so `with_animation` replays from delta 0.
     anim_seq: u64,
@@ -1097,7 +1096,7 @@ impl Waku {
                 .with_easing(ease_out_quint()),
                 move |element, delta| {
                     // The stagger folds into the animation's span: the card
-                    // sits invisible through its delay, then rises.
+                    // sits invisible through its delay, then fades in.
                     let delta = if entering {
                         let delay = enter_delay.as_secs_f32()
                             / (CARD_TRANSITION + enter_delay).as_secs_f32();
@@ -1105,15 +1104,9 @@ impl Waku {
                     } else {
                         delta
                     };
-                    let mut top = from_top + (top - from_top) * delta;
-                    if leaving {
-                        top += 10.0 * delta;
-                    } else if entering {
-                        top += 14.0 * (1.0 - delta);
-                    }
                     element
                         .left(px(from_left + (left - from_left) * delta))
-                        .top(px(top))
+                        .top(px(from_top + (top - from_top) * delta))
                         .w(px(from_width + (width - from_width) * delta))
                         .h(px(from_height + (height - from_height) * delta))
                         .opacity(if leaving {
@@ -1871,11 +1864,7 @@ impl Waku {
                             self.big_picture.open_seq
                         )),
                         Animation::new(COMPOSER_TRANSITION).with_easing(ease_out_quint()),
-                        |element, delta| {
-                            element
-                                .top(px(COMPOSER_RISE * (1.0 - delta)))
-                                .opacity(delta)
-                        },
+                        |element, delta| element.opacity(delta),
                     ),
             );
         Some(
