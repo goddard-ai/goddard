@@ -739,23 +739,23 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
     // never matter.
     for selected in [None, Some(second), Some(third)] {
         assert_eq!(
-            next_unread_completion(&sessions, &unseen, &rows, selected, None),
+            next_unread_completion(&sessions, &unseen, &rows, selected, None, None),
             Some(first)
         );
     }
     // The selected session never targets itself, even while unread.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, Some(first), None),
+        next_unread_completion(&sessions, &unseen, &rows, Some(first), None, None),
         Some(third)
     );
     // A pending activation is treated as on-screen too.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, Some(third), Some(first)),
+        next_unread_completion(&sessions, &unseen, &rows, Some(third), Some(first), None),
         None
     );
     // No candidates: the caller falls to the idle rotation.
     assert_eq!(
-        next_unread_completion(&sessions, &HashMap::new(), &rows, None, None),
+        next_unread_completion(&sessions, &HashMap::new(), &rows, None, None, None),
         None
     );
 }
@@ -785,21 +785,21 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
     let unseen = HashMap::from([(pinned_bottom, 100), (below, 400)]);
     for selected in [None, Some(current), Some(below)] {
         assert_eq!(
-            next_unread_completion(&sessions, &unseen, &rows, selected, None),
+            next_unread_completion(&sessions, &unseen, &rows, selected, None, None),
             Some(pinned_bottom)
         );
     }
     // Two unread pinned tasks take their sidebar order.
     let both_pinned = HashMap::from([(pinned_top, 50), (pinned_bottom, 500)]);
     assert_eq!(
-        next_unread_completion(&sessions, &both_pinned, &rows, None, None),
+        next_unread_completion(&sessions, &both_pinned, &rows, None, None, None),
         Some(pinned_top)
     );
     // A blocked pinned task counts as unread too.
     let mut sessions = sessions;
     sessions[0].status = SessionStatus::Waiting;
     assert_eq!(
-        next_unread_completion(&sessions, &HashMap::new(), &rows, Some(current), None),
+        next_unread_completion(&sessions, &HashMap::new(), &rows, Some(current), None, None),
         Some(pinned_top)
     );
 }
@@ -829,7 +829,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
         (settled_id, 100),
     ]);
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None),
+        next_unread_completion(&sessions, &unseen, &rows, None, None, None),
         Some(settled_id)
     );
 
@@ -850,8 +850,46 @@ fn next_unread_completion_skips_ineligible_sessions() {
     ];
     let queued_only = HashMap::from([(queued_id, 300), (blocked_id, 400)]);
     assert_eq!(
-        next_unread_completion(&sessions, &queued_only, &rows, None, None),
+        next_unread_completion(&sessions, &queued_only, &rows, None, None, None),
         None
+    );
+}
+
+#[test]
+fn next_unread_completion_skips_sweep_parked_sessions() {
+    let parked = Uuid::new_v4();
+    let unread = Uuid::new_v4();
+    let idle = Uuid::new_v4();
+    let sessions = vec![
+        started_session(parked),
+        started_session(unread),
+        started_session(idle),
+    ];
+    let rows = vec![
+        SidebarRow::Session(parked),
+        SidebarRow::Session(unread),
+        SidebarRow::Session(idle),
+    ];
+    let unseen = HashMap::from([(parked, 100), (unread, 200)]);
+    let sweep = HashSet::from([parked]);
+
+    // The departure fallback's scan: a parked row is passed over for the
+    // next genuinely unread one, even though it sits higher in the sidebar.
+    assert_eq!(
+        next_unread_completion(&sessions, &unseen, &rows, None, None, Some(&sweep)),
+        Some(unread)
+    );
+    // With every unread row parked there is no unread target, so the caller
+    // falls to the idle rotation — where parked rows still count.
+    let only_parked = HashMap::from([(parked, 100)]);
+    assert_eq!(
+        next_unread_completion(&sessions, &only_parked, &rows, None, None, Some(&sweep)),
+        None
+    );
+    // ⌘D proper keeps parked rows as candidates.
+    assert_eq!(
+        next_unread_completion(&sessions, &unseen, &rows, None, None, None),
+        Some(parked)
     );
 }
 

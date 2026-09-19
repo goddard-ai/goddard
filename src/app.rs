@@ -1687,6 +1687,16 @@ pub struct Waku {
     /// Selection is committed only after this target's transcript arrives, so
     /// the currently visible task stays intact during daemon latency.
     pending_session_activation: Option<PendingSessionActivation>,
+    /// The sessions ⌘⇧D has parked so far — stamped unread, then left
+    /// mid-sweep. They stay GoToNextUnreadCompletion candidates for ⌘D, but
+    /// the session-departure fallback skips them so archiving the landing
+    /// task cannot bounce selection straight back onto a task the sweep
+    /// deliberately parked. Cleared when an activation arrives from anywhere
+    /// but the sweep's own jump.
+    unread_sweep: HashSet<Uuid>,
+    /// The session ⌘⇧D is flying to — lets `activate_session` tell the
+    /// sweep's own landing from an outside selection change.
+    unread_sweep_target: Option<Uuid>,
     analytics: crate::analytics::Analytics,
     state: PersistedState,
     store: StateStore,
@@ -4711,6 +4721,8 @@ impl Waku {
                 daemon_hostname,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
+                unread_sweep: HashSet::new(),
+                unread_sweep_target: None,
                 analytics,
                 state,
                 store,
