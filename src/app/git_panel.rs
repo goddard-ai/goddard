@@ -153,6 +153,33 @@ impl SyncConflict {
     }
 }
 
+/// The prompt Resolve in chat hands the composer — and the auto-resolve
+/// setting sends outright. Pull conflicts continue with `rebase --continue`
+/// or `merge --continue`; a land still owes its base the fast-forward
+/// afterward, so its prompts name it.
+fn sync_conflict_prompt(conflict: &SyncConflict) -> String {
+    match conflict {
+        SyncConflict::Pull {
+            in_progress: SyncInProgress::Rebase,
+            ..
+        } => tr!("git_panel.resolve_rebase_prompt"),
+        SyncConflict::Pull {
+            in_progress: SyncInProgress::Merge,
+            ..
+        } => tr!("git_panel.resolve_merge_prompt"),
+        SyncConflict::Land {
+            in_progress: SyncInProgress::Rebase,
+            base,
+            ..
+        } => tr!("git_panel.resolve_land_rebase_prompt", base = base),
+        SyncConflict::Land {
+            in_progress: SyncInProgress::Merge,
+            base,
+            ..
+        } => tr!("git_panel.resolve_land_merge_prompt", base = base),
+    }
+}
+
 pub(super) struct GitPanelOperation {
     pub id: Uuid,
     pub workspace: PathBuf,
@@ -1367,31 +1394,32 @@ impl Waku {
             } => Some(workspace.clone()),
             _ => None,
         };
-        let prompt = match conflict {
-            SyncConflict::Pull {
-                in_progress: SyncInProgress::Rebase,
-                ..
-            } => tr!("git_panel.resolve_rebase_prompt"),
-            SyncConflict::Pull {
-                in_progress: SyncInProgress::Merge,
-                ..
-            } => tr!("git_panel.resolve_merge_prompt"),
-            SyncConflict::Land {
-                in_progress: SyncInProgress::Rebase,
-                base,
-                ..
-            } => tr!("git_panel.resolve_land_rebase_prompt", base = base),
-            SyncConflict::Land {
-                in_progress: SyncInProgress::Merge,
-                base,
-                ..
-            } => tr!("git_panel.resolve_land_merge_prompt", base = base),
-        };
+        let prompt = sync_conflict_prompt(&conflict);
         if let Some(workspace) = new_chat_workspace {
             self.create_task_in_directory(workspace, window, cx);
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
+        self.composer
+            .update(cx, |composer, cx| composer.insert_text(&prompt, cx));
+        self.schedule_composer_draft_save(cx);
+        cx.notify();
+    }
+
+    /// The `auto_resolve_in_chat` form of Resolve in chat: every conflict —
+    /// not only the picker's — opens a fresh chat on the checkout and sends
+    /// the resolution prompt itself, no click. When no provider can take the
+    /// send, the prompt still lands in the new chat's composer as a draft.
+    fn auto_resolve_sync_conflict(&mut self, conflict: SyncConflict, cx: &mut Context<Self>) {
+        let workspace = conflict.workspace();
+        let prompt = sync_conflict_prompt(&conflict);
+        self.create_task_in_directory_unfocused(workspace, cx);
+        if let Some(submission) = self.submission_with_attachments(&prompt, cx)
+            && let Some(session_id) = self.state.selected_session
+        {
+            self.submit_composer_submission_to(session_id, submission, cx);
+            return;
+        }
         self.composer
             .update(cx, |composer, cx| composer.insert_text(&prompt, cx));
         self.schedule_composer_draft_save(cx);
@@ -1439,12 +1467,19 @@ impl Waku {
             }) => {
                 self.git_panel_conflict_files_scroll
                     .set_offset(gpui::Point::default());
-                self.git_panel_sync_conflict = Some(SyncConflict::Pull {
+                let conflict = SyncConflict::Pull {
                     in_progress,
                     workspace: op.workspace.clone(),
                     files,
                     new_chat: op.sync_branch,
-                });
+                };
+                if self.state.auto_resolve_in_chat {
+                    // The setting trades the modal for a chat that starts on
+                    // its own — one rooted at the conflicted checkout.
+                    self.auto_resolve_sync_conflict(conflict, cx);
+                } else {
+                    self.git_panel_sync_conflict = Some(conflict);
+                }
                 // The conflict modal takes over from the picker card — when
                 // this is the operation the card is waiting on. An inherited
                 // marker (a "Merge instead" retry) leaves an open picker alone.
@@ -1465,12 +1500,19 @@ impl Waku {
                     self.dismiss_operation_toast(op.toast_id);
                     self.git_panel_conflict_files_scroll
                         .set_offset(gpui::Point::default());
-                    self.git_panel_sync_conflict = Some(SyncConflict::Land {
+                    let conflict = SyncConflict::Land {
                         in_progress,
                         base,
                         workspace: op.workspace.clone(),
                         files,
-                    });
+                    };
+                    if self.state.auto_resolve_in_chat {
+                        // Same trade as a pull conflict: the modal gives way
+                        // to a chat that starts resolving on its own.
+                        self.auto_resolve_sync_conflict(conflict, cx);
+                    } else {
+                        self.git_panel_sync_conflict = Some(conflict);
+                    }
                     self.invalidate_workspace_queries(cx);
                     cx.notify();
                 }

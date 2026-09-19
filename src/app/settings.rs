@@ -1183,6 +1183,23 @@ impl Waku {
                 search,
             ))
             .children(setting_card(
+                tr!("settings.auto_resolve_in_chat"),
+                tr!("settings.auto_resolve_in_chat_description"),
+                toggle_switch(
+                    "auto-resolve-in-chat-toggle",
+                    self.state.auto_resolve_in_chat,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.auto_resolve_in_chat;
+                        move |this, _, cx| this.set_auto_resolve_in_chat(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
                 tr!("settings.sidebar_shortcut_tags"),
                 tr!(
                     "settings.sidebar_shortcut_tags_description",
@@ -5789,6 +5806,15 @@ impl Waku {
             return;
         }
         self.state.sync_with_merge = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_auto_resolve_in_chat(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.auto_resolve_in_chat == enabled {
+            return;
+        }
+        self.state.auto_resolve_in_chat = enabled;
         self.save();
         cx.notify();
     }

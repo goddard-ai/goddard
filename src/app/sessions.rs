@@ -1476,6 +1476,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.create_task_in_directory_unfocused(path, cx);
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+    }
+
+    /// `create_task_in_directory` minus the composer focus — background
+    /// completion handlers have no window to focus through.
+    pub(super) fn create_task_in_directory_unfocused(
+        &mut self,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
         self.settings_page = None;
         let project_id = match self
             .state
@@ -1494,8 +1506,6 @@ impl Waku {
             }
         };
         self.create_session_for(project_id, self.state.last_provider, cx);
-        let focus = self.composer_focus(cx);
-        window.focus(&focus, cx);
     }
 
     /// The project's new-task draft — an unstarted one it already had, or a

@@ -863,6 +863,10 @@ settings.sync_with_merge:
   en: Merge when syncing changes
 settings.sync_with_merge_description:
   en: Use git merge instead of git pull --rebase when syncing a checkout from the new task area
+settings.auto_resolve_in_chat:
+  en: Resolve sync conflicts in a chat
+settings.auto_resolve_in_chat_description:
+  en: When a pull or land stops on conflicts, start a fresh chat on the checkout with the resolution steps already sent
 settings.new_worktree_default_branch:
   en: New worktrees use the default branch
 settings.new_worktree_default_branch_description:

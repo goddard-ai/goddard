@@ -653,6 +653,10 @@ pub struct AppSettings {
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
     pub sync_with_merge: bool,
+    /// A sync that stops on conflicts skips the Resolve-in-chat button and
+    /// starts a fresh chat on the checkout with the resolution prompt
+    /// already sent.
+    pub auto_resolve_in_chat: bool,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     pub new_worktree_default_branch: bool,
@@ -746,6 +750,7 @@ impl Default for AppSettings {
             show_response_token_speed: false,
             open_at_last_prompt: true,
             sync_with_merge: false,
+            auto_resolve_in_chat: false,
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
@@ -1001,6 +1006,11 @@ pub struct PersistedState {
     /// task area.
     #[serde(default)]
     pub sync_with_merge: bool,
+    /// A sync that stops on conflicts skips the Resolve-in-chat button and
+    /// starts a fresh chat on the checkout with the resolution prompt
+    /// already sent.
+    #[serde(default)]
+    pub auto_resolve_in_chat: bool,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     #[serde(default)]
@@ -1213,6 +1223,7 @@ impl PersistedState {
             show_response_token_speed: false,
             open_at_last_prompt: true,
             sync_with_merge: false,
+            auto_resolve_in_chat: false,
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
@@ -1498,6 +1509,7 @@ impl PersistedState {
             show_response_token_speed: self.show_response_token_speed,
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
+            auto_resolve_in_chat: self.auto_resolve_in_chat,
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
             new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
@@ -1582,6 +1594,7 @@ impl PersistedState {
         self.show_response_token_speed = settings.show_response_token_speed;
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
+        self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
         self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
