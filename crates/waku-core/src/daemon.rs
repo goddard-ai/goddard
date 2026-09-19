@@ -847,6 +847,11 @@ impl Backend for WakuBackend {
                     evaluation: result?,
                 })
             }
+            Command::TestEvalConnection { settings } => {
+                Ok(ResponsePayload::Evaluation {
+                    evaluation: crate::eval::probe(&settings)?,
+                })
+            }
             Command::RouteTask {
                 prompt,
                 project,
@@ -3461,6 +3466,7 @@ fn handle_driver_command(
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::Evaluate { .. }
+        | Command::TestEvalConnection { .. }
         | Command::RouteTask { .. }
         | Command::RecordRouteOverride { .. }
         | Command::GetRoutePolicy

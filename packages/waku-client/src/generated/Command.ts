@@ -8,6 +8,7 @@ import type { ComposerDrafts } from "./ComposerDrafts";
 import type { CustomCommand } from "./CustomCommand";
 import type { DaemonSettings } from "./DaemonSettings";
 import type { EvalQuestion } from "./EvalQuestion";
+import type { EvalSettings } from "./EvalSettings";
 import type { FriendSyncAlertAction } from "./FriendSyncAlertAction";
 import type { GoalOperation } from "./GoalOperation";
 import type { MessageAttachment } from "./MessageAttachment";
@@ -57,7 +58,7 @@ scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider
  * log record. `None` — every caller before this field existed —
  * logs as a bare `"evaluate"`.
  */
-feature?: string | null, } | { "type": "routeTask", prompt: string,
+feature?: string | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "routeTask", prompt: string,
 /**
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.

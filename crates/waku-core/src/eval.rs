@@ -189,6 +189,21 @@ pub fn evaluate(
     Ok(evaluation)
 }
 
+/// The settings pane's "Test connection" check: one trivial question against
+/// a fixed state. Enough to verify credentials, headers, and the answer
+/// envelope — a bare HTTP 200 that skipped envelope parsing could pass on a
+/// broken contract. Deliberately writes no decision log record.
+pub fn probe(settings: &EvalSettings) -> anyhow::Result<Evaluation> {
+    let questions = BTreeMap::from([(
+        "connection".to_owned(),
+        EvalQuestion::Noul {
+            instructions: "Is this a connection check?".to_owned(),
+            criteria: None,
+        },
+    )]);
+    evaluate(settings, &json!({"task": "connection-check"}), &questions)
+}
+
 fn backend_request(
     settings: &EvalSettings,
     state: &Value,

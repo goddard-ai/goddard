@@ -4114,6 +4114,57 @@ impl Waku {
         cx.notify();
     }
 
+    /// The Jev page's "Test connection": one probe evaluation against the
+    /// backend selected in the dropdown, using the field contents as staged —
+    /// a configuration verifies before Apply persists it. The daemon owns the
+    /// HTTP call; the answer lands on `eval_probe_result` and renders as the
+    /// status text beside the button.
+    fn verify_eval_connection(&mut self, cx: &mut Context<Self>) {
+        if self.eval_probe_pending {
+            return;
+        }
+        let content = |input: &Entity<TextInput>| {
+            let content = input.read(cx).content().trim().to_owned();
+            (!content.is_empty()).then_some(content)
+        };
+        let settings = waku_protocol::eval::EvalSettings {
+            backend: self.state.eval.clone().unwrap_or_default().backend,
+            typesafe_api_key: content(&self.eval_typesafe_key_input),
+            vercel_api_key: content(&self.eval_vercel_key_input),
+            vercel_team_id: content(&self.eval_vercel_team_input),
+            cloudflare_account_id: content(&self.eval_cloudflare_account_input),
+            cloudflare_api_token: content(&self.eval_cloudflare_token_input),
+        };
+        self.eval_probe_pending = true;
+        self.eval_probe_result = None;
+        let daemon = self.daemon.client();
+        let probe = cx.background_executor().spawn(async move {
+            daemon
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::TestEvalConnection { settings },
+                )
+                .map_err(|error| format!("{error:#}"))
+                .and_then(|payload| match payload {
+                    waku_client::ResponsePayload::Evaluation { evaluation } => {
+                        Ok((evaluation.model, evaluation.latency_ms))
+                    }
+                    _ => Err("the daemon returned an invalid eval probe response".into()),
+                })
+        });
+        cx.spawn(async move |this, cx| {
+            let result = probe.await;
+            let _ = this.update(cx, |this, cx| {
+                this.eval_probe_pending = false;
+                this.eval_probe_result = Some(result);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     /// The Jev page's routing configuration: the eval backend and its
     /// credentials, then the three class-level targets the policy document
     /// resolves through. The document stays authoritative — the
@@ -4191,6 +4242,56 @@ impl Waku {
             })
             .child(tr!("daemon.apply"));
 
+        let pending = self.eval_probe_pending;
+        let test_button = div()
+            .id("test-eval-connection")
+            .tab_index(0)
+            .h(px(29.0))
+            .px(px(11.0))
+            .rounded(px(9.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if pending { 0.55 } else { 1.0 })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when(!pending, |element| {
+                element
+                    .hover(|element| element.bg(theme.overlay))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.verify_eval_connection(cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.verify_eval_connection(cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(tr!("routing.test_connection"));
+
+        let probe_status = if pending {
+            Some((tr!("routing.testing"), theme.text_tertiary))
+        } else {
+            self.eval_probe_result.as_ref().map(|result| match result {
+                Ok((model, latency)) => (
+                    tr!("routing.connection_ok", model = model, latency = latency),
+                    theme.success,
+                ),
+                Err(error) => (
+                    tr!("routing.connection_failed", error = error),
+                    theme.warning,
+                ),
+            })
+        };
+        let no_probe_status = probe_status.is_none();
+
         let mut credential_rows: Vec<Option<AnyElement>> = match backend {
             waku_protocol::eval::EvalBackend::TypeSafe => vec![settings_row(
                 tr!("routing.typesafe_key"),
@@ -4259,7 +4360,23 @@ impl Waku {
                         .px(px(20.0))
                         .pb(px(13.0))
                         .flex()
-                        .justify_end()
+                        .items_center()
+                        .gap(px(8.0))
+                        .when_some(probe_status, |row, (message, color)| {
+                            row.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(sp(12.0))
+                                    .text_color(color)
+                                    .child(message),
+                            )
+                        })
+                        .when(no_probe_status, |row| {
+                            row.child(div().flex_1())
+                        })
+                        .child(test_button)
                         .child(apply_button),
                 )
             })
