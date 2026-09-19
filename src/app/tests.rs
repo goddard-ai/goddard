@@ -2964,11 +2964,15 @@ fn route_class_rows_lead_with_aliases_then_providers_then_models() {
             .collect::<Vec<_>>()
     };
 
-    // Tiers lead — the aliases the shipped defaults use — then the provider's
-    // own default, then its catalog models at `provider:model` granularity.
+    // Session tiers lead — the aliases the shipped defaults use — then the
+    // global tiers, the provider's own default, and its catalog models at
+    // `provider:model` granularity.
     assert_eq!(
         targets(""),
         [
+            "session:tier:fast",
+            "session:tier:default",
+            "session:tier:heavy",
             "tier:fast",
             "tier:default",
             "tier:heavy",

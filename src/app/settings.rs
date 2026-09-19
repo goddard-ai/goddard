@@ -7685,9 +7685,9 @@ fn eval_backend_label(backend: waku_protocol::eval::EvalBackend) -> &'static str
 /// carries, shown before the first GetRoutePolicy answer lands.
 fn default_route_class_target(class: TaskClass) -> &'static str {
     match class {
-        TaskClass::Routine => "tier:fast",
-        TaskClass::General => "tier:default",
-        TaskClass::Demanding => "tier:heavy",
+        TaskClass::Routine => "session:tier:fast",
+        TaskClass::General => "session:tier:default",
+        TaskClass::Demanding => "session:tier:heavy",
     }
 }
 
@@ -7696,6 +7696,9 @@ fn default_route_class_target(class: TaskClass) -> &'static str {
 /// hand-edited value still shows what it says.
 fn route_target_label(target: &str, probes: &[ProviderProbe]) -> String {
     match target {
+        "session:tier:fast" => tr!("routing.session_tier_fast"),
+        "session:tier:default" => tr!("routing.session_tier_default"),
+        "session:tier:heavy" => tr!("routing.session_tier_heavy"),
         "tier:fast" => tr!("routing.tier_fast"),
         "tier:default" => tr!("routing.tier_default"),
         "tier:heavy" => tr!("routing.tier_heavy"),
@@ -7735,6 +7738,9 @@ fn route_target_label(target: &str, probes: &[ProviderProbe]) -> String {
 /// a concrete model — the same list the composer's model picker draws, at
 /// model granularity because a policy target names no effort or tier.
 pub(super) enum RouteClassRow {
+    /// `session:tier:*` — resolves through the session provider's tier
+    /// table at route time.
+    SessionTier(&'static str),
     /// `tier:*` — resolves through the policy's tier table at route time.
     Tier(&'static str),
     /// `provider` — the provider's own default model.
@@ -7747,7 +7753,9 @@ impl RouteClassRow {
     /// The raw policy target the row writes — same grammar hand edits use.
     pub(super) fn target(&self) -> String {
         match self {
-            RouteClassRow::Tier(target) => (*target).to_owned(),
+            RouteClassRow::SessionTier(target) | RouteClassRow::Tier(target) => {
+                (*target).to_owned()
+            }
             RouteClassRow::ProviderDefault(provider) => provider.id().to_owned(),
             RouteClassRow::Model(provider, model) => {
                 format!("{}:{}", provider.id(), model.id)
@@ -7758,7 +7766,7 @@ impl RouteClassRow {
     /// The row's mark, title, and subtitle — the composer's two-line shape.
     fn render_parts(&self, theme: &Theme) -> (AnyElement, String, String) {
         match self {
-            RouteClassRow::Tier(target) => (
+            RouteClassRow::SessionTier(target) | RouteClassRow::Tier(target) => (
                 icon("icons/chart-column.svg", 14.0, theme.accent.opacity(0.9))
                     .into_any_element(),
                 route_target_label(target, &[]),
@@ -7810,8 +7818,17 @@ pub(super) fn route_class_rows(
                 .all(|token| searchable.to_ascii_lowercase().contains(token))
     };
     let mut rows = Vec::new();
-    // The policy's own vocabulary first — the tier aliases the shipped
-    // defaults resolve through.
+    // The policy's own vocabulary first — the session-scoped tier aliases
+    // the shipped defaults use, then the global preference-order tiers.
+    for target in [
+        "session:tier:fast",
+        "session:tier:default",
+        "session:tier:heavy",
+    ] {
+        if matches(format!("{target} {}", route_target_label(target, &[]))) {
+            rows.push(RouteClassRow::SessionTier(target));
+        }
+    }
     for target in ["tier:fast", "tier:default", "tier:heavy"] {
         if matches(format!("{target} {}", route_target_label(target, &[]))) {
             rows.push(RouteClassRow::Tier(target));

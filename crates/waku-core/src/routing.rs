@@ -17,7 +17,7 @@ use waku_protocol::model::ProviderKind;
 use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget, TaskClass, TaskFamily};
 
 use crate::eval::EvalDecisionRecord;
-use crate::route_policy::{DefaultRoute, PolicyTarget, RoutePolicy};
+use crate::route_policy::{DefaultRoute, PolicyTarget, RoutePolicy, Tier};
 
 /// One routing pass: the decision for the wire plus the log record that
 /// explains it.
@@ -193,7 +193,7 @@ pub fn route_task(
         .expect("a validated policy covers every class");
 
     reasons.push("policy");
-    let (route_target, note) = resolve_target(target, policy, candidates);
+    let (route_target, note) = resolve_target(target, policy, candidates, last_used);
     if let Some(note) = note {
         reasons.push(note);
     }
@@ -374,9 +374,27 @@ fn ordered_candidates<'a>(
     ordered
 }
 
+/// The tier's model id inside one provider's tier table, validated against
+/// the live catalog — `None` when the tier is unmapped or the catalog lacks
+/// it, leaving the provider's own default.
+fn tier_model(
+    policy: &RoutePolicy,
+    candidate: &RouteCandidate,
+    tier: Tier,
+) -> Option<String> {
+    policy
+        .tiers
+        .get(&candidate.provider)
+        .and_then(|table| table.get(&tier))
+        .filter(|model| is_eligible(candidate, Some(model.as_str())))
+        .cloned()
+}
+
 /// Resolve a policy target to an eligible concrete route, returning the
-/// target plus an optional reason note for the chain. A tier target takes the
-/// first eligible provider in preference order; the model drops to that
+/// target plus an optional reason note for the chain. A tier target takes
+/// the first eligible provider in preference order — a session tier stays
+/// inside the session's own provider, degrading to the global walk only
+/// when that provider is not a candidate — and the model drops to that
 /// provider's default when the tier is unmapped or the catalog lacks it. A
 /// concrete target degrades to the same provider's default before the
 /// policy's default route is consulted.
@@ -384,6 +402,7 @@ fn resolve_target(
     target: &PolicyTarget,
     policy: &RoutePolicy,
     candidates: &[RouteCandidate],
+    last_used: Option<&RouteTarget>,
 ) -> (RouteTarget, Option<&'static str>) {
     match target {
         PolicyTarget::Concrete { provider, model } => match find_candidate(candidates, *provider) {
@@ -406,6 +425,31 @@ fn resolve_target(
                 Some("provider-ineligible"),
             ),
         },
+        PolicyTarget::SessionTier(tier) => {
+            let session_candidate = last_used.and_then(|last| {
+                find_candidate(candidates, last.provider)
+                    .filter(|candidate| candidate.provider == last.provider)
+            });
+            match session_candidate {
+                Some(candidate) => {
+                    let model = tier_model(policy, candidate, *tier);
+                    let fell_to_default = model.is_none();
+                    (
+                        RouteTarget {
+                            provider: candidate.provider,
+                            model,
+                        },
+                        fell_to_default.then_some("tier-fell-to-default"),
+                    )
+                }
+                // No usable session provider — degrade to the global walk.
+                None => {
+                    let (target, note) =
+                        resolve_target(&PolicyTarget::Tier(*tier), policy, candidates, last_used);
+                    (target, note.or(Some("session-ineligible")))
+                }
+            }
+        }
         PolicyTarget::Tier(tier) => {
             let Some(candidate) = ordered_candidates(policy, candidates).first().copied() else {
                 return (
@@ -416,21 +460,14 @@ fn resolve_target(
                     Some("no-candidates"),
                 );
             };
-            let model = policy
-                .tiers
-                .get(&candidate.provider)
-                .and_then(|table| table.get(tier))
-                .filter(|model| is_eligible(candidate, Some(model.as_str())));
+            let model = tier_model(policy, candidate, *tier);
+            let fell_to_default = model.is_none();
             (
                 RouteTarget {
                     provider: candidate.provider,
-                    model: model.cloned(),
+                    model,
                 },
-                if model.is_none() {
-                    Some("tier-fell-to-default")
-                } else {
-                    None
-                },
+                fell_to_default.then_some("tier-fell-to-default"),
             )
         }
     }
@@ -445,7 +482,7 @@ fn default_target(
     last_used: Option<&RouteTarget>,
 ) -> RouteTarget {
     match &policy.default {
-        DefaultRoute::Target(target) => resolve_target(target, policy, candidates).0,
+        DefaultRoute::Target(target) => resolve_target(target, policy, candidates, last_used).0,
         DefaultRoute::LastUsed => {
             if let Some(last) = last_used {
                 if let Some(candidate) = find_candidate(candidates, last.provider) {
@@ -561,6 +598,7 @@ mod tests {
             &PolicyTarget::Tier(crate::route_policy::Tier::Fast),
             &policy,
             &candidates,
+            None,
         );
         assert_eq!(target.provider, ProviderKind::Claude);
         assert_eq!(target.model.as_deref(), Some("claude-haiku-4-5"));
@@ -580,6 +618,7 @@ mod tests {
             &PolicyTarget::Tier(crate::route_policy::Tier::Fast),
             &policy,
             &candidates,
+            None,
         );
         assert_eq!(target.provider, ProviderKind::Cursor);
         assert_eq!(target.model, None);
@@ -597,8 +636,66 @@ mod tests {
             },
             &policy,
             &candidates,
+            None,
         );
         assert_eq!(target.provider, ProviderKind::Claude);
         assert_eq!(note, Some("provider-ineligible"));
+    }
+
+    #[test]
+    fn session_tier_resolves_inside_the_session_provider() {
+        let policy = shipped_default_policy();
+        // Codex is the session provider — the tier stays there even though
+        // the preference order would pick Claude's catalog first.
+        let candidates = [
+            candidate(
+                ProviderKind::Claude,
+                &["claude-haiku-4-5", "claude-sonnet-5"],
+            ),
+            candidate(
+                ProviderKind::Codex,
+                &["gpt-5.6-luna", "gpt-5.6-sol"],
+            ),
+        ];
+        let last_used = RouteTarget {
+            provider: ProviderKind::Codex,
+            model: Some("gpt-5.6-sol".into()),
+        };
+        let (target, note) = resolve_target(
+            &PolicyTarget::SessionTier(crate::route_policy::Tier::Fast),
+            &policy,
+            &candidates,
+            Some(&last_used),
+        );
+        assert_eq!(target.provider, ProviderKind::Codex);
+        assert_eq!(target.model.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(note, None);
+    }
+
+    #[test]
+    fn session_tier_degrades_to_preference_order_without_a_session_provider() {
+        let policy = shipped_default_policy();
+        let candidates = [
+            candidate(
+                ProviderKind::Claude,
+                &["claude-haiku-4-5"],
+            ),
+            candidate(ProviderKind::Kimi, &["k2"]),
+        ];
+        // The draft's provider is not a candidate — the tier falls back to
+        // the same preference-order walk a global tier takes.
+        let last_used = RouteTarget {
+            provider: ProviderKind::Amp,
+            model: None,
+        };
+        let (target, note) = resolve_target(
+            &PolicyTarget::SessionTier(crate::route_policy::Tier::Fast),
+            &policy,
+            &candidates,
+            Some(&last_used),
+        );
+        assert_eq!(target.provider, ProviderKind::Claude);
+        assert_eq!(target.model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(note, Some("session-ineligible"));
     }
 }

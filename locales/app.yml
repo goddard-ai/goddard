@@ -629,6 +629,12 @@ routing.tier_default:
   en: Default tier
 routing.tier_heavy:
   en: Heavy tier
+routing.session_tier_fast:
+  en: Fast · your provider
+routing.session_tier_default:
+  en: Default · your provider
+routing.session_tier_heavy:
+  en: Heavy · your provider
 routing.providers:
   en: Providers
 routing.provider_default:

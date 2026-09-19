@@ -8,8 +8,11 @@
 //! mtime changes, so edits apply on the next routed submission without a
 //! daemon restart.
 //!
-//! Target strings come in three forms:
+//! Target strings come in four forms:
 //!
+//! * `session:tier:fast` / `session:tier:default` / `session:tier:heavy` —
+//!   resolve through the `tiers` table inside the session's own provider;
+//!   degrades to the global tier walk when that provider is not a candidate.
 //! * `tier:fast` / `tier:default` / `tier:heavy` — resolve through the
 //!   policy's `tiers` table for whichever provider the route lands on. A
 //!   provider with no tier entry falls back to its own default model.
@@ -68,9 +71,9 @@ pub const DEFAULT_POLICY_JSON: &str = r#"{
   "minClassConfidence": 0.55,
   "planningBoost": true,
   "classes": {
-    "routine": "tier:fast",
-    "general": "tier:default",
-    "demanding": "tier:heavy"
+    "routine": "session:tier:fast",
+    "general": "session:tier:default",
+    "demanding": "session:tier:heavy"
   },
   "familyOverrides": {
     "agentic-tool-use": { "minClass": "general" },
@@ -110,10 +113,16 @@ pub enum DefaultRoute {
     Target(PolicyTarget),
 }
 
-/// A `tier:*` or concrete `provider[:model]` policy target.
+/// A `tier:*`, `session:tier:*`, or concrete `provider[:model]` policy target.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PolicyTarget {
+    /// Resolve the tier through the first eligible provider in
+    /// `preferredProviders` order.
     Tier(Tier),
+    /// Resolve the tier within the session's own provider — what most
+    /// people expect Auto to do: upgrade or downgrade the provider they
+    /// already picked rather than hop to another one.
+    SessionTier(Tier),
     Concrete {
         provider: ProviderKind,
         /// `None` = the provider's own default model.
@@ -353,9 +362,16 @@ fn provider_from_id(id: &str) -> anyhow::Result<ProviderKind> {
         .with_context(|| format!("unknown provider {id:?}"))
 }
 
-/// `tier:fast` | `tier:default` | `tier:heavy` | `provider` | `provider:model`.
+/// `session:tier:*` | `tier:fast` | `tier:default` | `tier:heavy` |
+/// `provider` | `provider:model`.
 pub fn parse_target(raw: &str) -> anyhow::Result<PolicyTarget> {
     let raw = raw.trim();
+    if let Some(session_target) = raw.strip_prefix("session:") {
+        let Some(tier) = session_target.strip_prefix("tier:") else {
+            bail!("unknown session target {raw:?}; expected session:tier:fast, session:tier:default, or session:tier:heavy");
+        };
+        return Ok(PolicyTarget::SessionTier(parse_tier(tier)?));
+    }
     if let Some(tier) = raw.strip_prefix("tier:") {
         return Ok(PolicyTarget::Tier(parse_tier(tier)?));
     }
@@ -505,11 +521,11 @@ mod tests {
         assert_eq!(policy.default, DefaultRoute::LastUsed);
         assert_eq!(
             policy.classes[&TaskClass::Routine],
-            PolicyTarget::Tier(Tier::Fast)
+            PolicyTarget::SessionTier(Tier::Fast)
         );
         assert_eq!(
             policy.classes[&TaskClass::Demanding],
-            PolicyTarget::Tier(Tier::Heavy)
+            PolicyTarget::SessionTier(Tier::Heavy)
         );
         assert_eq!(
             policy.tiers[&ProviderKind::Claude][&Tier::Fast],
@@ -541,6 +557,12 @@ mod tests {
             parse_target("tier:heavy").unwrap(),
             PolicyTarget::Tier(Tier::Heavy)
         );
+        assert_eq!(
+            parse_target("session:tier:fast").unwrap(),
+            PolicyTarget::SessionTier(Tier::Fast)
+        );
+        assert!(parse_target("session:tier:ludicrous").is_err());
+        assert!(parse_target("session:claude").is_err());
         assert!(parse_target("tier:ludicrous").is_err());
         assert!(parse_target("notaprovider:x").is_err());
     }
@@ -584,7 +606,7 @@ mod tests {
         // Untouched keys survive the edit.
         assert_eq!(
             policy.classes[&TaskClass::Routine],
-            PolicyTarget::Tier(Tier::Fast)
+            PolicyTarget::SessionTier(Tier::Fast)
         );
 
         assert!(
