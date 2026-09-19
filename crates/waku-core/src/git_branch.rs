@@ -51,18 +51,23 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
     // `%(worktreepath)` is empty for an available branch and points at the
     // owning checkout otherwise. A NUL separates it from the branch name so
     // paths containing spaces need no shell-style decoding.
+    // `%(committerdate:unix)` is the tip commit's committer date — the
+    // picker's "last committed" recency signal.
     let refs = git_stdout(
         cwd,
         &[
             "for-each-ref",
-            "--format=%(refname:short)%00%(worktreepath)",
+            "--format=%(refname:short)%00%(worktreepath)%00%(committerdate:unix)",
             "refs/heads",
         ],
     )?;
     let mut branches = refs
         .lines()
         .filter_map(|line| {
-            let (name, worktree_path) = line.split_once('\0')?;
+            let mut fields = line.split('\0');
+            let name = fields.next()?;
+            let worktree_path = fields.next().unwrap_or("");
+            let last_commit_at = fields.next().and_then(|raw| raw.parse::<u64>().ok());
             if name.is_empty() {
                 return None;
             }
@@ -76,6 +81,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
             Some(BranchEntry {
                 name: name.to_owned(),
                 checked_out_elsewhere,
+                last_commit_at,
             })
         })
         .collect::<Vec<_>>();
@@ -439,6 +445,12 @@ mod tests {
         let snapshot = inspect(&repository).unwrap().unwrap();
         assert_eq!(snapshot.current.as_deref(), Some("main"));
         assert_eq!(snapshot.branches[0].name, "main");
+        assert!(
+            snapshot
+                .branches
+                .iter()
+                .all(|branch| branch.last_commit_at.is_some())
+        );
         assert!(
             snapshot
                 .branches

@@ -4895,7 +4895,16 @@ impl Waku {
             .to_ascii_lowercase();
         let visible_branches = Rc::new(
             if handle.is_open() && self.branch_picker_mode == BranchPickerMode::Browse {
-                visible_branch_entries(&snapshot.branches, &selected_branch, &normalized_query)
+                let now_unix_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_secs())
+                    .unwrap_or(0);
+                visible_branch_entries(
+                    &snapshot.branches,
+                    &selected_branch,
+                    &normalized_query,
+                    now_unix_secs,
+                )
             } else {
                 Vec::new()
             },
@@ -5925,25 +5934,70 @@ impl Waku {
     }
 }
 
+/// Fit dominates recency: a branch only outranks a better match when its tip
+/// commit is enough fresher to cover the match-quality gap.
+const BRANCH_MATCH_WEIGHT: f64 = 0.7;
+const BRANCH_RECENCY_WEIGHT: f64 = 0.3;
+/// A branch's recency score halves every this-many seconds without a commit.
+const BRANCH_RECENCY_HALF_LIFE_SECS: f64 = 30.0 * 24.0 * 60.0 * 60.0;
+
+/// How well one query token fits a branch name, on a 0–1 scale. The filter
+/// guarantees the token appears, so this only measures fit: prefix matches
+/// approach 1.0 and the score decays the later the match lands in the name.
+fn branch_token_match_score(lower_name: &str, token: &str) -> f64 {
+    let Some(position) = lower_name.find(token) else {
+        return 0.0;
+    };
+    1.0 - position as f64 / lower_name.len().max(1) as f64
+}
+
+/// The branch's recency on a 0–1 scale — exponential decay with a fixed
+/// half-life, so scores stay comparable no matter how old the repo is.
+fn branch_recency_score(last_commit_at: Option<u64>, now_unix_secs: u64) -> f64 {
+    let Some(committed) = last_commit_at else {
+        return 0.0;
+    };
+    let age = now_unix_secs.saturating_sub(committed) as f64;
+    0.5_f64.powf(age / BRANCH_RECENCY_HALF_LIFE_SECS)
+}
+
 /// Branches matching the search, with an exact match first, then the
-/// selected branch pinned, and every other row sorted by name. Disabled
+/// selected branch pinned, and every other row ranked by a blend of how
+/// closely the name fits the query and how recently it was committed to.
+/// With an empty query the blend reduces to recency order. Disabled
 /// worktree-owned rows stay in the result; the UI needs to explain why Git
 /// cannot switch to them.
 pub(super) fn visible_branch_entries(
     branches: &[crate::git_branch::BranchEntry],
     selected_branch: &str,
     normalized_query: &str,
+    now_unix_secs: u64,
 ) -> Vec<crate::git_branch::BranchEntry> {
     let normalized_query = normalized_query.to_ascii_lowercase();
+    let tokens = normalized_query.split_whitespace().collect::<Vec<_>>();
     let mut visible = branches
         .iter()
         .filter(|branch| {
-            normalized_query
-                .split_whitespace()
+            tokens
+                .iter()
                 .all(|token| branch.name.to_ascii_lowercase().contains(token))
         })
         .cloned()
         .collect::<Vec<_>>();
+    let rank = |branch: &crate::git_branch::BranchEntry| {
+        let lower_name = branch.name.to_ascii_lowercase();
+        let fit = if tokens.is_empty() {
+            0.0
+        } else {
+            tokens
+                .iter()
+                .map(|token| branch_token_match_score(&lower_name, token))
+                .sum::<f64>()
+                / tokens.len() as f64
+        };
+        BRANCH_MATCH_WEIGHT * fit
+            + BRANCH_RECENCY_WEIGHT * branch_recency_score(branch.last_commit_at, now_unix_secs)
+    };
     visible.sort_by(|left, right| {
         let left_exact = left.name.eq_ignore_ascii_case(&normalized_query);
         let right_exact = right.name.eq_ignore_ascii_case(&normalized_query);
@@ -5952,6 +6006,7 @@ pub(super) fn visible_branch_entries(
         right_exact
             .cmp(&left_exact)
             .then_with(|| right_selected.cmp(&left_selected))
+            .then_with(|| rank(right).total_cmp(&rank(left)))
             .then_with(|| left.name.cmp(&right.name))
     });
     visible
