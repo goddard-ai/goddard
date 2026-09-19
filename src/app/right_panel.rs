@@ -2164,6 +2164,20 @@ impl Waku {
             .and_then(RightPanelSurface::browser_id);
     }
 
+    /// The panel-open half of the file slot: the active editor's input takes
+    /// focus on the first frame it mounts — `position: None`, so no caret
+    /// jump rides along. An in-flight `file:line` request wins the slot.
+    pub(super) fn request_active_file_focus(&mut self) {
+        if self.right_panel_pending_file_focus.is_none()
+            && let Some(path) = self.visible_right_panel_file_path()
+        {
+            self.right_panel_pending_file_focus = Some(PendingFileFocus {
+                path,
+                position: None,
+            });
+        }
+    }
+
     /// `secondary-j`: put keyboard focus back in this session's terminal —
     /// the one that last had it, the most recently opened one otherwise, or a
     /// fresh surface when the session has no terminal yet. The panel opens if
@@ -2508,6 +2522,16 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        // The open-time fallback for surfaces with nothing focusable of
+        // their own — held until a frame actually shows the panel so a
+        // cached hidden render cannot spend it. Runs before the surface
+        // pendings below so a deeper request wins when both fire on the
+        // same frame.
+        if self.right_panel_visible
+            && let Some(focus) = self.right_panel_pending_focus.take()
+        {
+            window.focus(&focus, cx);
+        }
         let active_terminal_id = self
             .active_right_panel_surface()
             .and_then(RightPanelSurface::terminal_id);
@@ -2591,6 +2615,8 @@ impl Waku {
             .flex()
             .flex_col()
             .min_w_0()
+            .key_context("RightPanel")
+            .track_focus(&self.right_panel_focus)
             .border_l(hairline())
             .border_color(theme.separator)
             .bg(theme.surface)
