@@ -3950,6 +3950,58 @@ friends.trust:
   en: Trust files
 friends.command_failed:
   en: "Friend command failed: %{error}"
+friends.sync_alerts:
+  en: Sync alerts
+friends.sync_conflict_title:
+  en: "Sync conflict on %{branch}"
+friends.sync_conflict_hint:
+  en: "%{count} conflicted files — the %{integration} is stopped in %{path}."
+friends.sync_refused_title:
+  en: "Sync skipped on %{branch}"
+friends.sync_refused_hint:
+  en: "Uncommitted changes in %{path} — sync left the checkout alone."
+friends.resolve_in_chat:
+  en: Resolve in chat
+friends.merge_instead:
+  en: Merge instead
+friends.abort_sync:
+  en: Abort
+friends.dismiss:
+  en: Dismiss
+friends.sync_now:
+  en: Sync now
+friends.sharing:
+  en: Sharing…
+friends.shared_projects:
+  en: Shared with them
+friends.no_projects_hint:
+  en: Add a project to share it with friends.
+friends.shared_with_you:
+  en: Shared with you
+friends.matches_project:
+  en: "matches %{name}"
+friends.no_local_match:
+  en: no local checkout
+friends.enable_sync:
+  en: Enable sync
+friends.disable_sync:
+  en: Disable sync
+friends.sync_link_title:
+  en: "Syncing %{name} with %{peer}"
+friends.sync_waiting:
+  en: waiting for friend
+friends.auto_push:
+  en: Auto-push commits
+friends.auto_push_hint:
+  en: Commits you land on synced branches push to origin automatically.
+friends.sync_branches:
+  en: Branches
+friends.sync_paused:
+  en: paused — sync again to resume
+friends.sync_toast_conflict:
+  en: "Sync conflict on %{branch} — review it in Settings → Friends"
+friends.sync_toast_refused:
+  en: "Sync skipped on %{branch} — uncommitted changes"
 keybind.category.projects:
   en: Projects
 keybind.category.git:

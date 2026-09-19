@@ -5,7 +5,10 @@
 
 use super::settings::{SettingSearch, settings_search_text, settings_title_jump};
 use super::*;
-use waku_client::friends::{FriendInfo, TransferDirection, TransferInfo, TransferStatus};
+use waku_client::friends::{
+    FriendInfo, FriendSyncAlertAction, IncomingShareInfo, SyncAlertInfo, SyncAlertKind,
+    SyncLinkInfo, TransferDirection, TransferInfo, TransferStatus,
+};
 
 impl Waku {
     fn friends_card(&self, theme: &Theme, children: impl IntoIterator<Item = AnyElement>) -> Div {
@@ -68,12 +71,14 @@ impl Waku {
     }
 
     pub(super) fn render_friends_settings(
-        &self,
+        &mut self,
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let friends = &self.friends_state;
+        // The document is cloned once so the sharing panel's lazy branch
+        // fetch and `&mut self` helpers can run mid-render.
+        let friends = self.friends_state.clone();
 
         // -- Your display name ----------------------------------------------
         let name_card = self.friends_card(
@@ -390,6 +395,7 @@ impl Waku {
             }
             let editing = self.editing_friend_nickname.as_deref() == Some(node_id.as_str());
             let send_id = node_id.clone();
+            let share_id = node_id.clone();
             let remove_id = node_id.clone();
             // Nicknames are searchable too — the row renders the resolved
             // name, so match on it rather than the self-reported one.
@@ -469,6 +475,13 @@ impl Waku {
                         cx,
                     ))
                     .child(self.friends_button(
+                        SharedString::from(format!("friend-share-{node_id}")),
+                        tr!("friends.sharing"),
+                        &theme,
+                        move |this, cx| this.toggle_friend_share_panel(share_id.clone(), cx),
+                        cx,
+                    ))
+                    .child(self.friends_button(
                         SharedString::from(format!("friend-send-{node_id}")),
                         tr!("friends.send_file"),
                         &theme,
@@ -490,7 +503,18 @@ impl Waku {
                         cx,
                     ));
             }
-            friend_rows.push(row.into_any_element());
+            if self.expanded_share_friend.as_deref() == Some(node_id.as_str()) {
+                friend_rows.push(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(row)
+                        .child(self.render_friend_share_panel(&node_id, &theme, cx))
+                        .into_any_element(),
+                );
+            } else {
+                friend_rows.push(row.into_any_element());
+            }
         }
         if friend_rows.is_empty() && !search.active() {
             friend_rows.push(
@@ -542,12 +566,40 @@ impl Waku {
         });
 
         let requests_title_matched = search.matched(&tr!("friends.requests"), "").is_some();
+        // Sync alerts lead the page — a stopped rebase blocks sync until
+        // someone picks a decision.
+        let sync_alerts_card = (!friends.sync_alerts.is_empty()
+            || search
+                .matched(&tr!("friends.sync_alerts"), "")
+                .is_some())
+        .then(|| {
+            self.friends_card(
+                &theme,
+                std::iter::once(
+                    self.friends_section_title(&theme, tr!("friends.sync_alerts"))
+                        .into_any_element(),
+                )
+                .chain(
+                    friends
+                        .sync_alerts
+                        .iter()
+                        .filter(|alert| {
+                            search
+                                .matched(&format!("{} · {}", alert.peer_name, alert.branch), "")
+                                .is_some()
+                        })
+                        .map(|alert| self.render_sync_alert_row(alert, &theme, cx)),
+                )
+                .collect::<Vec<_>>(),
+            )
+        });
         let mut column = div()
             .mt(px(15.0))
             .w_full()
             .flex()
             .flex_col()
             .gap(px(12.0))
+            .children(sync_alerts_card)
             .child(name_card)
             .children(code_card)
             .children(add_card)
@@ -790,6 +842,691 @@ impl Waku {
             }
         })
         .detach();
+    }
+
+    /// Expand/collapse the per-friend sharing panel — project toggles,
+    /// their shares of matching repos, and the sync links between you.
+    fn toggle_friend_share_panel(&mut self, node_id: String, cx: &mut Context<Self>) {
+        if self.expanded_share_friend.as_deref() == Some(node_id.as_str()) {
+            self.expanded_share_friend = None;
+        } else {
+            self.expanded_share_friend = Some(node_id.clone());
+            // Warm the branch lists this panel renders.
+            let link_ids: Vec<String> = self
+                .friends_state
+                .sync_links
+                .iter()
+                .filter(|link| link.peer_id == node_id)
+                .map(|link| link.id.clone())
+                .collect();
+            for link_id in link_ids {
+                self.ensure_sync_link_branches(&link_id, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Lazily fetch a link's local branches for its config panel; the
+    /// result lands in `sync_link_branches` and repaints the page.
+    fn ensure_sync_link_branches(&mut self, link_id: &str, cx: &mut Context<Self>) {
+        if self.sync_link_branches.contains_key(link_id)
+            || !self.sync_branch_fetch_pending.insert(link_id.to_owned())
+        {
+            return;
+        }
+        let client = self.daemon.client();
+        let link_id = link_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn({
+                    let link_id = link_id.clone();
+                    async move {
+                        match client.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::GetFriendSyncBranches { link_id },
+                        ) {
+                            Ok(waku_client::ResponsePayload::FriendSyncBranches {
+                                branches,
+                                default_branch,
+                                ..
+                            }) => Some((branches, default_branch)),
+                            _ => None,
+                        }
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.sync_branch_fetch_pending.remove(&link_id);
+                if let Some(fetched) = result {
+                    this.sync_link_branches.insert(link_id.clone(), fetched);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The expanded sharing panel under a friend row: which of your
+    /// projects they can see, what they've shared with you, and the sync
+    /// links' branch/auto-push configuration.
+    fn render_friend_share_panel(
+        &mut self,
+        node_id: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let friends = self.friends_state.clone();
+        let mut children: Vec<AnyElement> = Vec::new();
+
+        // -- Projects we share with them ---------------------------------
+        children.push(
+            div()
+                .mt(px(12.0))
+                .text_size(sp(11.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_tertiary)
+                .child(tr!("friends.shared_projects"))
+                .into_any_element(),
+        );
+        let mut project_rows = 0;
+        for project in &self.state.projects {
+            if project.temporary {
+                continue;
+            }
+            project_rows += 1;
+            let shared = friends
+                .shared_projects
+                .iter()
+                .find(|share| share.peer_id == node_id && share.repo_path == project.path);
+            let project_path = project.path.clone();
+            let origin_url = shared.map(|share| share.origin_url.clone());
+            let peer = node_id.to_owned();
+            children.push(
+                div()
+                    .mt(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(project.name.clone()),
+                    )
+                    .child(toggle_switch(
+                        SharedString::from(format!("share-{}-{}", node_id, project.id)),
+                        shared.is_some(),
+                        false,
+                        *theme,
+                        cx,
+                        move |this, _window, cx| {
+                            if origin_url.is_some() {
+                                this.friends_command(
+                                    waku_client::Command::UnshareProjectWithFriend {
+                                        node_id: peer.clone(),
+                                        origin_url: origin_url.clone().unwrap_or_default(),
+                                    },
+                                    cx,
+                                );
+                            } else {
+                                this.friends_command(
+                                    waku_client::Command::ShareProjectWithFriend {
+                                        node_id: peer.clone(),
+                                        project_path: project_path.clone(),
+                                    },
+                                    cx,
+                                );
+                            }
+                        },
+                    ))
+                    .into_any_element(),
+            );
+        }
+        if project_rows == 0 {
+            children.push(
+                div()
+                    .mt(px(6.0))
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("friends.no_projects_hint"))
+                    .into_any_element(),
+            );
+        }
+
+        // -- What they've shared with us ---------------------------------
+        let incoming: Vec<&IncomingShareInfo> = friends
+            .incoming_shares
+            .iter()
+            .filter(|share| share.peer_id == node_id)
+            .collect();
+        if !incoming.is_empty() {
+            children.push(
+                div()
+                    .mt(px(14.0))
+                    .text_size(sp(11.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("friends.shared_with_you"))
+                    .into_any_element(),
+            );
+            for share in incoming {
+                let mut row = div()
+                    .mt(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text)
+                                    .child(share.project_name.clone()),
+                            )
+                            .child(
+                                div().text_size(sp(11.0)).text_color(theme.text_tertiary).child(
+                                    match &share.matched_project_name {
+                                        Some(name) => {
+                                            tr!("friends.matches_project", name = name.clone())
+                                                .to_string()
+                                        }
+                                        None => tr!("friends.no_local_match").to_string(),
+                                    },
+                                ),
+                            ),
+                    );
+                if share.matched_path.is_some() && !share.sync_enabled {
+                    let peer = node_id.to_owned();
+                    let origin = share.origin_url.clone();
+                    row = row.child(self.friends_button(
+                        SharedString::from(format!("sync-enable-{}-{}", node_id, share.origin_url)),
+                        tr!("friends.enable_sync"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::EnableFriendSync {
+                                    node_id: peer.clone(),
+                                    origin_url: origin.clone(),
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ));
+                }
+                children.push(row.into_any_element());
+            }
+        }
+
+        // -- Sync links ---------------------------------------------------
+        for link in friends
+            .sync_links
+            .iter()
+            .filter(|link| link.peer_id == node_id)
+        {
+            children.push(self.render_sync_link(link, theme, cx));
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .pl(px(16.0))
+            .pr(px(4.0))
+            .pb(px(4.0))
+            .children(children)
+            .into_any_element()
+    }
+
+    /// One sync link's config block inside the sharing panel: auto-push
+    /// toggle, per-branch sync toggles, paused state, and teardown.
+    fn render_sync_link(
+        &mut self,
+        link: &SyncLinkInfo,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.ensure_sync_link_branches(&link.id, cx);
+        let link_id = link.id.clone();
+        let repo_name = link
+            .repo_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| link.repo_path.display().to_string());
+        let auto_push = link.auto_push;
+        let enabled: Vec<String> = link.enabled_branches.clone();
+        let paused = link.paused_branches.clone();
+        let peer_enabled = link.peer_sync_enabled;
+        let enabled_set: std::collections::BTreeSet<String> =
+            enabled.iter().cloned().collect();
+        let (branches, default_branch) = self
+            .sync_link_branches
+            .get(&link.id)
+            .cloned()
+            .unwrap_or_else(|| (enabled.clone(), None));
+
+        let mut children: Vec<AnyElement> = Vec::new();
+        children.push(
+            div()
+                .mt(px(14.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!(
+                            "friends.sync_link_title",
+                            name = repo_name,
+                            peer = link.peer_name.clone()
+                        )),
+                )
+                .when(!peer_enabled, |element| {
+                    element.child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.warning)
+                            .child(tr!("friends.sync_waiting")),
+                    )
+                })
+                .into_any_element(),
+        );
+
+        // Auto-push toggle.
+        let cfg_link = link_id.clone();
+        let cfg_branches = enabled.clone();
+        children.push(
+            div()
+                .mt(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .child(tr!("friends.auto_push")),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("friends.auto_push_hint")),
+                        ),
+                )
+                .child(toggle_switch(
+                    SharedString::from(format!("sync-autopush-{link_id}")),
+                    auto_push,
+                    false,
+                    *theme,
+                    cx,
+                    move |this, _window, cx| {
+                        this.friends_command(
+                            waku_client::Command::SetFriendSyncConfig {
+                                link_id: cfg_link.clone(),
+                                auto_push: !auto_push,
+                                enabled_branches: cfg_branches.clone(),
+                            },
+                            cx,
+                        );
+                    },
+                ))
+                .into_any_element(),
+        );
+
+        // Branch toggles — paused branches show a Sync now action.
+        children.push(
+            div()
+                .mt(px(10.0))
+                .text_size(sp(11.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_tertiary)
+                .child(tr!("friends.sync_branches"))
+                .into_any_element(),
+        );
+        for branch in &branches {
+            let is_default = default_branch.as_deref() == Some(branch.as_str());
+            let is_paused = paused.contains(branch);
+            let is_enabled = enabled_set.contains(branch);
+            let branch_name = branch.clone();
+            let toggle_link = link_id.clone();
+            let mut next_enabled = enabled_set.clone();
+            if is_enabled {
+                next_enabled.remove(branch);
+            } else {
+                next_enabled.insert(branch.clone());
+            }
+            let next_enabled: Vec<String> = next_enabled.into_iter().collect();
+            let label = if is_default {
+                format!("{branch} · default")
+            } else {
+                branch.clone()
+            };
+            let mut row = div()
+                .mt(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text)
+                        .child(label),
+                );
+            if is_enabled && is_paused {
+                let resume_link = link_id.clone();
+                let resume_branch = branch_name.clone();
+                row = row
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.warning)
+                            .child(tr!("friends.sync_paused")),
+                    )
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-now-{link_id}-{branch}")),
+                        tr!("friends.sync_now"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::FriendSyncNow {
+                                    link_id: resume_link.clone(),
+                                    branch: resume_branch.clone(),
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ));
+            } else {
+                row = row.child(toggle_switch(
+                    SharedString::from(format!("sync-branch-{link_id}-{branch}")),
+                    is_enabled,
+                    false,
+                    *theme,
+                    cx,
+                    move |this, _window, cx| {
+                        this.friends_command(
+                            waku_client::Command::SetFriendSyncConfig {
+                                link_id: toggle_link.clone(),
+                                auto_push,
+                                enabled_branches: next_enabled.clone(),
+                            },
+                            cx,
+                        );
+                    },
+                ));
+            }
+            children.push(row.into_any_element());
+        }
+
+        // Teardown.
+        let disable_link = link_id.clone();
+        children.push(
+            div()
+                .mt(px(10.0))
+                .flex()
+                .justify_end()
+                .child(self.friends_button(
+                    SharedString::from(format!("sync-disable-{link_id}")),
+                    tr!("friends.disable_sync"),
+                    theme,
+                    move |this, cx| {
+                        this.friends_command(
+                            waku_client::Command::DisableFriendSync {
+                                link_id: disable_link.clone(),
+                            },
+                            cx,
+                        );
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+        );
+
+        div()
+            .flex()
+            .flex_col()
+            .children(children)
+            .into_any_element()
+    }
+
+    /// One sync-alert row: the conflict decisions or a dirty-worktree
+    /// refusal. Resolve-in-chat opens an agent session on the stopped
+    /// checkout.
+    fn render_sync_alert_row(
+        &self,
+        alert: &SyncAlertInfo,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let alert_id = alert.id.clone();
+        let (title, hint) = match alert.kind {
+            SyncAlertKind::Conflict => {
+                let integration = match alert.in_progress {
+                    Some(waku_client::git::SyncInProgress::Merge) => "merge",
+                    _ => "rebase",
+                };
+                (
+                    tr!("friends.sync_conflict_title", branch = alert.branch.clone()).to_string(),
+                    tr!(
+                        "friends.sync_conflict_hint",
+                        count = alert.files.len(),
+                        integration = integration,
+                        path = alert.worktree_path.display().to_string()
+                    )
+                    .to_string(),
+                )
+            }
+            SyncAlertKind::RefusedDirtyWorktree => (
+                tr!("friends.sync_refused_title", branch = alert.branch.clone()).to_string(),
+                tr!(
+                    "friends.sync_refused_hint",
+                    path = alert.worktree_path.display().to_string()
+                )
+                .to_string(),
+            ),
+        };
+
+        let mut row = div()
+            .mt(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(hint),
+                    ),
+            );
+
+        match alert.kind {
+            SyncAlertKind::Conflict => {
+                let merge_id = alert_id.clone();
+                let abort_id = alert_id.clone();
+                let dismiss_id = alert_id.clone();
+                let resolve_alert = alert.clone();
+                row = row
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-resolve-{alert_id}")),
+                        tr!("friends.resolve_in_chat"),
+                        theme,
+                        move |this, cx| this.resolve_sync_alert_in_chat(resolve_alert.clone(), cx),
+                        cx,
+                    ))
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-merge-{alert_id}")),
+                        tr!("friends.merge_instead"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::FriendSyncAlertAction {
+                                    alert_id: merge_id.clone(),
+                                    action: FriendSyncAlertAction::MergeInstead,
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-abort-{alert_id}")),
+                        tr!("friends.abort_sync"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::FriendSyncAlertAction {
+                                    alert_id: abort_id.clone(),
+                                    action: FriendSyncAlertAction::Abort,
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-dismiss-{alert_id}")),
+                        tr!("friends.dismiss"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::FriendSyncAlertAction {
+                                    alert_id: dismiss_id.clone(),
+                                    action: FriendSyncAlertAction::Dismiss,
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ));
+            }
+            SyncAlertKind::RefusedDirtyWorktree => {
+                let retry_link = alert.link_id.clone();
+                let retry_branch = alert.branch.clone();
+                let dismiss_id = alert_id.clone();
+                row = row
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-retry-{alert_id}")),
+                        tr!("friends.sync_now"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::FriendSyncNow {
+                                    link_id: retry_link.clone(),
+                                    branch: retry_branch.clone(),
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.friends_button(
+                        SharedString::from(format!("sync-dismiss-{alert_id}")),
+                        tr!("friends.dismiss"),
+                        theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::FriendSyncAlertAction {
+                                    alert_id: dismiss_id.clone(),
+                                    action: FriendSyncAlertAction::Dismiss,
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ));
+            }
+        }
+        row.into_any_element()
+    }
+
+    /// "Resolve in chat": open a task on the repo (bound to the stopped
+    /// worktree when it isn't the primary checkout) with the conflict
+    /// context as its first turn.
+    fn resolve_sync_alert_in_chat(&mut self, alert: SyncAlertInfo, cx: &mut Context<Self>) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.path == alert.repo_path)
+            .cloned()
+        else {
+            self.show_toast(tr!("friends.command_failed", error = "project not found"));
+            return;
+        };
+        self.settings_page = None;
+        self.create_session_for(project.id, self.state.last_provider, cx);
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        // A conflict stopped in a linked worktree binds the session to
+        // that checkout; the repo root and our temp worktrees stay Local —
+        // the prompt names the exact checkout either way.
+        if !alert.temp_worktree && alert.worktree_path != alert.repo_path {
+            let name = alert
+                .worktree_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.workspace = SessionWorkspace::Worktree {
+                    path: alert.worktree_path.clone(),
+                    name,
+                    branch: Some(alert.branch.clone()),
+                    base_branch: None,
+                };
+            }
+        }
+        let integration = match alert.in_progress {
+            Some(waku_client::git::SyncInProgress::Merge) => "merge",
+            _ => "rebase",
+        };
+        let files = alert
+            .files
+            .iter()
+            .map(|file| format!("- {file}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let prompt = format!(
+            "Automatic sync stopped a {integration} on `{branch}` in the checkout at {path}. \
+             Resolve the conflicts and run `git {integration} --continue` to finish.\n\n\
+             Conflicted files:\n{files}",
+            integration = integration,
+            branch = alert.branch,
+            path = alert.worktree_path.display(),
+            files = files,
+        );
+        self.submit_composer_submission_to(
+            session_id,
+            ComposerSubmission::plain(prompt),
+            cx,
+        );
     }
 }
 

@@ -8,6 +8,7 @@
 
 pub mod friends;
 pub mod identity;
+pub mod projects;
 
 pub use iroh::{EndpointId, RelayMode};
 pub use iroh_blobs::api::TempTag;

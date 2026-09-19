@@ -176,7 +176,7 @@ pub fn pull(cwd: &Path, strategy: PullStrategy) -> anyhow::Result<PullOutcome> {
 /// The working-tree paths still unmerged — what `git status` shows as
 /// "both modified" (or added/deleted). `--diff-filter=U` covers every
 /// unmerged status pair.
-fn conflicted_paths(cwd: &Path) -> anyhow::Result<Vec<String>> {
+pub(crate) fn conflicted_paths(cwd: &Path) -> anyhow::Result<Vec<String>> {
     let stdout = git_stdout(cwd, &["diff", "--name-only", "--diff-filter=U", "-z"])?;
     Ok(stdout
         .split('\0')
@@ -205,7 +205,7 @@ pub fn abort_sync(cwd: &Path) -> anyhow::Result<()> {
 /// dir — `REBASE_HEAD` itself lingers after a stopped rebase is continued
 /// to completion, so it cannot stand in for them. `MERGE_HEAD` is removed
 /// when the merge concludes, so the ref check is reliable there.
-fn sync_in_progress(cwd: &Path) -> anyhow::Result<Option<SyncInProgress>> {
+pub(crate) fn sync_in_progress(cwd: &Path) -> anyhow::Result<Option<SyncInProgress>> {
     if git_path_exists(cwd, "rebase-merge")? || git_path_exists(cwd, "rebase-apply")? {
         return Ok(Some(SyncInProgress::Rebase));
     }

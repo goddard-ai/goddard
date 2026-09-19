@@ -195,6 +195,42 @@ impl WakuBackend {
                 },
             ));
         }
+        {
+            // The share layer's view of local projects — paths, names,
+            // and `origin` URLs for share matching. Resolving every
+            // remote is a git call per project, so cache briefly.
+            let task_state = backend.task_state.clone();
+            let cache = Arc::new(Mutex::new(
+                None::<(std::time::Instant, Vec<crate::share::RepoInfo>)>,
+            ));
+            backend.share.set_repo_resolver(Arc::new(move || {
+                let mut cache = cache.lock();
+                let stale = cache
+                    .as_ref()
+                    .is_none_or(|(at, _)| at.elapsed() > std::time::Duration::from_secs(60));
+                if stale {
+                    let projects = task_state.lock().projects.clone();
+                    let repos = projects
+                        .iter()
+                        .map(|project| crate::share::RepoInfo {
+                            path: project.path.clone(),
+                            name: project.name.clone(),
+                            origin_url: crate::git_branch::remote_url(
+                                &project.path,
+                                "origin",
+                            )
+                            .ok()
+                            .flatten(),
+                        })
+                        .collect();
+                    *cache = Some((std::time::Instant::now(), repos));
+                }
+                cache
+                    .as_ref()
+                    .map(|(_, repos)| repos.to_vec())
+                    .unwrap_or_default()
+            }));
+        }
         Ok(backend)
     }
 
@@ -631,6 +667,56 @@ impl Backend for WakuBackend {
             Command::SetFriendNickname { node_id, nickname } => {
                 self.share.set_friend_nickname(node_id, nickname)?;
                 Ok(ResponsePayload::Ack)
+            }
+            Command::ShareProjectWithFriend {
+                node_id,
+                project_path,
+            } => {
+                self.share.share_project(node_id, project_path)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::UnshareProjectWithFriend {
+                node_id,
+                origin_url,
+            } => {
+                self.share.unshare_project(node_id, origin_url)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::EnableFriendSync {
+                node_id,
+                origin_url,
+            } => {
+                self.share.enable_sync(node_id, origin_url)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::DisableFriendSync { link_id } => {
+                self.share.disable_sync(link_id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SetFriendSyncConfig {
+                link_id,
+                auto_push,
+                enabled_branches,
+            } => {
+                self.share
+                    .set_sync_config(link_id, auto_push, enabled_branches)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::FriendSyncNow { link_id, branch } => {
+                self.share.sync_now(link_id, branch)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::FriendSyncAlertAction { alert_id, action } => {
+                self.share.sync_alert_action(alert_id, action)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::GetFriendSyncBranches { link_id } => {
+                let (branches, default_branch) = self.share.get_sync_branches(link_id.clone())?;
+                Ok(ResponsePayload::FriendSyncBranches {
+                    link_id,
+                    branches,
+                    default_branch,
+                })
             }
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
@@ -1290,9 +1376,22 @@ impl Backend for WakuBackend {
                     checkpoint: self.capture_turn_checkpoint(cwd, session_id, turn_count)?,
                 },
             }),
-            Command::Workspace { operation } => Ok(ResponsePayload::Workspace {
-                result: crate::workspace::execute(operation)?,
-            }),
+            Command::Workspace { operation } => {
+                // Commit/push/land move local refs — prompt the share
+                // poll so synced branches push and notify promptly
+                // rather than waiting out the interval.
+                let kick = matches!(
+                    operation,
+                    WorkspaceOperation::Commit { .. }
+                        | WorkspaceOperation::Push { .. }
+                        | WorkspaceOperation::Land { .. }
+                );
+                let result = crate::workspace::execute(operation)?;
+                if kick {
+                    self.share.note_repo_activity();
+                }
+                Ok(ResponsePayload::Workspace { result })
+            }
             Command::OpenTerminal { cwd, cols, rows } => {
                 let terminal = self.open_terminal(&cwd, cols, rows, events)?;
                 let previous = self
@@ -3414,7 +3513,15 @@ fn handle_driver_command(
         | Command::GetAutomations
         | Command::UpsertAutomation { .. }
         | Command::RemoveAutomation { .. }
-        | Command::RunAutomationNow { .. } => {
+        | Command::RunAutomationNow { .. }
+        | Command::ShareProjectWithFriend { .. }
+        | Command::UnshareProjectWithFriend { .. }
+        | Command::EnableFriendSync { .. }
+        | Command::DisableFriendSync { .. }
+        | Command::SetFriendSyncConfig { .. }
+        | Command::FriendSyncNow { .. }
+        | Command::FriendSyncAlertAction { .. }
+        | Command::GetFriendSyncBranches { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

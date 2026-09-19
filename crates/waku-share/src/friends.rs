@@ -16,9 +16,10 @@ use iroh::protocol::{AcceptError, ProtocolHandler};
 use serde::{Deserialize, Serialize};
 use parking_lot::Mutex;
 
-/// ALPN for the friends control channel (friend requests, transfer offers).
-/// Bumped on breaking wire changes; v0.
-pub const ALPN_FRIENDS: &[u8] = b"goddard/friends/0";
+/// ALPN for the friends control channel (friend requests, transfer offers,
+/// project shares). Bumped on breaking wire changes; v1 adds
+/// `ShareProjects`/`SyncEnabled`/`SyncDisabled`/`PushNotice`.
+pub const ALPN_FRIENDS: &[u8] = b"goddard/friends/1";
 
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -166,6 +167,24 @@ pub enum FriendsMessage {
     Ack,
     /// Liveness probe — presence is lazy (dial on demand), never heartbeated.
     Ping,
+    /// The sender's full shared-repo set for us — replaces what we
+    /// recorded, so removing a repo from the list unshares it.
+    ShareProjects {
+        projects: Vec<crate::projects::SharedRepo>,
+    },
+    /// Sender enabled automatic sync for `origin_url` on a repo we shared
+    /// with them — the link becomes mutual.
+    SyncEnabled { origin_url: String },
+    /// Sender disabled sync for `origin_url` — both sides tear the link
+    /// down.
+    SyncDisabled { origin_url: String },
+    /// Sender pushed commits to the shared origin on these branches —
+    /// the recipient fetches and integrates. A hint: the receiver still
+    /// verifies against origin.
+    PushNotice {
+        origin_url: String,
+        branches: Vec<String>,
+    },
 }
 
 /// What the local user decided about an incoming request.
@@ -200,6 +219,19 @@ pub type OfferHandler = Arc<dyn Fn(OfferInfo) + Send + Sync>;
 /// Fired when the receiver reports a finished, verified download.
 pub type DoneHandler = Arc<dyn Fn(EndpointId, String) + Send + Sync>;
 
+/// Fired when a friend sends their full shared-repo set — replaces what
+/// we recorded for that peer.
+pub type ShareListHandler =
+    Arc<dyn Fn(EndpointId, Vec<crate::projects::SharedRepo>) + Send + Sync>;
+
+/// Fired when a friend enables or disables sync on a repo we shared
+/// with them. `enabled` distinguishes `SyncEnabled` from `SyncDisabled`.
+pub type SyncStateHandler = Arc<dyn Fn(EndpointId, String, bool) + Send + Sync>;
+
+/// Fired when a friend reports pushing to a shared origin — the receiver
+/// fetches and integrates its enabled branches.
+pub type PushHandler = Arc<dyn Fn(EndpointId, String, Vec<String>) + Send + Sync>;
+
 /// Acceptor for [`ALPN_FRIENDS`]: reads one message, dispatches to the
 /// installed handler, replies. Offers from non-friends are declined;
 /// offers from friends are auto-accepted (per the product decision) and the
@@ -209,6 +241,9 @@ pub struct FriendsProtocol {
     on_request: RequestHandler,
     on_offer: OfferHandler,
     on_done: DoneHandler,
+    on_share: Option<ShareListHandler>,
+    on_sync_state: Option<SyncStateHandler>,
+    on_push: Option<PushHandler>,
     store: Arc<Mutex<FriendStore>>,
 }
 
@@ -233,8 +268,38 @@ impl FriendsProtocol {
             on_request,
             on_offer,
             on_done,
+            on_share: None,
+            on_sync_state: None,
+            on_push: None,
             store,
         }
+    }
+
+    /// Install the project-sharing handlers. Separate from `new` so the
+    /// spike and tests can run the request/offer flow without them.
+    pub fn with_project_handlers(
+        mut self,
+        on_share: ShareListHandler,
+        on_sync_state: SyncStateHandler,
+        on_push: PushHandler,
+    ) -> Self {
+        self.on_share = Some(on_share);
+        self.on_sync_state = Some(on_sync_state);
+        self.on_push = Some(on_push);
+        self
+    }
+
+    /// Friend-gate + mark-seen shared by the one-way messages; returns
+    /// false for non-friends (whose messages get no reply and a closed
+    /// stream).
+    fn touch_friend(&self, remote: &EndpointId) -> bool {
+        let mut store = self.store.lock();
+        let is_friend = store.is_friend(remote);
+        if is_friend {
+            store.mark_seen(remote);
+            let _ = store.save();
+        }
+        is_friend
     }
 }
 
@@ -325,6 +390,53 @@ impl ProtocolHandler for FriendsProtocol {
                 write_message(&mut send, &FriendsMessage::Ack)
                     .await
                     .map_err(accept_err)?;
+                send.finish()?;
+            }
+            FriendsMessage::ShareProjects { projects } => {
+                if self.touch_friend(&remote) {
+                    if let Some(on_share) = &self.on_share {
+                        on_share(remote, projects);
+                    }
+                    write_message(&mut send, &FriendsMessage::Ack)
+                        .await
+                        .map_err(accept_err)?;
+                }
+                send.finish()?;
+            }
+            FriendsMessage::SyncEnabled { origin_url } => {
+                if self.touch_friend(&remote) {
+                    if let Some(on_sync_state) = &self.on_sync_state {
+                        on_sync_state(remote, origin_url, true);
+                    }
+                    write_message(&mut send, &FriendsMessage::Ack)
+                        .await
+                        .map_err(accept_err)?;
+                }
+                send.finish()?;
+            }
+            FriendsMessage::SyncDisabled { origin_url } => {
+                if self.touch_friend(&remote) {
+                    if let Some(on_sync_state) = &self.on_sync_state {
+                        on_sync_state(remote, origin_url, false);
+                    }
+                    write_message(&mut send, &FriendsMessage::Ack)
+                        .await
+                        .map_err(accept_err)?;
+                }
+                send.finish()?;
+            }
+            FriendsMessage::PushNotice {
+                origin_url,
+                branches,
+            } => {
+                if self.touch_friend(&remote) {
+                    if let Some(on_push) = &self.on_push {
+                        on_push(remote, origin_url, branches);
+                    }
+                    write_message(&mut send, &FriendsMessage::Ack)
+                        .await
+                        .map_err(accept_err)?;
+                }
                 send.finish()?;
             }
             _ => send.finish()?,
@@ -460,6 +572,81 @@ pub async fn notify_transfer_done(
         FriendsMessage::Ack => Ok(()),
         _ => bail!("unexpected reply to TransferDone"),
     }
+}
+
+/// Send a one-way message that expects an `Ack` back.
+async fn send_acked(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    msg: &FriendsMessage,
+) -> anyhow::Result<()> {
+    let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
+    write_message(&mut send, msg).await?;
+    send.finish()?;
+    let reply = read_message(&mut recv).await;
+    conn.close(0u32.into(), b"done");
+    match reply? {
+        FriendsMessage::Ack => Ok(()),
+        _ => bail!("unexpected reply to share message"),
+    }
+}
+
+/// Publish our full shared-repo set to a friend — the receiver replaces
+/// what it recorded, so shrinking the list unshares what was removed.
+pub async fn send_share_projects(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    projects: &[crate::projects::SharedRepo],
+) -> anyhow::Result<()> {
+    send_acked(
+        endpoint,
+        addr,
+        &FriendsMessage::ShareProjects {
+            projects: projects.to_vec(),
+        },
+    )
+    .await
+}
+
+/// Tell `addr` we enabled (`true`) or disabled (`false`) sync on a repo
+/// they shared with us. Enable creates their side of the link; disable
+/// tears both down.
+pub async fn send_sync_state(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    origin_url: &str,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    let msg = if enabled {
+        FriendsMessage::SyncEnabled {
+            origin_url: origin_url.to_string(),
+        }
+    } else {
+        FriendsMessage::SyncDisabled {
+            origin_url: origin_url.to_string(),
+        }
+    };
+    send_acked(endpoint, addr, &msg).await
+}
+
+/// Tell a friend we pushed to a shared origin — they fetch and integrate
+/// their enabled branches.
+pub async fn send_push_notice(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    origin_url: &str,
+    branches: &[String],
+) -> anyhow::Result<()> {
+    send_acked(
+        endpoint,
+        addr,
+        &FriendsMessage::PushNotice {
+            origin_url: origin_url.to_string(),
+            branches: branches.to_vec(),
+        },
+    )
+    .await
 }
 
 async fn write_message(

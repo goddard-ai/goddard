@@ -8,16 +8,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::bail;
+use anyhow::{Context as _, bail};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
 use waku_protocol::friends::{
-    FriendInfo, FriendRequestInfo, FriendsState, TransferDirection, TransferInfo, TransferStatus,
+    FriendInfo, FriendRequestInfo, FriendSyncAlertAction, FriendsState, IncomingShareInfo,
+    SharedProjectInfo, SyncAlertInfo, SyncAlertKind, SyncLinkInfo, TransferDirection,
+    TransferInfo, TransferStatus,
 };
+use waku_protocol::git::SyncInProgress;
 use waku_share::friends::{
     self, Friend, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
+};
+use waku_share::projects::{
+    IncomingShare, Integration, OutgoingShare, ShareStore, SharedRepo, SyncLink,
+    normalize_origin,
 };
 use waku_share::{EndpointId, RelayMode, ShareNode, TempTag};
 
@@ -42,6 +49,121 @@ const NOTIFY_TIMEOUT: Duration = Duration::from_secs(30);
 /// TransferDone receipt; past this it is declared stalled. A late receipt
 /// still flips the row back to Done.
 const TRANSFER_STALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Local ref poll cadence — detects commits landing on synced branches
+/// (auto-push) and manual pushes completing (push notices). Pure local
+/// reads, so it can stay quick.
+const SYNC_POLL_INTERVAL: Duration = Duration::from_secs(15);
+/// Backstop fetch cadence — catches pushes the notice path missed
+/// (friend's other machines, other collaborators) and retries unacked
+/// `SyncEnabled` handshakes.
+const SYNC_FETCH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// The daemon's view of a local project for share matching — its path,
+/// display name, and `origin` fetch URL.
+#[derive(Clone)]
+pub struct RepoInfo {
+    pub path: PathBuf,
+    pub name: String,
+    pub origin_url: Option<String>,
+}
+
+/// Resolves the local projects the share layer can match incoming
+/// shares against and offer for sharing. Installed by the daemon, which
+/// owns the project list; called only on the worker thread.
+pub type RepoResolver = Arc<dyn Fn() -> Vec<RepoInfo> + Send + Sync>;
+
+/// Work for the share worker thread — every job is blocking git or
+/// store bookkeeping, serialized so sync never races itself on a repo.
+enum SyncJob {
+    /// Detect new commits on synced branches (auto-push) and completed
+    /// manual pushes (notices); reconcile stale alerts.
+    Poll,
+    /// Fetch + integrate every enabled branch of one link — on creation
+    /// and on the slow backstop cadence (`None` → all links).
+    Fetch { link_id: Option<String> },
+    /// A friend's push notice: fetch + integrate the named branches.
+    Integrate {
+        link_id: String,
+        branches: Vec<String>,
+    },
+    /// Manual sync: unpause the branch, fetch, integrate.
+    SyncNow {
+        link_id: String,
+        branch: String,
+    },
+    /// Alert decisions that touch git state. Dismiss is store-level.
+    AlertAction {
+        alert_id: String,
+        merge_instead: bool,
+    },
+    /// Create the local side of a link (enable-sync opt-in or the
+    /// SyncEnabled handshake) — resolves the default branch on the
+    /// worker, not the command path.
+    CreateLink {
+        peer: EndpointId,
+        origin_url: String,
+        repo_path: PathBuf,
+        peer_initiated: bool,
+        reply: Sender<anyhow::Result<String>>,
+    },
+    /// A friend's `SyncEnabled`/`SyncDisabled` arrived — mark flags,
+    /// create or tear down the link.
+    PeerSyncState {
+        peer: EndpointId,
+        origin_url: String,
+        enabled: bool,
+    },
+    /// Share a project with a friend — resolves name/origin on the
+    /// worker, then re-sends them the full set.
+    ShareProject {
+        peer: EndpointId,
+        project_path: PathBuf,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    /// Stop sharing an origin with a friend — re-sends the set, then
+    /// tears the link down when no incoming share justifies it.
+    UnshareProject {
+        peer: EndpointId,
+        origin_url: String,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    /// Tear down one link — user disable (`notify` sends `SyncDisabled`)
+    /// or the peer's own message (`notify` false).
+    TearDownLink {
+        link_id: String,
+        notify: bool,
+    },
+    /// A friend's full shared set arrived — reconcile incoming shares
+    /// and the links they fed.
+    UpdateIncoming {
+        peer: EndpointId,
+        projects: Vec<SharedRepo>,
+    },
+    /// Local branches + default for the link config UI.
+    QueryBranches {
+        link_id: String,
+        reply: Sender<anyhow::Result<(Vec<String>, Option<String>)>>,
+    },
+}
+
+/// Peer messages the worker wants sent — it owns no async context, so
+/// the runtime drains these and dials.
+enum RuntimeEffect {
+    ShareProjects {
+        peer: EndpointId,
+        projects: Vec<SharedRepo>,
+    },
+    SyncState {
+        peer: EndpointId,
+        origin_url: String,
+        enabled: bool,
+    },
+    PushNotice {
+        peer: EndpointId,
+        origin_url: String,
+        branches: Vec<String>,
+    },
+}
 
 /// Installed by the server so async share events (incoming request, offer,
 /// progress) reach every subscribed client.
@@ -81,6 +203,48 @@ enum ShareCommand {
         node_id: String,
         reply: Sender<anyhow::Result<()>>,
     },
+    ShareProject {
+        node_id: String,
+        project_path: PathBuf,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    UnshareProject {
+        node_id: String,
+        origin_url: String,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    EnableSync {
+        node_id: String,
+        origin_url: String,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    DisableSync {
+        link_id: String,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    SetSyncConfig {
+        link_id: String,
+        auto_push: bool,
+        enabled_branches: Vec<String>,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    SyncNow {
+        link_id: String,
+        branch: String,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    AlertAction {
+        alert_id: String,
+        action: FriendSyncAlertAction,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    GetSyncBranches {
+        link_id: String,
+        reply: Sender<anyhow::Result<(Vec<String>, Option<String>)>>,
+    },
+    /// A workspace op landed commits or moved refs — poll promptly
+    /// instead of waiting out the interval.
+    KickPoll,
     Shutdown,
 }
 
@@ -88,6 +252,10 @@ enum ShareCommand {
 /// callbacks; every mutation re-publishes the wire snapshot.
 struct ShareInner {
     store: Arc<Mutex<FriendStore>>,
+    /// Shared repos, sync links, and pending alerts — `share.json`.
+    share_store: Arc<Mutex<ShareStore>>,
+    /// The daemon's project list for origin matching, installed once.
+    resolver: Option<RepoResolver>,
     transfers: Vec<TransferInfo>,
     /// node id string → (last probe verdict, when taken). Presence is lazy.
     probes: HashMap<String, (bool, u64)>,
@@ -106,6 +274,7 @@ struct ShareInner {
 impl ShareInner {
     fn snapshot(&self) -> FriendsState {
         let store = self.store.lock();
+        let share_store = self.share_store.lock();
         FriendsState {
             friend_code: self.friend_code.clone(),
             display_name: store.display_name.clone(),
@@ -142,6 +311,81 @@ impl ShareInner {
                 .map(request_info)
                 .collect(),
             transfers: self.transfers.clone(),
+            shared_projects: share_store
+                .outgoing
+                .iter()
+                .map(|share| SharedProjectInfo {
+                    peer_id: share.peer.to_string(),
+                    peer_name: store.resolved_name(&share.peer, ""),
+                    project_name: share.name.clone(),
+                    origin_url: share.origin_url.clone(),
+                    repo_path: share.repo_path.clone(),
+                    peer_sync_enabled: share.peer_sync_enabled,
+                    shared_at_ms: share.shared_at_ms,
+                })
+                .collect(),
+            incoming_shares: share_store
+                .incoming
+                .iter()
+                .map(|share| IncomingShareInfo {
+                    peer_id: share.peer.to_string(),
+                    peer_name: store.resolved_name(&share.peer, &share.peer_name),
+                    project_name: share.name.clone(),
+                    origin_url: share.origin_url.clone(),
+                    matched_path: share.matched_path.clone(),
+                    matched_project_name: share.matched_name.clone(),
+                    sync_enabled: share_store
+                        .link_for(&share.peer, &share.origin_url)
+                        .is_some(),
+                    received_at_ms: share.received_at_ms,
+                })
+                .collect(),
+            sync_links: share_store
+                .links
+                .iter()
+                .map(|link| SyncLinkInfo {
+                    id: link.id.clone(),
+                    peer_id: link.peer.to_string(),
+                    peer_name: store.resolved_name(&link.peer, ""),
+                    origin_url: link.origin_url.clone(),
+                    repo_path: link.repo_path.clone(),
+                    auto_push: link.auto_push,
+                    enabled_branches: link.enabled_branches.iter().cloned().collect(),
+                    paused_branches: link.paused_branches.iter().cloned().collect(),
+                    peer_sync_enabled: link.peer_sync_enabled,
+                    created_at_ms: link.created_at_ms,
+                })
+                .collect(),
+            sync_alerts: share_store
+                .alerts
+                .iter()
+                .filter_map(|alert| {
+                    let link = share_store.links.iter().find(|l| l.id == alert.link_id)?;
+                    Some(SyncAlertInfo {
+                        id: alert.id.clone(),
+                        link_id: alert.link_id.clone(),
+                        peer_name: store.resolved_name(&link.peer, ""),
+                        branch: alert.branch.clone(),
+                        repo_path: link.repo_path.clone(),
+                        kind: match alert.kind {
+                            waku_share::projects::SyncAlertKind::Conflict => {
+                                SyncAlertKind::Conflict
+                            }
+                            waku_share::projects::SyncAlertKind::RefusedDirtyWorktree => {
+                                SyncAlertKind::RefusedDirtyWorktree
+                            }
+                        },
+                        in_progress: alert.in_progress.map(|i| match i {
+                            Integration::Rebase => SyncInProgress::Rebase,
+                            Integration::Merge => SyncInProgress::Merge,
+                        }),
+                        files: alert.files.clone(),
+                        worktree_path: alert.worktree_path.clone(),
+                        temp_worktree: alert.temp_worktree,
+                        at_ms: alert.at_ms,
+                    })
+                })
+                .collect(),
         }
     }
 }
@@ -175,11 +419,13 @@ impl ShareService {
             store.display_name = our_name.clone();
         }
         Self {
-            dir,
+            dir: dir.clone(),
             our_name,
             cmd: Mutex::new(None),
             state: Arc::new(Mutex::new(ShareInner {
                 store: Arc::new(Mutex::new(store)),
+                share_store: Arc::new(Mutex::new(ShareStore::load(&dir).unwrap_or_default())),
+                resolver: None,
                 transfers: Vec::new(),
                 probes: HashMap::new(),
                 pending: HashMap::new(),
@@ -382,6 +628,96 @@ impl ShareService {
         self.call(|reply| ShareCommand::Probe { node_id, reply })
     }
 
+    /// Where the daemon installs the project list used for origin
+    /// matching and share offers.
+    pub fn set_repo_resolver(&self, resolver: RepoResolver) {
+        self.state.lock().resolver = Some(resolver);
+    }
+
+    pub fn share_project(&self, node_id: String, project_path: PathBuf) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::ShareProject {
+            node_id,
+            project_path,
+            reply,
+        })
+    }
+
+    pub fn unshare_project(&self, node_id: String, origin_url: String) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::UnshareProject {
+            node_id,
+            origin_url,
+            reply,
+        })
+    }
+
+    pub fn enable_sync(&self, node_id: String, origin_url: String) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::EnableSync {
+            node_id,
+            origin_url,
+            reply,
+        })
+    }
+
+    pub fn disable_sync(&self, link_id: String) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::DisableSync { link_id, reply })
+    }
+
+    pub fn set_sync_config(
+        &self,
+        link_id: String,
+        auto_push: bool,
+        enabled_branches: Vec<String>,
+    ) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::SetSyncConfig {
+            link_id,
+            auto_push,
+            enabled_branches,
+            reply,
+        })
+    }
+
+    pub fn sync_now(&self, link_id: String, branch: String) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::SyncNow {
+            link_id,
+            branch,
+            reply,
+        })
+    }
+
+    pub fn sync_alert_action(
+        &self,
+        alert_id: String,
+        action: FriendSyncAlertAction,
+    ) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::AlertAction {
+            alert_id,
+            action,
+            reply,
+        })
+    }
+
+    pub fn get_sync_branches(
+        &self,
+        link_id: String,
+    ) -> anyhow::Result<(Vec<String>, Option<String>)> {
+        let tx = self.ensure_started()?;
+        let (reply_tx, reply_rx) = bounded(1);
+        tx.send(ShareCommand::GetSyncBranches {
+            link_id,
+            reply: reply_tx,
+        })?;
+        reply_rx.recv_timeout(COMMAND_TIMEOUT)?
+    }
+
+    /// A workspace op landed commits or moved refs — prompt the poll
+    /// instead of waiting out the interval. No-op before the runtime
+    /// starts.
+    pub fn note_repo_activity(&self) {
+        if let Some(tx) = self.cmd.lock().as_ref() {
+            let _ = tx.send(ShareCommand::KickPoll);
+        }
+    }
+
     pub fn shutdown(&self) {
         if let Some(tx) = self.cmd.lock().take() {
             let _ = tx.send(ShareCommand::Shutdown);
@@ -523,6 +859,748 @@ fn relink_peer_transfers(state: &Arc<Mutex<ShareInner>>, peer: &EndpointId) {
     }
 }
 
+/// The sync worker's context — everything a job needs that isn't the
+/// job itself. One worker serializes all share git so syncs never race
+/// each other on the same repository.
+struct SyncWorker {
+    state: Arc<Mutex<ShareInner>>,
+    share_store: Arc<Mutex<ShareStore>>,
+    sink: Arc<Mutex<Option<FriendsSink>>>,
+    /// Temp worktrees for branches checked out nowhere — `dir/sync/`.
+    scratch_dir: PathBuf,
+    effect_tx: tokio::sync::mpsc::UnboundedSender<RuntimeEffect>,
+    /// link id → branch → remembered tips, the manual-push detector.
+    branch_states: HashMap<String, HashMap<String, crate::sync::BranchTips>>,
+}
+
+impl SyncWorker {
+    fn publish(&self) {
+        publish(&self.state, &self.sink);
+    }
+
+    fn store(&self) -> parking_lot::MutexGuard<'_, ShareStore> {
+        self.share_store.lock()
+    }
+
+    /// Persist the share store after a mutation, then broadcast.
+    fn save_and_publish(&self) {
+        let _ = self.store().save();
+        self.publish();
+    }
+
+    /// The peer's shared set changed — replace it, re-match origins
+    /// against our projects, and drop links whose shares went away.
+    fn update_incoming(&self, peer: EndpointId, projects: Vec<SharedRepo>) {
+        let resolver = self.state.lock().resolver.clone();
+        let repos = resolver.map(|r| r()).unwrap_or_default();
+        let peer_name = self
+            .state
+            .lock()
+            .store
+            .lock()
+            .resolved_name(&peer, "");
+        let dead = {
+            let mut store = self.store();
+            store.incoming.retain(|s| s.peer != peer);
+            for repo in projects {
+                let normalized = normalize_origin(&repo.origin_url);
+                let matched = repos.iter().find(|r| {
+                    r.origin_url
+                        .as_deref()
+                        .is_some_and(|url| normalize_origin(url) == normalized)
+                });
+                store.incoming.push(IncomingShare {
+                    peer,
+                    peer_name: peer_name.clone(),
+                    name: repo.name,
+                    origin_url: repo.origin_url,
+                    matched_path: matched.map(|r| r.path.clone()),
+                    matched_name: matched.map(|r| r.name.clone()),
+                    received_at_ms: now_ms(),
+                });
+            }
+            // Links whose justifying share vanished come down. A link is
+            // justified by either direction — our outgoing share to the
+            // peer keeps it alive even when their share of the same repo
+            // is revoked.
+            let live: std::collections::BTreeSet<String> = store
+                .incoming
+                .iter()
+                .filter(|s| s.peer == peer)
+                .map(|s| normalize_origin(&s.origin_url))
+                .collect();
+            let dead: Vec<String> = store
+                .links
+                .iter()
+                .filter(|l| {
+                    l.peer == peer
+                        && !live.contains(&normalize_origin(&l.origin_url))
+                        && !store.outgoing.iter().any(|s| {
+                            s.peer == peer
+                                && normalize_origin(&s.origin_url)
+                                    == normalize_origin(&l.origin_url)
+                        })
+                })
+                .map(|l| l.id.clone())
+                .collect();
+            let _ = store.save();
+            dead
+        };
+        for link_id in dead {
+            // Notify tears their side down too — a revoked share ends
+            // sync both ways.
+            self.tear_down_link(&link_id, true);
+        }
+        self.publish();
+    }
+
+    /// The full shared-repo set we advertise to `peer`.
+    fn shared_set(&self, peer: &EndpointId) -> Vec<SharedRepo> {
+        self.store()
+            .outgoing
+            .iter()
+            .filter(|s| s.peer == *peer)
+            .map(|s| SharedRepo {
+                name: s.name.clone(),
+                origin_url: s.origin_url.clone(),
+            })
+            .collect()
+    }
+
+    fn share_project(
+        &self,
+        peer: EndpointId,
+        project_path: PathBuf,
+        reply: Sender<anyhow::Result<()>>,
+    ) {
+        let result = (|| {
+            let resolver = self.state.lock().resolver.clone();
+            let repo = resolver
+                .and_then(|r| {
+                    r().into_iter()
+                        .find(|repo| repo.path == project_path)
+                })
+                .context("no project at that path")?;
+            let origin_url = repo
+                .origin_url
+                .context("project has no origin remote")?;
+            {
+                let mut store = self.store();
+                if store.outgoing.iter().any(|s| {
+                    s.peer == peer
+                        && normalize_origin(&s.origin_url) == normalize_origin(&origin_url)
+                }) {
+                    anyhow::bail!("already shared with them");
+                }
+                store.outgoing.push(OutgoingShare {
+                    peer,
+                    name: repo.name,
+                    origin_url,
+                    repo_path: project_path,
+                    peer_sync_enabled: false,
+                    shared_at_ms: now_ms(),
+                });
+                let _ = store.save();
+            }
+            Ok(())
+        })();
+        let ok = result.is_ok();
+        let _ = reply.send(result);
+        if ok {
+            self.publish();
+            let projects = self.shared_set(&peer);
+            let _ = self
+                .effect_tx
+                .send(RuntimeEffect::ShareProjects { peer, projects });
+        }
+    }
+
+    fn unshare_project(
+        &self,
+        peer: EndpointId,
+        origin_url: String,
+        reply: Sender<anyhow::Result<()>>,
+    ) {
+        let result = (|| {
+            {
+                let mut store = self.store();
+                let before = store.outgoing.len();
+                store.outgoing.retain(|s| {
+                    !(s.peer == peer
+                        && normalize_origin(&s.origin_url) == normalize_origin(&origin_url))
+                });
+                if store.outgoing.len() == before {
+                    anyhow::bail!("not shared with them");
+                }
+                let _ = store.save();
+            }
+            Ok(())
+        })();
+        let ok = result.is_ok();
+        let _ = reply.send(result);
+        if !ok {
+            return;
+        }
+        self.publish();
+        let projects = self.shared_set(&peer);
+        let _ = self
+            .effect_tx
+            .send(RuntimeEffect::ShareProjects { peer, projects });
+        // The link survives only while an incoming share justifies it.
+        let justified = self.store().incoming.iter().any(|s| {
+            s.peer == peer
+                && normalize_origin(&s.origin_url) == normalize_origin(&origin_url)
+        });
+        if !justified {
+            let link_id = self
+                .store()
+                .link_for(&peer, &origin_url)
+                .map(|l| l.id.clone());
+            if let Some(link_id) = link_id {
+                self.tear_down_link(&link_id, true);
+            }
+        }
+    }
+
+    /// Fetch + integrate a link's branches, recording alerts on
+    /// conflict/refusal and clearing them on success.
+    fn integrate_link(&self, link_id: &str, branches: &[String], fetch_first: bool) {
+        let link = self.store().links.iter().find(|l| l.id == link_id).cloned();
+        let Some(link) = link else { return };
+        if fetch_first && let Err(error) = crate::sync::fetch(&link.repo_path) {
+            eprintln!("share sync: fetch {} failed: {error:#}", link.repo_path.display());
+            return;
+        }
+        let mut changed = false;
+        for branch in branches {
+            if !link.enabled_branches.contains(branch) || link.paused_branches.contains(branch) {
+                continue;
+            }
+            match crate::sync::integrate(&link.repo_path, &self.scratch_dir, &link.id, branch) {
+                Ok(crate::sync::IntegrateOutcome::Conflict {
+                    in_progress,
+                    files,
+                    worktree,
+                    temp_worktree,
+                }) => {
+                    let mut store = self.store();
+                    store.alerts.retain(|a| !(a.link_id == link.id && a.branch == *branch));
+                    store.alerts.push(crate::sync::conflict_alert(
+                        &link,
+                        branch,
+                        in_progress,
+                        files,
+                        worktree,
+                        temp_worktree,
+                    ));
+                    changed = true;
+                }
+                Ok(crate::sync::IntegrateOutcome::RefusedDirty { worktree }) => {
+                    let mut store = self.store();
+                    if !store
+                        .alerts
+                        .iter()
+                        .any(|a| a.link_id == link.id && a.branch == *branch)
+                    {
+                        store.alerts.push(crate::sync::refused_alert(&link, branch, worktree));
+                        changed = true;
+                    }
+                }
+                Ok(
+                    crate::sync::IntegrateOutcome::FastForwarded
+                    | crate::sync::IntegrateOutcome::Integrated
+                    | crate::sync::IntegrateOutcome::UpToDate
+                    | crate::sync::IntegrateOutcome::AheadOnly,
+                ) => {
+                    let mut store = self.store();
+                    let before = store.alerts.len();
+                    // Success clears a refused alert; a conflict alert is
+                    // the reconcile pass's call — the stopped integration
+                    // may still be on disk.
+                    store.alerts.retain(|a| {
+                        !(a.link_id == link.id
+                            && a.branch == *branch
+                            && a.kind == waku_share::projects::SyncAlertKind::RefusedDirtyWorktree)
+                    });
+                    changed |= store.alerts.len() != before;
+                }
+                Ok(crate::sync::IntegrateOutcome::Busy) => {}
+                Err(error) => {
+                    eprintln!(
+                        "share sync: integrate {} {branch} failed: {error:#}",
+                        link.repo_path.display()
+                    );
+                }
+            }
+        }
+        if changed {
+            self.save_and_publish();
+        }
+    }
+
+    /// Reconcile persisted alerts against the repos — drops alerts
+    /// resolved elsewhere and pauses branches aborted elsewhere.
+    fn reconcile_alerts(&self) {
+        let alerts = self.store().alerts.clone();
+        let mut changed = false;
+        for alert in alerts {
+            let link = self
+                .store()
+                .links
+                .iter()
+                .find(|l| l.id == alert.link_id)
+                .cloned();
+            let Some(link) = link else {
+                self.store().alerts.retain(|a| a.id != alert.id);
+                changed = true;
+                continue;
+            };
+            match crate::sync::reconcile_alert(&link.repo_path, &alert) {
+                Ok(Some(paused)) => {
+                    {
+                        let mut store = self.store();
+                        store.alerts.retain(|a| a.id != alert.id);
+                        if paused
+                            && let Some(l) =
+                                store.links.iter_mut().find(|l| l.id == alert.link_id)
+                        {
+                            l.paused_branches.insert(alert.branch.clone());
+                        }
+                        let _ = store.save();
+                    }
+                    // Whatever way the stop ended, the temp worktree we
+                    // owned goes — abort is a no-op once nothing is in
+                    // progress and drops the registration either way.
+                    if alert.temp_worktree
+                        && let Err(error) = crate::sync::abort(
+                            &link.repo_path,
+                            &alert.worktree_path,
+                            true,
+                        )
+                    {
+                        eprintln!("share sync: temp cleanup failed: {error:#}");
+                    }
+                    changed = true;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("share sync: reconcile {} failed: {error:#}", alert.branch);
+                }
+            }
+        }
+        if changed {
+            self.save_and_publish();
+        }
+    }
+
+    /// Create the local side of a link. `peer_initiated` marks the
+    /// handshake receiver — its `peer_sync_enabled` starts true and its
+    /// ack goes back over the wire.
+    fn create_link(
+        &mut self,
+        peer: EndpointId,
+        origin_url: String,
+        repo_path: PathBuf,
+        peer_initiated: bool,
+        reply: Option<Sender<anyhow::Result<String>>>,
+    ) {
+        let mut created_id = None;
+        let result = (|| {
+            if let Some(id) = self
+                .store()
+                .link_for(&peer, &origin_url)
+                .map(|l| l.id.clone())
+            {
+                return Ok(id);
+            }
+            let default = crate::sync::default_branch(&repo_path)?;
+            let mut enabled = std::collections::BTreeSet::new();
+            if let Some(branch) = default {
+                enabled.insert(branch);
+            }
+            let link = SyncLink {
+                id: Uuid::new_v4().to_string(),
+                peer,
+                origin_url: origin_url.clone(),
+                repo_path,
+                auto_push: true,
+                enabled_branches: enabled,
+                paused_branches: Default::default(),
+                peer_sync_enabled: peer_initiated,
+                created_at_ms: now_ms(),
+            };
+            let id = link.id.clone();
+            {
+                let mut store = self.store();
+                store.links.push(link);
+                if peer_initiated && let Some(share) = store
+                    .outgoing
+                    .iter_mut()
+                    .find(|s| s.peer == peer && normalize_origin(&s.origin_url) == normalize_origin(&origin_url))
+                {
+                    share.peer_sync_enabled = true;
+                }
+                let _ = store.save();
+            }
+            created_id = Some(id.clone());
+            Ok(id)
+        })();
+        let ok = result.is_ok();
+        if let Some(reply) = reply {
+            let _ = reply.send(result);
+        }
+        if ok {
+            self.publish();
+            // Both creation paths send `SyncEnabled`: manual enable opens
+            // the handshake, peer-initiated creation answers it.
+            let _ = self.effect_tx.send(RuntimeEffect::SyncState {
+                peer,
+                origin_url: origin_url.clone(),
+                enabled: true,
+            });
+        }
+        if let Some(id) = created_id {
+            // The new side catches up immediately — pushes that landed
+            // before the link existed are already on origin.
+            self.integrate_link(&id, &self.enabled_branches(&id), true);
+        }
+    }
+
+    fn enabled_branches(&self, link_id: &str) -> Vec<String> {
+        self.store()
+            .links
+            .iter()
+            .find(|l| l.id == link_id)
+            .map(|l| l.enabled_branches.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Drop a link and its alerts, aborting any temp worktrees the
+    /// alerts still own. `notify` sends `SyncDisabled` — false when the
+    /// teardown itself came from the peer's `SyncDisabled`.
+    fn tear_down_link(&self, link_id: &str, notify: bool) {
+        let link = {
+            let mut store = self.store();
+            let Some(index) = store.links.iter().position(|l| l.id == link_id) else {
+                return;
+            };
+            let link = store.links.remove(index);
+            // A stopped integration owns a real checkout state — abort
+            // and clean temp worktrees before forgetting the alert.
+            let alerts: Vec<waku_share::projects::SyncAlert> = store
+                .alerts
+                .iter()
+                .filter(|a| a.link_id == link_id)
+                .cloned()
+                .collect();
+            store.alerts.retain(|a| a.link_id != link_id);
+            if let Some(share) = store
+                .outgoing
+                .iter_mut()
+                .find(|s| s.peer == link.peer && normalize_origin(&s.origin_url) == normalize_origin(&link.origin_url))
+            {
+                share.peer_sync_enabled = false;
+            }
+            let _ = store.save();
+            (link, alerts)
+        };
+        for alert in link.1 {
+            if let Err(error) = crate::sync::abort(
+                &link.0.repo_path,
+                &alert.worktree_path,
+                alert.temp_worktree,
+            ) {
+                eprintln!("share sync: cleanup {} failed: {error:#}", alert.branch);
+            }
+        }
+        let link = link.0;
+        self.publish();
+        if notify {
+            let _ = self.effect_tx.send(RuntimeEffect::SyncState {
+                peer: link.peer,
+                origin_url: link.origin_url,
+                enabled: false,
+            });
+        }
+    }
+
+    fn run(&mut self, job_rx: Receiver<SyncJob>) {
+        while let Ok(job) = job_rx.recv() {
+            match job {
+                SyncJob::Poll => {
+                    let links = self.store().links.clone();
+                    let mut notices: Vec<(EndpointId, String, Vec<String>)> = Vec::new();
+                    for link in &links {
+                        let states = self.branch_states.entry(link.id.clone()).or_default();
+                        match crate::sync::poll(&link.repo_path, link, states) {
+                            Ok(report) => {
+                                let branches: Vec<String> = report
+                                    .pushed
+                                    .iter()
+                                    .chain(report.noticed.iter())
+                                    .cloned()
+                                    .collect();
+                                if !branches.is_empty() {
+                                    notices.push((
+                                        link.peer,
+                                        link.origin_url.clone(),
+                                        branches,
+                                    ));
+                                }
+                            }
+                            Err(error) => eprintln!(
+                                "share sync: poll {} failed: {error:#}",
+                                link.repo_path.display()
+                            ),
+                        }
+                    }
+                    for (peer, origin_url, branches) in notices {
+                        let _ = self.effect_tx.send(RuntimeEffect::PushNotice {
+                            peer,
+                            origin_url,
+                            branches,
+                        });
+                    }
+                    self.reconcile_alerts();
+                }
+                SyncJob::Fetch { link_id } => {
+                    let links = self.store().links.clone();
+                    // Slow cadence also re-sends unacked SyncEnabled
+                    // handshakes — an offline peer learns the link when
+                    // it comes back.
+                    for link in &links {
+                        if !link.peer_sync_enabled {
+                            let _ = self.effect_tx.send(RuntimeEffect::SyncState {
+                                peer: link.peer,
+                                origin_url: link.origin_url.clone(),
+                                enabled: true,
+                            });
+                        }
+                    }
+                    for link in links
+                        .iter()
+                        .filter(|l| link_id.as_ref().is_none_or(|id| &l.id == id))
+                    {
+                        let branches: Vec<String> = link.enabled_branches.iter().cloned().collect();
+                        self.integrate_link(&link.id, &branches, true);
+                    }
+                }
+                SyncJob::Integrate { link_id, branches } => {
+                    self.integrate_link(&link_id, &branches, true);
+                }
+                SyncJob::SyncNow { link_id, branch } => {
+                    {
+                        let mut store = self.store();
+                        if let Some(link) =
+                            store.links.iter_mut().find(|l| l.id == link_id)
+                        {
+                            link.paused_branches.remove(&branch);
+                            let _ = store.save();
+                        }
+                    }
+                    self.publish();
+                    self.integrate_link(&link_id, &[branch], true);
+                }
+                SyncJob::AlertAction {
+                    alert_id,
+                    merge_instead,
+                } => {
+                    let (alert, link) = {
+                        let store = self.store();
+                        let alert = store.alerts.iter().find(|a| a.id == alert_id).cloned();
+                        let link = alert.as_ref().and_then(|a| {
+                            store.links.iter().find(|l| l.id == a.link_id).cloned()
+                        });
+                        (alert, link)
+                    };
+                    let (Some(alert), Some(link)) = (alert, link) else {
+                        continue;
+                    };
+                    if merge_instead {
+                        match crate::sync::merge_instead(
+                            &link.repo_path,
+                            &alert.worktree_path,
+                            &alert.branch,
+                            alert.temp_worktree,
+                        ) {
+                            Ok(crate::sync::IntegrateOutcome::Conflict {
+                                in_progress,
+                                files,
+                                worktree,
+                                temp_worktree,
+                            }) => {
+                                let mut store = self.store();
+                                if let Some(a) =
+                                    store.alerts.iter_mut().find(|a| a.id == alert_id)
+                                {
+                                    a.in_progress = Some(in_progress);
+                                    a.files = files;
+                                    a.worktree_path = worktree;
+                                    a.temp_worktree = temp_worktree;
+                                    a.at_ms = now_ms();
+                                }
+                            }
+                            Ok(_) => {
+                                self.store().alerts.retain(|a| a.id != alert_id);
+                            }
+                            Err(error) => {
+                                eprintln!("share sync: merge-instead failed: {error:#}");
+                            }
+                        }
+                    } else {
+                        if let Err(error) = crate::sync::abort(
+                            &link.repo_path,
+                            &alert.worktree_path,
+                            alert.temp_worktree,
+                        ) {
+                            eprintln!("share sync: abort failed: {error:#}");
+                        }
+                        {
+                            let mut store = self.store();
+                            store.alerts.retain(|a| a.id != alert_id);
+                            // Aborting pauses the branch until a manual
+                            // sync — spec.
+                            if let Some(l) =
+                                store.links.iter_mut().find(|l| l.id == alert.link_id)
+                            {
+                                l.paused_branches.insert(alert.branch.clone());
+                            }
+                        }
+                    }
+                    self.save_and_publish();
+                }
+                SyncJob::CreateLink {
+                    peer,
+                    origin_url,
+                    repo_path,
+                    peer_initiated,
+                    reply,
+                } => {
+                    self.create_link(
+                        peer,
+                        origin_url,
+                        repo_path,
+                        peer_initiated,
+                        Some(reply),
+                    );
+                }
+                SyncJob::PeerSyncState {
+                    peer,
+                    origin_url,
+                    enabled,
+                } => {
+                    if enabled {
+                        let has_link =
+                            self.store().link_for(&peer, &origin_url).is_some();
+                        let share = self
+                            .store()
+                            .outgoing
+                            .iter()
+                            .find(|s| {
+                                s.peer == peer
+                                    && normalize_origin(&s.origin_url)
+                                        == normalize_origin(&origin_url)
+                            })
+                            .cloned();
+                        if has_link {
+                            // Their ack — mark both flags.
+                            {
+                                let mut store = self.store();
+                                if let Some(link) =
+                                    store.link_for_mut(&peer, &origin_url)
+                                {
+                                    link.peer_sync_enabled = true;
+                                }
+                                if let Some(share) = store
+                                    .outgoing
+                                    .iter_mut()
+                                    .find(|s| {
+                                        s.peer == peer
+                                            && normalize_origin(&s.origin_url)
+                                                == normalize_origin(&origin_url)
+                                    })
+                                {
+                                    share.peer_sync_enabled = true;
+                                }
+                                let _ = store.save();
+                            }
+                            self.publish();
+                        } else if let Some(share) = share {
+                            // They enabled sync on a repo we shared —
+                            // create our side of the link.
+                            self.create_link(
+                                peer,
+                                origin_url,
+                                share.repo_path,
+                                true,
+                                None,
+                            );
+                        }
+                    } else {
+                        // Their SyncDisabled — tear our side down without
+                        // answering (they already know).
+                        let link_id = self
+                            .store()
+                            .link_for(&peer, &origin_url)
+                            .map(|l| l.id.clone());
+                        if let Some(link_id) = link_id {
+                            self.tear_down_link(&link_id, false);
+                        } else {
+                            // No link — still clear the share's flag.
+                            {
+                                let mut store = self.store();
+                                if let Some(share) = store
+                                    .outgoing
+                                    .iter_mut()
+                                    .find(|s| {
+                                        s.peer == peer
+                                            && normalize_origin(&s.origin_url)
+                                                == normalize_origin(&origin_url)
+                                    })
+                                {
+                                    share.peer_sync_enabled = false;
+                                    let _ = store.save();
+                                }
+                            }
+                            self.publish();
+                        }
+                    }
+                }
+                SyncJob::ShareProject {
+                    peer,
+                    project_path,
+                    reply,
+                } => {
+                    self.share_project(peer, project_path, reply);
+                }
+                SyncJob::UnshareProject {
+                    peer,
+                    origin_url,
+                    reply,
+                } => {
+                    self.unshare_project(peer, origin_url, reply);
+                }
+                SyncJob::TearDownLink { link_id, notify } => {
+                    self.tear_down_link(&link_id, notify);
+                }
+                SyncJob::UpdateIncoming { peer, projects } => {
+                    self.update_incoming(peer, projects);
+                }
+                SyncJob::QueryBranches { link_id, reply } => {
+                    let link = self.store().links.iter().find(|l| l.id == link_id).cloned();
+                    let result = match link {
+                        Some(link) => crate::sync::local_branches(&link.repo_path).and_then(|b| {
+                            crate::sync::default_branch(&link.repo_path).map(|d| (b, d))
+                        }),
+                        None => Err(anyhow::anyhow!("no sync link with that id")),
+                    };
+                    let _ = reply.send(result);
+                }
+            }
+        }
+    }
+}
+
 fn run_runtime(
     dir: PathBuf,
     our_name: String,
@@ -552,6 +1630,8 @@ fn run_runtime(
         let friend_code = waku_share::identity::friend_code(secret.public());
         let store = state.lock().store.clone();
         *store.lock() = FriendStore::load(&dir)?;
+        let share_store = state.lock().share_store.clone();
+        *share_store.lock() = ShareStore::load(&dir)?;
         {
             let mut store = store.lock();
             if store.display_name.is_empty() {
@@ -565,6 +1645,32 @@ fn run_runtime(
         // The ShareNode Arc is filled after spawn; offer tasks wait on it.
         let node: Arc<tokio::sync::Mutex<Option<Arc<ShareNode>>>> =
             Arc::new(tokio::sync::Mutex::new(None));
+
+        // The sync worker serializes all share git. Jobs arrive from
+        // commands and the protocol handlers; peer messages it wants sent
+        // come back over `effect_rx` so the async loop can dial.
+        let (job_tx, job_rx) = unbounded::<SyncJob>();
+        let (effect_tx, mut effect_rx) =
+            tokio::sync::mpsc::unbounded_channel::<RuntimeEffect>();
+        {
+            let state = state.clone();
+            let share_store = share_store.clone();
+            let sink = sink.clone();
+            let scratch_dir = dir.join("sync");
+            std::thread::Builder::new()
+                .name("goddard-share-sync".into())
+                .spawn(move || {
+                    let mut worker = SyncWorker {
+                        state,
+                        share_store,
+                        sink,
+                        scratch_dir,
+                        effect_tx,
+                        branch_states: HashMap::new(),
+                    };
+                    worker.run(job_rx);
+                })?;
+        }
 
         let proto = FriendsProtocol::new(
             // on_request: register pending, broadcast, hand back a oneshot.
@@ -764,6 +1870,44 @@ fn run_runtime(
                 })
             },
             store.clone(),
+        )
+        .with_project_handlers(
+            // on_share: the friend's full shared set — the worker
+            // reconciles incoming shares and any links they fed.
+            {
+                let job_tx = job_tx.clone();
+                Arc::new(move |peer: EndpointId, projects: Vec<SharedRepo>| {
+                    let _ = job_tx.send(SyncJob::UpdateIncoming { peer, projects });
+                })
+            },
+            // on_sync_state: SyncEnabled/SyncDisabled handshake.
+            {
+                let job_tx = job_tx.clone();
+                Arc::new(move |peer: EndpointId, origin_url: String, enabled: bool| {
+                    let _ = job_tx.send(SyncJob::PeerSyncState {
+                        peer,
+                        origin_url,
+                        enabled,
+                    });
+                })
+            },
+            // on_push: a friend pushed to a shared origin — resolve the
+            // link and integrate the named branches.
+            {
+                let job_tx = job_tx.clone();
+                let state = state.clone();
+                Arc::new(move |peer: EndpointId, origin_url: String, branches: Vec<String>| {
+                    let link_id = state
+                        .lock()
+                        .share_store
+                        .lock()
+                        .link_for(&peer, &origin_url)
+                        .map(|l| l.id.clone());
+                    if let Some(link_id) = link_id {
+                        let _ = job_tx.send(SyncJob::Integrate { link_id, branches });
+                    }
+                })
+            },
         );
 
         let share_node = match ShareNode::spawn(&dir, secret, RelayMode::Default, proto).await {
@@ -776,7 +1920,68 @@ fn run_runtime(
         drop(ready_tx.send(Ok(())));
         *node.lock().await = Some(share_node.clone());
 
-        while let Some(cmd) = async_rx.recv().await {
+        let mut poll_tick = tokio::time::interval(SYNC_POLL_INTERVAL);
+        poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut fetch_tick = tokio::time::interval(SYNC_FETCH_INTERVAL);
+        fetch_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            let cmd = tokio::select! {
+                cmd = async_rx.recv() => match cmd {
+                    Some(cmd) => cmd,
+                    None => break,
+                },
+                effect = effect_rx.recv() => {
+                    match effect {
+                        Some(RuntimeEffect::ShareProjects { peer, projects }) => {
+                            let endpoint = share_node.endpoint().clone();
+                            tokio::spawn(async move {
+                                if let Err(error) =
+                                    friends::send_share_projects(&endpoint, peer, &projects).await
+                                {
+                                    eprintln!("share: share-projects to {peer} failed: {error:#}");
+                                }
+                            });
+                        }
+                        Some(RuntimeEffect::SyncState { peer, origin_url, enabled }) => {
+                            let endpoint = share_node.endpoint().clone();
+                            tokio::spawn(async move {
+                                if let Err(error) =
+                                    friends::send_sync_state(&endpoint, peer, &origin_url, enabled)
+                                        .await
+                                {
+                                    eprintln!("share: sync-state to {peer} failed: {error:#}");
+                                }
+                            });
+                        }
+                        Some(RuntimeEffect::PushNotice { peer, origin_url, branches }) => {
+                            let endpoint = share_node.endpoint().clone();
+                            tokio::spawn(async move {
+                                if let Err(error) = friends::send_push_notice(
+                                    &endpoint,
+                                    peer,
+                                    &origin_url,
+                                    &branches,
+                                )
+                                .await
+                                {
+                                    eprintln!("share: push notice to {peer} failed: {error:#}");
+                                }
+                            });
+                        }
+                        None => break,
+                    }
+                    continue;
+                }
+                _ = poll_tick.tick() => {
+                    let _ = job_tx.send(SyncJob::Poll);
+                    continue;
+                }
+                _ = fetch_tick.tick() => {
+                    let _ = job_tx.send(SyncJob::Fetch { link_id: None });
+                    continue;
+                }
+            };
             match cmd {
                 ShareCommand::Shutdown => break,
                 ShareCommand::Probe { node_id, reply } => {
@@ -1041,6 +2246,212 @@ fn run_runtime(
                     }
                     publish(&state, &sink);
                     let _ = reply.send(Ok(()));
+                }
+                ShareCommand::ShareProject {
+                    node_id,
+                    project_path,
+                    reply,
+                } => {
+                    let result = node_id
+                        .parse::<EndpointId>()
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .and_then(|peer| {
+                            if !state.lock().store.lock().is_friend(&peer) {
+                                anyhow::bail!("no friend with that code");
+                            }
+                            job_tx
+                                .send(SyncJob::ShareProject {
+                                    peer,
+                                    project_path,
+                                    reply: reply.clone(),
+                                })
+                                .map_err(|e| anyhow::anyhow!("{e}"))
+                        });
+                    if let Err(error) = result {
+                        let _ = reply.send(Err(error));
+                    }
+                }
+                ShareCommand::UnshareProject {
+                    node_id,
+                    origin_url,
+                    reply,
+                } => {
+                    let result = node_id
+                        .parse::<EndpointId>()
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .and_then(|peer| {
+                            job_tx
+                                .send(SyncJob::UnshareProject {
+                                    peer,
+                                    origin_url,
+                                    reply: reply.clone(),
+                                })
+                                .map_err(|e| anyhow::anyhow!("{e}"))
+                        });
+                    if let Err(error) = result {
+                        let _ = reply.send(Err(error));
+                    }
+                }
+                ShareCommand::EnableSync {
+                    node_id,
+                    origin_url,
+                    reply,
+                } => {
+                    let result = (|| {
+                        let peer: EndpointId = node_id.parse()?;
+                        // The daemon-resolved match wins over the client's
+                        // copy — the incoming share's `matched_path` is the
+                        // authoritative local checkout for that origin.
+                        let repo_path = {
+                            let s = state.lock();
+                            let share = s.share_store.lock();
+                            share
+                                .incoming
+                                .iter()
+                                .find(|i| {
+                                    i.peer == peer
+                                        && normalize_origin(&i.origin_url)
+                                            == normalize_origin(&origin_url)
+                                })
+                                .and_then(|i| i.matched_path.clone())
+                                .context("they don't share that repo with you")?
+                        };
+                        let (job_reply, job_rx) = bounded(1);
+                        job_tx.send(SyncJob::CreateLink {
+                            peer,
+                            origin_url,
+                            repo_path,
+                            peer_initiated: false,
+                            reply: job_reply,
+                        })?;
+                        job_rx.recv_timeout(COMMAND_TIMEOUT)??;
+                        anyhow::Ok(())
+                    })();
+                    let _ = reply.send(result);
+                }
+                ShareCommand::DisableSync { link_id, reply } => {
+                    let exists = {
+                        let s = state.lock();
+                        s.share_store.lock().links.iter().any(|l| l.id == link_id)
+                    };
+                    let result = if exists {
+                        job_tx
+                            .send(SyncJob::TearDownLink {
+                                link_id,
+                                notify: true,
+                            })
+                            .map_err(|e| anyhow::anyhow!("{e}"))
+                    } else {
+                        Err(anyhow::anyhow!("no sync link with that id"))
+                    };
+                    let _ = reply.send(result);
+                }
+                ShareCommand::SetSyncConfig {
+                    link_id,
+                    auto_push,
+                    enabled_branches,
+                    reply,
+                } => {
+                    let result = (|| {
+                        {
+                            let s = state.lock();
+                            let mut share = s.share_store.lock();
+                            let Some(link) =
+                                share.links.iter_mut().find(|l| l.id == link_id)
+                            else {
+                                anyhow::bail!("no sync link with that id");
+                            };
+                            link.auto_push = auto_push;
+                            link.enabled_branches =
+                                enabled_branches.into_iter().collect();
+                            // A disabled branch's pause flag is moot —
+                            // keep the set tidy.
+                            let enabled = link.enabled_branches.clone();
+                            link.paused_branches.retain(|b| enabled.contains(b));
+                            let _ = share.save();
+                        }
+                        anyhow::Ok(())
+                    })();
+                    publish(&state, &sink);
+                    let _ = reply.send(result);
+                }
+                ShareCommand::SyncNow {
+                    link_id,
+                    branch,
+                    reply,
+                } => {
+                    let exists = {
+                        let s = state.lock();
+                        s.share_store.lock().links.iter().any(|l| l.id == link_id)
+                    };
+                    let result = if exists {
+                        job_tx
+                            .send(SyncJob::SyncNow { link_id, branch })
+                            .map_err(|e| anyhow::anyhow!("{e}"))
+                    } else {
+                        Err(anyhow::anyhow!("no sync link with that id"))
+                    };
+                    let _ = reply.send(result);
+                }
+                ShareCommand::AlertAction {
+                    alert_id,
+                    action,
+                    reply,
+                } => {
+                    let result = match action {
+                        FriendSyncAlertAction::Dismiss => {
+                            {
+                                let s = state.lock();
+                                let mut share = s.share_store.lock();
+                                share.alerts.retain(|a| a.id != alert_id);
+                                let _ = share.save();
+                            }
+                            publish(&state, &sink);
+                            Ok(())
+                        }
+                        _ => {
+                            let exists = {
+                                let s = state.lock();
+                                s.share_store
+                                    .lock()
+                                    .alerts
+                                    .iter()
+                                    .any(|a| a.id == alert_id)
+                            };
+                            if exists {
+                                job_tx
+                                    .send(SyncJob::AlertAction {
+                                        alert_id,
+                                        merge_instead: matches!(
+                                            action,
+                                            FriendSyncAlertAction::MergeInstead
+                                        ),
+                                    })
+                                    .map_err(|e| anyhow::anyhow!("{e}"))
+                            } else {
+                                Err(anyhow::anyhow!("no sync alert with that id"))
+                            }
+                        }
+                    };
+                    let _ = reply.send(result);
+                }
+                ShareCommand::GetSyncBranches { link_id, reply } => {
+                    let (job_reply, job_rx) = bounded(1);
+                    let result = job_tx
+                        .send(SyncJob::QueryBranches {
+                            link_id,
+                            reply: job_reply,
+                        })
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .and_then(|_| {
+                            job_rx
+                                .recv_timeout(COMMAND_TIMEOUT)
+                                .map_err(|e| anyhow::anyhow!("{e}"))?
+                        });
+                    let _ = reply.send(result);
+                }
+                ShareCommand::KickPoll => {
+                    let _ = job_tx.send(SyncJob::Poll);
                 }
             }
         }

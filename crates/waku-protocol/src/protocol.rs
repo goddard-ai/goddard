@@ -516,6 +516,57 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<ProviderKind>,
     },
+    /// Share one of my projects with a friend. The daemon resolves the
+    /// project's name and `origin` URL from `project_path` and re-sends
+    /// the friend our full shared set.
+    ShareProjectWithFriend {
+        node_id: String,
+        #[ts(type = "string")]
+        project_path: PathBuf,
+    },
+    /// Stop sharing `origin_url` with the friend — their incoming share
+    /// and any sync link on it come down on both sides.
+    UnshareProjectWithFriend {
+        node_id: String,
+        origin_url: String,
+    },
+    /// Opt in to automatic sync on a friend's shared repo — creates the
+    /// link against the daemon-matched local checkout with the repo's
+    /// default branch enabled and tells the friend, which creates their
+    /// side of it.
+    EnableFriendSync {
+        node_id: String,
+        origin_url: String,
+    },
+    /// Tear down a sync link on both sides.
+    DisableFriendSync {
+        link_id: String,
+    },
+    /// Update a link's auto-push flag and enabled-branch set. Branches
+    /// absent from `enabled_branches` stop syncing; paused branches stay
+    /// paused until `FriendSyncNow` re-arms them.
+    SetFriendSyncConfig {
+        link_id: String,
+        auto_push: bool,
+        enabled_branches: Vec<String>,
+    },
+    /// Manually sync one branch — clears its paused flag and runs a
+    /// fetch + integrate now.
+    FriendSyncNow {
+        link_id: String,
+        branch: String,
+    },
+    /// Act on a sync alert: retry a stopped rebase as a merge, abort the
+    /// integration (pausing the branch), or dismiss a refusal.
+    FriendSyncAlertAction {
+        alert_id: String,
+        action: crate::friends::FriendSyncAlertAction,
+    },
+    /// The repo's local branches and default branch, for a link's
+    /// branch-toggle UI. Returns `FriendSyncBranches`.
+    GetFriendSyncBranches {
+        link_id: String,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -744,6 +795,12 @@ pub enum ResponsePayload {
     /// The run record a `runAutomationNow` queued.
     AutomationRun {
         run: AutomationRun,
+    },
+    /// A sync link's repo branches, as read for `getFriendSyncBranches`.
+    FriendSyncBranches {
+        link_id: String,
+        branches: Vec<String>,
+        default_branch: Option<String>,
     },
     Session {
         session: Option<AgentSession>,
