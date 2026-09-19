@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::model::{ProviderKind, ProviderResumeCursor, ProviderSessionSummary};
 
-const SERVER_START_TIMEOUT: Duration = Duration::from_secs(10);
+const SERVER_START_TIMEOUT: Duration = Duration::from_secs(30);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Forking copies every retained message and part into a new native session.
 /// A long task can legitimately take longer than the ordinary request budget;
