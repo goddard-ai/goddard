@@ -920,11 +920,11 @@ impl Render for Waku {
             })
             // The peek overlay: the real sidebar pane — scroll position and
             // all — mounted over the content rather than in the layout. Once
-            // up it covers the strip and is itself the hover surface, so only
-            // leaving the panel dismisses it. On macOS the pane's own fill is
-            // transparent — it borrows the native vibrancy strip behind the
-            // window, which the opaque surface under this overlay hides — so
-            // the overlay carries the sidebar's solid color itself.
+            // up it covers the strip, so only leaving the panel dismisses it.
+            // On macOS the pane's own fill is transparent — it borrows the
+            // native vibrancy strip behind the window, which the opaque
+            // surface under this overlay hides — so the overlay carries the
+            // sidebar's solid color itself.
             .when_some(sidebar_peek, |root, (offset, opacity)| {
                 root.child(
                     div()
@@ -939,11 +939,23 @@ impl Render for Waku {
                         .bg(theme.sidebar_drag_background)
                         .border_r(hairline())
                         .border_color(theme.sidebar_border)
-                        .on_hover(cx.listener(Self::sidebar_peek_overlay_hover))
                         .child(
                             self.sidebar_pane
                                 .clone()
                                 .cached(StyleRefinement::default().size_full()),
+                        )
+                        // The hover surface is a probe painted last: the
+                        // footer's quick-action dock occludes the hitboxes
+                        // beneath it, so the overlay's own hitbox would read
+                        // as unhovered — starting the exit nudge — while the
+                        // pointer is on the dock. A topmost Normal hitbox
+                        // spanning the panel stays hovered instead.
+                        .child(
+                            div()
+                                .id("sidebar-peek-hover")
+                                .absolute()
+                                .inset_0()
+                                .on_hover(cx.listener(Self::sidebar_peek_overlay_hover)),
                         ),
                 )
             })
