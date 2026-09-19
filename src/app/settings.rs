@@ -3774,6 +3774,16 @@ impl Waku {
                         |this, enabled, cx| this.set_friends_enabled(enabled, cx),
                     ))
                     .children(self.experiment_card(
+                        "automations-experiment-toggle",
+                        "experiments.automations_title",
+                        "experiments.automations_description",
+                        self.state.automations_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_automations_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
                         "model-router-experiment-toggle",
                         "experiments.model_router_title",
                         "experiments.model_router_description",
@@ -3883,6 +3893,15 @@ impl Waku {
         if !enabled {
             self.state.computer_use_enabled = false;
         }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_automations_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.automations_enabled = enabled;
+        // Disabling folds the page and any open editor so the surface is
+        // never reachable-but-dead.
+        self.apply_automations_enabled(cx);
         self.save();
         cx.notify();
     }

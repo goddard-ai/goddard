@@ -1,0 +1,257 @@
+//! Daemon-owned scheduled automations — definitions and run history.
+//!
+//! An automation fires a stored prompt on a schedule. The daemon owns the
+//! whole lifecycle: it ticks while no client is connected, dispatches runs
+//! through the same session-creation path interactive tasks use, and
+//! broadcasts the resulting document to every attached app.
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+use uuid::Uuid;
+
+use crate::model::ProviderKind;
+
+/// When an automation fires. Presets cover the common cadences; `Cron`
+/// accepts a standard five- or six-field expression for everything else.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AutomationSchedule {
+    /// Once per hour at `minute`.
+    Hourly { minute: u8 },
+    /// Every day at `hour`:`minute`.
+    Daily { hour: u8, minute: u8 },
+    /// Monday through Friday at `hour`:`minute`.
+    Weekdays { hour: u8, minute: u8 },
+    /// Once per week on `day_of_week` (0 = Sunday) at `hour`:`minute`.
+    Weekly {
+        day_of_week: u8,
+        hour: u8,
+        minute: u8,
+    },
+    /// Standard cron expression (`minute hour day month weekday`); an
+    /// optional leading seconds or trailing year field is also accepted.
+    Cron { expression: String },
+}
+
+/// Where a scheduled run's work happens.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AutomationWorkspace {
+    /// A fresh task in the project's own directory.
+    #[default]
+    Local,
+    /// A fresh task in a new daemon-managed worktree based on `base_branch`.
+    Worktree,
+    /// The prompt is queued onto an existing task (`session_id` required),
+    /// delivered once that task is idle.
+    Existing,
+}
+
+/// Optional gate run before a scheduled dispatch: a shell command that must
+/// exit 0 inside `timeout_seconds` or the run is skipped.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationPrecheck {
+    pub command: String,
+    #[serde(default = "default_precheck_timeout")]
+    pub timeout_seconds: u64,
+}
+
+fn default_precheck_timeout() -> u64 {
+    60
+}
+
+/// The result of running an [`AutomationPrecheck`].
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationPrecheckResult {
+    pub passed: bool,
+    pub exit_code: Option<i32>,
+    /// Tail of the command's combined output, for the skipped-run reason.
+    pub detail: Option<String>,
+}
+
+/// A daemon-owned automation definition.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Automation {
+    pub id: Uuid,
+    pub name: String,
+    pub prompt: String,
+    pub provider: ProviderKind,
+    /// `None` uses the provider's default model.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Project directory the task runs against — the daemon registers a
+    /// project for this path on dispatch when none exists yet.
+    pub project_path: PathBuf,
+    #[serde(default)]
+    pub workspace: AutomationWorkspace,
+    /// Base branch for `workspace == Worktree`.
+    #[serde(default)]
+    pub base_branch: Option<String>,
+    /// Target task for `workspace == Existing`.
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    #[serde(default)]
+    pub schedule: Option<AutomationSchedule>,
+    /// IANA timezone name; `None`/empty means the daemon's local zone.
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub precheck: Option<AutomationPrecheck>,
+    /// When a due occurrence went by while the daemon was down or asleep,
+    /// run once if the miss is within this many minutes; otherwise record a
+    /// skipped run. `None` skips every missed occurrence.
+    #[serde(default)]
+    pub missed_run_grace_minutes: Option<u32>,
+    /// When the last run spawned a task, later `Local`/`Worktree` runs may
+    /// reuse it while idle instead of creating another task.
+    #[serde(default)]
+    pub reuse_session: bool,
+    /// Task the previous run dispatched to; set by the daemon so
+    /// `reuse_session` and `Existing` can find it again.
+    #[serde(default)]
+    pub last_session_id: Option<Uuid>,
+    #[serde(default)]
+    pub next_run_at: Option<u64>,
+    #[serde(default)]
+    pub last_run_at: Option<u64>,
+    #[serde(default)]
+    pub last_run_status: Option<AutomationRunStatus>,
+    /// Identifier of the last skip/dispatch failure. Runs with an identical
+    /// refusal fold into the previous run's `refusal_count` instead of
+    /// appending history rows.
+    #[serde(default)]
+    pub last_refusal_key: Option<String>,
+    /// Unix seconds.
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// What started a run.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AutomationTrigger {
+    Scheduled,
+    Manual,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AutomationRunStatus {
+    /// Recorded, not yet dispatched (precheck pending, queued behind an
+    /// earlier evaluation).
+    Pending,
+    /// A task accepted the prompt; waiting for the turn to finish.
+    Running,
+    Completed,
+    /// Dispatch failed — project registration, worktree creation, or
+    /// provider launch rejected the run.
+    Failed,
+    /// The precheck exited non-zero or timed out.
+    SkippedPrecheck,
+    /// A due occurrence passed while the daemon was down beyond the grace
+    /// window.
+    SkippedMissed,
+    /// Dispatch was refused — disabled automation, missing target session,
+    /// or a busy reuse target.
+    SkippedUnavailable,
+}
+
+impl AutomationRunStatus {
+    /// End states a run cannot leave once reached.
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, Self::Pending | Self::Running)
+    }
+}
+
+/// One recorded execution attempt.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRun {
+    pub id: Uuid,
+    pub automation_id: Uuid,
+    pub trigger: AutomationTrigger,
+    pub status: AutomationRunStatus,
+    /// The occurrence this run covers — for a manual run, when it was
+    /// requested. Unix seconds.
+    pub scheduled_for: u64,
+    /// When dispatch was attempted.
+    #[serde(default)]
+    pub started_at: Option<u64>,
+    #[serde(default)]
+    pub finished_at: Option<u64>,
+    /// Task the run dispatched to, when one was created or reused.
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    /// Rejection detail for `Failed`/`Skipped*` runs.
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub precheck: Option<AutomationPrecheckResult>,
+    /// Groups identical repeated refusals: a run whose `refusal_key` matches
+    /// the previous run's folds into it, bumping this count, so an
+    /// always-unavailable schedule cannot flood history.
+    #[serde(default)]
+    pub refusal_key: Option<String>,
+    #[serde(default)]
+    pub refusal_count: u32,
+    /// Unix seconds.
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Create or update payload for `upsertAutomation`. `id == None` creates;
+/// `Some(id)` replaces the matching record's editable fields.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub name: String,
+    pub prompt: String,
+    pub provider: ProviderKind,
+    #[serde(default)]
+    pub model: Option<String>,
+    pub project_path: PathBuf,
+    #[serde(default)]
+    pub workspace: AutomationWorkspace,
+    #[serde(default)]
+    pub base_branch: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    #[serde(default)]
+    pub schedule: Option<AutomationSchedule>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub precheck: Option<AutomationPrecheck>,
+    #[serde(default)]
+    pub missed_run_grace_minutes: Option<u32>,
+    #[serde(default)]
+    pub reuse_session: bool,
+}
+
+/// The whole daemon-owned document — definitions plus bounded run history.
+/// `getAutomations` reads it and every `automationsChanged` broadcast
+/// carries it, so clients apply updates wholesale.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationsState {
+    #[serde(default)]
+    pub automations: Vec<Automation>,
+    /// Newest first; retention trims per automation, not globally.
+    #[serde(default)]
+    pub runs: Vec<AutomationRun>,
+}

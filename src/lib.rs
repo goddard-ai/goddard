@@ -91,6 +91,7 @@ actions!(
         ToggleInboxPage,
         DismissInbox,
         DismissDraftsLayer,
+        ToggleAutomationsPage,
         ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
@@ -361,6 +362,7 @@ pub fn run() {
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
+            crate::app::init_automations_keys(cx);
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);
@@ -575,6 +577,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘⇧I opens the notification inbox — the same page contract the
         // Projects page has.
         KeyBinding::new("secondary-shift-i", ToggleInboxPage, None),
+        // ⌘⇧U opens the Automations page — scheduling's letter in the
+        // page-toggle family.
+        KeyBinding::new("secondary-shift-u", ToggleAutomationsPage, None),
         // ⌘⌥1–2 switch the page's tabs while it is open. The chords used
         // to deep-link to a tab from anywhere; the model picker's
         // ⌘⌥1–⌘⌥9 favorite jump owns the workspace scope now.

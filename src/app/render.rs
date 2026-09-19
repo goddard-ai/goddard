@@ -575,6 +575,7 @@ impl Render for Waku {
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let send_file_dialog = self.render_send_file_dialog(cx);
+        let automation_editor = self.render_automation_editor(window, cx);
         let ssh_prompt = self.render_ssh_prompt(window, cx);
         let sync_branch_modal = self.render_sync_branch(window, cx);
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
@@ -652,6 +653,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_toast_session_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
             .on_action(cx.listener(Self::toggle_projects_page_action))
+            .on_action(cx.listener(Self::toggle_automations_page_action))
             .on_action(cx.listener(Self::toggle_inbox_page_action))
             .on_action(cx.listener(Self::select_projects_tab_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
@@ -718,6 +720,7 @@ impl Render for Waku {
                             && self.projects_page.is_none()
                             && !self.notifications.open
                             && !self.drafts_page
+                            && !self.automations_page
                             && !agy_surface,
                         |element| {
                             element
@@ -752,6 +755,8 @@ impl Render for Waku {
                             )
                         } else if self.drafts_page {
                             self.render_drafts_page(cx)
+                        } else if self.automations_page {
+                            self.render_automations_page(cx)
                         } else if projects_page.is_some() {
                             self.render_projects_page(window, cx)
                         } else if self.notifications.open {
@@ -780,6 +785,7 @@ impl Render for Waku {
                             && self.projects_page.is_none()
                             && !self.notifications.open
                             && !self.drafts_page
+                            && !self.automations_page
                             && !agy_surface,
                         |element| {
                             if self.big_picture.is_open() {
@@ -937,6 +943,7 @@ impl Render for Waku {
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(send_file_dialog)
+            .children(automation_editor)
             .children(ssh_prompt)
             .children(sync_branch_modal)
             .children(git_panel_overlays)

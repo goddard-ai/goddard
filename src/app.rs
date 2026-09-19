@@ -89,10 +89,10 @@ use crate::{
     OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
     SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
     SelectProjectsTab, SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward,
-    SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleBigPicture, ToggleBranchPicker,
-    ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage,
-    ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
+    SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage, ToggleBigPicture,
+    ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder,
+    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
+    ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
     ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
     ToggleWorkspace,
 };
@@ -1265,6 +1265,7 @@ enum NavigationLocation {
     Terminal(Uuid),
     ProjectsPage(Uuid),
     DraftsPage,
+    AutomationsPage,
 }
 
 #[derive(Debug, Default)]
@@ -1388,6 +1389,7 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
         NavigationLocation::Task(id) => Some(PersistedNavigationLocation::Task(id)),
         NavigationLocation::ProjectsPage(id) => Some(PersistedNavigationLocation::ProjectsPage(id)),
         NavigationLocation::DraftsPage => Some(PersistedNavigationLocation::DraftsPage),
+        NavigationLocation::AutomationsPage => Some(PersistedNavigationLocation::AutomationsPage),
         NavigationLocation::Terminal(_) => None,
     }
 }
@@ -2006,6 +2008,16 @@ pub struct Waku {
     friends_state: waku_client::friends::FriendsState,
     friends_tx: Sender<waku_client::friends::FriendsState>,
     friends_events: Receiver<waku_client::friends::FriendsState>,
+    /// `automationsChanged` documents from every connected daemon — the
+    /// per-daemon mirrors live in `automations`.
+    automations_tx: Sender<(
+        waku_client::DaemonKey,
+        waku_client::automations::AutomationsState,
+    )>,
+    automations_events: Receiver<(
+        waku_client::DaemonKey,
+        waku_client::automations::AutomationsState,
+    )>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
     /// The Settings → Friends display-name field — the name friends see on
@@ -2568,6 +2580,32 @@ pub struct Waku {
     /// `drafts_edit_input`.
     drafts_editing: Option<Uuid>,
     drafts_edit_input: Entity<TextInput>,
+    /// The Automations page claiming the main column, like `drafts_page`.
+    automations_page: bool,
+    /// Schedules vs Runs — which list the page body shows.
+    automations_tab: automations::AutomationsTab,
+    /// The automation whose detail pane replaced the list: `(daemon, id)`.
+    automations_detail: Option<(waku_client::DaemonKey, Uuid)>,
+    /// Every daemon's automation document, folded in from
+    /// `automationsChanged` broadcasts.
+    automations: HashMap<waku_client::DaemonKey, waku_client::automations::AutomationsState>,
+    /// Filter query over the page's lists.
+    automations_search: Entity<TextInput>,
+    /// A deferred editor open: set by click handlers, materialized at the
+    /// top of `render_automation_editor` where a `Window` is available.
+    automations_editor_request: Option<automations::AutomationEditorRequest>,
+    automations_editor: Option<automations::AutomationEditor>,
+    /// Virtualized lists over the two tabs.
+    automations_list_state: ListState,
+    automations_scrollbar: Rc<ScrollbarState>,
+    automations_runs_list_state: ListState,
+    automations_runs_scrollbar: Rc<ScrollbarState>,
+    /// The `(daemon, id)` pairs each tab's current filter leaves visible —
+    /// refreshed once per frame so row builders read only this.
+    automations_rows: RefCell<Vec<(waku_client::DaemonKey, Uuid)>>,
+    automations_run_rows: RefCell<Vec<(waku_client::DaemonKey, Uuid)>>,
+    automations_row_focus: FocusHandle,
+    automations_new_focus: FocusHandle,
     /// The Settings → Git page's project selection — which repo's worktrees
     /// and branches the page lists.
     settings_git_project: Option<Uuid>,
@@ -2798,6 +2836,7 @@ mod agy;
 mod annotations;
 mod archive_dialog;
 mod autocomplete;
+mod automations;
 mod background_work;
 mod big_picture;
 mod branches;
@@ -2850,6 +2889,7 @@ mod worktrees;
 pub use annotations::init as init_annotation_keys;
 pub use archive_dialog::init as init_archive_dialog_keys;
 pub use autocomplete::init as init_composer_autocomplete;
+pub use automations::init as init_automations_keys;
 use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
@@ -3800,6 +3840,12 @@ impl Waku {
                 .accessibility_label(tr!("a11y.draft_edit"))
                 .placeholder(tr!("drafts.edit_placeholder"))
         });
+        let automations_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("automations.search"))
+                .placeholder(tr!("automations.search_placeholder"))
+        });
         let session_rename_input =
             cx.new(|cx| TextInput::new(window, cx).accessibility_label(tr!("a11y.task_name")));
         let provider_path_input = cx.new(|cx| {
@@ -4026,6 +4072,7 @@ impl Waku {
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
+        let (automations_tx, automations_events) = unbounded();
         let (route_policy_tx, route_policy_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
         #[cfg(target_os = "macos")]
@@ -4991,6 +5038,8 @@ impl Waku {
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,
+                automations_tx,
+                automations_events,
                 route_policy_tx,
                 route_policy_events,
                 route_policy: None,
@@ -5257,6 +5306,21 @@ impl Waku {
                 drafts_rows: RefCell::new(Vec::new()),
                 drafts_editing: None,
                 drafts_edit_input,
+                automations_page: false,
+                automations_tab: automations::AutomationsTab::default(),
+                automations_detail: None,
+                automations: HashMap::new(),
+                automations_search,
+                automations_editor_request: None,
+                automations_editor: None,
+                automations_list_state: ListState::new(0, ListAlignment::Top, px(640.0)),
+                automations_scrollbar: ScrollbarState::new(),
+                automations_runs_list_state: ListState::new(0, ListAlignment::Top, px(640.0)),
+                automations_runs_scrollbar: ScrollbarState::new(),
+                automations_rows: RefCell::new(Vec::new()),
+                automations_run_rows: RefCell::new(Vec::new()),
+                automations_row_focus: cx.focus_handle(),
+                automations_new_focus: cx.focus_handle(),
                 settings_git_project: None,
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),

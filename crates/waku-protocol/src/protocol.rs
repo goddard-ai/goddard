@@ -7,6 +7,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::attachments::{AttachmentUpload, StoredAttachment};
+use crate::automations::{Automation, AutomationInput, AutomationRun, AutomationsState};
 use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, Evaluation};
@@ -473,6 +474,24 @@ pub enum Command {
         node_id: String,
         nickname: Option<String>,
     },
+    /// Read the daemon-owned automations document — definitions plus bounded
+    /// run history. Global command — the session id must be nil.
+    GetAutomations,
+    /// Create an automation, or replace the editable fields of the one
+    /// `input.id` names. Global command — the session id must be nil.
+    UpsertAutomation {
+        input: AutomationInput,
+    },
+    /// Delete an automation and its run history. Global command — the
+    /// session id must be nil.
+    RemoveAutomation {
+        automation_id: Uuid,
+    },
+    /// Queue a manual run for one automation. Global command — the session
+    /// id must be nil.
+    RunAutomationNow {
+        automation_id: Uuid,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -605,6 +624,12 @@ pub enum ServerMessage {
     FriendsChanged {
         state: crate::friends::FriendsState,
     },
+    /// The automations document changed — a definition was edited or a run
+    /// recorded progress. Carries the whole document; it's small and every
+    /// client applies it wholesale.
+    AutomationsChanged {
+        state: AutomationsState,
+    },
     ShuttingDown,
 }
 
@@ -683,6 +708,18 @@ pub enum ResponsePayload {
     /// The daemon-owned friends document, as read for `getFriends`.
     Friends {
         state: crate::friends::FriendsState,
+    },
+    /// The daemon-owned automations document, as read for `getAutomations`.
+    Automations {
+        state: AutomationsState,
+    },
+    /// The automation record after an `upsertAutomation`.
+    Automation {
+        automation: Automation,
+    },
+    /// The run record a `runAutomationNow` queued.
+    AutomationRun {
+        run: AutomationRun,
     },
     Session {
         session: Option<AgentSession>,

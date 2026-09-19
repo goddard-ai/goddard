@@ -213,6 +213,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "app.big_picture", action: || Box::new(crate::ToggleBigPicture), title_key: "shortcuts.big_picture", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.projects_page", action: || Box::new(crate::ToggleProjectsPage), title_key: "shortcuts.projects_page", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.inbox_page", action: || Box::new(crate::ToggleInboxPage), title_key: "sidebar.inbox", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.automations_page", action: || Box::new(crate::ToggleAutomationsPage), title_key: "sidebar.automations", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "inbox.dismiss", action: || Box::new(crate::DismissInbox), title_key: "shortcuts.dismiss", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.usage_panel", action: || Box::new(crate::ToggleUsagePanel), title_key: "shortcuts.usage_panel", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.run_script", action: || Box::new(crate::RunProjectScript), title_key: "menu.run_project_script", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },

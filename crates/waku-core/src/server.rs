@@ -99,6 +99,14 @@ pub trait Backend: Send + Sync + 'static {
     /// Where the share layer reports session-catalog mutations (a transfer
     /// session materialized outside any client request).
     fn set_task_state_sink(&self, _sink: crate::share::TaskNotifier) {}
+
+    /// Where the automation scheduler publishes document changes — `serve`
+    /// installs this before accepting connections.
+    fn set_automations_sink(&self, _sink: crate::automations::AutomationsSink) {}
+
+    /// Root event sink for work the backend initiates without a client
+    /// request — a scheduled automation dispatching a run.
+    fn set_event_source(&self, _events: EventSink) {}
 }
 
 #[derive(Clone)]
@@ -141,6 +149,18 @@ impl EventSink {
         self.hub
             .emit(self.session_id, self.runtime_id, event, false);
         Ok(())
+    }
+
+    /// A sink bound to a private hub — events go nowhere. Fallback for code
+    /// paths that run before `serve` installs the real event source (tests,
+    /// a backend constructed without a server).
+    pub(crate) fn detached() -> EventSink {
+        EventSink {
+            session_id: Uuid::nil(),
+            runtime_id: Uuid::nil(),
+            hub: Arc::new(Hub::default()),
+            source_subscriber_id: u64::MAX,
+        }
     }
 
     /// Retarget this sink at another session/runtime pair. Agent commands
@@ -481,6 +501,18 @@ impl Hub {
         );
     }
 
+    /// The automations document changed outside any request — the scheduler
+    /// recorded a run transition, or another client edited a definition.
+    /// Broadcast to every subscriber; there is no initiator to skip.
+    fn automations_changed(&self, state: waku_protocol::automations::AutomationsState) {
+        let mut hub_state = self.state.lock();
+        Self::broadcast(
+            &mut hub_state,
+            &ServerMessage::AutomationsChanged { state },
+            None,
+        );
+    }
+
     fn cached_response(&self, request_id: Uuid) -> Option<ResponseOutcome> {
         self.state
             .lock()
@@ -670,6 +702,11 @@ pub fn serve(
         let hub = hub.clone();
         backend.set_task_state_sink(Arc::new(move || hub.task_state_changed(u64::MAX)));
     }
+    {
+        let hub = hub.clone();
+        backend.set_automations_sink(Arc::new(move |state| hub.automations_changed(state)));
+    }
+    backend.set_event_source(hub.event_sink(Uuid::nil(), Uuid::nil()));
     let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
     let options = Arc::new(options);
     let active_connections = Arc::new(AtomicUsize::new(0));

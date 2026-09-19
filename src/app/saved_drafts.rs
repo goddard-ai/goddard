@@ -121,6 +121,8 @@ impl Waku {
     pub(super) fn show_drafts_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_page = None;
         self.projects_page = None;
+        self.automations_page = false;
+        self.automations_detail = None;
         self.selected_terminal = None;
         if self
             .sidebar_collapsed_groups

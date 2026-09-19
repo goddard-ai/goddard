@@ -1300,6 +1300,7 @@ impl Waku {
         let results = self.task_state_sync_tx.clone();
         let settings_updates = self.daemon_settings_tx.clone();
         let friends_updates = self.friends_tx.clone();
+        let automations_updates = self.automations_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
@@ -1314,15 +1315,26 @@ impl Waku {
                     let revisions = client.subscribe_task_state();
                     let settings = client.subscribe_settings();
                     let friends = client.subscribe_friends();
+                    let automations = client.subscribe_automations();
                     // Seed the document before broadcasts arrive — a client
                     // connecting after the last change sees no event until
                     // something mutates friends state again.
-                    if let Ok(waku_client::ResponsePayload::Friends { state }) = client.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::GetFriends,
-                    ) {
+                    if let Ok(waku_client::ResponsePayload::Friends { state }) =
+                        client.request(Uuid::nil(), Uuid::nil(), waku_client::Command::GetFriends)
+                    {
                         if friends_updates.send(state).is_err() {
+                            return;
+                        }
+                    }
+                    // Same seed-then-broadcast contract as friends: a client
+                    // connecting after the last change sees nothing until
+                    // the next write.
+                    if let Ok(waku_client::ResponsePayload::Automations { state }) = client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::GetAutomations,
+                    ) {
+                        if automations_updates.send((key, state)).is_err() {
                             return;
                         }
                     }
@@ -1384,6 +1396,18 @@ impl Waku {
                                     break replacement;
                                 };
                                 if friends_updates.send(state).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
+                            recv(automations) -> automations => {
+                                let Ok(state) = automations else {
+                                    let Ok(replacement) = clients.recv() else {
+                                        return;
+                                    };
+                                    break replacement;
+                                };
+                                if automations_updates.send((key, state)).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1475,6 +1499,20 @@ impl Waku {
         }
         cx.notify();
         true
+    }
+
+    /// Fold `automationsChanged` broadcasts into the per-daemon mirrors;
+    /// the newest document per daemon wins within one drain.
+    fn drain_automations_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok((key, state)) = self.automations_events.try_recv() {
+            self.automations.insert(key, state);
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     /// Fire a lazy presence probe at every known friend. The daemon no-ops
@@ -5157,6 +5195,7 @@ impl Waku {
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)
+            | self.drain_automations_events(cx)
             | self.drain_route_policy_events()
             | self.drain_status_marker_events()
         {
