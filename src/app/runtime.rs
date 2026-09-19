@@ -1487,6 +1487,33 @@ impl Waku {
                 self.state.unseen_completions.insert(session_id, unix_time());
             }
         }
+        // Fresh sync alerts surface as a toast even when Friends isn't
+        // open — a stopped rebase blocks sync until someone decides.
+        let old_alert_ids: std::collections::HashSet<String> = self
+            .friends_state
+            .sync_alerts
+            .iter()
+            .map(|alert| alert.id.clone())
+            .collect();
+        for alert in &state.sync_alerts {
+            if old_alert_ids.contains(alert.id.as_str()) {
+                continue;
+            }
+            match alert.kind {
+                waku_client::friends::SyncAlertKind::Conflict => {
+                    self.show_toast(tr!(
+                        "friends.sync_toast_conflict",
+                        branch = alert.branch.clone()
+                    ));
+                }
+                waku_client::friends::SyncAlertKind::RefusedDirtyWorktree => {
+                    self.show_toast(tr!(
+                        "friends.sync_toast_refused",
+                        branch = alert.branch.clone()
+                    ));
+                }
+            }
+        }
         // Mirror the display name into its editor — but only while the
         // field still shows the last broadcast value, so typing a new name
         // is never clobbered by an unrelated friends update.

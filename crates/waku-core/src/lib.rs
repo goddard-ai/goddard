@@ -103,6 +103,7 @@ pub mod shell_command;
 pub mod skills;
 mod slash_command_catalog;
 mod subagents;
+pub mod sync;
 pub mod terminal;
 pub mod theme;
 pub mod usage;

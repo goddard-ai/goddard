@@ -8,6 +8,7 @@ import type { ComposerDrafts } from "./ComposerDrafts";
 import type { CustomCommand } from "./CustomCommand";
 import type { DaemonSettings } from "./DaemonSettings";
 import type { EvalQuestion } from "./EvalQuestion";
+import type { FriendSyncAlertAction } from "./FriendSyncAlertAction";
 import type { GoalOperation } from "./GoalOperation";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { Project } from "./Project";
@@ -113,4 +114,4 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, };
+threadId?: string | null, provider?: ProviderKind | null, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, };

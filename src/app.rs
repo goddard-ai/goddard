@@ -2075,6 +2075,15 @@ pub struct Waku {
     friend_nickname_input: Entity<TextInput>,
     /// Node id of the friend whose nickname is being edited, if any.
     editing_friend_nickname: Option<String>,
+    /// Node id of the friend whose project-sharing panel is expanded in
+    /// Settings → Friends.
+    expanded_share_friend: Option<String>,
+    /// Branch lists fetched per sync link (`GetFriendSyncBranches`) —
+    /// link id → (local branches, default branch). Lazy; missing means
+    /// "not fetched yet" and the panel degrades to the enabled set.
+    sync_link_branches: HashMap<String, (Vec<String>, Option<String>)>,
+    /// Links whose branch fetch is in flight — dedupes the lazy query.
+    sync_branch_fetch_pending: HashSet<String>,
     /// Generation guard for the while-open presence re-probe loop — a new
     /// loop (or leaving the page) retires the previous one.
     friends_probe_generation: Cell<u64>,
@@ -4984,6 +4993,9 @@ impl Waku {
                 friend_name_input,
                 friend_nickname_input,
                 editing_friend_nickname: None,
+                expanded_share_friend: None,
+                sync_link_branches: HashMap::new(),
+                sync_branch_fetch_pending: HashSet::new(),
                 ui_font_selector,
                 code_font_selector,
                 daemon_port_input,
