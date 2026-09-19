@@ -2404,16 +2404,15 @@ impl WakuBackend {
                 ),
             }
         }
-        // Named subagents ride the launch with the runtime: the built-in
-        // explorer plus the configured tiers, priced from the cached rate
-        // table (disk only — a session start never waits on the network).
-        // Drivers without an injection channel simply ignore it. Still
-        // experimental — injected only when the opt-in is on.
+        // Named subagents ride the launch with the runtime: the fixed roster
+        // resolves its models through the route policy's tier table, so
+        // routing and subagents share one user-editable map. Drivers without
+        // an injection channel simply ignore it. Still experimental —
+        // injected only when the opt-in is on.
         if daemon_settings.subagents_enabled {
             options.subagents = Some(crate::subagents::spec_for(
                 provider,
-                &daemon_settings.subagent_tiers,
-                &crate::usage_history::load_cached_rate_table(&self.usage_rates_dir),
+                &self.route_policy.get(),
             ));
         }
         // Auto-mode permission review rides the same BYOK evaluation backend

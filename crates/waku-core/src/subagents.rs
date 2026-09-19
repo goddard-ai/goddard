@@ -3,21 +3,24 @@
 //! Goddard cannot dispatch subagents itself — every harness answers that
 //! differently — so this module owns only the shared parts: the `goddard-`
 //! naming convention (which doubles as the UI attribution key on
-//! `BackgroundWorkItem.role`), the default agent set, and the text that
+//! `BackgroundWorkItem.role`), the fixed agent roster, and the text that
 //! teaches a session's model when to delegate. Each driver turns the spec
 //! into its own launch-time mechanism: CLI flags for Claude, a config env
 //! for OpenCode, an extension file for Pi, a session instruction entry for
 //! the adopted OpenCode 2 service, and a thread-start hint for Codex.
+//!
+//! The roster is fixed — `goddard-explore` plus one agent per routing tier —
+//! and tier agents resolve their model (and optional effort) through the
+//! route policy's `tiers` table for the session's provider, so routing and
+//! subagents share one user-editable model map.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde_json::{Value, json};
 use waku_protocol::model::{ProviderKind, SubagentDef, SubagentSpec};
-use waku_protocol::settings::SubagentTier;
 
-use crate::usage_history::{RateTable, lookup_rate};
+use crate::route_policy::{RoutePolicy, Tier};
 
 /// Agent names carrying this prefix are Goddard-defined; the transcript's
 /// background-work rows attribute their runs to us with no extra plumbing.
@@ -43,12 +46,11 @@ fn default_explore() -> SubagentDef {
     }
 }
 
-/// The prompt/description baseline for a tier name, after the router's
-/// @fast/@medium/@heavy split. An unknown name still gets an agent — the
-/// user named it — with a generic delegation prompt.
-fn tier_baseline(name: &str) -> (String, String, bool) {
-    match name {
-        "fast" | "explore" => (
+/// The prompt/description baseline for each routing tier. The roster is
+/// fixed, so these are the only personalities an agent can carry.
+fn tier_baseline(tier: Tier) -> (String, String, bool) {
+    match tier {
+        Tier::Fast => (
             "Read-only lookups, search, and quick questions — the cheap pass \
              for anything answerable without edits."
                 .into(),
@@ -61,7 +63,7 @@ fn tier_baseline(name: &str) -> (String, String, bool) {
                 .into(),
             true,
         ),
-        "medium" | "implement" | "work" => (
+        Tier::Default => (
             "Focused implementation work: edits, refactoring, and tests. \
              Delegate bounded coding tasks here."
                 .into(),
@@ -73,7 +75,7 @@ fn tier_baseline(name: &str) -> (String, String, bool) {
                 .into(),
             false,
         ),
-        "heavy" | "deep" => (
+        Tier::Heavy => (
             "Deep analysis: architecture, debugging, and security review. \
              Reserve this for the hardest problems."
                 .into(),
@@ -84,100 +86,35 @@ fn tier_baseline(name: &str) -> (String, String, bool) {
                 .into(),
             false,
         ),
-        _ => (
-            "A specialized helper agent configured for this session.".into(),
-            "You are a specialist inside a coding session. Complete the task \
-             exactly as asked and return a concise summary. If the task \
-             exceeds your instructions, report back instead of expanding it."
-                .into(),
-            false,
-        ),
     }
 }
 
-fn tier_slug(name: &str) -> String {
-    name.trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect()
-}
-
-/// Relative cost labels baked into each description — "(~5× the cheapest
-/// helper's cost)" is the routing signal the session's model actually reads.
-/// Labels appear only when two or more agents carry a priced model.
-fn annotate_cost(agents: &mut [SubagentDef], rates: &RateTable) {
-    let blended = |agent: &SubagentDef| {
-        agent
-            .model
-            .as_deref()
-            .and_then(|model| lookup_rate(rates, model))
-            .map(|rate| rate.input + rate.output)
-    };
-    let priced = agents.iter().filter_map(blended).collect::<Vec<_>>();
-    if priced.len() < 2 {
-        return;
-    }
-    let cheapest = priced.iter().cloned().fold(f64::INFINITY, f64::min);
-    if cheapest <= 0.0 {
-        return;
-    }
-    for agent in agents.iter_mut() {
-        let Some(price) = blended(agent) else {
-            continue;
-        };
-        let label = if price / cheapest < 1.5 {
-            " (cheapest)".to_owned()
-        } else {
-            format!(
-                " (~{}× the cheapest helper's cost)",
-                (price / cheapest).round().max(2.0) as u32
-            )
-        };
-        agent.description.push_str(&label);
-    }
-}
-
-/// The agent set for one session launch: the built-in `goddard-explore` plus a
-/// `goddard-<tier>` agent per configured tier, each carrying the provider's
-/// configured model and effort. An `explore` tier customizes the built-in
-/// instead of adding a second explorer.
-pub(crate) fn spec_for(
-    provider: ProviderKind,
-    tiers: &BTreeMap<String, SubagentTier>,
-    rates: &RateTable,
-) -> SubagentSpec {
+/// The agent set for one session launch: the built-in `goddard-explore` plus
+/// `goddard-fast`, `goddard-default`, and `goddard-heavy`. Each tier agent
+/// resolves its model and effort through the route policy's `tiers` table
+/// for the session's provider; a tier the policy leaves unmapped keeps the
+/// provider's default model.
+pub(crate) fn spec_for(provider: ProviderKind, policy: &RoutePolicy) -> SubagentSpec {
     let mut agents = vec![default_explore()];
-    for (name, tier) in tiers {
-        let slug = tier_slug(name);
-        if slug.is_empty() {
-            continue;
-        }
-        let target = tier.providers.get(&provider);
-        if slug == "explore" {
-            if let Some(target) = target {
-                agents[0].model = target.model.clone();
-                agents[0].effort = target.effort.clone();
-            }
-            continue;
-        }
-        let (description, prompt, read_only) = tier_baseline(&slug);
+    for (tier, slug) in [
+        (Tier::Fast, "fast"),
+        (Tier::Default, "default"),
+        (Tier::Heavy, "heavy"),
+    ] {
+        let (description, prompt, read_only) = tier_baseline(tier);
+        let target = policy
+            .tiers
+            .get(&provider)
+            .and_then(|table| table.get(&tier));
         agents.push(SubagentDef {
             name: format!("{NAME_PREFIX}{slug}"),
             description,
             prompt,
             read_only,
-            model: target.and_then(|target| target.model.clone()),
-            effort: target.and_then(|target| target.effort.clone()),
+            model: target.map(|entry| entry.model.clone()),
+            effort: target.and_then(|entry| entry.effort.clone()),
         });
     }
-    annotate_cost(&mut agents, rates);
     SubagentSpec { agents }
 }
 
@@ -198,10 +135,10 @@ pub(crate) fn routing_hint(spec: &SubagentSpec) -> Option<String> {
         "This session can delegate focused, self-contained subtasks to helper \
          agents instead of doing everything inline:\n{agents}\nInvoke your \
          task/subagent tool with the agent's name; the helper's reply returns \
-         into this turn. Prefer the cheapest helper that can finish the task \
-         — a task the user tags `budget` favors the cheapest helper that \
-         fits, `quality` or `deep` prefers a deeper one. Trivial lookups you \
-         can answer in one or two tool calls are not worth delegating."
+         into this turn. Prefer the lightest tier that can finish the task \
+         — a task the user tags `budget` favors `goddard-fast`, `quality` or \
+         `deep` prefers `goddard-heavy`. Trivial lookups you can answer in \
+         one or two tool calls are not worth delegating."
     ))
 }
 
@@ -417,8 +354,7 @@ mod tests {
     fn default_agents_carry_the_attribution_prefix() {
         let spec = spec_for(
             ProviderKind::Claude,
-            &BTreeMap::new(),
-            &RateTable::unavailable(),
+            &crate::route_policy::shipped_default_policy(),
         );
         assert!(!spec.agents.is_empty());
         assert!(
@@ -432,8 +368,7 @@ mod tests {
     fn routing_hint_names_every_agent() {
         let spec = spec_for(
             ProviderKind::Claude,
-            &BTreeMap::new(),
-            &RateTable::unavailable(),
+            &crate::route_policy::shipped_default_policy(),
         );
         let hint = routing_hint(&spec).expect("a populated spec yields a hint");
         for agent in &spec.agents {
@@ -446,8 +381,7 @@ mod tests {
     fn claude_definitions_mark_read_only_agents() {
         let json = claude_agents_json(&spec_for(
             ProviderKind::Claude,
-            &BTreeMap::new(),
-            &RateTable::unavailable(),
+            &crate::route_policy::shipped_default_policy(),
         ))
         .expect("agents serialize");
         let value: Value = serde_json::from_str(&json).unwrap();
@@ -466,8 +400,7 @@ mod tests {
     fn opencode_definitions_are_subagent_mode_and_deny_writes() {
         let json = opencode_config_json(&spec_for(
             ProviderKind::Claude,
-            &BTreeMap::new(),
-            &RateTable::unavailable(),
+            &crate::route_policy::shipped_default_policy(),
         ))
         .expect("config serializes");
         let value: Value = serde_json::from_str(&json).unwrap();
@@ -477,84 +410,44 @@ mod tests {
     }
 
     #[test]
-    fn tiers_become_named_agents_with_provider_models() {
-        let mut tiers = BTreeMap::new();
-        let mut explore = SubagentTier::default();
-        explore.providers.insert(
-            ProviderKind::Claude,
-            waku_protocol::settings::SubagentTierTarget {
-                model: Some("claude-haiku-4-5".into()),
-                effort: Some("low".into()),
-            },
+    fn tier_agents_resolve_models_through_the_route_policy() {
+        let policy = crate::route_policy::parse_policy(
+            r#"{"version": 1,
+                "classes": {"routine": "tier:fast", "general": "tier:default", "demanding": "tier:heavy"},
+                "tiers": {"claude": {
+                    "fast": {"model": "claude-haiku-4-5", "effort": "low"},
+                    "heavy": "claude-opus-5"
+                }}}"#,
+        )
+        .unwrap();
+        let spec = spec_for(ProviderKind::Claude, &policy);
+        let names: Vec<&str> = spec
+            .agents
+            .iter()
+            .map(|agent| agent.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "goddard-explore",
+                "goddard-fast",
+                "goddard-default",
+                "goddard-heavy"
+            ]
         );
-        let mut heavy = SubagentTier::default();
-        heavy.providers.insert(
-            ProviderKind::Claude,
-            waku_protocol::settings::SubagentTierTarget {
-                model: Some("claude-opus-4-5".into()),
-                effort: None,
-            },
+        assert_eq!(spec.agents[1].model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(spec.agents[1].effort.as_deref(), Some("low"));
+        assert!(spec.agents[1].read_only);
+        assert_eq!(
+            spec.agents[2].model, None,
+            "an unmapped tier keeps the provider default"
         );
-        tiers.insert("Explore".into(), explore);
-        tiers.insert("heavy".into(), heavy);
+        assert_eq!(spec.agents[3].model.as_deref(), Some("claude-opus-5"));
+        assert!(!spec.agents[3].read_only);
 
-        let spec = spec_for(ProviderKind::Claude, &tiers, &RateTable::unavailable());
-        assert_eq!(spec.agents.len(), 2, "an explore tier customizes, not adds");
-        assert_eq!(spec.agents[0].model.as_deref(), Some("claude-haiku-4-5"));
-        assert_eq!(spec.agents[0].effort.as_deref(), Some("low"));
-        assert_eq!(spec.agents[1].name, "goddard-heavy");
-        assert_eq!(spec.agents[1].model.as_deref(), Some("claude-opus-4-5"));
-        assert!(!spec.agents[1].read_only);
-    }
-
-    #[test]
-    fn priced_models_get_relative_cost_labels() {
-        let mut agents = vec![
-            SubagentDef {
-                name: "goddard-fast".into(),
-                description: "cheap".into(),
-                prompt: String::new(),
-                read_only: false,
-                model: Some("claude-haiku-4-5".into()),
-                effort: None,
-            },
-            SubagentDef {
-                name: "goddard-heavy".into(),
-                description: "deep".into(),
-                prompt: String::new(),
-                read_only: false,
-                model: Some("claude-opus-4-5".into()),
-                effort: None,
-            },
-        ];
-        let mut rates = std::collections::HashMap::new();
-        rates.insert(
-            "claude-haiku-4-5".into(),
-            crate::usage_history::ModelRate {
-                input: 1.0,
-                output: 5.0,
-                cache_read: 0.1,
-                cache_creation: 1.25,
-            },
-        );
-        rates.insert(
-            "claude-opus-4-5".into(),
-            crate::usage_history::ModelRate {
-                input: 5.0,
-                output: 25.0,
-                cache_read: 0.5,
-                cache_creation: 6.25,
-            },
-        );
-        annotate_cost(
-            &mut agents,
-            &RateTable {
-                rates,
-                status: crate::usage_history::PricingStatus::Cached,
-            },
-        );
-        assert!(agents[0].description.ends_with("(cheapest)"));
-        assert!(agents[1].description.contains("~5×"));
+        // A provider with no tiers entry leaves every tier agent unmapped.
+        let codex = spec_for(ProviderKind::Codex, &policy);
+        assert!(codex.agents.iter().all(|agent| agent.model.is_none()));
     }
 
     #[test]

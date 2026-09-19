@@ -3,7 +3,6 @@ import type { ComputerAppGrant } from "./ComputerAppGrant";
 import type { CustomCommand } from "./CustomCommand";
 import type { EvalSettings } from "./EvalSettings";
 import type { ProviderKind } from "./ProviderKind";
-import type { SubagentTier } from "./SubagentTier";
 import type { JsonValue } from "./serde_json/JsonValue";
 
 export type DaemonSettings = { computer_use_enabled: boolean,
@@ -40,13 +39,6 @@ custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
  * toggling affects only sessions started afterwards.
  */
 subagents_enabled: boolean,
-/**
- * Named subagent tiers injected into every session's harness, keyed by
- * tier name ("explore", "fast", "medium", "heavy"). Empty → only the
- * built-in read-only `goddard-explore` agent is injected. Ignored while
- * `subagents_enabled` is off.
- */
-subagent_tiers?: { [key in string]: SubagentTier },
 /**
  * Experimental: prepend a token-budgeted structural map of the session's
  * workspace to the first prompt of every new session, so providers skip
