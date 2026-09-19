@@ -45,6 +45,8 @@ const ICONS: &[(&str, &[u8])] = icons![
     "copy",
     "corner-down-right",
     "cursor-spark",
+    "dock-archive",
+    "dock-keyboard",
     "download",
     "ellipsis",
     "eye",
@@ -159,6 +161,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/zig",
     "file-types/zip",
     "fork",
+    "friends",
     "gauge",
     "git-branch",
     "git-commit-horizontal",
@@ -175,6 +178,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "github",
     "hourglass",
     "hexagon",
+    "inbox",
     "info",
     "keyboard",
     "laptop",
@@ -225,6 +229,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "send",
     "server",
     "settings",
+    "settings-hexagon",
     "slash",
     "sparkle",
     "star",
@@ -244,6 +249,13 @@ const ICONS: &[(&str, &[u8])] = icons![
     "x",
     "zap",
 ];
+
+/// Raster art embedded the same way — anything `img()` loads that is not a
+/// monochrome icon.
+const IMAGES: &[(&str, &[u8])] = &[(
+    "images/dock-button-bkg.webp",
+    include_bytes!("../assets/images/dock-button-bkg.webp").as_slice(),
+)];
 
 const TEXT_FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
@@ -273,6 +285,7 @@ impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         Ok(ICONS
             .iter()
+            .chain(IMAGES)
             .find(|(name, _)| *name == path)
             .map(|(_, bytes)| Cow::Borrowed(*bytes)))
     }
@@ -280,6 +293,7 @@ impl AssetSource for Assets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         Ok(ICONS
             .iter()
+            .chain(IMAGES)
             .filter(|(name, _)| name.starts_with(path))
             .map(|(name, _)| SharedString::from(*name))
             .collect())

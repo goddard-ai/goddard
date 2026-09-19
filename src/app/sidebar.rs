@@ -1697,9 +1697,16 @@ impl Waku {
                     .size(px(44.0))
                     .rounded_full()
                     .bg(rgb(0xFFFFFF))
+                    .relative()
                     .flex()
                     .items_center()
                     .justify_center()
+                    .child(
+                        img("images/dock-button-bkg.webp")
+                            .absolute()
+                            .inset_0()
+                            .size_full(),
+                    )
                     .child(icon(path, 22.0, glyph)),
             )
             .focus_visible(|style| {
