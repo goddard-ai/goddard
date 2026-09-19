@@ -1342,6 +1342,27 @@ impl Waku {
             self.model_picker_offers_auto_route(),
             self.model_picker_granularity(),
         ));
+        // A rail button's jump clears the query before scrolling, so which
+        // sections exist is answered by the unfiltered list — not by what a
+        // live search happens to leave. A provider whose models are all
+        // filtered out of the merged list entirely (a locked session's other
+        // providers, or one whose combos all sit in favorites/recents) gets
+        // no rail button, and neither does a favorites or recents section
+        // with nothing to scroll to.
+        let section_rows = if searching {
+            Rc::new(visible_picker_rows(
+                &probes,
+                &favorites,
+                &recents,
+                &disabled_providers,
+                locked_provider,
+                "",
+                self.model_picker_offers_auto_route(),
+                self.model_picker_granularity(),
+            ))
+        } else {
+            available_rows.clone()
+        };
         let highlight = self
             .model_picker_highlight
             .filter(|index| *index < available_rows.len());
@@ -1352,12 +1373,16 @@ impl Waku {
             && self
                 .composer_session()
                 .is_some_and(|session| session.auto_route);
-        // The rail offers a favorites jump only when a combo is starred and a
-        // recents jump only when a session use was recorded — either list may
-        // hold entries the merged rows no longer draw, but the jump then just
-        // clears the filter without a scroll target.
-        let rail_favorites = !favorites.is_empty();
-        let rail_recents = !recents.is_empty();
+        // The rail offers a favorites or recents jump only when the merged
+        // list actually draws that section — a stored entry whose provider
+        // fell out of the picker (switched off, locked out, uninstalled)
+        // leaves nothing to scroll to.
+        let rail_favorites = section_rows
+            .iter()
+            .any(|row| picker_row_section(row) == ModelPickerSection::Favorites);
+        let rail_recents = section_rows
+            .iter()
+            .any(|row| picker_row_section(row) == ModelPickerSection::Recents);
 
         // The rail jumps rather than filters: a button drops the
         // query and brings its section's first row into view.
@@ -1416,6 +1441,15 @@ impl Waku {
         }
         for kind in ProviderKind::ALL {
             if !picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, kind) {
+                continue;
+            }
+            // No provider block in the merged list means no scroll
+            // target — a locked session's other providers land here,
+            // as does one whose combos are all favorites or recents.
+            if !section_rows
+                .iter()
+                .any(|row| picker_row_section(row) == ModelPickerSection::Provider(kind))
+            {
                 continue;
             }
             rail = rail.child(
