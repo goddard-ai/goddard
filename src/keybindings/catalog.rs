@@ -405,8 +405,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === input::init — Windows/Linux ========================================
     e("text.line_start", NotMacOS, "home", TextInput),
     e("text.line_end", NotMacOS, "end", TextInput),
-    e("text.select_to_start", NotMacOS, "shift-home", TextInput),
-    e("text.select_to_end", NotMacOS, "shift-end", TextInput),
+    e("text.select_line_start", NotMacOS, "shift-home", TextInput),
+    e("text.select_line_end", NotMacOS, "shift-end", TextInput),
     e("text.home", NotMacOS, "ctrl-home", TextInput),
     e("text.end", NotMacOS, "ctrl-end", TextInput),
     e("text.select_to_start", NotMacOS, "ctrl-shift-home", TextInput),

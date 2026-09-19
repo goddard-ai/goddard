@@ -313,21 +313,25 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 bound(tr!("shortcuts.line_end"), input::LineEnd, Some("TextInput")),
                 bound(tr!("shortcuts.doc_start"), input::Home, Some("TextInput")),
                 bound(tr!("shortcuts.doc_end"), input::End, Some("TextInput")),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.paragraph_back"),
                     input::ParagraphBackward,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.paragraph_forward"),
                     input::ParagraphForward,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.paragraph_start"),
                     input::ParagraphStart,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.paragraph_end"),
                     input::ParagraphEnd,
@@ -353,21 +357,25 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     input::DeleteToNextWord,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.delete_line_back"),
                     input::DeleteToLineStart,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.delete_line_forward"),
                     input::DeleteToLineEnd,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.kill_line_back"),
                     input::DeleteToParagraphStart,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.kill_line_forward"),
                     input::DeleteToParagraphEnd,
@@ -423,11 +431,13 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     input::SelectToEnd,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.select_paragraph_back"),
                     input::SelectParagraphBackward,
                     Some("TextInput"),
                 ),
+                #[cfg(target_os = "macos")]
                 bound(
                     tr!("shortcuts.select_paragraph_forward"),
                     input::SelectParagraphForward,
