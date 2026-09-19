@@ -261,6 +261,23 @@ pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<Str
         .map(|last_reply_at| format_time_ago(now.saturating_sub(last_reply_at)))
 }
 
+/// The session row's draft line: the unsent composer text left on the task,
+/// flattened to a single line so the row can carry as much of it as the
+/// width allows before truncating. `None` when the task holds no draft text
+/// — attachments and annotations alone draw no line.
+pub(super) fn sidebar_draft_preview(
+    drafts: &ComposerDrafts,
+    session: &AgentSession,
+) -> Option<SharedString> {
+    let preview = drafts
+        .get_for(session)?
+        .text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!preview.is_empty()).then(|| SharedString::from(preview))
+}
+
 /// Recency for sidebar ordering and date groups. A submitted turn promotes the
 /// task immediately, while metadata edits such as a rename do not; a task with
 /// no turns stays anchored to when it was created.
@@ -3823,10 +3840,12 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The two-line body a session row shares between the sidebar and a Big
-    /// Picture card header: title plus status/archive on top, project or
-    /// branch detail below. `grouped_by_project` swaps the detail line into
-    /// branch mode the way a project-grouped sidebar does.
+    /// The body a session row shares between the sidebar and a Big Picture
+    /// card header: title plus status/archive on top, project or branch
+    /// detail below, and — while the composer-drafts setting is on and the
+    /// task holds one — the draft's text on its own line in between.
+    /// `grouped_by_project` swaps the detail line into branch mode the way a
+    /// project-grouped sidebar does.
     pub(super) fn render_session_row_body(
         &self,
         session_id: Uuid,
@@ -3954,6 +3973,11 @@ impl Waku {
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
         };
+        let draft_preview = self
+            .state
+            .sidebar_composer_drafts
+            .then(|| sidebar_draft_preview(&self.composer_drafts, session))
+            .flatten();
         let pull_request_badge = self
             .sidebar_pull_requests
             .borrow()
@@ -4159,6 +4183,18 @@ impl Waku {
                     .child(pin_button)
                     .child(archive_button),
             )
+            .when_some(draft_preview, |element, preview| {
+                element.child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .line_height(sp(15.0))
+                        .text_color(theme.danger)
+                        .child(preview),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -4743,6 +4779,32 @@ mod tests {
             session_date_group_for_dates(tomorrow, today),
             SessionDateGroup::Today
         );
+    }
+
+    #[test]
+    fn draft_preview_flattens_the_composer_text_to_one_line() {
+        fn text_draft(text: &str) -> crate::persistence::ComposerDraft {
+            crate::persistence::ComposerDraft {
+                text: text.to_owned(),
+                attachments: Vec::new(),
+                annotations: Vec::new(),
+            }
+        }
+
+        let session = AgentSession::new(Uuid::from_u128(1), ProviderKind::Codex);
+        let key = crate::persistence::ComposerDraftKey::for_session(&session);
+        let mut drafts = ComposerDrafts::default();
+        assert_eq!(sidebar_draft_preview(&drafts, &session), None);
+
+        drafts.set(key, text_draft("  first line\n\tsecond   line  "));
+        assert_eq!(
+            sidebar_draft_preview(&drafts, &session),
+            Some(SharedString::from("first line second line"))
+        );
+
+        // Whitespace-only text still reads as no draft.
+        drafts.set(key, text_draft(" \n\t "));
+        assert_eq!(sidebar_draft_preview(&drafts, &session), None);
     }
 
     #[test]
