@@ -1466,7 +1466,14 @@ pub fn apply_theme_preference(
     );
     let mut theme = theme_for(settings, system_dark);
     let is_dark = theme.is_dark;
-    if !sidebar_transparent {
+    if sidebar_transparent && cfg!(target_os = "macos") {
+        // The sidebar fill is the slider's share of the wash; the native
+        // material underneath — glass on macOS 26, vibrancy below — shows
+        // through the rest. The square keeps the midrange glassy while 0
+        // still lands solid.
+        let cover = 1.0 - sidebar_transparency_amount.clamp(0.0, 1.0);
+        theme.sidebar = theme.sidebar_drag_background.opacity(cover * cover);
+    } else if !sidebar_transparent {
         // The vibrancy stack is switched off natively, so the sidebar needs
         // its own fill — the same solid it already uses while resizing.
         theme.sidebar = theme.sidebar_drag_background;
@@ -1477,7 +1484,6 @@ pub fn apply_theme_preference(
         theme.sidebar_drag_background,
         is_dark,
         sidebar_transparent,
-        sidebar_transparency_amount,
     );
     window.refresh();
 }

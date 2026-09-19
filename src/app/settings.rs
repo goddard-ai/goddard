@@ -8267,10 +8267,6 @@ impl Waku {
         self.state.sidebar_transparency
     }
 
-    pub(crate) fn sidebar_transparency_amount(&self) -> f32 {
-        self.state.sidebar_transparency_amount
-    }
-
     fn set_thick_borders(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.thick_borders == enabled {
             return;
