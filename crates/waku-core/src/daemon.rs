@@ -588,6 +588,10 @@ impl Backend for WakuBackend {
         self.automations.set_event_source(events);
     }
 
+    fn set_review_notifier(&self, notifier: crate::share::ReviewNotifier) {
+        self.share.set_review_notifier(notifier);
+    }
+
     fn handle(
         &self,
         request: Request,
@@ -1441,9 +1445,24 @@ impl Backend for WakuBackend {
                         | WorkspaceOperation::Push { .. }
                         | WorkspaceOperation::Land { .. }
                 );
+                let review_move = match &operation {
+                    WorkspaceOperation::ReviewApprove { cwd, .. } => {
+                        Some((cwd.clone(), ReviewMove::Approved))
+                    }
+                    WorkspaceOperation::ReviewReject { cwd, .. } => {
+                        Some((cwd.clone(), ReviewMove::Rejected))
+                    }
+                    WorkspaceOperation::ReviewPromote { cwd } => {
+                        Some((cwd.clone(), ReviewMove::Promoted))
+                    }
+                    _ => None,
+                };
                 let result = crate::workspace::execute(operation)?;
                 if kick {
                     self.share.note_repo_activity();
+                }
+                if let Some((cwd, review_move)) = review_move {
+                    self.notify_review_moved(&cwd, review_move, &result);
                 }
                 Ok(ResponsePayload::Workspace { result })
             }
@@ -1796,7 +1815,48 @@ fn preserve_daemon_checkpoints(existing: &AgentSession, incoming: &mut AgentSess
     }
 }
 
+/// Which review op moved shared state — decides which notices go out.
+enum ReviewMove {
+    Approved,
+    Rejected,
+    Promoted,
+}
+
 impl WakuBackend {
+    /// A review op moved `refs/notes/qa`, `qa`, or the base branch on a
+    /// shared origin — tell friends sharing it and bump review surfaces
+    /// locally. Best-effort: no notices go out without an `origin`.
+    fn notify_review_moved(&self, cwd: &Path, review_move: ReviewMove, result: &WorkspaceResult) {
+        let Ok(Some(origin_url)) = crate::git_branch::remote_url(cwd, "origin") else {
+            return;
+        };
+        match review_move {
+            ReviewMove::Approved => {
+                self.share
+                    .notify_refs(origin_url.clone(), vec![crate::review::NOTES_REF.to_owned()]);
+            }
+            ReviewMove::Rejected => {
+                self.share
+                    .notify_refs(origin_url.clone(), vec![crate::review::NOTES_REF.to_owned()]);
+                self.share
+                    .notify_push(origin_url.clone(), vec!["qa".to_owned()]);
+            }
+            ReviewMove::Promoted => {
+                let base = match result {
+                    WorkspaceResult::ReviewQueue { queue: Some(queue) } => {
+                        queue.base_branch.clone()
+                    }
+                    _ => None,
+                };
+                self.share.notify_push(
+                    origin_url.clone(),
+                    vec![base.unwrap_or_else(|| "main".to_owned())],
+                );
+            }
+        }
+        self.share.review_changed(origin_url);
+    }
+
     /// Fork a response using only daemon-host state.
     ///
     /// A browser must never reconstruct or persist this operation itself:

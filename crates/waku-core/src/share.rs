@@ -133,6 +133,12 @@ enum SyncJob {
         link_id: String,
         notify: bool,
     },
+    /// A friend's ref notice: fetch the moved refs into every checkout we
+    /// can resolve for this origin, then bump review surfaces.
+    RefNotice {
+        origin_url: String,
+        refs: Vec<String>,
+    },
     /// A friend's full shared set arrived — reconcile incoming shares
     /// and the links they fed.
     UpdateIncoming {
@@ -177,6 +183,11 @@ pub type TransferHook = Arc<dyn Fn(&TransferInfo) -> Option<Uuid> + Send + Sync>
 /// Fired when the share layer changed session/project state — the hub
 /// translates it into a `TaskStateChanged` bump for every client.
 pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
+
+/// Fired when `refs/notes/qa` (or a promoted base branch) moved for an
+/// origin — locally or on a friend's machine. The hub broadcasts a
+/// `ReviewChanged` with the origin URL so review surfaces re-read.
+pub type ReviewNotifier = Arc<dyn Fn(String) + Send + Sync>;
 
 enum ShareCommand {
     SendRequest {
@@ -245,6 +256,18 @@ enum ShareCommand {
     /// A workspace op landed commits or moved refs — poll promptly
     /// instead of waiting out the interval.
     KickPoll,
+    /// A workspace op pushed branches on a shared origin — send push
+    /// notices to every friend sharing it.
+    NotifyPush {
+        origin_url: String,
+        branches: Vec<String>,
+    },
+    /// A workspace op moved non-branch refs on a shared origin — send
+    /// ref notices to every friend sharing it.
+    NotifyRefs {
+        origin_url: String,
+        refs: Vec<String>,
+    },
     Shutdown,
 }
 
@@ -268,6 +291,7 @@ struct ShareInner {
     outgoing_tags: HashMap<Uuid, TempTag>,
     transfer_hook: Option<TransferHook>,
     task_notifier: Option<TaskNotifier>,
+    review_notifier: Option<ReviewNotifier>,
     friend_code: String,
 }
 
@@ -433,6 +457,7 @@ impl ShareService {
                 outgoing_tags: HashMap::new(),
                 transfer_hook: None,
                 task_notifier: None,
+                review_notifier: None,
                 friend_code: String::new(),
             })),
             sink: Arc::new(Mutex::new(None)),
@@ -453,6 +478,11 @@ impl ShareService {
     /// Where the server installs the `TaskStateChanged` bump.
     pub fn set_task_notifier(&self, notifier: TaskNotifier) {
         self.state.lock().task_notifier = Some(notifier);
+    }
+
+    /// Where the server installs the `ReviewChanged` broadcast.
+    pub fn set_review_notifier(&self, notifier: ReviewNotifier) {
+        self.state.lock().review_notifier = Some(notifier);
     }
 
     /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required,
@@ -718,11 +748,63 @@ impl ShareService {
         }
     }
 
+    /// A workspace op pushed `branches` on a shared origin — tell every
+    /// friend sharing it. No-op until the endpoint is running; offline
+    /// peers catch up on their next fetch.
+    pub fn notify_push(&self, origin_url: String, branches: Vec<String>) {
+        if let Some(tx) = self.cmd.lock().as_ref() {
+            let _ = tx.send(ShareCommand::NotifyPush {
+                origin_url,
+                branches,
+            });
+        }
+    }
+
+    /// A workspace op moved `refs` on a shared origin — tell every friend
+    /// sharing it. Same laziness as `notify_push`.
+    pub fn notify_refs(&self, origin_url: String, refs: Vec<String>) {
+        if let Some(tx) = self.cmd.lock().as_ref() {
+            let _ = tx.send(ShareCommand::NotifyRefs { origin_url, refs });
+        }
+    }
+
+    /// A local review action moved state — bump review surfaces through
+    /// the installed notifier.
+    pub fn review_changed(&self, origin_url: String) {
+        if let Some(notifier) = self.state.lock().review_notifier.clone() {
+            notifier(origin_url);
+        }
+    }
+
     pub fn shutdown(&self) {
         if let Some(tx) = self.cmd.lock().take() {
             let _ = tx.send(ShareCommand::Shutdown);
         }
     }
+}
+
+/// Friends who share `origin_url` — through a sync link or a project
+/// share either direction. Notices go to all of them: a reviewer who
+/// never enabled sync still wants their queue fresh.
+fn peers_for_origin(store: &ShareStore, origin_url: &str) -> Vec<EndpointId> {
+    let key = normalize_origin(origin_url);
+    let mut peers = std::collections::BTreeSet::new();
+    for link in &store.links {
+        if normalize_origin(&link.origin_url) == key {
+            peers.insert(link.peer);
+        }
+    }
+    for share in &store.incoming {
+        if normalize_origin(&share.origin_url) == key {
+            peers.insert(share.peer);
+        }
+    }
+    for share in &store.outgoing {
+        if normalize_origin(&share.origin_url) == key {
+            peers.insert(share.peer);
+        }
+    }
+    peers.into_iter().collect()
 }
 
 /// Publish the current snapshot to every subscriber.
@@ -1583,6 +1665,36 @@ impl SyncWorker {
                 SyncJob::TearDownLink { link_id, notify } => {
                     self.tear_down_link(&link_id, notify);
                 }
+                SyncJob::RefNotice { origin_url, refs } => {
+                    // Fetch moved refs into every checkout we can resolve
+                    // for this origin — sync links and matched incoming
+                    // shares — then bump review surfaces. An open Review
+                    // tab re-reads its queue; no checkout resolved means
+                    // the bump is all that happens.
+                    let key = normalize_origin(&origin_url);
+                    let paths: Vec<PathBuf> = {
+                        let store = self.share_store.lock();
+                        store
+                            .links
+                            .iter()
+                            .filter(|l| normalize_origin(&l.origin_url) == key)
+                            .map(|l| l.repo_path.clone())
+                            .chain(
+                                store
+                                    .incoming
+                                    .iter()
+                                    .filter(|s| normalize_origin(&s.origin_url) == key)
+                                    .filter_map(|s| s.matched_path.clone()),
+                            )
+                            .collect()
+                    };
+                    for path in paths {
+                        crate::review::fetch_refs(&path, &refs);
+                    }
+                    if let Some(notifier) = self.state.lock().review_notifier.clone() {
+                        notifier(origin_url);
+                    }
+                }
                 SyncJob::UpdateIncoming { peer, projects } => {
                     self.update_incoming(peer, projects);
                 }
@@ -1906,6 +2018,15 @@ fn run_runtime(
                     if let Some(link_id) = link_id {
                         let _ = job_tx.send(SyncJob::Integrate { link_id, branches });
                     }
+                })
+            },
+            // on_refs: non-branch refs moved on a shared origin — the
+            // worker fetches them into repos it can resolve, then bumps
+            // review surfaces.
+            {
+                let job_tx = job_tx.clone();
+                Arc::new(move |_peer: EndpointId, origin_url: String, refs: Vec<String>| {
+                    let _ = job_tx.send(SyncJob::RefNotice { origin_url, refs });
                 })
             },
         );
@@ -2452,6 +2573,42 @@ fn run_runtime(
                 }
                 ShareCommand::KickPoll => {
                     let _ = job_tx.send(SyncJob::Poll);
+                }
+                ShareCommand::NotifyPush {
+                    origin_url,
+                    branches,
+                } => {
+                    for peer in
+                        peers_for_origin(&state.lock().share_store.lock(), &origin_url)
+                    {
+                        let endpoint = share_node.endpoint().clone();
+                        let origin_url = origin_url.clone();
+                        let branches = branches.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) =
+                                friends::send_push_notice(&endpoint, peer, &origin_url, &branches)
+                                    .await
+                            {
+                                eprintln!("share: push notice to {peer} failed: {error:#}");
+                            }
+                        });
+                    }
+                }
+                ShareCommand::NotifyRefs { origin_url, refs } => {
+                    for peer in
+                        peers_for_origin(&state.lock().share_store.lock(), &origin_url)
+                    {
+                        let endpoint = share_node.endpoint().clone();
+                        let origin_url = origin_url.clone();
+                        let refs = refs.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) =
+                                friends::send_ref_notice(&endpoint, peer, &origin_url, &refs).await
+                            {
+                                eprintln!("share: ref notice to {peer} failed: {error:#}");
+                            }
+                        });
+                    }
                 }
             }
         }

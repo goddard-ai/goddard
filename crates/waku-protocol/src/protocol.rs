@@ -734,6 +734,10 @@ pub enum ServerMessage {
     AutomationsChanged {
         state: AutomationsState,
     },
+    /// `refs/notes/qa` (or a promoted base branch) moved for this `origin`
+    /// — here or on a friend's machine. Review surfaces for a project
+    /// with that remote should re-read their queue.
+    ReviewChanged { origin_url: String },
     ShuttingDown,
 }
 

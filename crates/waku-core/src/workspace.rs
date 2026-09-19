@@ -296,6 +296,18 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::CommitEntry { cwd, sha } => WorkspaceResult::CommitEntry {
             entry: crate::git_panel::commit(&cwd, &sha)?,
         },
+        WorkspaceOperation::ReviewQueue { cwd } => WorkspaceResult::ReviewQueue {
+            queue: crate::review::queue(&cwd)?,
+        },
+        WorkspaceOperation::ReviewApprove { cwd, sha } => WorkspaceResult::ReviewQueue {
+            queue: crate::review::approve(&cwd, &sha)?,
+        },
+        WorkspaceOperation::ReviewReject { cwd, sha } => WorkspaceResult::ReviewQueue {
+            queue: crate::review::reject(&cwd, &sha)?,
+        },
+        WorkspaceOperation::ReviewPromote { cwd } => WorkspaceResult::ReviewQueue {
+            queue: crate::review::promote(&cwd)?,
+        },
         WorkspaceOperation::CaptureTurnStart {
             cwd,
             session_id,
