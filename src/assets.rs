@@ -219,6 +219,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "provider-opencode2-badge",
     "provider-pi",
     "provider-typesafe",
+    "provider-typesafe-padded",
     "projects",
     "queue",
     "regex",
