@@ -932,10 +932,6 @@ settings.markdown_preview:
   en: Preview Markdown files
 settings.markdown_preview_description:
   en: Open Markdown files as a rendered preview instead of source
-settings.open_at_last_prompt:
-  en: Open finished tasks at the last prompt
-settings.open_at_last_prompt_description:
-  en: Start reading at your latest message instead of the end of the transcript
 settings.archive_navigation:
   en: After archiving a task
 settings.archive_navigation_description:

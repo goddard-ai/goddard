@@ -24,7 +24,7 @@ use super::{
     previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
     response_footer_message_index, response_row_turn_id, retain_fading_working_indicator,
     row_starts_followup_turn, session_accepts_turn_output, session_is_reapable,
-    session_opens_at_last_prompt, settle_stream_segment, should_refresh_branch_after_activity,
+    settle_stream_segment, should_refresh_branch_after_activity,
     should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
     task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
     transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
@@ -1339,24 +1339,6 @@ fn pending_expansion_reasserts_the_user_message_anchor() {
         true,
         gpui::Pixels::ZERO,
     ));
-}
-
-#[test]
-fn open_landing_applies_only_when_no_turn_can_still_grow() {
-    for status in [
-        SessionStatus::Idle,
-        SessionStatus::Waiting,
-        SessionStatus::Failed,
-    ] {
-        assert!(session_opens_at_last_prompt(status), "{status:?}");
-    }
-    for status in [
-        SessionStatus::Connecting,
-        SessionStatus::Working,
-        SessionStatus::Background,
-    ] {
-        assert!(!session_opens_at_last_prompt(status), "{status:?}");
-    }
 }
 
 #[test]

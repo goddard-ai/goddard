@@ -330,8 +330,6 @@ settings.show_response_token_speed: 显示回复的令牌速度
 settings.show_response_token_speed_description: 在每条回复的页脚中显示估算的每秒令牌数
 settings.markdown_preview: 预览 Markdown 文件
 settings.markdown_preview_description: 以渲染后的预览而非源码形式打开 Markdown 文件
-settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提问
-settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
 settings.archive_navigation: 归档任务后
 settings.archive_navigation_description: 选择归档正在查看的任务后跳转的位置
 settings.archive_navigation_next_unread: 前往下一个未读完成

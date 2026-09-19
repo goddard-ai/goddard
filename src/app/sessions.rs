@@ -263,7 +263,7 @@ impl Waku {
                 let _ = self.session_navigation.go_forward(from);
             }
         }
-        self.activate_session(session_id, transition, cx);
+        self.activate_session(session_id, cx);
     }
 
     /// Loads a session's transcript if startup only fetched its list columns.
@@ -325,10 +325,16 @@ impl Waku {
                             waku.reset_visible_state();
                             waku.reset_transcript_rows(waku.transcript_row_count());
                             if !waku.transcript_is_scrolled.get() {
-                                waku.apply_transcript_landing(
-                                    SessionActivationTransition::Visit,
-                                    cx,
+                                // The original activation already consumed
+                                // the attention state; its chosen landing
+                                // still says whether this session wanted the
+                                // last turn over the restored position.
+                                let attention = matches!(
+                                    waku.transcript_landing,
+                                    Some((id, TranscriptLanding::LastTurn))
+                                        if id == session_id
                                 );
+                                waku.apply_transcript_landing(attention, cx);
                             }
                             waku.refresh_composer_sources(cx);
                         }
@@ -349,12 +355,7 @@ impl Waku {
         .detach();
     }
 
-    fn activate_session(
-        &mut self,
-        session_id: Uuid,
-        transition: SessionActivationTransition,
-        cx: &mut Context<Self>,
-    ) {
+    fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
             self.capture_and_save_current_composer_draft(cx);
@@ -374,6 +375,16 @@ impl Waku {
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
         self.selected_terminal = None;
+        // Selection clears the unseen stamp, so read the attention state —
+        // an unread completion or a turn waiting on the reader — first:
+        // it decides whether the transcript opens on the last turn instead
+        // of the position the reader left it at.
+        let attention = self.state.unseen_completions.contains_key(&session_id)
+            || self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && session.status == SessionStatus::Waiting);
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
@@ -444,7 +455,7 @@ impl Waku {
         }
         self.refresh_composer_sources(cx);
         self.reset_transcript_rows(self.transcript_row_count());
-        self.apply_transcript_landing(transition, cx);
+        self.apply_transcript_landing(attention, cx);
         self.save();
         if let Some(session) = self.selected_session()
             && session.has_started()
@@ -594,7 +605,6 @@ impl Waku {
             .filter(|(id, _)| task_exists(id))
             .map(|(id, offset)| (*id, list_offset_from_persisted(*offset)))
             .collect();
-        self.startup_scroll_restores = self.transcript_scroll_positions.keys().copied().collect();
         self.pending_sidebar_scroll
             .set(self.state.sidebar_scroll.map(list_offset_from_persisted));
         self.right_panel_session_states = self
@@ -765,7 +775,7 @@ impl Waku {
                 self.state.push_session(session);
                 id
             });
-        self.activate_session(draft_id, SessionActivationTransition::Visit, cx);
+        self.activate_session(draft_id, cx);
         // A draft typed against the page's previous project follows the
         // switch into the new project's empty slot — the composer's project
         // picker hands text off the same way.

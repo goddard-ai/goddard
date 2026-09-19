@@ -326,8 +326,6 @@ settings.show_response_token_speed: 応答のトークン速度を表示
 settings.show_response_token_speed_description: 各応答のフッターに推定トークン/秒を表示します
 settings.markdown_preview: Markdown ファイルをプレビュー
 settings.markdown_preview_description: Markdown ファイルをソースではなくレンダリング済みのプレビューで開きます
-settings.open_at_last_prompt: 終了したタスクを最後のプロンプトから開く
-settings.open_at_last_prompt_description: トランスクリプトの末尾ではなく、最後のメッセージから読み始めます
 settings.archive_navigation: タスクをアーカイブした後
 settings.archive_navigation_description: 表示中のタスクをアーカイブしたときの移動先を選びます
 settings.archive_navigation_next_unread: 次の未読の完了へ移動

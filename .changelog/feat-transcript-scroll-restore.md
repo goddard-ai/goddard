@@ -1,0 +1,1 @@
+- Selecting a task now reopens its transcript at the scroll position you left it at instead of jumping to the last prompt; tasks with unread completions or a pending question still open on their last turn.

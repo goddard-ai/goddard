@@ -264,49 +264,32 @@ impl Waku {
 
     /// Park the transcript where a session activation should land. Runs after
     /// `reset_transcript_rows`, which leaves the bottom-aligned list on its
-    /// tail.
-    pub(super) fn apply_transcript_landing(
-        &mut self,
-        transition: SessionActivationTransition,
-        cx: &mut Context<Self>,
-    ) {
+    /// tail. `attention` says the session held unseen state when it was
+    /// selected — an unread completion or a turn waiting on the reader —
+    /// which is the only reason to override the position the reader left it
+    /// at.
+    pub(super) fn apply_transcript_landing(&mut self, attention: bool, cx: &mut Context<Self>) {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
-        let landing = match transition {
-            SessionActivationTransition::Back { .. }
-            | SessionActivationTransition::Forward { .. } => self
-                .transcript_scroll_positions
-                .get(&session_id)
-                .copied()
-                .map(TranscriptLanding::Position),
-            // A position restored from disk claims only the first visit after
-            // launch; later plain visits land at the last prompt like usual.
-            SessionActivationTransition::Visit => self
-                .startup_scroll_restores
-                .remove(&session_id)
-                .then(|| self.transcript_scroll_positions.get(&session_id).copied())
-                .flatten()
-                .map(TranscriptLanding::Position),
-        }
-        .or_else(|| self.session_open_landing(session_id));
+        let saved = self
+            .transcript_scroll_positions
+            .get(&session_id)
+            .copied()
+            .map(TranscriptLanding::Position);
+        let landing = if attention {
+            // Open on the last turn so the new work — or the pending
+            // question — is what's on screen.
+            (!self.navigation_turns().is_empty())
+                .then_some(TranscriptLanding::LastTurn)
+                .or(saved)
+        } else {
+            saved
+        };
         self.transcript_landing = landing.map(|landing| (session_id, landing));
         if let Some(landing) = landing {
             self.scroll_to_transcript_landing(landing, cx);
         }
-    }
-
-    /// The default landing for a fresh activation: the top of the last turn,
-    /// but only while no turn can still grow under the reader.
-    fn session_open_landing(&self, session_id: Uuid) -> Option<TranscriptLanding> {
-        if !self.state.open_at_last_prompt {
-            return None;
-        }
-        let session = self.selected_session()?;
-        if session.id != session_id || !session_opens_at_last_prompt(session.status) {
-            return None;
-        }
-        (!self.navigation_turns().is_empty()).then_some(TranscriptLanding::LastTurn)
     }
 
     /// Re-apply the landing activation chose after a late runtime attach or
@@ -595,17 +578,6 @@ pub(super) struct TranscriptNavigationTurn {
     pub row_index: usize,
     pub prompt: String,
     pub response: String,
-}
-
-/// A session opens on its last prompt only while no turn can still grow
-/// under the reader: waiting on input counts — the question is part of the
-/// turn the prompt opens onto — while a parked background turn keeps
-/// streaming on wake.
-pub(super) fn session_opens_at_last_prompt(status: SessionStatus) -> bool {
-    matches!(
-        status,
-        SessionStatus::Idle | SessionStatus::Waiting | SessionStatus::Failed
-    )
 }
 
 pub(super) fn transcript_navigation_turns(
