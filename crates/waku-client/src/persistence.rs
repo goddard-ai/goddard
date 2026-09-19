@@ -1227,10 +1227,6 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
     pub subagents_enabled: bool,
-    /// Named subagent tiers injected into every session's harness. Daemon-
-    /// owned; mirrored here so clients can render what will be injected.
-    #[serde(default)]
-    pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
     /// Experimental: whether the daemon maintains project memory. Daemon-
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -1364,7 +1360,6 @@ impl PersistedState {
             agent_tools_enabled: false,
             agent_settings_enabled: true,
             subagents_enabled: default_experiment_enabled(),
-            subagent_tiers: BTreeMap::new(),
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
             eval: None,
@@ -1562,7 +1557,6 @@ impl PersistedState {
             agent_tools_enabled: self.agent_tools_enabled,
             agent_settings_enabled: self.agent_settings_enabled,
             subagents_enabled: self.subagents_enabled,
-            subagent_tiers: self.subagent_tiers.clone(),
             memory_experiment_enabled: self.memory_experiment_enabled,
             project_map_enabled: self.project_map_enabled,
             custom_commands: self.custom_commands.clone(),
@@ -1584,7 +1578,6 @@ impl PersistedState {
         self.agent_tools_enabled = settings.agent_tools_enabled;
         self.agent_settings_enabled = settings.agent_settings_enabled;
         self.subagents_enabled = settings.subagents_enabled;
-        self.subagent_tiers = settings.subagent_tiers;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.project_map_enabled = settings.project_map_enabled;
         self.custom_commands = settings.custom_commands;
