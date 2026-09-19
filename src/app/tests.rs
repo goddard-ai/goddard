@@ -1,6 +1,6 @@
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, pasted_text_preview, prompt_with_pasted_blocks,
+    next_picker_highlight, pasted_text_preview, splice_pasted_blocks,
     supports_reasoning_default_reset, visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
@@ -478,22 +478,26 @@ fn pasted_text_preview_caps_at_two_hundred_characters() {
 }
 
 #[test]
-fn collapsed_paste_blocks_follow_the_typed_text_in_order() {
+fn collapsed_paste_blocks_splice_back_at_their_markers() {
+    use crate::input::FOLDED_PASTE_MARKER as M;
     let blocks = vec!["first\nblock".to_owned(), " second\nblock ".to_owned()];
+    // Each marker splices to its block in marker order, wherever it sits.
+    let content = format!("fix this\n{M}\nand\n{M}\nthen");
     assert_eq!(
-        prompt_with_pasted_blocks("fix this", &blocks),
-        "fix this\n\nfirst\nblock\n\nsecond\nblock"
+        splice_pasted_blocks(&content, &blocks),
+        "fix this\nfirst\nblock\nand\nsecond\nblock\nthen"
     );
-    // A blocks-only draft still sends; a blank block contributes nothing.
+    // A marker without a block splices to nothing; a block without a
+    // marker folds onto the end, split off by a blank line.
     assert_eq!(
-        prompt_with_pasted_blocks("  ", &blocks),
-        "first\nblock\n\nsecond\nblock"
-    );
-    assert_eq!(prompt_with_pasted_blocks("fix this", &[]), "fix this");
-    assert_eq!(
-        prompt_with_pasted_blocks("fix this", &["  ".to_owned()]),
+        splice_pasted_blocks(&format!("fix this\n{M}"), &["  ".to_owned()]),
         "fix this"
     );
+    assert_eq!(
+        splice_pasted_blocks("fix this", &blocks),
+        "fix this\n\nfirst\nblock\n\nsecond\nblock"
+    );
+    assert_eq!(splice_pasted_blocks("fix this", &[]), "fix this");
 }
 
 #[test]

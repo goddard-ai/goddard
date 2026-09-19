@@ -21,6 +21,20 @@ const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
 /// How much of a paste its chip's hover preview shows.
 const PASTED_TEXT_PREVIEW_CHARS: usize = 200;
 
+/// The composer's `padding_x` — where the field's text, and so a marker
+/// chip's `left`, starts inside the card.
+const COMPOSER_TEXT_INSET: f32 = 14.0;
+
+/// A collapsed paste block folded into the composer. The text itself lives
+/// here; `marker` is the byte offset of its [`FOLDED_PASTE_MARKER`] stand-in
+/// in the field's content, which the chip overlay anchors to and every
+/// [`ComposerSplice`] remaps. Blocks stay ordered by marker offset — the
+/// order the markers appear in the text.
+pub(super) struct ComposerPastedBlock {
+    pub text: String,
+    pub marker: usize,
+}
+
 const COMPUTER_USE_PREVIEW_WIDTH: f32 = 304.0;
 const COMPUTER_USE_PREVIEW_HEIGHT: f32 = 172.0;
 const COMPUTER_USE_PREVIEW_RADIUS: f32 = 15.0;
@@ -3185,11 +3199,17 @@ impl Waku {
     /// A text paste the field refused to splice. Past
     /// [`PASTED_TEXT_FILE_BYTES`] the text takes the same durable route as a
     /// pasted image — a `.txt` blob that submits as an ordinary file
-    /// attachment; under it the paste becomes a collapsible block that still
-    /// joins the submission verbatim.
+    /// attachment; under it the paste folds into the field as a marker chip
+    /// at the caret, and still joins the submission verbatim.
     pub(super) fn stage_pasted_text(&mut self, text: String, cx: &mut Context<Self>) {
         if text.len() <= PASTED_TEXT_FILE_BYTES {
-            self.composer_pasted_blocks.push(text);
+            let marker = self
+                .composer
+                .update(cx, |composer, cx| composer.insert_paste_marker(cx));
+            self.composer_pasted_blocks
+                .push(ComposerPastedBlock { text, marker });
+            self.composer_pasted_blocks
+                .sort_by_key(|block| block.marker);
             self.schedule_composer_draft_save(cx);
             cx.notify();
             return;
@@ -3251,27 +3271,103 @@ impl Waku {
         .detach();
     }
 
-    /// Splice a collapsed paste back into the field at the caret, as though
-    /// it had never left. The chip is consumed.
+    /// Splice a collapsed paste back into the field in place of its marker,
+    /// as though it had never folded. The chip is consumed.
     fn expand_pasted_block(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if index >= self.composer_pasted_blocks.len() {
             return;
         }
-        let text = self.composer_pasted_blocks.remove(index);
+        let block = self.composer_pasted_blocks.remove(index);
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
-        self.composer
-            .update(cx, |composer, cx| composer.insert_text(&text, cx));
+        self.composer.update(cx, |composer, cx| {
+            composer.replace_range(
+                block.marker..block.marker + FOLDED_PASTE_MARKER.len_utf8(),
+                &block.text,
+                cx,
+            );
+        });
         self.schedule_composer_draft_save(cx);
         cx.notify();
     }
 
     fn remove_pasted_block(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.composer_pasted_blocks.len() {
-            self.composer_pasted_blocks.remove(index);
-            self.schedule_composer_draft_save(cx);
-            cx.notify();
+        if index >= self.composer_pasted_blocks.len() {
+            return;
         }
+        let block = self.composer_pasted_blocks.remove(index);
+        // Take the line break that set the marker apart — preferring the
+        // trailing one — so removing the chip doesn't leave a blank line.
+        let content = self.composer.read(cx).content(cx);
+        let mut range = block.marker..block.marker + FOLDED_PASTE_MARKER.len_utf8();
+        if content[range.end..].starts_with('\n') {
+            range.end += 1;
+        } else if content[..range.start].ends_with('\n') {
+            range.start -= 1;
+        }
+        self.composer
+            .update(cx, |composer, cx| composer.replace_range(range, "", cx));
+        self.schedule_composer_draft_save(cx);
+        cx.notify();
+    }
+
+    /// Re-anchor each block's marker after a field splice: markers before the
+    /// removed range keep their place, markers after it shift, and markers
+    /// inside it rebind to markers the inserted text brought — a
+    /// whole-content undo step carries them across — while the rest lose
+    /// their block. The vec then re-zips to the content's marker positions
+    /// so block order always matches marker order.
+    pub(super) fn remap_pasted_blocks(&mut self, splice: &ComposerSplice, cx: &App) {
+        if self.composer_pasted_blocks.is_empty() {
+            return;
+        }
+        let removed = &splice.0.removed;
+        let inserted_end = removed.start + splice.0.inserted;
+        let markers: Vec<usize> = self
+            .composer
+            .read(cx)
+            .content(cx)
+            .match_indices(FOLDED_PASTE_MARKER)
+            .map(|(index, _)| index)
+            .collect();
+        let rebound = markers
+            .iter()
+            .filter(|position| **position >= removed.start && **position < inserted_end)
+            .count();
+        let mut prefix = Vec::new();
+        let mut dropped = Vec::new();
+        let mut suffix = Vec::new();
+        for block in std::mem::take(&mut self.composer_pasted_blocks) {
+            if block.marker < removed.start {
+                prefix.push(block);
+            } else if block.marker >= removed.end {
+                suffix.push(block);
+            } else {
+                dropped.push(block);
+            }
+        }
+        let mut positions = markers.iter().copied();
+        let mut blocks = Vec::with_capacity(prefix.len() + suffix.len() + rebound);
+        for mut block in prefix {
+            if let Some(position) = positions.next() {
+                block.marker = position;
+                blocks.push(block);
+            }
+        }
+        let mut dropped = dropped.into_iter();
+        for position in positions.by_ref().take(rebound) {
+            if let Some(mut block) = dropped.next() {
+                block.marker = position;
+                blocks.push(block);
+            }
+        }
+        for mut block in suffix {
+            if let Some(position) = positions.next() {
+                block.marker = position;
+                blocks.push(block);
+            }
+        }
+        self.composer_pasted_blocks = blocks;
     }
 
     /// The text and attachment presentation accepted from the composer. The
@@ -3307,10 +3403,13 @@ impl Waku {
             .drain(..)
             .map(MessageAttachment::from)
             .collect::<Vec<_>>();
-        let pasted_blocks = std::mem::take(&mut self.composer_pasted_blocks);
-        // Typed text leads; collapsed paste blocks follow in paste order,
-        // ahead of the attachment tokens `merged_submission` still trails.
-        let body = prompt_with_pasted_blocks(prompt, &pasted_blocks);
+        let pasted_blocks: Vec<String> = std::mem::take(&mut self.composer_pasted_blocks)
+            .into_iter()
+            .map(|block| block.text)
+            .collect();
+        // Markers splice back to their blocks in place, then the attachment
+        // tokens `merged_submission` still trails.
+        let body = splice_pasted_blocks(prompt, &pasted_blocks);
         let annotations = self.drain_annotations();
         let submission = match merged_submission(&body, &attachments) {
             Some(body) => {
@@ -3338,7 +3437,8 @@ impl Waku {
         // quote and comment above the typed text, while titles and a restored
         // draft keep the user's own words — the comments when nothing was
         // typed.
-        let typed = prompt.trim();
+        let typed_content = text_without_paste_markers(prompt);
+        let typed = typed_content.trim();
         let human_content = (!annotations.is_empty() || !pasted_blocks.is_empty()).then(|| {
             if typed.is_empty() {
                 annotation_display_content(&annotations)
@@ -3606,7 +3706,7 @@ impl Waku {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
-        self.composer_pasted_blocks = submission.pasted_blocks;
+        let pasted_blocks = submission.pasted_blocks;
         if !submission.annotations.is_empty() {
             // The drain consumed the highlights; hand them back so the
             // restored draft still carries its comments — file annotations
@@ -3642,30 +3742,50 @@ impl Waku {
             .unwrap_or(submission.prompt);
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
+        // A restored draft's blocks fold back in as marker chips, appended
+        // after the typed text rather than at their original positions.
+        for text in pasted_blocks {
+            let marker = self
+                .composer
+                .update(cx, |composer, cx| composer.insert_paste_marker(cx));
+            self.composer_pasted_blocks
+                .push(ComposerPastedBlock { text, marker });
+        }
         self.schedule_composer_draft_save(cx);
         cx.notify();
     }
 
-    /// Collapsed paste blocks above the input: one compact "Pasted text" chip
-    /// per block — hovering shows the paste's leading characters, activating
-    /// splices it back into the field at the caret.
-    pub(super) fn render_pasted_blocks(&self, cx: &mut Context<Self>) -> Div {
+    /// Collapsed paste blocks folded into the input: one compact "Pasted
+    /// text" chip per marker, overlaid on the marker's own line — hovering
+    /// shows the paste's leading characters, activating splices it back into
+    /// the field in place. Positions come from the previous frame's layout,
+    /// so a chip trails a reflow by a frame at most.
+    pub(super) fn render_pasted_blocks(&self, cx: &mut Context<Self>) -> Option<Div> {
+        if self.composer_pasted_blocks.is_empty() {
+            return None;
+        }
+        const CHIP_HEIGHT: f32 = 20.0;
         let theme = Theme::current(cx);
-        let mut row = div()
-            .px(px(14.0))
-            .pt(px(2.0))
-            .pb(px(8.0))
-            .flex()
-            .flex_wrap()
-            .gap(px(8.0));
+        let mut overlay = div().absolute().inset_0().overflow_hidden();
         for (index, block) in self.composer_pasted_blocks.iter().enumerate() {
-            let preview = SharedString::from(pasted_text_preview(block));
+            let Some((anchor, line_height)) =
+                self.composer.read(cx).marker_anchor(block.marker, cx)
+            else {
+                continue;
+            };
+            let preview = SharedString::from(pasted_text_preview(&block.text));
             let chip = div()
                 .id(SharedString::from(format!("composer-pasted-block-{index}")))
-                .h(px(24.0))
+                .absolute()
+                // The marker is line-initial, so the anchor already sits at
+                // the field's text inset; the constant nudges the chip to the
+                // line's vertical middle.
+                .left(anchor.x + px(COMPOSER_TEXT_INSET))
+                .top(anchor.y + (line_height - px(CHIP_HEIGHT)).max(px(0.)) / 2.0)
+                .h(px(CHIP_HEIGHT))
                 .pl(px(6.0))
                 .pr(px(4.0))
-                .rounded(px(8.0))
+                .rounded(px(7.0))
                 .border(hairline())
                 .border_color(theme.border_subtle)
                 .bg(theme.inset)
@@ -3719,9 +3839,9 @@ impl Waku {
                         cx.stop_propagation();
                     }
                 }));
-            row = row.child(chip);
+            overlay = overlay.child(chip);
         }
-        row
+        Some(overlay)
     }
 
     /// The staged-attachment chips above the input: a thumbnail tile per
@@ -4660,14 +4780,21 @@ impl Waku {
                 .children(autocomplete)
                 // Big Picture's "replying to" chip; absent everywhere else.
                 .children(self.render_big_picture_target_chip(cx))
-                .when(!self.composer_pasted_blocks.is_empty(), |card| {
-                    card.child(self.render_pasted_blocks(cx))
-                })
                 .when(!self.composer_attachments.is_empty(), |card| {
                     card.child(self.render_composer_attachments(cx))
                 })
                 .children(self.render_annotation_chip(cx))
-                .child(div().pt(px(2.0)).child(self.composer.clone()))
+                // The paste chips ride inside the field: the overlay is a
+                // sibling of the composer covering its exact box, and each
+                // chip anchors to its marker's line.
+                .child(
+                    div().pt(px(2.0)).child(
+                        div()
+                            .relative()
+                            .child(self.composer.clone())
+                            .children(self.render_pasted_blocks(cx)),
+                    ),
+                )
                 .child(
                     div()
                         .mt(px(8.0))
@@ -6276,20 +6403,38 @@ pub(super) fn pasted_text_tooltip(
     }
 }
 
-/// Typed text first, then each collapsed paste block in paste order, split
-/// by a blank line — blocks are almost always many lines themselves.
-pub(super) fn prompt_with_pasted_blocks(prompt: &str, pasted_blocks: &[String]) -> String {
-    pasted_blocks
-        .iter()
-        .map(|block| block.trim())
-        .filter(|block| !block.is_empty())
-        .fold(prompt.trim().to_owned(), |mut body, block| {
-            if !body.is_empty() {
-                body.push_str("\n\n");
-            }
-            body.push_str(block);
-            body
-        })
+/// Splice each [`FOLDED_PASTE_MARKER`] in `content` back to its block's
+/// text, in marker order — what the paste would have looked like had it
+/// never collapsed. An unclaimed marker (its block is already gone) splices
+/// to nothing; a block without a marker folds onto the end, split off by a
+/// blank line the way collapsed pastes used to join wholesale.
+pub(super) fn splice_pasted_blocks(content: &str, pasted_blocks: &[String]) -> String {
+    let marker_len = FOLDED_PASTE_MARKER.len_utf8();
+    let mut body = String::with_capacity(content.len());
+    let mut rest = content;
+    let mut blocks = pasted_blocks.iter();
+    while let Some(index) = rest.find(FOLDED_PASTE_MARKER) {
+        body.push_str(&rest[..index]);
+        if let Some(block) = blocks.next() {
+            body.push_str(block.trim());
+        }
+        rest = &rest[index + marker_len..];
+    }
+    body.push_str(rest);
+    let mut body = body.trim().to_owned();
+    for block in blocks.map(|block| block.trim()).filter(|block| !block.is_empty()) {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(block);
+    }
+    body
+}
+
+/// `content` minus its markers — the user's own typed words, for a title or
+/// a restored draft where the blocks ride along separately.
+pub(super) fn text_without_paste_markers(content: &str) -> String {
+    content.replace(FOLDED_PASTE_MARKER, "")
 }
 
 /// The prompt a submission sends: the typed text plus one token per staged

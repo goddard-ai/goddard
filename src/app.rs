@@ -30,8 +30,8 @@ use crate::computer_use::{
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::git_branch::BranchSnapshot;
 use crate::input::{
-    ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerTextPaste, InputEvent, TextInput,
-    Undo,
+    ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerSplice, ComposerTextPaste,
+    FOLDED_PASTE_MARKER, InputEvent, TextInput, Undo,
 };
 use crate::md;
 use crate::model::{
@@ -2070,10 +2070,10 @@ pub struct Waku {
     /// Files dropped onto the composer, drawn as chips above the input and
     /// drained into the next submission.
     composer_attachments: Vec<ComposerAttachment>,
-    /// Text pastes too large for the field, held as collapsible cards above
-    /// the input and spliced back into the next submission verbatim. Purely
-    /// view state: drafts capture their text inline instead.
-    composer_pasted_blocks: Vec<String>,
+    /// Text pastes too large for the field, folded into it as marker chips
+    /// at the paste position and spliced back into the next submission
+    /// verbatim. Purely view state: drafts capture their text inline instead.
+    composer_pasted_blocks: Vec<composer::ComposerPastedBlock>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
@@ -4600,12 +4600,22 @@ impl Waku {
             )
             .detach();
 
-            // A text paste too large for the field collapses into a chip;
-            // the composer's text stays the user's own typing.
+            // A text paste too large for the field folds into it as a marker
+            // chip; the pasted text stays beside the composer until submit.
             cx.subscribe(
                 &composer,
                 |this: &mut Self, _, event: &ComposerTextPaste, cx| {
                     this.stage_pasted_text(event.0.clone(), cx);
+                },
+            )
+            .detach();
+
+            // Every splice the field applies can move or delete the markers
+            // the pasted blocks anchor to; keep the two in step.
+            cx.subscribe(
+                &composer,
+                |this: &mut Self, _, event: &ComposerSplice, cx| {
+                    this.remap_pasted_blocks(event, cx);
                 },
             )
             .detach();

@@ -576,6 +576,22 @@ pub struct MediaPaste(pub Vec<ClipboardEntry>);
 #[derive(Clone)]
 pub struct CollapsedPaste(pub String);
 
+/// Byte-level splice report emitted whenever `content` changes, ahead of
+/// [`InputEvent::Edited`], so an owner anchoring state to text offsets — the
+/// composer's folded paste markers — can remap it without diffing the whole
+/// string. `removed` is the byte range replaced in the old content,
+/// `inserted` the byte length that took its place.
+#[derive(Clone)]
+pub struct ContentSplice {
+    pub removed: Range<usize>,
+    pub inserted: usize,
+}
+
+/// The object-replacement character a folded paste leaves in the field: one
+/// invisible glyph standing for the whole block, spliced back to the real
+/// text on submit. Deleting it deletes the block.
+pub const FOLDED_PASTE_MARKER: char = '\u{FFFC}';
+
 /// Respect the representation priority chosen by the source application.
 /// Finder puts paths first (and a text fallback second), while screenshots put
 /// an image first. Text-first clipboard content remains ordinary text paste.
@@ -712,6 +728,10 @@ pub struct TextInput {
     /// Large text pastes surface as [`CollapsedPaste`] instead of splicing
     /// into the field.
     accepts_collapsed_paste: bool,
+    /// [`FOLDED_PASTE_MARKER`] glyphs paint invisible: the owner stages a
+    /// pasted block behind each marker and draws its chip over the glyph's
+    /// line, so the marker itself must never show the notdef box.
+    folded_paste: bool,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -828,6 +848,7 @@ impl TextInput {
             line_height: 22.0,
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
+            folded_paste: false,
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -1066,6 +1087,13 @@ impl TextInput {
         self.accepts_collapsed_paste = accepts;
     }
 
+    /// Paint [`FOLDED_PASTE_MARKER`] glyphs invisible. Pair with
+    /// [`set_collapsed_paste`](Self::set_collapsed_paste) on fields whose
+    /// owner folds pastes into markers.
+    pub fn set_folded_paste(&mut self, folded: bool) {
+        self.folded_paste = folded;
+    }
+
     /// Make Escape clear the field first, the filter-field convention: only
     /// a second press on the emptied field reaches the surface's own escape
     /// (dismissing the popover or palette around it).
@@ -1162,6 +1190,10 @@ impl TextInput {
         self.history.seal();
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
+        cx.emit(ContentSplice {
+            removed: range,
+            inserted: text.len(),
+        });
         cx.emit(InputEvent::Edited);
         cx.notify();
     }
@@ -1311,6 +1343,24 @@ impl TextInput {
         crate::md::render::range_rects(layout, &range, 0.0, 0.0)
     }
 
+    /// Where `offset` paints relative to the field element's top-left —
+    /// `(x, y)` of the glyph with scroll applied — plus the line height, so a
+    /// sibling overlay can anchor an element to a byte offset. Reads the
+    /// previous frame's layout, like [`Self::position_for_offset`].
+    pub fn overlay_anchor(&self, offset: usize) -> Option<(Point<Pixels>, Pixels)> {
+        let layout = self.last_layout.as_ref()?;
+        let origin = layout.position_for_index(0)?;
+        let position =
+            layout.position_for_index(self.display_index(offset.min(self.content.len())))?;
+        // Scroll offsets are negative once scrolled: adding one back turns
+        // the painted window position into a field-relative one.
+        let scroll = self.scroll_handle.offset();
+        Some((
+            point(position.x - origin.x, position.y - origin.y + scroll.y),
+            layout.line_height(),
+        ))
+    }
+
     /// Height of each logical line as laid out, so a gutter can put one number
     /// per line even when soft wrap gives a line several visual rows.
     ///
@@ -1330,6 +1380,7 @@ impl TextInput {
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         let changed = !self.content.is_empty();
+        let removed = 0..self.content.len();
         self.content = "".into();
         self.selected_range = 0..0;
         self.selection_reversed = false;
@@ -1343,6 +1394,10 @@ impl TextInput {
         }
         self.pause_blink_cursor(cx);
         if changed {
+            cx.emit(ContentSplice {
+                removed,
+                inserted: 0,
+            });
             cx.emit(InputEvent::Edited);
         }
         cx.notify();
@@ -1351,6 +1406,7 @@ impl TextInput {
     pub fn set_content(&mut self, content: impl Into<SharedString>, cx: &mut Context<Self>) {
         let content = content.into();
         let changed = self.content != content;
+        let removed = 0..self.content.len();
         self.content = content;
         let offset = self.content.len();
         self.selected_range = offset..offset;
@@ -1366,6 +1422,10 @@ impl TextInput {
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
         if changed {
+            cx.emit(ContentSplice {
+                removed,
+                inserted: self.content.len(),
+            });
             cx.emit(InputEvent::Edited);
         }
         cx.notify();
@@ -2269,6 +2329,10 @@ impl TextInput {
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
         if previous != self.content {
+            cx.emit(ContentSplice {
+                removed: range,
+                inserted: new_text.len(),
+            });
             cx.emit(InputEvent::Edited);
         }
         cx.notify();
@@ -2333,6 +2397,7 @@ impl TextInput {
         selection_reversed: bool,
         cx: &mut Context<Self>,
     ) {
+        let removed = 0..self.content.len();
         self.content = content.into();
         self.selected_range = selection;
         self.selection_reversed = selection_reversed;
@@ -2340,6 +2405,10 @@ impl TextInput {
         self.vertical_navigation = None;
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
+        cx.emit(ContentSplice {
+            removed,
+            inserted: self.content.len(),
+        });
         cx.emit(InputEvent::Edited);
         cx.notify();
     }
@@ -2561,6 +2630,7 @@ fn word_range_at(content: &str, offset: usize) -> Range<usize> {
 impl EventEmitter<InputEvent> for TextInput {}
 impl EventEmitter<MediaPaste> for TextInput {}
 impl EventEmitter<CollapsedPaste> for TextInput {}
+impl EventEmitter<ContentSplice> for TextInput {}
 
 impl EntityInputHandler for TextInput {
     fn text_for_range(
@@ -2655,6 +2725,10 @@ impl EntityInputHandler for TextInput {
         self.vertical_navigation = None;
         self.pause_blink_cursor(cx);
         if previous != self.content {
+            cx.emit(ContentSplice {
+                removed: range,
+                inserted: new_text.len(),
+            });
             cx.emit(InputEvent::Edited);
         }
         cx.notify();
@@ -2992,6 +3066,7 @@ fn input_text_runs(
     token_color: impl Fn(TokenClass) -> Hsla,
     search: SearchPaint,
     annotations: AnnotationPaint,
+    concealed: &[Range<usize>],
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
@@ -3007,6 +3082,10 @@ fn input_text_runs(
         boundaries.push(range.end.min(display_len));
     }
     for (range, _) in annotations.ranges {
+        boundaries.push(range.start.min(display_len));
+        boundaries.push(range.end.min(display_len));
+    }
+    for range in concealed {
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
     }
@@ -3039,10 +3118,17 @@ fn input_text_runs(
             let start = boundary[0];
             let end = boundary[1];
             let token_index = highlight.partition_point(|(range, _)| range.end <= start);
-            let color = highlight
-                .get(token_index)
-                .filter(|(range, _)| range.start <= start && range.end >= end)
-                .map_or(base_run.color, |(_, class)| token_color(*class));
+            let concealed = concealed
+                .iter()
+                .any(|range| range.start <= start && range.end >= end);
+            let color = if concealed {
+                gpui::transparent_black()
+            } else {
+                highlight
+                    .get(token_index)
+                    .filter(|(range, _)| range.start <= start && range.end >= end)
+                    .map_or(base_run.color, |(_, class)| token_color(*class))
+            };
             let background_color = if search
                 .active
                 .is_some_and(|range| range.start <= start && range.end >= end)
@@ -3165,6 +3251,14 @@ impl Element for InputElement {
                 emphasized_color: annotation_wash.opacity((annotation_wash.a * 1.75).min(1.0)),
             }
         };
+        let concealed: Vec<Range<usize>> = if input.folded_paste && !content_is_empty && !masked {
+            display_text
+                .match_indices(FOLDED_PASTE_MARKER)
+                .map(|(index, _)| index..index + FOLDED_PASTE_MARKER.len_utf8())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let runs = input_text_runs(
             display_text.len(),
             base_run,
@@ -3179,6 +3273,7 @@ impl Element for InputElement {
             |class| palette.token(class),
             search,
             annotations,
+            &concealed,
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
@@ -3559,10 +3654,15 @@ pub enum ComposerEvent {
 pub struct ComposerAttachmentPaste(pub Vec<ClipboardEntry>);
 
 /// A large text paste, re-emitted from the embedded field's
-/// [`CollapsedPaste`]. The owning view presents it as a collapsible block
-/// above the composer rather than as field content.
+/// [`CollapsedPaste`]. The owning view folds it into the composer as a
+/// [`FOLDED_PASTE_MARKER`] chip rather than as field content.
 #[derive(Clone)]
 pub struct ComposerTextPaste(pub String);
+
+/// Byte-level splice report, re-emitted from the embedded field's
+/// [`ContentSplice`]. The owner remaps its folded paste markers through it.
+#[derive(Clone)]
+pub struct ComposerSplice(pub ContentSplice);
 
 /// The prompt composer, built on [`TextInput`]: a self-sizing multi-line
 /// field where Enter submits the trimmed prompt and clears, the primary
@@ -3617,6 +3717,9 @@ impl ComposerInput {
             cx.subscribe(&input, |_, _, event: &CollapsedPaste, cx| {
                 cx.emit(ComposerTextPaste(event.0.clone()));
             }),
+            cx.subscribe(&input, |_, _, event: &ContentSplice, cx| {
+                cx.emit(ComposerSplice(event.clone()));
+            }),
         ];
         Self {
             input,
@@ -3634,12 +3737,48 @@ impl ComposerInput {
     }
 
     /// Opt the embedded field into [`CollapsedPaste`] and re-emit it as
-    /// [`ComposerTextPaste`]. Only surfaces that stage the blocks should
-    /// enable it — an unheard event drops the paste entirely.
+    /// [`ComposerTextPaste`], and into [`FOLDED_PASTE_MARKER`] concealment so
+    /// the staged markers never show their glyph. Only surfaces that stage
+    /// the blocks should enable it — an unheard event drops the paste
+    /// entirely.
     pub fn collapsed_paste(self, cx: &mut Context<Self>) -> Self {
-        self.input
-            .update(cx, |input, _| input.set_collapsed_paste(true));
+        self.input.update(cx, |input, _| {
+            input.set_collapsed_paste(true);
+            input.set_folded_paste(true);
+        });
         self
+    }
+
+    /// Splice a [`FOLDED_PASTE_MARKER`] over the current selection, set on
+    /// its own line: newlines are added around it only where the surrounding
+    /// text doesn't already break. Returns the marker's byte offset, which
+    /// the owner records beside the block it stands for.
+    pub fn insert_paste_marker(&mut self, cx: &mut Context<Self>) -> usize {
+        let (range, before_line_start, at_line_end) = self.input.update(cx, |input, _| {
+            let range = input.selected_range();
+            (
+                range.clone(),
+                range.start == 0 || input.content()[..range.start].ends_with('\n'),
+                range.end == input.content().len() || input.content()[range.end..].starts_with('\n'),
+            )
+        });
+        let prefix = (!before_line_start).then_some('\n');
+        let suffix = (!at_line_end).then_some('\n');
+        let marker = range.start + prefix.map_or(0, |prefix| prefix.len_utf8());
+        let mut text = String::new();
+        text.extend(prefix);
+        text.push(FOLDED_PASTE_MARKER);
+        text.extend(suffix);
+        self.input
+            .update(cx, |input, cx| input.replace_range(range, &text, cx));
+        marker
+    }
+
+    /// Where the byte offset paints relative to the composer's top-left —
+    /// `(x, y)` with scroll applied — plus the line height, so a sibling
+    /// overlay can anchor a chip to a [`FOLDED_PASTE_MARKER`].
+    pub fn marker_anchor(&self, offset: usize, cx: &App) -> Option<(Point<Pixels>, Pixels)> {
+        self.input.read(cx).overlay_anchor(offset)
     }
 
     pub fn focus(&self) -> FocusHandle {
@@ -3755,6 +3894,7 @@ impl Focusable for ComposerInput {
 impl EventEmitter<ComposerEvent> for ComposerInput {}
 impl EventEmitter<ComposerAttachmentPaste> for ComposerInput {}
 impl EventEmitter<ComposerTextPaste> for ComposerInput {}
+impl EventEmitter<ComposerSplice> for ComposerInput {}
 
 #[cfg(test)]
 mod tests {
@@ -5072,6 +5212,7 @@ mod tests {
             },
             SearchPaint::none(),
             AnnotationPaint::none(),
+            &[],
         );
 
         assert_eq!(
@@ -5113,6 +5254,7 @@ mod tests {
             |_| hsla(0.0, 0.0, 1.0, 1.0),
             SearchPaint::none(),
             AnnotationPaint::none(),
+            &[],
         );
 
         assert_eq!(
@@ -5169,6 +5311,7 @@ mod tests {
                 active_color,
             },
             AnnotationPaint::none(),
+            &[],
         );
 
         assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 20);
