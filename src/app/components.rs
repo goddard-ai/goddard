@@ -219,7 +219,7 @@ pub(super) fn render_message_footer(
             show_token_speed
                 .then(|| response_tokens_per_second(message, footer_time))
                 .flatten(),
-            |element, tps| element.child(" • ").child(format!("{tps} tok/s")),
+            |element, tps| element.child(" · ").child(format!("{tps} tok/s")),
         );
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
