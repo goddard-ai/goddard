@@ -1026,6 +1026,10 @@ sync.push: 変更をプッシュ
 sync.command_hint: "ターミナルで %{command} を実行します"
 
 terminal.starting: ターミナルを起動中…
+terminal.close_title: このターミナルを終了しますか？
+terminal.close_title_named: "%{name} を終了しますか？"
+terminal.close_description: このシェルでコマンドがまだ実行中です。ターミナルを閉じるとプロセスが終了します。
+terminal.kill: ターミナルを終了
 
 project.add_project: プロジェクトを追加
 errors.remote_project_picker: デーモンホスト上のプロジェクトを追加するにはリモートパス選択が必要ですが、まだ利用できません

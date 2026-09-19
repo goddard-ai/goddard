@@ -1,0 +1,1 @@
+- ⌘W on a terminal filling the main area kills it — with a confirmation first while a command is still running inside

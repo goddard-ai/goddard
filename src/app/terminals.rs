@@ -243,6 +243,13 @@ impl Waku {
         if self.terminal_rename == Some(terminal_id) {
             self.terminal_rename = None;
         }
+        if self
+            .terminal_close_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.terminal_id == terminal_id)
+        {
+            self.terminal_close_dialog = None;
+        }
         if self.selected_terminal == Some(terminal_id) {
             self.selected_terminal = None;
         }
@@ -867,6 +874,27 @@ impl Waku {
         }
         self.drop_terminal(terminal_id, cx);
         cx.notify();
+    }
+
+    /// ⌘W with a terminal filling the main area: an idle shell dies
+    /// outright, a shell mid-command earns a confirmation first — the
+    /// same `command_running` signal the sidebar spinner reads.
+    pub(super) fn close_main_terminal(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let busy = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .is_some_and(|terminal| terminal.read(cx).command_running());
+        if busy {
+            let focus = self.open_terminal_close_dialog(terminal_id, cx);
+            window.focus(&focus, cx);
+        } else {
+            self.close_terminal(terminal_id, cx);
+        }
     }
 
     /// The selected terminal rendered full-width in the main area,

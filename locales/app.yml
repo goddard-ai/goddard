@@ -2419,6 +2419,14 @@ sync.command_hint:
 
 terminal.starting:
   en: Starting terminal…
+terminal.close_title:
+  en: Kill this terminal?
+terminal.close_title_named:
+  en: "Kill %{name}?"
+terminal.close_description:
+  en: A command is still running in this shell. Closing the terminal kills the process.
+terminal.kill:
+  en: Kill Terminal
 
 project.add_project:
   en: Add project
@@ -3841,6 +3849,8 @@ shortcuts.confirm_dialog:
   en: Confirm Dialog
 shortcuts.confirm_archive:
   en: Confirm Archive
+shortcuts.confirm_kill_terminal:
+  en: Confirm Kill Terminal
 shortcuts.dismiss_dialog:
   en: Dismiss Dialog
 shortcuts.bigpicture_move:

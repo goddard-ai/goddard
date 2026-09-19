@@ -373,6 +373,7 @@ pub fn run() {
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_full_access_dialog_keys(cx);
+            crate::app::init_terminal_close_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);

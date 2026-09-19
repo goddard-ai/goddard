@@ -1974,6 +1974,9 @@ pub struct Waku {
     /// The one-time confirmation gating the first switch to Full access;
     /// `state.full_access_acknowledged` records that it was accepted.
     full_access_dialog: Option<full_access_dialog::FullAccessDialogState>,
+    /// The kill confirmation ⌘W raises on a main-area terminal whose shell
+    /// still has a command running.
+    terminal_close_dialog: Option<terminal_close_dialog::TerminalCloseDialogState>,
     /// The keyboard-shortcut cheatsheet opened from the sidebar footer.
     shortcuts_dialog: Option<shortcuts_dialog::ShortcutsDialogState>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
@@ -2963,6 +2966,7 @@ mod status_markers;
 mod streaming;
 mod sync_branch;
 mod task_switcher;
+mod terminal_close_dialog;
 mod terminals;
 mod transcript;
 mod transcript_search;
@@ -2998,6 +3002,7 @@ pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow, format_time_ago, mix_str};
 pub use skills_page::init as init_skills_keys;
 pub use sync_branch::init as init_sync_branch;
+pub use terminal_close_dialog::init as init_terminal_close_dialog_keys;
 
 // Re-exported for the keybinding catalog (`crate::keybindings`), which needs
 // every dispatchable action by path without making each module public.
@@ -3017,6 +3022,7 @@ pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
 pub use sidebar::CancelSessionRename;
+pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
 use streaming::*;
 use terminals::TerminalRecord;
 use transcript::*;
@@ -5097,6 +5103,7 @@ impl Waku {
                 issue_dialog: None,
                 last_created_issue: None,
                 archive_dialog: None,
+                terminal_close_dialog: None,
                 archive_preview_pending: HashSet::new(),
                 full_access_dialog: None,
                 shortcuts_dialog: None,
