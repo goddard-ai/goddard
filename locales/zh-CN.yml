@@ -335,6 +335,11 @@ settings.archive_navigation_description: 选择归档正在查看的任务后跳
 settings.archive_navigation_next_unread: 前往下一个未读完成
 settings.archive_navigation_next_session: 前往侧栏中的下一个会话
 settings.archive_navigation_new_task: 撰写新任务
+settings.dormant_after: 休眠时间
+settings.dormant_after_description: 没有新活动达到此时长的任务将折叠到侧边栏的“休眠”分组中。选择“从不”可停用自动休眠
+settings.dormant_after_one_day: 1 天
+settings.dormant_after_days: "%{count} 天"
+settings.dormant_after_never: 从不
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
 settings.auto_resolve_in_chat: 在聊天中解决同步冲突
@@ -435,6 +440,8 @@ session.move_to_worktree: 移动到工作树
 session.archive: 归档
 session.pin: 置顶
 session.unpin: 取消置顶
+session.sweep: 移至休眠
+session.restore: 恢复
 session.mark_unread: 标记为未读
 archive.confirm_title: 归档此任务？
 archive.confirm_title_named: "归档 %{name}？"
@@ -443,6 +450,12 @@ archive.confirm_description_busy: 该任务仍有进行中的回合。归档会�
 archive.confirm_description_busy_worktree: 该任务仍有进行中的回合，且检出中还有未完成的工作。归档会停止回合、快照检出并移除工作树；取消归档可恢复。
 archive.uncommitted: "%{count} 个未提交的文件"
 archive.unpushed: "%{count} 个未推送的提交"
+
+dormant.confirm_title: 将此任务移至休眠？
+dormant.confirm_title_named: "将 %{name} 移至休眠？"
+dormant.confirm_description: 该检出中仍有进行中的工作。移至休眠会将其快照并移除工作树；恢复可将其取回。
+dormant.confirm_description_busy: 该任务仍有进行中的回合。移至休眠会停止该回合；恢复可将其取回。
+dormant.confirm_description_busy_worktree: 该任务仍有进行中的回合，且检出中还有未完成的工作。移至休眠会停止回合、快照检出并移除工作树；恢复可将其取回。
 sidebar.today: 今天
 sidebar.search: 搜索
 sidebar.projects: 项目
@@ -456,6 +469,7 @@ sidebar.ordering_last_created: 最近创建
 sidebar.show_more: 显示更多
 sidebar.pinned: 已置顶
 sidebar.terminals: 终端
+sidebar.dormant: 休眠
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周
 sidebar.this_month: 本月

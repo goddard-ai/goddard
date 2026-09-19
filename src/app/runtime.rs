@@ -216,6 +216,9 @@ pub(super) fn merge_remote_session_catalog(
             local.created_at = remote.created_at;
             local.last_reply_at = remote.last_reply_at;
             local.archived_at = remote.archived_at;
+            local.pinned_at = remote.pinned_at;
+            local.dormant_at = remote.dormant_at;
+            local.dormant_exempt_until = remote.dormant_exempt_until;
             // A hydrated session's workspace is at least as fresh as the
             // stored column the projection carries — and may hold an unsaved
             // move — so only skeletons adopt it.

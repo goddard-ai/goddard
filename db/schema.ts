@@ -50,6 +50,10 @@ export const sessions = sqliteTable(
     archivedAt: integer("archived_at"),
     /** When the session was pinned to the sidebar top, unix seconds. */
     pinnedAt: integer("pinned_at"),
+    /** When the session was swept into the Dormant group, unix seconds. */
+    dormantAt: integer("dormant_at"),
+    /** Auto-dormancy is suppressed until this time, unix seconds. */
+    dormantExemptUntil: integer("dormant_exempt_until"),
     /** When the session's workspace landed on its base, unix seconds. */
     landedAt: integer("landed_at"),
     /**

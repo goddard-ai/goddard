@@ -181,6 +181,16 @@ impl Waku {
         {
             self.unarchive_session(session_id, false, cx);
         }
+        // Opening a dormant task wakes it — the same promise archive makes:
+        // explicit activation is the session's way back to the list.
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && self.session_dormant_now(session))
+        {
+            self.restore_dormant_sessions(&[session_id], cx);
+        }
         // Selecting a chat folds the Terminals group; the terminal keeps its
         // last-visible memory for the next expand.
         if self
@@ -1352,6 +1362,189 @@ impl Waku {
             self.show_unarchived_toast(session_id);
         }
         cx.notify();
+    }
+
+    /// Parks a task in the sidebar's Dormant group — the sweep behind the
+    /// Option-hover broom and the row menu's "Move to Dormant".
+    ///
+    /// Follows the archive shape: a live turn or a checkout with uncommitted
+    /// or unpushed work confirms through the same dialog, and a clean task
+    /// sweeps directly. Unlike archive the session keeps its row — dormant
+    /// groups it instead of hiding it.
+    pub(super) fn sweep_session(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.hold_sidebar_peek();
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .filter(|session| session.has_started() && session.archived_at.is_none())
+        else {
+            return;
+        };
+        if self.session_dormant_now(session) {
+            return;
+        }
+        let busy = session.is_busy();
+        // Same split as archive: only a worktree gets a preview. A local
+        // checkout is the user's own git state — sweeping never touches it.
+        let Some(workspace) = (match &session.workspace {
+            SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
+            _ => None,
+        }) else {
+            if busy && self.archive_dialog.is_none() {
+                let focus = self.open_dormant_dialog(
+                    session_id,
+                    crate::git_commit::ArchivePreview::default(),
+                    true,
+                    cx,
+                );
+                // Like the other deferred surfaces, focus lands two frames
+                // after the modal joins the dispatch tree.
+                window.on_next_frame(move |window, _| {
+                    window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                });
+            } else if !busy {
+                self.finish_sweep_session(session_id, cx);
+            }
+            return;
+        };
+        if self.archive_dialog.is_some() || !self.archive_preview_pending.insert(session_id) {
+            return;
+        }
+        let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.archive_preview_pending.remove(&session_id);
+            self.finish_sweep_session(session_id, cx);
+            return;
+        };
+        let window_handle = window.window_handle();
+        cx.spawn(async move |waku, cx| {
+            let preview = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace_client.request(
+                        waku_client::WorkspaceOperation::InspectArchivePreview { cwd: workspace },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
+                        _ => None,
+                    }
+                })
+                .await;
+            let finish = waku
+                .update(cx, |waku, cx| {
+                    waku.archive_preview_pending.remove(&session_id);
+                    // The turn may have settled while the preview was being
+                    // inspected — warn only about what is still true now.
+                    let busy = waku
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| session.is_busy());
+                    let preview = preview.unwrap_or_default();
+                    if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
+                        let focus =
+                            waku.open_dormant_dialog(session_id, preview, busy, cx);
+                        Some(focus)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(None);
+            let _ = window_handle.update(cx, move |_, window, cx| {
+                match finish {
+                    Some(focus) => {
+                        // Like the other deferred surfaces, focus lands two
+                        // frames after the modal joins the dispatch tree.
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                        });
+                    }
+                    None => {
+                        let _ = waku.update(cx, |waku, cx| {
+                            waku.finish_sweep_session(session_id, cx)
+                        });
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The point every sweep path reaches once the checkout proved clean or
+    /// the user confirmed. Stamps `dormant_at` as the newest mutation so the
+    /// next activity wakes the task, drops the pin, and queues the worktree
+    /// for the same snapshot-and-remove archive uses.
+    pub(super) fn finish_sweep_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(is_busy) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .filter(|session| session.has_started() && session.archived_at.is_none())
+            .map(|session| session.is_busy())
+        else {
+            return;
+        };
+        if is_busy {
+            self.cancel_session_turn(session_id, cx);
+        }
+        let now = unix_time();
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.pinned_at = None;
+            session.dormant_at = Some(now);
+            session.dormant_exempt_until = None;
+            session.updated_at = now;
+        }
+        // The sweep's own teardown goes through the archive drain, so an
+        // earlier background sweep's bookkeeping starts over.
+        self.dormant_worktrees_swept.borrow_mut().remove(&session_id);
+        self.queue_archived_workspace_cleanup(session_id, cx);
+        self.save();
+        cx.notify();
+    }
+
+    /// Wakes tasks back into the ordinary groups: clears the sweep flag,
+    /// snoozes auto-dormancy for one threshold period so a still-stale task
+    /// does not fold straight back, and restores a worktree the sweep
+    /// already removed. Same mutation-then-save shape as pin/archive.
+    pub(super) fn restore_dormant_sessions(&mut self, session_ids: &[Uuid], cx: &mut Context<Self>) {
+        self.hold_sidebar_peek();
+        let now = unix_time();
+        let exempt_until =
+            sidebar::dormant_threshold_secs(self.state.dormant_after_days).map(|secs| now + secs);
+        let mut changed = false;
+        for session_id in session_ids {
+            let dormant = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id)
+                .is_some_and(|session| self.session_dormant_now(session));
+            if !dormant {
+                continue;
+            }
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.dormant_at = None;
+                session.dormant_exempt_until = exempt_until;
+                session.updated_at = now;
+            }
+            // A queued sweep teardown must not fire once the task is back,
+            // and a worktree the sweep already removed comes back now rather
+            // than at the next prompt.
+            self.pending_workspace_cleanups.remove(session_id);
+            self.restore_missing_worktree(*session_id, cx);
+            changed = true;
+        }
+        if changed {
+            self.save();
+            cx.notify();
+        }
     }
 
     pub(super) fn archive_session_action(

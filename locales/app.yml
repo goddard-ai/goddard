@@ -925,6 +925,16 @@ settings.archive_navigation_next_session:
   en: Go to next session in the sidebar
 settings.archive_navigation_new_task:
   en: Compose a new task
+settings.dormant_after:
+  en: Dormant after
+settings.dormant_after_description:
+  en: Tasks with no new activity for this long fold into the sidebar's Dormant group. 'Never' keeps auto-dormancy off.
+settings.dormant_after_one_day:
+  en: 1 day
+settings.dormant_after_days:
+  en: "%{count} days"
+settings.dormant_after_never:
+  en: Never
 settings.sync_with_merge:
   en: Merge when syncing changes
 settings.sync_with_merge_description:
@@ -1173,6 +1183,10 @@ session.pin:
   en: Pin
 session.unpin:
   en: Unpin
+session.sweep:
+  en: Move to Dormant
+session.restore:
+  en: Restore
 session.mark_unread:
   en: Mark as Unread
 
@@ -1190,6 +1204,17 @@ archive.uncommitted:
   en: "%{count} uncommitted files"
 archive.unpushed:
   en: "%{count} unpushed commits"
+
+dormant.confirm_title:
+  en: Move this task to Dormant?
+dormant.confirm_title_named:
+  en: "Move %{name} to Dormant?"
+dormant.confirm_description:
+  en: Its checkout still has work in progress. Moving to Dormant snapshots it and removes the worktree; restoring brings it back.
+dormant.confirm_description_busy:
+  en: A turn is still in progress. Moving to Dormant stops it; restoring brings the task back.
+dormant.confirm_description_busy_worktree:
+  en: A turn is still in progress and its checkout has work in progress. Moving to Dormant stops the turn, snapshots the checkout, and removes the worktree; restoring brings it back.
 
 sidebar.today:
   en: Today
@@ -1219,6 +1244,8 @@ sidebar.pinned:
   en: Pinned
 sidebar.terminals:
   en: Terminals
+sidebar.dormant:
+  en: Dormant
 sidebar.yesterday:
   en: Yesterday
 sidebar.this_week:

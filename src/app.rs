@@ -2136,6 +2136,20 @@ pub struct Waku {
     /// Groups the user has folded in either sidebar view. This is
     /// intentionally runtime-only, like transcript disclosure state.
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
+    /// While Option/Alt is held, a session row's hover pin control becomes
+    /// the sweep-to-Dormant control. Tracked from the root's
+    /// modifiers-changed events so the swap repaints on the press itself.
+    sidebar_alt_held: bool,
+    /// Dormant sessions whose clean worktrees the background sweep has
+    /// already snapshotted and removed — re-checked only when a session
+    /// leaves dormancy. In-flight entries also dedupe a pass's spawns.
+    dormant_worktrees_swept: RefCell<HashSet<Uuid>>,
+    /// Throttle for the dormant-worktree sweep pass, like
+    /// `sidebar_checkout_scanned_at`.
+    dormant_sweep_scanned_at: Cell<Option<Instant>>,
+    /// Bumped when a new dormant-worktree sweep pass starts so a stale
+    /// pass's completions cannot act on newer state.
+    dormant_sweep_generation: Cell<u64>,
     /// While the primary modifier is held past
     /// [`sidebar::SIDEBAR_SHORTCUT_HOLD_DELAY`], the sidebar's first nine
     /// visible tasks wear their ⌘1–⌘9 shortcut chips.
@@ -5097,7 +5111,14 @@ impl Waku {
                 session_rename_input,
                 // The Terminals group starts folded every launch — its rows
                 // are opt-in, unlike the session history below them.
-                sidebar_collapsed_groups: HashSet::from([SidebarGroup::Terminals]),
+                sidebar_collapsed_groups: HashSet::from([
+                    SidebarGroup::Terminals,
+                    SidebarGroup::Dormant,
+                ]),
+                sidebar_alt_held: false,
+                dormant_worktrees_swept: RefCell::new(HashSet::new()),
+                dormant_sweep_scanned_at: Cell::new(None),
+                dormant_sweep_generation: Cell::new(0),
                 sidebar_shortcut_hints: false,
                 sidebar_shortcut_hint_generation: 0,
                 sidebar_shortcut_hint_chord_used: false,

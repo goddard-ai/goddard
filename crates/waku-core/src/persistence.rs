@@ -1311,7 +1311,7 @@ impl StateStore {
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
-                        landed_at, workspace
+                        dormant_at, dormant_exempt_until, landed_at, workspace
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1332,7 +1332,9 @@ impl StateStore {
                     row.get::<_, Option<i64>>(10)?,
                     row.get::<_, Option<i64>>(11)?,
                     row.get::<_, Option<i64>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<i64>>(13)?,
+                    row.get::<_, Option<i64>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1693,6 +1695,8 @@ type SessionColumns = (
     Option<i64>,
     Option<i64>,
     Option<i64>,
+    Option<i64>,
+    Option<i64>,
     Option<String>,
 );
 
@@ -1715,6 +1719,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at,
         archived_at,
         pinned_at,
+        dormant_at,
+        dormant_exempt_until,
         landed_at,
         workspace,
     ) = row;
@@ -1749,6 +1755,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at: last_reply_at.map(|at| at as u64),
         archived_at: archived_at.map(|at| at as u64),
         pinned_at: pinned_at.map(|at| at as u64),
+        dormant_at: dormant_at.map(|at| at as u64),
+        dormant_exempt_until: dormant_exempt_until.map(|at| at as u64),
         // Skeletons must not look quarantined: clients echo list projections
         // back through SaveTaskState, and a `true` here would poison real
         // sessions. The daemon gate reads full task_state; the UI card
@@ -2017,8 +2025,8 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
-         landed_at, workspace
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         dormant_at, dormant_exempt_until, landed_at, workspace
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2031,6 +2039,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          last_reply_at = excluded.last_reply_at,
          archived_at   = excluded.archived_at,
          pinned_at     = excluded.pinned_at,
+         dormant_at    = excluded.dormant_at,
+         dormant_exempt_until = excluded.dormant_exempt_until,
          landed_at     = excluded.landed_at,
          workspace     = excluded.workspace";
 
@@ -2079,6 +2089,12 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
         session
             .pinned_at
+            .map_or(Value::Null, |at| Value::Integer(at as i64)),
+        session
+            .dormant_at
+            .map_or(Value::Null, |at| Value::Integer(at as i64)),
+        session
+            .dormant_exempt_until
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
         session
             .landed_at

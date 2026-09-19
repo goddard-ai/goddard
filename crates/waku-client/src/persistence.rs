@@ -178,6 +178,10 @@ fn default_sidebar_shortcut_tags() -> bool {
     true
 }
 
+fn default_dormant_after_days() -> Option<u32> {
+    Some(DEFAULT_DORMANT_AFTER_DAYS)
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -701,6 +705,9 @@ pub struct AppSettings {
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title, in the theme's alert color.
     pub sidebar_composer_drafts: bool,
+    /// Days without a reply before a session groups as dormant; `None`
+    /// disables auto-dormancy.
+    pub dormant_after_days: Option<u32>,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -781,6 +788,7 @@ impl Default for AppSettings {
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
             sidebar_composer_drafts: false,
+            dormant_after_days: default_dormant_after_days(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -803,6 +811,23 @@ impl Default for AppSettings {
 pub const DEFAULT_UI_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_CODE_FONT_SIZE: f32 = 13.0;
 pub const DEFAULT_COMPLETION_SOUND_VOLUME: f32 = 1.0;
+
+/// Days without a reply before a session folds into the sidebar's Dormant
+/// group — the default for `dormant_after_days`.
+pub const DEFAULT_DORMANT_AFTER_DAYS: u32 = 7;
+
+/// The choices the dormancy-threshold picker offers, in days; `None` is its
+/// "Never" row, which disables auto-dormancy.
+pub const DORMANT_AFTER_DAYS_OPTIONS: [Option<u32>; 7] = [
+    Some(1),
+    Some(2),
+    Some(3),
+    Some(7),
+    Some(14),
+    Some(30),
+    None,
+];
+
 /// The completion sound's relative volume tops out at twice its recorded level.
 pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
 /// Fraction of the Sidebar vibrancy let through the sidebar's tint by
@@ -1092,6 +1117,10 @@ pub struct PersistedState {
     /// the sidebar row's title, in the theme's alert color.
     #[serde(default)]
     pub sidebar_composer_drafts: bool,
+    /// Days without a reply before a session groups as dormant; `None`
+    /// disables auto-dormancy.
+    #[serde(default = "default_dormant_after_days")]
+    pub dormant_after_days: Option<u32>,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1284,6 +1313,7 @@ impl PersistedState {
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
             sidebar_composer_drafts: false,
+            dormant_after_days: default_dormant_after_days(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1580,6 +1610,7 @@ impl PersistedState {
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             archive_navigation: self.archive_navigation,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
+            dormant_after_days: self.dormant_after_days,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1671,6 +1702,7 @@ impl PersistedState {
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.archive_navigation = settings.archive_navigation;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
+        self.dormant_after_days = settings.dormant_after_days;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;

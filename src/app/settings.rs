@@ -483,6 +483,16 @@ pub(super) fn settings_row_text(
         )
 }
 
+/// The dormancy-threshold picker's row label — "1 day", "N days", or
+/// "Never" for the auto-dormancy kill switch.
+fn dormant_after_label(days: Option<u32>) -> String {
+    match days {
+        None => tr!("settings.dormant_after_never"),
+        Some(1) => tr!("settings.dormant_after_one_day"),
+        Some(days) => tr!("settings.dormant_after_days", count = days),
+    }
+}
+
 /// A standalone-card settings row — the General page's shape — kept or
 /// dropped by the search. Pass an empty `div()` as the control for text-only
 /// cards.
@@ -1366,6 +1376,43 @@ impl Waku {
                     tr!("settings.archive_navigation"),
                     tr!("settings.archive_navigation_description"),
                     navigation_selector,
+                    theme,
+                    search,
+                )
+            })
+            .children({
+                let dormant_after = self.state.dormant_after_days;
+                let weak = cx.entity().downgrade();
+                let dormant_handle = self.menu_handle("dormant-after-selector", cx);
+                let dormant_selector = dropdown_menu(
+                    MenuChip::new("dormant-after-selector")
+                        .label(dormant_after_label(dormant_after))
+                        .outlined()
+                        .selected(dormant_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "dormant-after-selector-menu",
+                    &dormant_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        waku_client::persistence::DORMANT_AFTER_DAYS_OPTIONS
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(dormant_after_label(option), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_dormant_after_days(option, cx);
+                                    });
+                                })
+                                .selected(option == dormant_after)
+                            })
+                            .collect()
+                    },
+                );
+                setting_card(
+                    tr!("settings.dormant_after"),
+                    tr!("settings.dormant_after_description"),
+                    dormant_selector,
                     theme,
                     search,
                 )
@@ -6492,6 +6539,15 @@ impl Waku {
             return;
         }
         self.state.auto_resolve_land_conflicts = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_dormant_after_days(&mut self, days: Option<u32>, cx: &mut Context<Self>) {
+        if self.state.dormant_after_days == days {
+            return;
+        }
+        self.state.dormant_after_days = days;
         self.save();
         cx.notify();
     }
