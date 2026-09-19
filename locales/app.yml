@@ -1240,6 +1240,8 @@ sidebar.ordering_last_created:
   en: Last created
 sidebar.show_more:
   en: Show more
+sidebar.show_dormant:
+  en: Show dormant
 sidebar.pinned:
   en: Pinned
 sidebar.terminals:

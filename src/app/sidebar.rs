@@ -172,17 +172,19 @@ fn append_sidebar_group_rows(
     group: SidebarGroup,
     sessions: &[Uuid],
     collapsed: bool,
-    show_more: bool,
+    fold: Option<SidebarFold>,
 ) {
-    if sessions.is_empty() && !show_more {
+    if sessions.is_empty() && fold.is_none() {
         return;
     }
 
     rows.push(SidebarRow::Header(group));
     if !collapsed {
         rows.extend(sessions.iter().copied().map(SidebarRow::Session));
-        if show_more {
-            rows.push(SidebarRow::ShowMore(group));
+        match fold {
+            Some(SidebarFold::More) => rows.push(SidebarRow::ShowMore(group)),
+            Some(SidebarFold::Dormant) => rows.push(SidebarRow::ShowDormant(group)),
+            None => {}
         }
     }
     rows.push(SidebarRow::GroupSpacer);
@@ -378,13 +380,28 @@ fn project_sidebar_groups(
     groups
 }
 
+/// A project group's fold keeps two tails: live sessions past the default
+/// cap reveal through "Show more", and once every live session is shown a
+/// "Show dormant" row takes its place and reveals the dormant tail — a
+/// single click never mixes the two.
 fn visible_project_sessions(
-    sessions: &[Uuid],
+    live: &[Uuid],
+    dormant: &[Uuid],
     revealed_extra_sessions: usize,
-) -> (Vec<Uuid>, bool) {
-    let limit = SIDEBAR_PROJECT_DEFAULT_VISIBLE.saturating_add(revealed_extra_sessions);
-    let visible = sessions.iter().take(limit).copied().collect();
-    (visible, sessions.len() > limit)
+    revealed_dormant_sessions: usize,
+) -> (Vec<Uuid>, Option<SidebarFold>) {
+    let live_limit = SIDEBAR_PROJECT_DEFAULT_VISIBLE.saturating_add(revealed_extra_sessions);
+    let mut visible = Vec::with_capacity(live_limit.min(live.len()) + dormant.len().min(revealed_dormant_sessions));
+    visible.extend(live.iter().take(live_limit).copied());
+    visible.extend(dormant.iter().take(revealed_dormant_sessions).copied());
+    let fold = if live.len() > live_limit {
+        Some(SidebarFold::More)
+    } else if dormant.len() > revealed_dormant_sessions {
+        Some(SidebarFold::Dormant)
+    } else {
+        None
+    };
+    (visible, fold)
 }
 
 fn sidebar_project_is_projectless(project: &Project, projectless_root: Option<&Path>) -> bool {
@@ -692,8 +709,19 @@ pub(super) enum SidebarRow {
     Terminal(Uuid),
     /// Reveals the next batch of older sessions in a project section.
     ShowMore(SidebarGroup),
+    /// Reveals the next batch of dormant sessions in a project section —
+    /// replaces ShowMore once every live session in the group is shown.
+    ShowDormant(SidebarGroup),
     /// Spacing between date groups.
     GroupSpacer,
+}
+
+/// Which tail a project group's fold row reveals next: the live sessions
+/// past the default cap, then the dormant tail once live is exhausted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SidebarFold {
+    More,
+    Dormant,
 }
 
 pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
@@ -751,7 +779,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
-        SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
+        SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
     })
 }
@@ -2607,9 +2635,19 @@ impl Waku {
                     .fold(0u64, |combined, (group, count)| {
                         combined.wrapping_add(group.mix_fingerprint(*count as u64))
                     });
+            let dormant_revealed = self
+                .sidebar_project_dormant_reveals
+                .iter()
+                .fold(0u64, |combined, (group, count)| {
+                    combined.wrapping_add(group.mix_fingerprint(*count as u64))
+                });
             fingerprint = mix(
-                mix(fingerprint, self.sidebar_project_reveal_counts.len() as u64),
-                revealed,
+                mix(
+                    fingerprint,
+                    (self.sidebar_project_reveal_counts.len() as u64)
+                        .wrapping_add(self.sidebar_project_dormant_reveals.len() as u64),
+                ),
+                revealed.wrapping_add(dormant_revealed),
             );
         }
         // A set has no stable iteration order; combine order-independently.
@@ -2661,17 +2699,16 @@ impl Waku {
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
-        // Swept and stale sessions leave the ordinary groups entirely — the
-        // Dormant section at the end is their only row. Ordering within it
-        // keeps the preference's sort.
+        // Swept and stale sessions are dormant; where they land depends on
+        // the grouping — a trailing Dormant section under Date, a
+        // below-the-fold tail inside each project under Project.
         let now = unix_time();
         let threshold = dormant_threshold_secs(self.state.dormant_after_days);
-        let dormant_ids = sorted_sessions
+        let dormant_set = sorted_sessions
             .iter()
             .filter(|session| session_dormant(session, now, threshold))
             .map(|session| session.id)
-            .collect::<Vec<_>>();
-        sorted_sessions.retain(|session| !session_dormant(session, now, threshold));
+            .collect::<HashSet<_>>();
 
         // The Projects row is experimental chrome — absent while its opt-in
         // is off.
@@ -2727,7 +2764,7 @@ impl Waku {
             SidebarGroup::Pinned,
             &pinned_ids,
             pinned_collapsed,
-            false,
+            None,
         );
         if pinned_collapsed {
             collapsed_members.insert(SidebarGroup::Pinned, pinned_ids);
@@ -2736,6 +2773,15 @@ impl Waku {
 
         match self.state.sidebar_grouping {
             SidebarGrouping::Date => {
+                // Dormant sessions leave the ordinary groups entirely — the
+                // Dormant section at the end is their only row. Ordering
+                // within it keeps the preference's sort.
+                let dormant_ids = sorted_sessions
+                    .iter()
+                    .filter(|session| dormant_set.contains(&session.id))
+                    .map(|session| session.id)
+                    .collect::<Vec<_>>();
+                sorted_sessions.retain(|session| !dormant_set.contains(&session.id));
                 let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
@@ -2745,12 +2791,25 @@ impl Waku {
                         group,
                         &grouped_sessions[date_group.index()],
                         collapsed,
-                        false,
+                        None,
                     );
                     if collapsed {
                         collapsed_members
                             .insert(group, grouped_sessions[date_group.index()].clone());
                     }
+                }
+                let dormant_collapsed = self
+                    .sidebar_collapsed_groups
+                    .contains(&SidebarGroup::Dormant);
+                append_sidebar_group_rows(
+                    &mut rows,
+                    SidebarGroup::Dormant,
+                    &dormant_ids,
+                    dormant_collapsed,
+                    None,
+                );
+                if dormant_collapsed && !dormant_ids.is_empty() {
+                    collapsed_members.insert(SidebarGroup::Dormant, dormant_ids);
                 }
             }
             SidebarGrouping::Project => {
@@ -2771,36 +2830,29 @@ impl Waku {
                     if collapsed {
                         collapsed_members.insert(group, sessions.clone());
                     }
+                    let (live, dormant) = sessions
+                        .iter()
+                        .copied()
+                        .partition::<Vec<_>, _>(|id| !dormant_set.contains(id));
                     let revealed_extra_sessions = self
                         .sidebar_project_reveal_counts
                         .get(&group)
                         .copied()
                         .unwrap_or_default();
-                    let (visible_sessions, show_more) =
-                        visible_project_sessions(&sessions, revealed_extra_sessions);
-                    append_sidebar_group_rows(
-                        &mut rows,
-                        group,
-                        &visible_sessions,
-                        collapsed,
-                        show_more,
+                    let revealed_dormant_sessions = self
+                        .sidebar_project_dormant_reveals
+                        .get(&group)
+                        .copied()
+                        .unwrap_or_default();
+                    let (visible_sessions, fold) = visible_project_sessions(
+                        &live,
+                        &dormant,
+                        revealed_extra_sessions,
+                        revealed_dormant_sessions,
                     );
+                    append_sidebar_group_rows(&mut rows, group, &visible_sessions, collapsed, fold);
                 }
             }
-        }
-        // The Dormant group trails every ordinary section in both groupings.
-        let dormant_collapsed = self
-            .sidebar_collapsed_groups
-            .contains(&SidebarGroup::Dormant);
-        append_sidebar_group_rows(
-            &mut rows,
-            SidebarGroup::Dormant,
-            &dormant_ids,
-            dormant_collapsed,
-            false,
-        );
-        if dormant_collapsed && !dormant_ids.is_empty() {
-            collapsed_members.insert(SidebarGroup::Dormant, dormant_ids);
         }
 
         let has_session_header = rows.iter().any(
@@ -2998,7 +3050,10 @@ impl Waku {
                 let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
                     matches!(
                         row,
-                        SidebarRow::Session(_) | SidebarRow::Terminal(_) | SidebarRow::ShowMore(_)
+                        SidebarRow::Session(_)
+                            | SidebarRow::Terminal(_)
+                            | SidebarRow::ShowMore(_)
+                            | SidebarRow::ShowDormant(_)
                     )
                 });
                 // The header actions belong to the session history — the
@@ -3026,7 +3081,10 @@ impl Waku {
                 .render_sidebar_terminal_item(terminal_id, cx)
                 .into_any_element(),
             SidebarRow::ShowMore(group) => {
-                self.render_sidebar_show_more(group, cx).into_any_element()
+                self.render_sidebar_show_more(group, false, cx).into_any_element()
+            }
+            SidebarRow::ShowDormant(group) => {
+                self.render_sidebar_show_more(group, true, cx).into_any_element()
             }
             SidebarRow::GroupSpacer => div()
                 .w_full()
@@ -3404,7 +3462,12 @@ impl Waku {
         window.focus(&focus, cx);
     }
 
-    fn render_sidebar_show_more(&self, group: SidebarGroup, cx: &mut Context<Self>) -> Div {
+    fn render_sidebar_show_more(
+        &self,
+        group: SidebarGroup,
+        dormant: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         let group_key = group.element_key();
         let focus = self
@@ -3424,13 +3487,17 @@ impl Waku {
             .text_color(theme.text_tertiary)
             .focus_visible(|style| style.text_color(theme.text))
             .hover(|style| style.text_color(theme.text))
-            .child(tr!("sidebar.show_more"))
+            .child(if dormant {
+                tr!("sidebar.show_dormant")
+            } else {
+                tr!("sidebar.show_more")
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.show_more_project_sessions(group, cx);
+                this.show_more_project_sessions(group, dormant, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.show_more_project_sessions(group, cx);
+                    this.show_more_project_sessions(group, dormant, cx);
                     cx.stop_propagation();
                 }
             }));
@@ -3459,8 +3526,21 @@ impl Waku {
             )
     }
 
-    fn show_more_project_sessions(&mut self, group: SidebarGroup, cx: &mut Context<Self>) {
-        let revealed = self.sidebar_project_reveal_counts.entry(group).or_default();
+    fn show_more_project_sessions(
+        &mut self,
+        group: SidebarGroup,
+        dormant: bool,
+        cx: &mut Context<Self>,
+    ) {
+        // Separate counters keep a click honest: "Show more" reveals live
+        // sessions only, "Show dormant" dormant ones only — a reveal never
+        // crosses the boundary mid-click.
+        let counts = if dormant {
+            &mut self.sidebar_project_dormant_reveals
+        } else {
+            &mut self.sidebar_project_reveal_counts
+        };
+        let revealed = counts.entry(group).or_default();
         *revealed = revealed.saturating_add(SIDEBAR_PROJECT_REVEAL_BATCH);
         self.sidebar_rows_fingerprint.set(None);
         cx.notify();
@@ -3500,6 +3580,7 @@ impl Waku {
         for group in groups {
             changed |= self.sidebar_collapsed_groups.insert(group);
             changed |= self.sidebar_project_reveal_counts.remove(&group).is_some();
+            changed |= self.sidebar_project_dormant_reveals.remove(&group).is_some();
         }
         if changed {
             self.sidebar_rows_fingerprint.set(None);
@@ -3518,7 +3599,9 @@ impl Waku {
         } else {
             self.sidebar_collapsed_groups.remove(&group)
         };
-        let reveal_reset = collapsed && self.sidebar_project_reveal_counts.remove(&group).is_some();
+        let reveal_reset = collapsed
+            && (self.sidebar_project_reveal_counts.remove(&group).is_some()
+                | self.sidebar_project_dormant_reveals.remove(&group).is_some());
         if collapse_changed || reveal_reset {
             self.sidebar_rows_fingerprint.set(None);
             cx.notify();
@@ -3643,12 +3726,12 @@ impl Waku {
         );
         let multi_selected = self.sidebar_multi_selection.contains(&session_id);
         let pinned = session.pinned_at.is_some();
-        let dormant = self.session_dormant_now(session);
-        // The Pinned and Dormant groups mix projects, so their rows keep the
-        // flat layout and project-name detail even while Project grouping is
-        // active.
+        // Pinned rows mix projects, so they keep the flat layout and
+        // project-name detail even while Project grouping is active. A
+        // dormant row sits inside its project there and indents like any
+        // sibling; only Date grouping gives it the flat standalone group.
         let grouped_by_project =
-            self.state.sidebar_grouping == SidebarGrouping::Project && !pinned && !dormant;
+            self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -4987,7 +5070,7 @@ mod tests {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let group = SidebarGroup::Date(SessionDateGroup::Today);
         let mut expanded = Vec::new();
-        append_sidebar_group_rows(&mut expanded, group, &sessions, false, false);
+        append_sidebar_group_rows(&mut expanded, group, &sessions, false, None);
         assert_eq!(
             expanded,
             vec![
@@ -4999,7 +5082,7 @@ mod tests {
         );
 
         let mut collapsed = Vec::new();
-        append_sidebar_group_rows(&mut collapsed, group, &sessions, true, false);
+        append_sidebar_group_rows(&mut collapsed, group, &sessions, true, None);
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
@@ -5026,7 +5109,7 @@ mod tests {
     fn collapsed_groups_contribute_no_shortcut_targets() {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let mut rows = Vec::new();
-        append_sidebar_group_rows(&mut rows, SidebarGroup::Pinned, &sessions, true, false);
+        append_sidebar_group_rows(&mut rows, SidebarGroup::Pinned, &sessions, true, None);
         assert_eq!(sidebar_shortcut_target_ids(&rows).count(), 0);
     }
 
@@ -5034,7 +5117,7 @@ mod tests {
     fn hidden_project_sessions_keep_a_keyboard_reveal_row() {
         let group = SidebarGroup::Project(Uuid::from_u128(1));
         let mut expanded = Vec::new();
-        append_sidebar_group_rows(&mut expanded, group, &[], false, true);
+        append_sidebar_group_rows(&mut expanded, group, &[], false, Some(SidebarFold::More));
         assert_eq!(
             expanded,
             vec![
@@ -5045,7 +5128,7 @@ mod tests {
         );
 
         let mut collapsed = Vec::new();
-        append_sidebar_group_rows(&mut collapsed, group, &[], true, true);
+        append_sidebar_group_rows(&mut collapsed, group, &[], true, Some(SidebarFold::More));
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer]
@@ -5056,22 +5139,54 @@ mod tests {
     fn project_sessions_reveal_history_beyond_the_default_cap() {
         let sessions = (1..=50).map(Uuid::from_u128).collect::<Vec<_>>();
 
-        let (initial, show_more) = visible_project_sessions(&sessions, 0);
+        let (initial, fold) = visible_project_sessions(&sessions, &[], 0, 0);
         assert_eq!(initial, sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE]);
-        assert!(show_more);
+        assert_eq!(fold, Some(SidebarFold::More));
 
-        let (first_batch, show_more) =
-            visible_project_sessions(&sessions, SIDEBAR_PROJECT_REVEAL_BATCH);
+        let (first_batch, fold) =
+            visible_project_sessions(&sessions, &[], SIDEBAR_PROJECT_REVEAL_BATCH, 0);
         assert_eq!(
             first_batch,
             sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE + SIDEBAR_PROJECT_REVEAL_BATCH]
         );
-        assert!(show_more);
+        assert_eq!(fold, Some(SidebarFold::More));
 
-        let (all_sessions, show_more) =
-            visible_project_sessions(&sessions, SIDEBAR_PROJECT_REVEAL_BATCH * 2);
+        let (all_sessions, fold) =
+            visible_project_sessions(&sessions, &[], SIDEBAR_PROJECT_REVEAL_BATCH * 2, 0);
         assert_eq!(all_sessions, sessions);
-        assert!(!show_more);
+        assert_eq!(fold, None);
+    }
+
+    #[test]
+    fn dormant_sessions_stay_below_the_project_fold() {
+        let live = (1..=50).map(Uuid::from_u128).collect::<Vec<_>>();
+        let dormant = (100..=110).map(Uuid::from_u128).collect::<Vec<_>>();
+
+        // Dormant rows never occupy the default slice — the fold row flips
+        // to ShowDormant only once every live session is revealed.
+        let (initial, fold) = visible_project_sessions(&live, &dormant, 0, 0);
+        assert_eq!(initial, live[..SIDEBAR_PROJECT_DEFAULT_VISIBLE]);
+        assert_eq!(fold, Some(SidebarFold::More));
+
+        let (all_live, fold) =
+            visible_project_sessions(&live, &dormant, SIDEBAR_PROJECT_REVEAL_BATCH * 2, 0);
+        assert_eq!(all_live, live);
+        assert_eq!(fold, Some(SidebarFold::Dormant));
+
+        let (with_dormant, fold) = visible_project_sessions(
+            &live,
+            &dormant,
+            SIDEBAR_PROJECT_REVEAL_BATCH * 2,
+            SIDEBAR_PROJECT_REVEAL_BATCH,
+        );
+        assert_eq!(with_dormant, [live.as_slice(), dormant.as_slice()].concat());
+        assert_eq!(fold, None);
+
+        // A project holding only dormant sessions shows nothing live — just
+        // the dormant fold row.
+        let (empty_live, fold) = visible_project_sessions(&[], &dormant, 0, 0);
+        assert!(empty_live.is_empty());
+        assert_eq!(fold, Some(SidebarFold::Dormant));
     }
 
     #[test]

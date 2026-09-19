@@ -467,6 +467,7 @@ sidebar.ordering: 排序
 sidebar.ordering_last_updated: 最近更新
 sidebar.ordering_last_created: 最近创建
 sidebar.show_more: 显示更多
+sidebar.show_dormant: 显示休眠任务
 sidebar.pinned: 已置顶
 sidebar.terminals: 终端
 sidebar.dormant: 休眠
