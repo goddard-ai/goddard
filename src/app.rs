@@ -1631,14 +1631,18 @@ fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPa
     restored
 }
 
-/// The accent dot painted at the top of a transcript whose session was opened
-/// with unseen completions. `armed_at` orders it against
+/// The accent dot painted beside the first line of the latest agent reply when
+/// its session was opened with unseen completions. `armed_at` orders it against
 /// `transcript_last_wheel_scroll` — a wheel gesture predating the activation
-/// must not dismiss it — and `fading` swaps the dot for its exit animation.
+/// must not dismiss it — and `fade_started` runs the exit animation, after
+/// which nothing renders so a remounting row cannot replay it.
 #[derive(Clone, Copy)]
 struct NewContentDot {
+    /// The assistant message the marker anchors to: the newest one in the
+    /// session, which is the reply the unseen completion produced.
+    message_id: Uuid,
     armed_at: Instant,
-    fading: bool,
+    fade_started: Option<Instant>,
 }
 
 /// Where a session activation parks the transcript.

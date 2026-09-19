@@ -397,10 +397,20 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id && session.status == SessionStatus::Waiting);
         if had_unseen {
-            self.transcript_new_content_dot = Some(NewContentDot {
-                armed_at: Instant::now(),
-                fading: false,
-            });
+            self.transcript_new_content_dot = self
+                .selected_session()
+                .and_then(|session| {
+                    session
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| message.role == MessageRole::Assistant)
+                })
+                .map(|message| NewContentDot {
+                    message_id: message.id,
+                    armed_at: Instant::now(),
+                    fade_started: None,
+                });
         } else if session_changed {
             self.transcript_new_content_dot = None;
         }
