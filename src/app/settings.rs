@@ -3024,32 +3024,36 @@ impl Waku {
         let header = {
             let title = tr!("daemon.build_title");
             let description = tr!("daemon.build_description");
-            search
-                .matched(&title, &description)
-                .map(|(title_ranges, description_ranges)| {
-                    div()
-                        .child(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(title, title_ranges, theme)),
-                        )
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .child(settings_search_text(
-                                    description,
-                                    description_ranges,
-                                    theme,
-                                )),
-                        )
-                })
+            search.matched(&title, &description).map(|matched| {
+                div()
+                    .child(settings_title_jump(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(settings_search_text(
+                                title,
+                                matched.title_ranges.clone(),
+                                theme,
+                            )),
+                        &matched,
+                        theme,
+                    ))
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(sp(12.5))
+                            .line_height(sp(16.0))
+                            .text_color(theme.text_secondary)
+                            .child(settings_search_text(
+                                description,
+                                matched.description_ranges,
+                                theme,
+                            )),
+                    )
+            })
         };
         let copy_button = |id: &'static str, value: String, cx: &mut Context<Self>| {
             let copied = self.control_was_copied(id);
@@ -3106,7 +3110,7 @@ impl Waku {
                          top_border: bool,
                          cx: &mut Context<Self>|
          -> Option<Div> {
-            search.matched(&title, "").map(|(ranges, _)| {
+            search.matched(&title, "").map(|matched| {
                 div()
                     .when(!top_border, |row| row.mt(px(13.0)))
                     .py(px(8.0))
@@ -3116,14 +3120,20 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .child(
+                    .child(settings_title_jump(
                         div()
                             .w(px(80.0))
                             .flex_none()
                             .text_size(sp(12.5))
                             .text_color(theme.text_tertiary)
-                            .child(settings_search_text(title, ranges, theme)),
-                    )
+                            .child(settings_search_text(
+                                title,
+                                matched.title_ranges.clone(),
+                                theme,
+                            )),
+                        &matched,
+                        theme,
+                    ))
                     .child(
                         div()
                             .flex_1()
