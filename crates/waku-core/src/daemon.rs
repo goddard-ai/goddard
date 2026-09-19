@@ -1826,15 +1826,10 @@ impl Backend for WakuBackend {
                 provider,
             } => self.agent_read_session(task_id, thread_id, provider),
             command => {
-                // Quarantined transfer sessions hold received files that the
-                // user hasn't trusted yet — the composer shows a trust card
-                // instead of a prompt field, and the daemon refuses anything
-                // that could start the agent on them.
-                if matches!(command, Command::Prompt { .. } | Command::Steer { .. })
-                    && self.session_quarantined(session_id)
-                {
-                    bail!("received files are quarantined until trusted");
-                }
+                // Quarantined transfer sessions still take interactive
+                // prompts — the sandbox is the boundary, and the quarantine
+                // flag only keeps unattended senders (agent prompts,
+                // automations) out until the user trusts the transfer.
                 let driver = {
                     let sessions = self.sessions.lock();
                     let (active_runtime_id, driver) = sessions

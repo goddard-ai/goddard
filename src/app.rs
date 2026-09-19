@@ -4504,12 +4504,14 @@ impl Waku {
                             && this.composer_attachments.is_empty()
                             && this.composer_pasted_blocks.is_empty()
                             && !this.has_annotations()
-                            && this
-                                .selected_session()
-                                .is_some_and(composer::session_awaits_continue)
+                            && this.selected_session().is_some_and(|session| {
+                                composer::session_awaits_continue(session)
+                                    || this.quarantine_handoff_transfer(session).is_some()
+                            })
                         {
                             // Enter on an empty composer over a stopped turn
-                            // is the same affordance as the play button.
+                            // or an unstarted quarantined transfer is the
+                            // same affordance as the play button.
                             this.continue_interrupted_session(cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)

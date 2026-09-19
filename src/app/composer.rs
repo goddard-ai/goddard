@@ -3,6 +3,7 @@ use super::annotations::{
 };
 use super::*;
 use crate::ui::ActivationExt;
+use waku_client::friends::{TransferDirection, TransferInfo, TransferStatus};
 
 use anyhow::Context as _;
 use base64::Engine as _;
@@ -173,6 +174,7 @@ pub(super) enum ComposerSubmitAction {
     Preparing,
     Stop,
     /// The session's last turn ended unsettled and the composer is empty —
+    /// or a quarantined transfer session is waiting for its hand-off — so
     /// the submit affordance continues that work with no prompt required.
     Continue,
 }
@@ -4576,13 +4578,89 @@ impl Waku {
         }
     }
 
-    /// The composer slot for a quarantined received-file session: a card
-    /// explaining the boundary plus the Trust action that clears it.
+    /// The received transfer behind a quarantined session that hasn't run
+    /// yet — its note and file location are what an empty-composer Enter
+    /// hands to the agent. The materialized receipt turn never sets
+    /// `provider_turn_started`, so the first real prompt is what retires the
+    /// affordance; a busy session is mid-turn already.
+    pub(super) fn quarantine_handoff_transfer(
+        &self,
+        session: &AgentSession,
+    ) -> Option<TransferInfo> {
+        if !session.quarantined
+            || session.status.is_busy()
+            || session.provider_turns_after(0) > 0
+        {
+            return None;
+        }
+        self.friends_state
+            .transfers
+            .iter()
+            .find(|transfer| {
+                transfer.session_id == Some(session.id)
+                    && transfer.direction == TransferDirection::Incoming
+                    && transfer.status == TransferStatus::Done
+            })
+            .cloned()
+    }
+
+    /// The submission an empty-composer Enter sends on a quarantined
+    /// transfer session: the sender's note plus where the files landed, so
+    /// the agent can reach them in the sandbox. The bubble shows the note
+    /// when there is one — the path line is transport context.
+    pub(super) fn quarantine_handoff_submission(
+        &self,
+        session: &AgentSession,
+    ) -> Option<ComposerSubmission> {
+        let transfer = self.quarantine_handoff_transfer(session)?;
+        let dest_dir = transfer.dest_dir?;
+        let context = format!(
+            "{} sent me \"{}\" — the files are in {}.",
+            transfer.peer_name,
+            transfer.title,
+            dest_dir.display()
+        );
+        let note = transfer
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|note| !note.is_empty());
+        let prompt = match note {
+            Some(note) => format!("{context}\n\n{note}"),
+            None => context,
+        };
+        let display = note.unwrap_or(&prompt).to_owned();
+        let mut submission = ComposerSubmission::plain(prompt);
+        submission.display_content = Some(display.clone());
+        submission.human_content = Some(display);
+        Some(submission)
+    }
+
+    /// `composer_submit_action` plus the quarantined-transfer hand-off: an
+    /// idle session whose received files haven't been handed to the agent
+    /// yet gets the same no-draft Continue affordance as a stopped turn.
+    pub(super) fn composer_submit_action_for(
+        &self,
+        session: Option<&AgentSession>,
+        preparing: bool,
+        has_draft: bool,
+    ) -> ComposerSubmitAction {
+        if !has_draft
+            && session.is_some_and(|session| self.quarantine_handoff_transfer(session).is_some())
+        {
+            return ComposerSubmitAction::Continue;
+        }
+        composer_submit_action(session, preparing, has_draft)
+    }
+
+    /// The composer slot's quarantine boundary: a banner above the live
+    /// composer carrying the Trust action that clears the flag.
     fn render_quarantine_card(&self, session_id: Uuid, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         div()
             .flex_none()
             .px(px(20.0 - COMPOSER_OVERHANG))
+            .pb(px(8.0))
             .child(
                 div()
                     .w_full()
@@ -4661,18 +4739,30 @@ impl Waku {
             )
     }
 
+    /// A received-file session stays quarantined until the user trusts it —
+    /// the composer stays live (chatting about the files is the point, and
+    /// the sandbox is the boundary), and a banner above it carries the flag
+    /// and the Trust action.
     pub(super) fn render_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let quarantined = self
+            .composer_session()
+            .filter(|session| session.quarantined && session.detail_loaded)
+            .map(|session| session.id);
+        let field = self.render_composer_field(window, cx);
+        let Some(session_id) = quarantined else {
+            return field;
+        };
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .child(self.render_quarantine_card(session_id, cx))
+            .child(field)
+    }
+
+    fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let session = self.composer_session();
-        // A received-file session stays quarantined until the user trusts
-        // it — the prompt field is replaced by a trust card so Enter can't
-        // start the agent on untrusted files. The daemon refuses anyway;
-        // this is the legible boundary.
-        if let Some(session) =
-            session.filter(|session| session.quarantined && session.detail_loaded)
-        {
-            return self.render_quarantine_card(session.id, cx);
-        }
         let session_id = session.map(|session| session.id);
         let preparing = session.is_some_and(|session| {
             self.submission_preparations.contains(&session.id)
@@ -4689,7 +4779,7 @@ impl Waku {
                 .is_empty();
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
-        let submit_action = composer_submit_action(session, preparing, has_draft);
+        let submit_action = self.composer_submit_action_for(session, preparing, has_draft);
         let escape_stop_armed = session.is_some_and(|session| {
             self.escape_stop_confirmation
                 .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())

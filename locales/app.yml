@@ -4057,7 +4057,7 @@ friends.transfers_active:
 friends.quarantined_title:
   en: Quarantined files
 friends.quarantined_hint:
-  en: "This session holds files received from a friend. The agent can't open or run them until you trust the transfer."
+  en: "This session holds files received from a friend. Chat works while they stay quarantined — Enter on an empty composer hands the files and note to the agent."
 friends.trust:
   en: Trust files
 friends.command_failed:

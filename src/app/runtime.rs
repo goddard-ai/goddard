@@ -4683,14 +4683,28 @@ impl Waku {
         handle
     }
 
-    /// Continue an interrupted turn with no typed prompt. The provider still
-    /// gets text — [`CONTINUE_PROMPT`] — but the message is `hidden`, so no
-    /// transcript row, title, or restored draft comes of it.
+    /// The composer's Continue affordance with no typed prompt. A stopped
+    /// turn gets the hidden nudge — [`CONTINUE_PROMPT`] reaches the provider
+    /// but no transcript row, title, or restored draft comes of it — while a
+    /// quarantined transfer session that hasn't run yet gets the hand-off:
+    /// the sender's note plus where the files landed.
     pub(super) fn continue_interrupted_session(&mut self, cx: &mut Context<Self>) {
         let Some(session) = self.composer_session() else {
             return;
         };
-        if !composer::session_awaits_continue(session) || self.model_picker_has_no_providers() {
+        if self.model_picker_has_no_providers() {
+            return;
+        }
+        if let Some(submission) = self.quarantine_handoff_submission(session) {
+            let session_id = session.id;
+            if self.big_picture.is_open() {
+                self.submit_composer_submission_to(session_id, submission, cx);
+            } else {
+                self.submit_composer_submission(submission, cx);
+            }
+            return;
+        }
+        if !composer::session_awaits_continue(session) {
             return;
         }
         let session_id = session.id;
@@ -5042,12 +5056,6 @@ impl Waku {
         else {
             return;
         };
-        // Quarantined transfer sessions can't start turns — the trust card
-        // replaces the composer, so reaching this means a path bypassed the
-        // UI. The daemon refuses too; drop the submission here as well.
-        if session.quarantined {
-            return;
-        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
