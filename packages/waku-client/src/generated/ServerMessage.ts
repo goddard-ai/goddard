@@ -4,4 +4,9 @@ import type { FriendsState } from "./FriendsState";
 import type { ResponseOutcome } from "./ResponseOutcome";
 import type { SequencedEvent } from "./SequencedEvent";
 
-export type ServerMessage = { "type": "hello", protocolVersion: number, daemonVersion: string, } | { "type": "rejected", message: string, } | { "type": "response", requestId: string, outcome: ResponseOutcome, } | { "type": "event" } & SequencedEvent | { "type": "taskStateChanged", revision: number, } | { "type": "settingsChanged", settings: DaemonSettings, } | { "type": "friendsChanged", state: FriendsState, } | { "type": "shuttingDown" };
+export type ServerMessage = { "type": "hello", protocolVersion: number, daemonVersion: string,
+/**
+ * The commit the daemon binary was built from, when its build had a
+ * git checkout to stamp. Dev builds surface it beside the app's own.
+ */
+daemonCommit: string | null, } | { "type": "rejected", message: string, } | { "type": "response", requestId: string, outcome: ResponseOutcome, } | { "type": "event" } & SequencedEvent | { "type": "taskStateChanged", revision: number, } | { "type": "settingsChanged", settings: DaemonSettings, } | { "type": "friendsChanged", state: FriendsState, } | { "type": "shuttingDown" };

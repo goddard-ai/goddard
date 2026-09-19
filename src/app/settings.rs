@@ -2369,6 +2369,7 @@ impl Waku {
         let agent_tools_card = self.agent_tools_card(theme, search, cx);
         let agent_settings_card = self.agent_settings_card(theme, search, cx);
         let remote_hosts_card = self.render_remote_hosts_card(theme, search, cx);
+        let build_card = self.render_build_card(theme, search, cx);
         if self.daemon.is_externally_managed() {
             let external_card = {
                 let title = tr!("daemon.external_title");
@@ -2393,6 +2394,7 @@ impl Waku {
                 .children(external_card)
                 .children(agent_tools_card)
                 .children(agent_settings_card)
+                .children(build_card)
                 .into_any_element();
         }
 
@@ -2989,7 +2991,177 @@ impl Waku {
             .children(remote_hosts_card)
             .children(agent_tools_card)
             .children(agent_settings_card)
+            .children(build_card)
             .into_any_element()
+    }
+
+    /// Dev builds stamp each binary with the commit it was built from; the
+    /// card puts the app's beside the connected daemon's so a stale daemon
+    /// stands out. Release builds never render it.
+    fn render_build_card(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !cfg!(debug_assertions) {
+            return None;
+        }
+        let before = search.hits();
+        let header = {
+            let title = tr!("daemon.build_title");
+            let description = tr!("daemon.build_description");
+            search
+                .matched(&title, &description)
+                .map(|(title_ranges, description_ranges)| {
+                    div()
+                        .child(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(title, title_ranges, theme)),
+                        )
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(sp(12.5))
+                                .line_height(sp(16.0))
+                                .text_color(theme.text_secondary)
+                                .child(settings_search_text(
+                                    description,
+                                    description_ranges,
+                                    theme,
+                                )),
+                        )
+                })
+        };
+        let copy_button = |id: &'static str, value: String, cx: &mut Context<Self>| {
+            let copied = self.control_was_copied(id);
+            div()
+                .id(id)
+                .tab_index(0)
+                .h(px(27.0))
+                .px(px(9.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .child(icon(
+                    if copied {
+                        "icons/check.svg"
+                    } else {
+                        "icons/copy.svg"
+                    },
+                    11.0,
+                    theme.text_tertiary,
+                ))
+                .child(if copied {
+                    tr!("common.copied")
+                } else {
+                    tr!("common.copy")
+                })
+                .on_click(cx.listener({
+                    let value = value.clone();
+                    move |this, _, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+                        this.show_control_copied(id, cx);
+                    }
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+                        this.show_control_copied(id, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        };
+        let build_row = |title: String,
+                         value: String,
+                         copy_id: &'static str,
+                         top_border: bool,
+                         cx: &mut Context<Self>|
+         -> Option<Div> {
+            search.matched(&title, "").map(|(ranges, _)| {
+                div()
+                    .when(!top_border, |row| row.mt(px(13.0)))
+                    .py(px(8.0))
+                    .when(top_border, |row| {
+                        row.border_t(hairline()).border_color(theme.separator)
+                    })
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .w(px(80.0))
+                            .flex_none()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(settings_search_text(title, ranges, theme)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(crate::fonts::current(cx).code)
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(SharedString::from(value.clone())),
+                    )
+                    .child(copy_button(copy_id, value, cx))
+            })
+        };
+        let app_build = match option_env!("GODDARD_COMMIT_SHA") {
+            Some(commit) => format!("{} · {commit}", env!("CARGO_PKG_VERSION")),
+            None => env!("CARGO_PKG_VERSION").to_owned(),
+        };
+        let client = self.daemon.client();
+        let daemon_build = match client.daemon_commit() {
+            Some(commit) => format!("{} · {commit}", client.daemon_version()),
+            None => client.daemon_version().to_owned(),
+        };
+        let app_row = build_row(
+            tr!("daemon.build_app"),
+            app_build,
+            "copy-app-build",
+            false,
+            cx,
+        );
+        let daemon_row = build_row(
+            tr!("daemon.build_daemon"),
+            daemon_build,
+            "copy-daemon-build",
+            true,
+            cx,
+        );
+        if search.active() && search.hits() == before {
+            None
+        } else {
+            Some(
+                div()
+                    .px(px(20.0))
+                    .py(px(15.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .children(header)
+                    .children(app_row)
+                    .children(daemon_row)
+                    .into_any_element(),
+            )
+        }
     }
 
     /// Saved remote daemons merged into this window's catalog. Each row shows

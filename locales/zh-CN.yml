@@ -234,6 +234,10 @@ daemon.agent_tools_title: 智能体工具
 daemon.agent_tools_description: 允许会话中的智能体创建任务并向其他任务发送消息。开启期间启动的会话将获得按会话隔离的 goddard-agent 命令，其发送的提示会在目标转录中标记。
 daemon.agent_settings_title: 智能体设置
 daemon.agent_settings_description: 允许智能体为你创建和编辑自定义命令。默认开启；智能体添加的命令会有标记，守护进程会记录是哪个任务做出的更改。
+daemon.build_title: 构建
+daemon.build_description: 此应用和已连接的守护进程所基于构建的提交。
+daemon.build_app: 应用
+daemon.build_daemon: 守护进程
 daemon.not_configured: 未配置
 daemon.status: 状态
 daemon.disconnect: 断开连接

@@ -85,6 +85,7 @@ fn main() -> anyhow::Result<()> {
         waku_core::ServerOptions {
             allowed_origins: arguments.allowed_origins.into_iter().collect(),
             allow_shutdown: arguments.parent_pid.is_some(),
+            build_commit: option_env!("GODDARD_COMMIT_SHA").map(str::to_owned),
         },
     )
 }
