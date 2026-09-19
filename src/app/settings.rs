@@ -643,18 +643,52 @@ impl Waku {
             .on_action(cx.listener(Self::cancel_turn_action))
             .on_action(cx.listener(Self::archive_session_action))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
+            .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
+            .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
             .size_full()
             .flex()
-            .bg(theme.canvas)
             .text_color(theme.text)
             .font_family(crate::fonts::current(cx).ui)
             .child(sidebar)
-            .child(content)
+            // The handle straddles the column's left edge — the sidebar's
+            // right edge — exactly as it does in the workspace.
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .flex()
+                    .child(content)
+                    .child(self.render_panel_resize_handle(
+                        "settings-sidebar-resize-handle",
+                        PanelResizeTarget::Sidebar,
+                        cx,
+                    )),
+            )
             .into_any_element()
+    }
+
+    /// The width the settings sidebar paints at: the workspace's panel
+    /// fitting with the sidebar forced on, so the shared `sidebar_width`
+    /// and the resize drag's clamp agree across both surfaces.
+    pub(super) fn settings_sidebar_width(&self, window: &Window) -> f32 {
+        fitted_panel_widths(
+            f32::from(window.viewport_size().width),
+            true,
+            self.right_panel_visible || self.git_panel_visible || self.right_panel_slide.is_some(),
+            self.sidebar_width,
+            self.right_panel_width,
+        )
+        .0
     }
 
     fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
+        let is_resizing = self
+            .panel_resize_drag
+            .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
+        let width = self.settings_sidebar_width(window);
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
         let query = self.settings_search_query(cx);
         let searching = !query.is_empty();
@@ -741,13 +775,17 @@ impl Waku {
             .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
                 this.cycle_settings_page("up", window, cx);
             }))
-            .w(px(DEFAULT_SIDEBAR_WIDTH))
+            .w(px(width))
             .h_full()
             .flex_none()
             .flex()
             .flex_col()
             .relative()
-            .bg(theme.sidebar)
+            .bg(if is_resizing {
+                theme.sidebar_drag_background
+            } else {
+                theme.sidebar
+            })
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
                 div().px(px(12.0)).child(
