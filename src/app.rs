@@ -278,24 +278,27 @@ enum SettingsPage {
     Git,
     Jev,
     Experiments,
+    Integrations,
     Keybindings,
 }
 
 impl SettingsPage {
-    /// Computer Use, Friends, and Jev are still experimental, so their
-    /// navigation entry points only appear once the Experiments opt-in is
-    /// on. Keeping this decision on the page itself makes the Settings
-    /// sidebar and command palette use the same gate.
+    /// Computer Use, Friends, Jev, and Integrations are still experimental,
+    /// so their navigation entry points only appear once the Experiments
+    /// opt-in is on. Keeping this decision on the page itself makes the
+    /// Settings sidebar and command palette use the same gate.
     fn is_visible_in_navigation(
         self,
         computer_use_experiment_enabled: bool,
         friends_enabled: bool,
         model_router_enabled: bool,
+        integrations_enabled: bool,
     ) -> bool {
         match self {
             Self::ComputerUse => computer_use_experiment_enabled,
             Self::Friends => friends_enabled,
             Self::Jev => model_router_enabled,
+            Self::Integrations => integrations_enabled,
             Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
         }
@@ -308,11 +311,13 @@ impl SettingsPage {
         computer_use_experiment_enabled: bool,
         friends_enabled: bool,
         model_router_enabled: bool,
+        integrations_enabled: bool,
     ) -> Self {
         if self.is_visible_in_navigation(
             computer_use_experiment_enabled,
             friends_enabled,
             model_router_enabled,
+            integrations_enabled,
         ) {
             self
         } else {
@@ -1531,6 +1536,7 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
         SettingsPage::Git => PersistedSettingsPage::Git,
         SettingsPage::Jev => PersistedSettingsPage::Jev,
         SettingsPage::Experiments => PersistedSettingsPage::Experiments,
+        SettingsPage::Integrations => PersistedSettingsPage::Integrations,
         SettingsPage::Keybindings => PersistedSettingsPage::Keybindings,
     }
 }
@@ -1550,6 +1556,7 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
         PersistedSettingsPage::Git => SettingsPage::Git,
         PersistedSettingsPage::Jev => SettingsPage::Jev,
         PersistedSettingsPage::Experiments => SettingsPage::Experiments,
+        PersistedSettingsPage::Integrations => SettingsPage::Integrations,
         PersistedSettingsPage::Keybindings => SettingsPage::Keybindings,
     }
 }
@@ -1838,6 +1845,19 @@ pub struct Waku {
     computer_permission_tx: Sender<Result<ComputerPermissions, String>>,
     computer_permission_events: Receiver<Result<ComputerPermissions, String>>,
     computer_permission_request_pending: bool,
+    /// The MCP integration catalog joined with daemon-side configuration,
+    /// fetched over RPC when the Integrations page first shows. `None` means
+    /// the fetch has not answered (or the daemon predates the feature).
+    integration_snapshots: Option<Vec<waku_protocol::integrations::IntegrationSnapshot>>,
+    integration_snapshots_tx:
+        Sender<Result<Vec<waku_protocol::integrations::IntegrationSnapshot>, String>>,
+    integration_snapshots_events:
+        Receiver<Result<Vec<waku_protocol::integrations::IntegrationSnapshot>, String>>,
+    /// The integration whose connect/edit form is open on the page.
+    integration_editor: Option<crate::app::settings::IntegrationEditor>,
+    /// Connect/disconnect calls that have not answered yet, keyed by
+    /// integration id, so their buttons render busy.
+    integration_commands_pending: HashSet<String>,
     /// Account rate-limit meters per provider, fetched off-thread (Claude,
     /// Codex, and OpenCode Go over HTTPS; Grok through a stdio probe) and
     /// refreshed live by Codex's own stream. Frames read only this snapshot.
@@ -4164,6 +4184,7 @@ impl Waku {
         let (provider_version_tx, provider_version_events) = unbounded();
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let (computer_permission_tx, computer_permission_events) = unbounded();
+        let (integration_snapshots_tx, integration_snapshots_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (agy_poll_tx, agy_poll_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
@@ -5067,6 +5088,11 @@ impl Waku {
                 computer_permission_tx,
                 computer_permission_events,
                 computer_permission_request_pending: false,
+                integration_snapshots: None,
+                integration_snapshots_tx,
+                integration_snapshots_events,
+                integration_editor: None,
+                integration_commands_pending: HashSet::new(),
                 plan_usage: HashMap::new(),
                 plan_usage_error: HashMap::new(),
                 plan_usage_tx,

@@ -52,6 +52,12 @@ impl Waku {
         if page == SettingsPage::Jev && !self.state.model_router_enabled {
             return;
         }
+        if page == SettingsPage::Integrations && !self.state.integrations_enabled {
+            return;
+        }
+        if page != SettingsPage::Integrations {
+            self.integration_editor = None;
+        }
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.
         self.daemon_token_revealed = false;
@@ -72,6 +78,9 @@ impl Waku {
         }
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
+        }
+        if page == SettingsPage::Integrations {
+            self.load_integrations();
         }
         // The Git page's lists are fetched on its next render, once the
         // per-project state exists — `open_settings_page` has no window to
