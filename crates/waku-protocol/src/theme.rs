@@ -52,24 +52,24 @@ impl ThemeName {
     /// Light-slot choices, in picker order.
     pub const LIGHT: [Self; 8] = [
         Self::DefaultLight,
+        Self::GithubLight,
         Self::GruvboxLightHard,
+        Self::RosePineDawn,
         Self::EverforestLight,
         Self::KanagawaLight,
-        Self::GithubLight,
-        Self::RosePineDawn,
         Self::KansoPearl,
         Self::WarmBurnoutLight,
     ];
     /// Dark-slot choices, in picker order.
     pub const DARK: [Self; 10] = [
         Self::DefaultDark,
+        Self::DraculaDark,
+        Self::GithubDark,
         Self::GruvboxDark,
+        Self::RosePineMoon,
         Self::EverforestDark,
         Self::ZenburnDark,
         Self::PoimandresDark,
-        Self::GithubDark,
-        Self::DraculaDark,
-        Self::RosePineMoon,
         Self::KansoZen,
         Self::WarmBurnoutDark,
     ];
