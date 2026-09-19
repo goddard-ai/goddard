@@ -4,7 +4,8 @@ use super::composer::{
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
-use gpui::{HighlightStyle, KeyBinding, StyledText, actions};
+use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, actions};
+use waku_protocol::integrations::{IntegrationAuthKind, IntegrationAuthState};
 use waku_protocol::routing::TaskClass;
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
@@ -47,7 +48,7 @@ actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 14] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 15] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -127,6 +128,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 14] = [
         "settings.jev_keywords",
     ),
     (
+        SettingsPage::Integrations,
+        "settings.integrations",
+        "icons/globe.svg",
+        "settings.integrations_keywords",
+    ),
+    (
         SettingsPage::Experiments,
         "settings.experiments",
         "icons/beaker.svg",
@@ -169,6 +176,16 @@ pub(super) struct CustomCommandEditor {
     pub(super) exit_settings_on_save: bool,
 }
 
+/// The Integrations page's open connect form. The API-key input exists only
+/// for services that accept one; OAuth-only services go straight to the
+/// browser.
+pub(super) struct IntegrationEditor {
+    pub(super) id: String,
+    variant_id: String,
+    providers: HashSet<ProviderKind>,
+    api_key: Option<Entity<TextInput>>,
+}
+
 /// The Daemon settings page's open remote-host form. Input entities live for
 /// the editor's lifetime rather than being pre-created with the other
 /// settings fields.
@@ -191,13 +208,14 @@ pub(super) struct RemoteHostEditor {
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
-/// Friends and Jev are experiments — their rows only appear while the opt-in
-/// is on.
+/// Friends, Jev, and Integrations are experiments — their rows only appear
+/// while the opt-in is on.
 pub(super) fn visible_settings_pages(
     query: &str,
     computer_use_experiment_enabled: bool,
     friends_enabled: bool,
     model_router_enabled: bool,
+    integrations_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
@@ -206,6 +224,7 @@ pub(super) fn visible_settings_pages(
                 computer_use_experiment_enabled,
                 friends_enabled,
                 model_router_enabled,
+                integrations_enabled,
             )
         })
         .filter_map(move |(page, label_key, icon, keywords_key)| {
@@ -663,6 +682,7 @@ impl Waku {
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
                 self.state.model_router_enabled,
+                self.state.integrations_enabled,
             )
             .collect()
         };
@@ -835,6 +855,7 @@ impl Waku {
             self.state.computer_use_experiment_enabled,
             self.state.friends_enabled,
             self.state.model_router_enabled,
+            self.state.integrations_enabled,
         )
         .map(|(page, ..)| page)
         .collect::<Vec<_>>();
@@ -910,6 +931,7 @@ impl Waku {
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
                 self.state.model_router_enabled,
+                self.state.integrations_enabled,
             );
         let search = SettingSearch::inactive().for_page(
             page,
@@ -1022,6 +1044,7 @@ impl Waku {
                         SettingsPage::Git => tr!("settings.git"),
                         SettingsPage::Jev => tr!("settings.jev"),
                         SettingsPage::Experiments => tr!("settings.experiments"),
+                        SettingsPage::Integrations => tr!("settings.integrations"),
                         SettingsPage::Keybindings => tr!("keybind.title"),
                     }),
             )
@@ -1039,6 +1062,7 @@ impl Waku {
                 SettingsPage::Git => self.render_git_settings(window, cx),
                 SettingsPage::Jev => self.render_jev_settings(&search, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
+                SettingsPage::Integrations => self.render_integrations_settings(cx),
                 SettingsPage::Keybindings => div().into_any_element(),
             });
 
@@ -1123,6 +1147,7 @@ impl Waku {
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
                 self.state.model_router_enabled,
+                self.state.integrations_enabled,
             ) {
                 continue;
             }
@@ -3839,6 +3864,16 @@ impl Waku {
                         search,
                         cx,
                         |this, enabled, cx| this.set_project_map_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "integrations-experiment-toggle",
+                        "experiments.integrations_title",
+                        "experiments.integrations_description",
+                        self.state.integrations_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_integrations_enabled(enabled, cx),
                     ))
                     .children(self.experiment_card(
                         "friends-experiment-toggle",
@@ -8461,6 +8496,596 @@ impl Waku {
         window.refresh();
         cx.notify();
     }
+
+    // ── Integrations ────────────────────────────────────────────────────
+    // The pane renders the daemon's catalog joined with the settings mirror:
+    // `integration_snapshots` is fetched once per page visit, and auth-state
+    // flips arrive through the daemon's SettingsChanged broadcast.
+
+    /// Fetch the catalog + configuration from the daemon. Runs off the UI
+    /// thread; the answer lands through `integration_snapshots_events`.
+    pub(super) fn load_integrations(&mut self) {
+        let tx = self.integration_snapshots_tx.clone();
+        let event_wake = self.event_wake_tx.clone();
+        let daemon = self.daemon.client();
+        std::thread::Builder::new()
+            .name("waku-integrations-load".into())
+            .spawn(move || {
+                let result = match daemon.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::ListIntegrations,
+                ) {
+                    Ok(waku_client::ResponsePayload::Integrations { snapshots }) => Ok(snapshots),
+                    Ok(_) => Err("the daemon returned an invalid integrations response".into()),
+                    Err(error) => Err(error.to_string()),
+                };
+                if tx.send(result).is_ok() {
+                    signal_event_pump(&event_wake);
+                }
+            })
+            .ok();
+    }
+
+    /// Send an integration command, then refresh the catalog snapshot so the
+    /// pane re-renders with the daemon's truth. The result channel carries
+    /// the refreshed list; a command failure sends the error instead.
+    fn run_integration_command(&mut self, id: &str, command: waku_client::Command) {
+        self.integration_commands_pending.insert(id.to_owned());
+        let tx = self.integration_snapshots_tx.clone();
+        let event_wake = self.event_wake_tx.clone();
+        let daemon = self.daemon.client();
+        std::thread::Builder::new()
+            .name("waku-integration-command".into())
+            .spawn(move || {
+                let result = daemon
+                    .request(Uuid::nil(), Uuid::nil(), command)
+                    .map(|_| ())
+                    .and_then(|_| {
+                        match daemon.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::ListIntegrations,
+                        ) {
+                            Ok(waku_client::ResponsePayload::Integrations { snapshots }) => {
+                                Ok(snapshots)
+                            }
+                            Ok(_) => Err(anyhow::anyhow!(
+                                "the daemon returned an invalid integrations response"
+                            )),
+                            Err(error) => Err(error),
+                        }
+                    })
+                    .map_err(|error| error.to_string());
+                if tx.send(result).is_ok() {
+                    signal_event_pump(&event_wake);
+                }
+            })
+            .ok();
+    }
+
+    /// Providers the picker may offer: installed, enabled, and able to carry
+    /// MCP at all. Pi has no native MCP, so it is never a candidate.
+    fn integration_providers(&self) -> Vec<ProviderKind> {
+        ProviderKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                *kind != ProviderKind::Pi
+                    && !self.state.disabled_providers.contains(kind)
+                    && self.provider_probe(*kind).is_some_and(|probe| probe.installed)
+            })
+            .collect()
+    }
+
+    /// The provider a new connection defaults to: the session the user is
+    /// looking at when it is one of the eligible providers.
+    fn default_integration_providers(&self) -> HashSet<ProviderKind> {
+        let eligible = self.integration_providers();
+        let current = self
+            .selected_session()
+            .map(|session| session.provider)
+            .filter(|provider| eligible.contains(provider));
+        current.into_iter().collect()
+    }
+
+    fn open_integration_editor(
+        &mut self,
+        snapshot: &waku_protocol::integrations::IntegrationSnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let configured = self
+            .state
+            .integrations
+            .iter()
+            .find(|setting| setting.id == snapshot.info.id);
+        let api_key = matches!(
+            snapshot.info.auth,
+            IntegrationAuthKind::ApiKey | IntegrationAuthKind::OauthOrApiKey
+        )
+        .then(|| {
+            cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .tab_index(0)
+                    .accessibility_label(tr!("integrations.api_key"))
+                    .placeholder(tr!("integrations.api_key_placeholder"))
+            })
+        });
+        self.integration_editor = Some(IntegrationEditor {
+            id: snapshot.info.id.clone(),
+            variant_id: configured
+                .map(|setting| setting.variant_id.clone())
+                .unwrap_or_else(|| snapshot.info.variants[0].id.clone()),
+            providers: configured
+                .map(|setting| setting.providers.iter().copied().collect())
+                .unwrap_or_else(|| self.default_integration_providers()),
+            api_key,
+        });
+        cx.notify();
+    }
+
+    fn connect_integration(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.integration_editor.take() else {
+            return;
+        };
+        let api_key = editor
+            .api_key
+            .as_ref()
+            .map(|input| input.read(cx).content().trim().to_owned())
+            .filter(|key| !key.is_empty());
+        let id = editor.id.clone();
+        self.run_integration_command(
+            &id,
+            waku_client::Command::ConnectIntegration {
+                id: id.clone(),
+                variant_id: editor.variant_id,
+                providers: editor.providers.into_iter().collect(),
+                api_key,
+            },
+        );
+        cx.notify();
+    }
+
+    fn disconnect_integration(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.integration_editor.as_ref().is_some_and(|e| e.id == id) {
+            self.integration_editor = None;
+        }
+        self.run_integration_command(
+            id,
+            waku_client::Command::DisconnectIntegration { id: id.to_owned() },
+        );
+        cx.notify();
+    }
+
+    /// Toggle one provider's assignment on an already-connected integration.
+    fn toggle_integration_provider(
+        &mut self,
+        id: &str,
+        provider: ProviderKind,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(setting) = self
+            .state
+            .integrations
+            .iter()
+            .find(|setting| setting.id == id)
+        else {
+            return;
+        };
+        let mut providers = setting.providers.clone();
+        if providers.contains(&provider) {
+            providers.retain(|existing| *existing != provider);
+        } else {
+            providers.push(provider);
+        }
+        self.run_integration_command(
+            id,
+            waku_client::Command::SetIntegrationProviders {
+                id: id.to_owned(),
+                providers,
+            },
+        );
+        cx.notify();
+    }
+
+    fn toggle_editor_provider(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
+        if let Some(editor) = &mut self.integration_editor {
+            if !editor.providers.insert(provider) {
+                editor.providers.remove(&provider);
+            }
+        }
+        cx.notify();
+    }
+
+    fn set_editor_variant(&mut self, variant_id: &str, cx: &mut Context<Self>) {
+        if let Some(editor) = &mut self.integration_editor {
+            editor.variant_id = variant_id.to_owned();
+        }
+        cx.notify();
+    }
+
+    fn retry_integration_auth(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.run_integration_command(
+            id,
+            waku_client::Command::StartIntegrationAuth { id: id.to_owned() },
+        );
+        cx.notify();
+    }
+
+    /// The Integrations experiment opt-in also decides whether its settings
+    /// page appears in navigation.
+    fn set_integrations_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled && self.settings_page == Some(SettingsPage::Integrations) {
+            self.settings_page = None;
+        }
+        self.state.integrations_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn render_integrations_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let providers = self.integration_providers();
+        let mut cards = div().flex().flex_col().gap(px(10.0));
+        match &self.integration_snapshots {
+            None => {
+                return div()
+                    .mt(px(15.0))
+                    .py(px(24.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("integrations.loading"))
+                    .into_any_element();
+            }
+            Some(snapshots) => {
+                for snapshot in snapshots {
+                    cards = cards.child(self.render_integration_card(
+                        snapshot,
+                        &providers,
+                        theme,
+                        cx,
+                    ));
+                }
+            }
+        }
+        div()
+            .when(true, |element| {
+                element.child(
+                    div()
+                        .mt(px(15.0))
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(14.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .child(
+                            div()
+                                .text_size(sp(12.5))
+                                .line_height(sp(18.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("integrations.description")),
+                        ),
+                )
+            })
+            .child(div().mt(px(15.0)).child(cards))
+            .into_any_element()
+    }
+
+    fn render_integration_card(
+        &self,
+        snapshot: &waku_protocol::integrations::IntegrationSnapshot,
+        providers: &[ProviderKind],
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = snapshot.info.id.clone();
+        let configured = self
+            .state
+            .integrations
+            .iter()
+            .find(|setting| setting.id == id);
+        let pending = self.integration_commands_pending.contains(&id);
+        let editing = self
+            .integration_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id == id);
+
+        // Right side: status + primary action. A connected integration offers
+        // Disconnect; one waiting on OAuth offers Sign in; anything else
+        // opens the connect form.
+        let (status_label, status_color) = match configured.map(|setting| setting.auth) {
+            Some(IntegrationAuthState::Connected) => {
+                (tr!("integrations.connected"), theme.success)
+            }
+            Some(IntegrationAuthState::NeedsAuth) => {
+                (tr!("integrations.sign_in_required"), theme.warning)
+            }
+            _ => (tr!("integrations.not_connected"), theme.text_ghost),
+        };
+        let action = if pending {
+            div()
+                .h(px(25.0))
+                .px(px(9.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(tr!("common.checking"))
+                .into_any_element()
+        } else if configured.is_some_and(|s| s.auth == IntegrationAuthState::NeedsAuth) {
+            integration_button(
+                format!("integration-signin-{id}"),
+                tr!("integrations.sign_in"),
+                theme,
+            )
+            .on_click(cx.listener({
+                let id = id.clone();
+                move |this, _, _, cx| {
+                    this.retry_integration_auth(&id, cx);
+                }
+            }))
+            .into_any_element()
+        } else if configured.is_some() {
+            integration_button(
+                format!("integration-disconnect-{id}"),
+                tr!("integrations.disconnect"),
+                theme,
+            )
+            .on_click(cx.listener({
+                let id = id.clone();
+                move |this, _, _, cx| {
+                    this.disconnect_integration(&id, cx);
+                }
+            }))
+            .into_any_element()
+        } else {
+            integration_button(
+                format!("integration-connect-{id}"),
+                tr!("integrations.connect"),
+                theme,
+            )
+            .on_click(cx.listener({
+                let snapshot = snapshot.clone();
+                move |this, _, window, cx| {
+                    this.open_integration_editor(&snapshot, window, cx);
+                }
+            }))
+            .into_any_element()
+        };
+
+        let mut body = div().flex().flex_col().gap(px(10.0));
+        if let Some(setting) = configured {
+            if editing {
+                body = body.child(self.render_integration_editor(
+                    snapshot,
+                    Some(setting),
+                    providers,
+                    theme,
+                    cx,
+                ));
+            } else {
+                body = body.child(self.render_integration_providers(
+                    &id,
+                    &setting.providers,
+                    providers,
+                    theme,
+                    cx,
+                ));
+            }
+        } else if editing {
+            body =
+                body.child(self.render_integration_editor(snapshot, None, providers, theme, cx));
+        }
+
+        div()
+            .w_full()
+            .px(px(20.0))
+            .py(px(14.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .text_size(sp(12.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(snapshot.info.name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(sp(11.5))
+                                            .text_color(status_color)
+                                            .child(status_label),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(2.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_tertiary)
+                                    .truncate()
+                                    .child(snapshot.info.summary.clone()),
+                            ),
+                    )
+                    .child(action),
+            )
+            .child(body)
+            .into_any_element()
+    }
+
+    /// Provider chips on a connected integration: click toggles assignment.
+    fn render_integration_providers(
+        &self,
+        id: &str,
+        selected: &[ProviderKind],
+        providers: &[ProviderKind],
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = id.to_owned();
+        let chips = providers.iter().map(|provider| {
+            let provider = *provider;
+            let on = selected.contains(&provider);
+            integration_chip(
+                format!("integration-{id}-provider-{}", provider.id()),
+                provider.display_name().to_string(),
+                on,
+                theme,
+            )
+            .on_click(cx.listener({
+                let id = id.clone();
+                move |this, _, _, cx| this.toggle_integration_provider(&id, provider, cx)
+            }))
+            .into_any_element()
+        });
+        div()
+            .pt(px(10.0))
+            .border_t(hairline())
+            .border_color(theme.separator)
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .flex_wrap()
+            .child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("integrations.agents")),
+            )
+            .children(chips)
+            .into_any_element()
+    }
+
+    /// The connect form: variant chips when the service ships more than one,
+    /// provider chips, an API-key field for services that take one, and
+    /// Connect/Cancel.
+    fn render_integration_editor(
+        &self,
+        snapshot: &waku_protocol::integrations::IntegrationSnapshot,
+        _configured: Option<&waku_protocol::integrations::IntegrationSetting>,
+        providers: &[ProviderKind],
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(editor) = &self.integration_editor else {
+            return div().into_any_element();
+        };
+        let id = editor.id.clone();
+
+        let mut form = div().flex().flex_col().gap(px(10.0));
+
+        if snapshot.info.variants.len() > 1 {
+            let chips = snapshot.info.variants.iter().map(|variant| {
+                let variant_id = variant.id.clone();
+                let on = editor.variant_id == variant.id;
+                integration_chip(
+                    format!("integration-{id}-variant-{}", variant.id),
+                    variant.label.clone(),
+                    on,
+                    theme,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_editor_variant(&variant_id, cx);
+                }))
+                .into_any_element()
+            });
+            form = form.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .flex_wrap()
+                    .children(chips),
+            );
+        }
+
+        let provider_chips = providers.iter().map(|provider| {
+            let provider = *provider;
+            let on = editor.providers.contains(&provider);
+            integration_chip(
+                format!("integration-{id}-edit-provider-{}", provider.id()),
+                provider.display_name().to_string(),
+                on,
+                theme,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_editor_provider(provider, cx);
+            }))
+            .into_any_element()
+        });
+        form = form.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .flex_wrap()
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("integrations.agents")),
+                )
+                .children(provider_chips),
+        );
+
+        if let Some(api_key) = &editor.api_key {
+            form = form.child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("integrations.api_key_hint")),
+            );
+            form = form.child(
+                TextField::new("integration-api-key", api_key.clone()).w_full(),
+            );
+        }
+
+        form = form.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap(px(8.0))
+                .child(
+                    integration_button("integration-editor-cancel", tr!("common.cancel"), theme)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.integration_editor = None;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    integration_button(
+                        format!("integration-editor-connect-{id}"),
+                        tr!("integrations.connect"),
+                        theme,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.connect_integration(cx);
+                    })),
+                ),
+        );
+
+        div()
+            .pt(px(10.0))
+            .border_t(hairline())
+            .border_color(theme.separator)
+            .child(form)
+            .into_any_element()
+    }
 }
 
 /// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
@@ -8801,6 +9426,59 @@ pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
         Some(relative) => format!("~/{}", relative.display()),
         None => path.display().to_string(),
     }
+}
+
+/// Small bordered action button for the Integrations cards.
+#[track_caller]
+fn integration_button(
+    id: impl Into<ElementId>,
+    label: String,
+    theme: Theme,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .tab_index(0)
+        .focus_visible(|style| style.border_color(theme.accent))
+        .h(px(25.0))
+        .px(px(9.0))
+        .rounded(px(8.0))
+        .border(hairline())
+        .border_color(theme.border_strong)
+        .flex()
+        .items_center()
+        .cursor_default()
+        .text_size(sp(12.5))
+        .text_color(theme.text_secondary)
+        .hover(|element| element.bg(theme.overlay).text_color(theme.text))
+        .child(label)
+}
+
+/// One selectable chip — a provider or variant choice on the Integrations
+/// cards. `on` fills it with the accent tint.
+#[track_caller]
+fn integration_chip(
+    id: impl Into<ElementId>,
+    label: String,
+    on: bool,
+    theme: Theme,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .tab_index(0)
+        .focus_visible(|style| style.border_color(theme.accent))
+        .h(px(22.0))
+        .px(px(8.0))
+        .rounded_full()
+        .border(hairline())
+        .border_color(if on { theme.accent } else { theme.border_strong })
+        .flex()
+        .items_center()
+        .cursor_default()
+        .text_size(sp(11.5))
+        .text_color(if on { theme.accent } else { theme.text_secondary })
+        .when(on, |element| element.bg(theme.accent.opacity(0.12)))
+        .hover(|element| element.bg(theme.overlay))
+        .child(label)
 }
 
 #[track_caller]

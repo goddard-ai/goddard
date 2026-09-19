@@ -2071,6 +2071,12 @@ impl Waku {
                 "settings preferences jev typesafe eval evaluation model auto routing router backend",
             ),
             (
+                SettingsPage::Integrations,
+                "settings.integrations",
+                "icons/globe.svg",
+                "settings integrations mcp servers tools linear github notion connect oauth",
+            ),
+            (
                 SettingsPage::Experiments,
                 "settings.experiments",
                 "icons/beaker.svg",
@@ -2081,6 +2087,7 @@ impl Waku {
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
                 self.state.model_router_enabled,
+                self.state.integrations_enabled,
             ) {
                 continue;
             }

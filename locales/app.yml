@@ -446,6 +446,34 @@ settings.archived_keywords:
   en: archived chats conversations hidden history restore unarchive remove
 settings.archived_description:
   en: Archived chats are hidden from the sidebar and search. Chats archived more than 30 days ago are permanently removed.
+settings.integrations:
+  en: Integrations
+settings.integrations_keywords:
+  en: integrations mcp servers tools linear github notion figma sentry stripe supabase vercel atlassian monday slack connect oauth api key agents
+integrations.description:
+  en: Connect a service once and Goddard gives it to your agents through its local MCP proxy. Credentials stay in the keychain — agents see only the local endpoint.
+integrations.loading:
+  en: Loading integrations…
+integrations.connected:
+  en: Connected
+integrations.not_connected:
+  en: Not connected
+integrations.sign_in_required:
+  en: Sign-in required
+integrations.connect:
+  en: Connect
+integrations.disconnect:
+  en: Disconnect
+integrations.sign_in:
+  en: Sign in
+integrations.agents:
+  en: Agents
+integrations.api_key:
+  en: API key
+integrations.api_key_placeholder:
+  en: API key
+integrations.api_key_hint:
+  en: Stored in the keychain — never written to provider config.
 settings.archived_empty:
   en: No archived chats.
 settings.archived_search:
@@ -626,6 +654,10 @@ experiments.friends_title:
   en: Friends
 experiments.friends_description:
   en: A Settings → Friends page for friend-to-friend file transfers — share your friend code, accept incoming requests, and watch live transfer progress from a sidebar footer ring.
+experiments.integrations_title:
+  en: MCP integrations
+experiments.integrations_description:
+  en: A Settings → Integrations page for connecting official remote MCP servers — Linear, GitHub, Notion, Stripe, and more — once, and delivering them to every enabled agent through Goddard's local proxy.
 experiments.model_router_title:
   en: Auto model routing
 experiments.model_router_description:

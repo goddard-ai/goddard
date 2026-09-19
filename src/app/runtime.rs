@@ -5254,6 +5254,7 @@ impl Waku {
             | self.drain_provider_version_events()
             | self.drain_provider_detection_events()
             | self.drain_computer_permission_events()
+            | self.drain_integration_events()
             | self.drain_plan_usage_events()
             | self.drain_agy_poll_events()
             | self.drain_task_state_sync_events(cx)
@@ -5317,6 +5318,22 @@ impl Waku {
             self.computer_permission_request_pending = false;
             match result {
                 Ok(permissions) => self.computer_permissions = permissions,
+                Err(error) => self.show_toast(error),
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    /// Integration commands and the page's catalog fetch land on one channel:
+    /// any answer clears the pending marks, an error toasts, and a refreshed
+    /// snapshot list replaces the pane's catalog.
+    pub(super) fn drain_integration_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok(result) = self.integration_snapshots_events.try_recv() {
+            self.integration_commands_pending.clear();
+            match result {
+                Ok(snapshots) => self.integration_snapshots = Some(snapshots),
                 Err(error) => self.show_toast(error),
             }
             changed = true;
