@@ -4082,6 +4082,34 @@ friends.sync_toast_conflict:
   en: "Sync conflict on %{branch} — review it in Settings → Friends"
 friends.sync_toast_refused:
   en: "Sync skipped on %{branch} — uncommitted changes"
+friends.share_sessions:
+  en: Share sessions
+friends.sessions:
+  en: Sessions
+friends.sessions_loading:
+  en: Loading sessions…
+friends.sessions_error:
+  en: "Could not load sessions — %{error}"
+friends.sessions_empty:
+  en: No sessions yet.
+friends.untitled_session:
+  en: Untitled session
+friends.session_running:
+  en: running
+friends.watch:
+  en: Watch
+friends.watching:
+  en: watching
+friends.a_friend:
+  en: a friend
+friends.watching_session:
+  en: "Watching %{name}'s session — read-only"
+friends.watch_revoked:
+  en: "%{name} stopped sharing this session"
+friends.watch_ended:
+  en: The connection to this session ended.
+friends.stop_watching:
+  en: Stop watching
 keybind.category.projects:
   en: Projects
 keybind.category.git:

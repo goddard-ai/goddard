@@ -570,6 +570,8 @@ impl Render for Waku {
         let agy_surface = self.selected_session().is_some_and(|session| {
             session.provider == ProviderKind::Antigravity && session.has_started()
         });
+        // A watched friend session is read-only — no composer, no drops.
+        let friend_watch = self.selected_friend_watch().is_some();
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
@@ -729,7 +731,8 @@ impl Render for Waku {
                             && !self.notifications.open
                             && !self.drafts_page
                             && !self.automations_page
-                            && !agy_surface,
+                            && !agy_surface
+                            && !friend_watch,
                         |element| {
                             element
                                 .group(composer::SESSION_DROP_GROUP)
@@ -749,6 +752,7 @@ impl Render for Waku {
                         },
                     )
                     .child(self.render_header(window, cx))
+                    .children(self.friend_watch_banner(cx))
                     // A selected terminal takes the column in place of the
                     // transcript, the Projects page, or the new-task prompt.
                     .child(
@@ -794,7 +798,8 @@ impl Render for Waku {
                             && !self.notifications.open
                             && !self.drafts_page
                             && !self.automations_page
-                            && !agy_surface,
+                            && !agy_surface
+                            && !friend_watch,
                         |element| {
                             if self.big_picture.is_open() {
                                 element

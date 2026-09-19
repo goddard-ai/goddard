@@ -2749,7 +2749,11 @@ impl Waku {
         );
         let now = unix_time();
         for session in &self.state.sessions {
-            if !session.has_started() || session.archived_at.is_some() || session.is_side_chat() {
+            if !session.has_started()
+                || session.archived_at.is_some()
+                || session.is_side_chat()
+                || self.friend_sessions.contains_key(&session.id)
+            {
                 continue;
             }
             fingerprint = mix_uuid(fingerprint, session.id);
@@ -2833,8 +2837,13 @@ impl Waku {
             .sessions
             .iter()
             // Side chats are panel content under their parent, never rows.
+            // Watched friend sessions aren't sidebar rows either — they
+            // open from the friends panel and stay out of local history.
             .filter(|session| {
-                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+                session.has_started()
+                    && session.archived_at.is_none()
+                    && !session.is_side_chat()
+                    && !self.friend_sessions.contains_key(&session.id)
             })
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
