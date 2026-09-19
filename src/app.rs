@@ -2293,6 +2293,14 @@ pub struct Waku {
     /// target when the requester had one.
     right_panel_pending_file_focus: Option<PendingFileFocus>,
     right_panel_pending_terminal_focus: Option<Uuid>,
+    /// Focus identity for the panel container — the open-time fallback when
+    /// the active surface has nothing focusable of its own, and the handle
+    /// whose context anchors the panel's keymap scope. Programmatic only;
+    /// the surfaces' controls carry the tab stops.
+    right_panel_focus: FocusHandle,
+    /// A one-shot focus request a panel open recorded, consumed by the
+    /// first render that shows the panel.
+    right_panel_pending_focus: Option<FocusHandle>,
     /// Terminal surface that most recently held focus. Swapped in and out with
     /// the rest of the per-session panel state.
     right_panel_last_focused_terminal: Option<Uuid>,
@@ -5174,6 +5182,8 @@ impl Waku {
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_file_focus: None,
                 right_panel_pending_terminal_focus: None,
+                right_panel_focus: cx.focus_handle(),
+                right_panel_pending_focus: None,
                 right_panel_last_focused_terminal: None,
                 right_panel_expanded_paths: HashSet::new(),
                 right_panel_files_selected_path: None,

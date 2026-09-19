@@ -1707,6 +1707,9 @@ impl Waku {
     }
 
     pub(super) fn set_right_panel_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        // Opening the panel counts as focusing it — the surface's own
+        // keybindings are live from the first keystroke.
+        let opening = visible && !self.right_panel_visible;
         if visible {
             self.request_active_terminal_focus();
             // The Git panel shares this slot: opening the right panel
@@ -1714,15 +1717,34 @@ impl Waku {
             self.close_git_panel_state();
         } else {
             self.right_panel_pending_terminal_focus = None;
+            self.right_panel_pending_browser_focus = None;
         }
         if self.right_panel_visible == visible {
             return;
         }
         self.right_panel_visible = visible;
         self.right_panel_slide = self.begin_panel_slide(self.right_panel_rendered_width, cx);
-        if visible {
+        if opening {
             self.analytics
                 .track(crate::analytics::Event::RightPanelOpened);
+            self.request_active_browser_focus();
+            self.request_active_file_focus();
+            if self.right_panel_pending_terminal_focus.is_none()
+                && self.right_panel_pending_browser_focus.is_none()
+                && self.right_panel_pending_file_focus.is_none()
+            {
+                // The diff's file tree is a focusable surface in its own
+                // right — its rows move with the arrow keys — so it takes
+                // the landing; every other surface without a focusable
+                // body falls back to the panel container.
+                self.right_panel_pending_focus = Some(
+                    if self.active_right_panel_surface() == Some(&RightPanelSurface::Diff) {
+                        self.transcript_control_focus("right-panel-diff-tree", cx)
+                    } else {
+                        self.right_panel_focus.clone()
+                    },
+                );
+            }
         }
         self.persist_panel_layout();
         cx.notify();
