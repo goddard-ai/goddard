@@ -1,8 +1,8 @@
-//! Confirmation shown before archiving a task that still has something to
-//! lose: a turn in progress that archiving would stop, or a checkout holding
-//! uncommitted files or unpushed commits — the work the archive snapshot is
-//! about to carry away. Settled sessions with clean, fully pushed checkouts
-//! archive directly; this dialog never opens for them.
+//! Confirmation shown before archiving or sweeping a task that still has
+//! something to lose: a turn in progress that the move would stop, or a
+//! checkout holding uncommitted files or unpushed commits — the work the
+//! snapshot is about to carry away. Settled sessions with clean, fully
+//! pushed checkouts move directly; this dialog never opens for them.
 
 use gpui::{KeyBinding, actions};
 
@@ -16,6 +16,15 @@ actions!(
 const DIALOG_CONTEXT: &str = "ArchiveDialog";
 const SUMMARY_MAX_HEIGHT: f32 = 220.0;
 
+/// What confirming the dialog does: archive hides the task outright, while a
+/// sweep only parks it in the sidebar's Dormant group. Both snapshot and
+/// remove the worktree the same way.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ArchiveDialogKind {
+    Archive,
+    Dormant,
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", ConfirmArchiveDialog, Some(DIALOG_CONTEXT)),
@@ -25,6 +34,7 @@ pub fn init(cx: &mut App) {
 
 pub(super) struct ArchiveDialogState {
     session_id: Uuid,
+    kind: ArchiveDialogKind,
     /// The sidebar row the session occupied when the archive started —
     /// carried through to `finish_archive_session` untouched by the dialog.
     landing_row: Option<usize>,
@@ -50,6 +60,44 @@ impl Waku {
         landing_row: Option<usize>,
         cx: &mut Context<Self>,
     ) -> FocusHandle {
+        self.open_kind_dialog(
+            session_id,
+            ArchiveDialogKind::Archive,
+            preview,
+            active_turn,
+            landing_row,
+            cx,
+        )
+    }
+
+    /// The dormant sweep's confirmation — same warnings, different outcome
+    /// and no archive-landing bookkeeping.
+    pub(super) fn open_dormant_dialog(
+        &mut self,
+        session_id: Uuid,
+        preview: crate::git_commit::ArchivePreview,
+        active_turn: bool,
+        cx: &mut Context<Self>,
+    ) -> FocusHandle {
+        self.open_kind_dialog(
+            session_id,
+            ArchiveDialogKind::Dormant,
+            preview,
+            active_turn,
+            None,
+            cx,
+        )
+    }
+
+    fn open_kind_dialog(
+        &mut self,
+        session_id: Uuid,
+        kind: ArchiveDialogKind,
+        preview: crate::git_commit::ArchivePreview,
+        active_turn: bool,
+        landing_row: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> FocusHandle {
         let title = self
             .state
             .sessions
@@ -60,6 +108,7 @@ impl Waku {
         let archive_focus = cx.focus_handle();
         let state = ArchiveDialogState {
             session_id,
+            kind,
             landing_row,
             title,
             active_turn,
@@ -77,7 +126,12 @@ impl Waku {
         let Some(dialog) = self.archive_dialog.take() else {
             return;
         };
-        self.finish_archive_session(dialog.session_id, dialog.landing_row, window, cx);
+        match dialog.kind {
+            ArchiveDialogKind::Archive => {
+                self.finish_archive_session(dialog.session_id, dialog.landing_row, window, cx)
+            }
+            ArchiveDialogKind::Dormant => self.finish_sweep_session(dialog.session_id, cx),
+        }
     }
 
     fn close_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -97,14 +151,33 @@ impl Waku {
         let commits = dialog.preview.unpushed_commits.clone();
         let has_checkout_work = !files.is_empty() || !commits.is_empty();
         let description = match (dialog.active_turn, has_checkout_work) {
-            (true, true) => tr!("archive.confirm_description_busy_worktree"),
-            (true, false) => tr!("archive.confirm_description_busy"),
-            (false, _) => tr!("archive.confirm_description"),
+            (true, true) => match dialog.kind {
+                ArchiveDialogKind::Archive => tr!("archive.confirm_description_busy_worktree"),
+                ArchiveDialogKind::Dormant => tr!("dormant.confirm_description_busy_worktree"),
+            },
+            (true, false) => match dialog.kind {
+                ArchiveDialogKind::Archive => tr!("archive.confirm_description_busy"),
+                ArchiveDialogKind::Dormant => tr!("dormant.confirm_description_busy"),
+            },
+            (false, _) => match dialog.kind {
+                ArchiveDialogKind::Archive => tr!("archive.confirm_description"),
+                ArchiveDialogKind::Dormant => tr!("dormant.confirm_description"),
+            },
         };
         let title = if dialog.title.trim().is_empty() {
-            tr!("archive.confirm_title")
+            match dialog.kind {
+                ArchiveDialogKind::Archive => tr!("archive.confirm_title"),
+                ArchiveDialogKind::Dormant => tr!("dormant.confirm_title"),
+            }
         } else {
-            tr!("archive.confirm_title_named", name = dialog.title.as_str())
+            match dialog.kind {
+                ArchiveDialogKind::Archive => {
+                    tr!("archive.confirm_title_named", name = dialog.title.as_str())
+                }
+                ArchiveDialogKind::Dormant => {
+                    tr!("dormant.confirm_title_named", name = dialog.title.as_str())
+                }
+            }
         };
 
         let mut sections = Vec::new();
@@ -197,8 +270,14 @@ impl Waku {
         let archive_row = render_archive_action_row(
             "archive-dialog-archive",
             &dialog.archive_focus,
-            "icons/archive.svg",
-            tr!("session.archive"),
+            match dialog.kind {
+                ArchiveDialogKind::Archive => "icons/archive.svg",
+                ArchiveDialogKind::Dormant => "icons/broom.svg",
+            },
+            match dialog.kind {
+                ArchiveDialogKind::Archive => tr!("session.archive"),
+                ArchiveDialogKind::Dormant => tr!("session.sweep"),
+            },
             weak.clone(),
             &theme,
             |waku, window, cx| waku.confirm_archive_dialog(window, cx),

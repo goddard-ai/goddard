@@ -331,6 +331,11 @@ settings.archive_navigation_description: 表示中のタスクをアーカイブ
 settings.archive_navigation_next_unread: 次の未読の完了へ移動
 settings.archive_navigation_next_session: サイドバーの次のセッションへ移動
 settings.archive_navigation_new_task: 新しいタスクを作成
+settings.dormant_after: 休眠までの期間
+settings.dormant_after_description: この期間新しいアクティビティがないタスクは、サイドバーの休眠グループに折りたたまれます。「なし」にすると自動休眠は無効になります
+settings.dormant_after_one_day: 1 日
+settings.dormant_after_days: "%{count} 日"
+settings.dormant_after_never: なし
 settings.sync_with_merge: 変更の同期にマージを使用
 settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
 settings.auto_resolve_in_chat: 同期の競合をチャットで解決
@@ -438,6 +443,8 @@ session.move_to_worktree: ワークツリーへ移動
 session.archive: アーカイブ
 session.pin: ピン留め
 session.unpin: ピン留めを解除
+session.sweep: 休眠に移動
+session.restore: 復元
 session.mark_unread: 未読にする
 
 archive.confirm_title: このタスクをアーカイブしますか？
@@ -447,6 +454,12 @@ archive.confirm_description_busy: 進行中のターンがあります。アー�
 archive.confirm_description_busy_worktree: 進行中のターンがあり、チェックアウトにも作業中の内容が残っています。アーカイブするとターンを停止し、チェックアウトをスナップショットに保存してワークツリーを削除します。解除で元に戻せます。
 archive.uncommitted: "未コミットのファイル %{count} 件"
 archive.unpushed: "未プッシュのコミット %{count} 件"
+
+dormant.confirm_title: このタスクを休眠に移動しますか？
+dormant.confirm_title_named: "%{name} を休眠に移動しますか？"
+dormant.confirm_description: チェックアウトに作業中の内容が残っています。休眠に移動するとスナップショットを保存してワークツリーを削除します。復元で元に戻せます。
+dormant.confirm_description_busy: 進行中のターンがあります。休眠に移動するとターンを停止します。復元でタスクを元に戻せます。
+dormant.confirm_description_busy_worktree: 進行中のターンがあり、チェックアウトにも作業中の内容が残っています。休眠に移動するとターンを停止し、チェックアウトをスナップショットに保存してワークツリーを削除します。復元で元に戻せます。
 
 sidebar.today: 今日
 sidebar.search: 検索
@@ -461,6 +474,7 @@ sidebar.ordering_last_created: 作成日
 sidebar.show_more: もっと見る
 sidebar.pinned: ピン留め
 sidebar.terminals: ターミナル
+sidebar.dormant: 休眠
 sidebar.yesterday: 昨日
 sidebar.this_week: 今週
 sidebar.this_month: 今月

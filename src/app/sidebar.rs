@@ -74,6 +74,9 @@ pub(super) enum SidebarGroup {
     /// search field and the session history. Starts collapsed; pinned
     /// terminals keep a row while it is.
     Terminals,
+    /// Swept and stale tasks, always the last section regardless of
+    /// grouping. Starts collapsed like Terminals.
+    Dormant,
     Date(SessionDateGroup),
     Project(Uuid),
     Projectless,
@@ -84,6 +87,7 @@ impl SidebarGroup {
         match self {
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
+            Self::Dormant => "dormant".into(),
             Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
             Self::Projectless => "projectless".into(),
@@ -94,6 +98,7 @@ impl SidebarGroup {
         match self {
             Self::Pinned => mix(fingerprint, 0x300),
             Self::Terminals => mix(fingerprint, 0x400),
+            Self::Dormant => mix(fingerprint, 0x500),
             Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
@@ -283,6 +288,43 @@ pub(super) fn sidebar_draft_preview(
 /// no turns stays anchored to when it was created.
 pub(super) fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
     session.last_reply_at.unwrap_or(session.created_at)
+}
+
+/// The dormancy threshold as seconds; `None` — the "Never" setting —
+/// disables auto-dormancy entirely.
+pub(super) fn dormant_threshold_secs(days: Option<u32>) -> Option<u64> {
+    days.map(|days| u64::from(days) * 86_400)
+}
+
+/// Whether a session belongs in the sidebar's Dormant group. Two paths land
+/// there: an explicit sweep, which stays dormant until any later mutation
+/// (`updated_at` overtaking `dormant_at`) wakes it, and staleness — no reply
+/// within the configured threshold. Pinned and busy sessions never
+/// auto-dormant, and a manual restore snoozes the stale rule until
+/// `dormant_exempt_until`.
+pub(super) fn session_dormant(
+    session: &AgentSession,
+    now: u64,
+    threshold_secs: Option<u64>,
+) -> bool {
+    if session
+        .dormant_at
+        .is_some_and(|swept| swept >= session.updated_at)
+    {
+        return true;
+    }
+    let Some(threshold) = threshold_secs else {
+        return false;
+    };
+    if session.pinned_at.is_some()
+        || session.is_busy()
+        || session
+            .dormant_exempt_until
+            .is_some_and(|until| until > now)
+    {
+        return false;
+    }
+    now.saturating_sub(sidebar_session_timestamp(session)) >= threshold
 }
 
 /// The ordering preference's sort key. Date groups bucket by
@@ -2261,6 +2303,7 @@ impl Waku {
         self.ensure_sidebar_branch_labels(cx);
         self.ensure_sidebar_checkout_statuses(cx);
         self.ensure_sidebar_pull_requests(cx);
+        self.ensure_dormant_worktree_sweeps(cx);
         self.ensure_sidebar_terminal_repo_roots(cx);
         let is_resizing = self
             .panel_resize_drag
@@ -2415,6 +2458,12 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Holding Option turns each hovered row's pin control into the
+        // sweep-to-Dormant control; repaint on the flip, not the next hover.
+        if event.modifiers.alt != self.sidebar_alt_held {
+            self.sidebar_alt_held = event.modifiers.alt;
+            cx.notify();
+        }
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
         if !event.modifiers.secondary() {
@@ -2476,10 +2525,25 @@ impl Waku {
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
         self.sidebar_shortcut_hint_chord_used = false;
+        if self.sidebar_alt_held {
+            self.sidebar_alt_held = false;
+            cx.notify();
+        }
         if self.sidebar_shortcut_hints {
             self.sidebar_shortcut_hints = false;
             cx.notify();
         }
+    }
+
+    /// The dormancy rule evaluated at the current time under the configured
+    /// threshold — the one predicate rows, menus, and the worktree sweep all
+    /// agree on.
+    pub(super) fn session_dormant_now(&self, session: &AgentSession) -> bool {
+        session_dormant(
+            session,
+            unix_time(),
+            dormant_threshold_secs(self.state.dormant_after_days),
+        )
     }
 
     /// The sidebar row snapshot, rebuilt only when its inputs move.
@@ -2490,8 +2554,8 @@ impl Waku {
     /// tick for values that move at most once per stream commit. The
     /// fingerprint is an allocation-free scan of exactly what
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
-    /// recency, the presentation preferences, the collapsed-group set, and
-    /// today's date.
+    /// recency, the presentation preferences, the collapsed-group set,
+    /// today's date, and each session's derived dormancy.
     pub(super) fn sidebar_rows_cached(&self, today: NaiveDate) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
         fingerprint = mix(
@@ -2510,6 +2574,15 @@ impl Waku {
         );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
+        // Dormancy is part of every row's placement: mix the derived flag,
+        // not the clock it is measured against, so the snapshot only rebuilds
+        // on real transitions.
+        let dormant_threshold = dormant_threshold_secs(self.state.dormant_after_days);
+        fingerprint = mix(
+            fingerprint,
+            self.state.dormant_after_days.unwrap_or(0) as u64,
+        );
+        let now = unix_time();
         for session in &self.state.sessions {
             if !session.has_started() || session.archived_at.is_some() {
                 continue;
@@ -2518,6 +2591,10 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, session.project_id);
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
+            fingerprint = mix(
+                fingerprint,
+                u64::from(session_dormant(session, now, dormant_threshold)),
+            );
         }
         if self.state.sidebar_grouping == SidebarGrouping::Project {
             for project in &self.state.projects {
@@ -2583,6 +2660,18 @@ impl Waku {
             .filter(|session| session.has_started() && session.archived_at.is_none())
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
+
+        // Swept and stale sessions leave the ordinary groups entirely — the
+        // Dormant section at the end is their only row. Ordering within it
+        // keeps the preference's sort.
+        let now = unix_time();
+        let threshold = dormant_threshold_secs(self.state.dormant_after_days);
+        let dormant_ids = sorted_sessions
+            .iter()
+            .filter(|session| session_dormant(session, now, threshold))
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        sorted_sessions.retain(|session| !session_dormant(session, now, threshold));
 
         // The Projects row is experimental chrome — absent while its opt-in
         // is off.
@@ -2699,6 +2788,21 @@ impl Waku {
                 }
             }
         }
+        // The Dormant group trails every ordinary section in both groupings.
+        let dormant_collapsed = self
+            .sidebar_collapsed_groups
+            .contains(&SidebarGroup::Dormant);
+        append_sidebar_group_rows(
+            &mut rows,
+            SidebarGroup::Dormant,
+            &dormant_ids,
+            dormant_collapsed,
+            false,
+        );
+        if dormant_collapsed && !dormant_ids.is_empty() {
+            collapsed_members.insert(SidebarGroup::Dormant, dormant_ids);
+        }
+
         let has_session_header = rows.iter().any(
             |row| matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Terminals),
         );
@@ -3008,6 +3112,7 @@ impl Waku {
         let label = match group {
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
             SidebarGroup::Terminals => tr!("sidebar.terminals"),
+            SidebarGroup::Dormant => tr!("sidebar.dormant"),
             SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(project_id) => self
                 .state
@@ -3038,7 +3143,10 @@ impl Waku {
         };
         let updated_chevron = matches!(
             group,
-            SidebarGroup::Date(_) | SidebarGroup::Pinned | SidebarGroup::Terminals
+            SidebarGroup::Date(_)
+                | SidebarGroup::Pinned
+                | SidebarGroup::Terminals
+                | SidebarGroup::Dormant
         )
         .then(|| {
             icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
@@ -3290,7 +3398,7 @@ impl Waku {
                 }
                 return;
             }
-            SidebarGroup::Pinned | SidebarGroup::Date(_) => return,
+            SidebarGroup::Pinned | SidebarGroup::Date(_) | SidebarGroup::Dormant => return,
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -3535,9 +3643,12 @@ impl Waku {
         );
         let multi_selected = self.sidebar_multi_selection.contains(&session_id);
         let pinned = session.pinned_at.is_some();
-        // The Pinned group mixes projects, so its rows keep the flat layout
-        // and project-name detail even while Project grouping is active.
-        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
+        let dormant = self.session_dormant_now(session);
+        // The Pinned and Dormant groups mix projects, so their rows keep the
+        // flat layout and project-name detail even while Project grouping is
+        // active.
+        let grouped_by_project =
+            self.state.sidebar_grouping == SidebarGrouping::Project && !pinned && !dormant;
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -3653,7 +3764,7 @@ impl Waku {
                     // Item callbacks run after the root's plain-click capture
                     // has cleared the set, so they close over the resolved
                     // list instead of re-reading it.
-                    let (targets, local_workspace, any_movable, all_pinned) = waku
+                    let (targets, local_workspace, any_movable, all_pinned, dormant_targets) = waku
                         .update(cx, |waku, cx| {
                             let targets = if waku.sidebar_multi_selection.contains(&session_id) {
                                 waku.sidebar_multi_selection_targets()
@@ -3661,31 +3772,40 @@ impl Waku {
                                 waku.clear_sidebar_multi_selection(cx);
                                 vec![session_id]
                             };
-                            let local_workspace = targets.iter().any(|target| {
+                            let session = |target: &Uuid| {
                                 waku.state
                                     .sessions
                                     .iter()
                                     .find(|session| session.id == *target)
-                                    .is_some_and(|session| session.workspace.is_local())
-                            });
+                            };
+                            let local_workspace = targets
+                                .iter()
+                                .any(|target| session(target).is_some_and(|session| session.workspace.is_local()));
                             let any_movable = targets
                                 .iter()
                                 .any(|target| waku.can_move_session_to_worktree(*target));
                             let all_pinned = targets.iter().all(|target| {
-                                waku.state
-                                    .sessions
-                                    .iter()
-                                    .find(|session| session.id == *target)
-                                    .is_some_and(|session| session.pinned_at.is_some())
+                                session(target).is_some_and(|session| session.pinned_at.is_some())
                             });
-                            (targets, local_workspace, any_movable, all_pinned)
+                            let dormant_targets = targets
+                                .iter()
+                                .copied()
+                                .filter(|target| {
+                                    session(target)
+                                        .is_some_and(|session| waku.session_dormant_now(session))
+                                })
+                                .collect::<Vec<_>>();
+                            (targets, local_workspace, any_movable, all_pinned, dormant_targets)
                         })
-                        .unwrap_or((vec![session_id], false, false, pinned));
+                        .unwrap_or((vec![session_id], false, false, pinned, Vec::new()));
+                    let all_dormant = dormant_targets.len() == targets.len();
                     let pin_targets = targets.clone();
                     let unread_targets = targets.clone();
                     let copy_targets = targets.clone();
                     let move_targets = targets.clone();
                     let archive_targets = targets.clone();
+                    let sweep_targets = targets.clone();
+                    let restore_targets = dormant_targets;
                     let remove_targets = targets;
                     let mut items = vec![
                         // Rename stays single-target: the inline field it
@@ -3742,6 +3862,33 @@ impl Waku {
                             })
                             .icon("icons/fork.svg")
                             .disabled(!any_movable),
+                        );
+                    }
+                    // Sweep and restore are complementary halves of the same
+                    // lifecycle: a mixed multi-selection can show both, each
+                    // acting on the half it applies to.
+                    if !all_dormant {
+                        let sweep_waku = waku.clone();
+                        items.push(
+                            MenuItem::new(tr!("session.sweep"), move |window, cx| {
+                                let _ = sweep_waku.update(cx, |waku, cx| {
+                                    for target in &sweep_targets {
+                                        waku.sweep_session(*target, window, cx);
+                                    }
+                                });
+                            })
+                            .icon("icons/broom.svg"),
+                        );
+                    }
+                    if !restore_targets.is_empty() {
+                        let restore_waku = waku.clone();
+                        items.push(
+                            MenuItem::new(tr!("session.restore"), move |_, cx| {
+                                let _ = restore_waku.update(cx, |waku, cx| {
+                                    waku.restore_dormant_sessions(&restore_targets, cx);
+                                });
+                            })
+                            .icon("icons/rotate-cw.svg"),
                         );
                     }
                     items.extend([
@@ -4094,8 +4241,13 @@ impl Waku {
             .entry(session_id)
             .or_insert_with(|| cx.focus_handle())
             .clone();
+        let dormant = self.session_dormant_now(session);
         // The pin control shares the archive control's reveal: zero-width
         // until the row is hovered or the button takes keyboard focus.
+        // Holding Option retasks the pin control: on an ordinary row it
+        // sweeps to Dormant, on a dormant row it restores. The click still
+        // reads the event's own modifiers so a press that lands before the
+        // modifiers-changed repaint sweeps too.
         let pin_button = div()
             .id(SharedString::from(format!("session-pin-{session_id}")))
             .track_focus(&pin_focus)
@@ -4120,16 +4272,31 @@ impl Waku {
             })
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text_with_action(
-                if pinned {
-                    tr!("session.unpin")
+            .when(!self.sidebar_alt_held, |element| {
+                element.tooltip(Tooltip::text_with_action(
+                    if pinned {
+                        tr!("session.unpin")
+                    } else {
+                        tr!("session.pin")
+                    },
+                    &ToggleSessionPin,
+                ))
+            })
+            .when(self.sidebar_alt_held, |element| {
+                element.tooltip(Tooltip::text(if dormant {
+                    tr!("session.restore")
                 } else {
-                    tr!("session.pin")
-                },
-                &ToggleSessionPin,
-            ))
+                    tr!("session.sweep")
+                }))
+            })
             .child(icon(
-                if pinned {
+                if self.sidebar_alt_held {
+                    if dormant {
+                        "icons/rotate-cw.svg"
+                    } else {
+                        "icons/broom.svg"
+                    }
+                } else if pinned {
                     "icons/pin-filled.svg"
                 } else {
                     "icons/pin.svg"
@@ -4138,9 +4305,17 @@ impl Waku {
                 theme.text_secondary,
             ))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                this.toggle_session_pin(session_id, cx);
+                if event.modifiers().alt || this.sidebar_alt_held {
+                    if dormant {
+                        this.restore_dormant_sessions(&[session_id], cx);
+                    } else {
+                        this.sweep_session(session_id, window, cx);
+                    }
+                } else {
+                    this.toggle_session_pin(session_id, cx);
+                }
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {

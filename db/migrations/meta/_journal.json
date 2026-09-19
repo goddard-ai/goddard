@@ -85,6 +85,13 @@
       "when": 1789777858574,
       "tag": "0011_outstanding_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1789786600788,
+      "tag": "0012_lame_ultimatum",
+      "breakpoints": true
     }
   ]
 }
