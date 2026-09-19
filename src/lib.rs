@@ -205,6 +205,12 @@ pub struct SelectFavoriteModel {
     pub index: usize,
 }
 
+/// Step the composer session through its starred model+effort combos plus
+/// the most recently used selection, wrapping at the end (⌥Tab).
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct CycleFavoriteModel;
+
 /// Step the composer session's reasoning effort through the current model's
 /// ladder, wrapping at the ends. ⌘E moves `Forward`, ⌘⇧E `Backward`.
 #[derive(Clone, PartialEq, gpui::Action)]
@@ -675,6 +681,13 @@ pub(crate) fn bind_keys(cx: &mut App) {
                 direction: EffortCycleDirection::Backward,
             },
             Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+        ),
+        // ⌥Tab rotates the composer session's combo through the starred
+        // selections plus the most recently used one.
+        KeyBinding::new(
+            "alt-tab",
+            CycleFavoriteModel,
+            Some("Waku && !Terminal && !ProjectsPage"),
         ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own

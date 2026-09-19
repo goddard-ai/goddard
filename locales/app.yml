@@ -3868,6 +3868,8 @@ keybind.command.cycle_effort:
   en: Cycle Reasoning Effort
 keybind.command.cycle_effort_backward:
   en: Cycle Reasoning Effort Backward
+keybind.command.cycle_favorite:
+  en: Cycle Favorite Models
 keybind.command.bigpicture_card:
   en: Select Big Picture Card %{n}
 keybind.command.run_command:

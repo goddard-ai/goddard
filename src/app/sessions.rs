@@ -3025,19 +3025,98 @@ impl Waku {
         // A favorite stored before rows were combos carries no effort; it
         // claims the model's default-effort row in the list, so the chord
         // applies that same effort rather than leaving the field unset.
-        let effort = favorite.effort.clone().or_else(|| {
-            self.provider_probe(favorite.provider)
-                .and_then(|probe| probe.model(&favorite.model))
-                .and_then(|model| {
-                    model.default_reasoning_effort.clone().or_else(|| {
-                        model
-                            .reasoning_efforts
-                            .first()
-                            .map(|option| option.id.clone())
-                    })
-                })
-        });
+        let effort = favorite
+            .effort
+            .clone()
+            .or_else(|| self.model_default_effort(favorite.provider, &favorite.model));
         self.choose_model(favorite.provider, favorite.model, effort, favorite.fast, cx);
+    }
+
+    /// The effort a `{provider, model}` selection with no stored effort
+    /// resolves to: the catalog model's default, or its first ladder rung
+    /// when it names none.
+    fn model_default_effort(&self, provider: ProviderKind, model: &str) -> Option<String> {
+        self.provider_probe(provider)
+            .and_then(|probe| probe.model(model))
+            .and_then(|model| {
+                model.default_reasoning_effort.clone().or_else(|| {
+                    model
+                        .reasoning_efforts
+                        .first()
+                        .map(|option| option.id.clone())
+                })
+            })
+    }
+
+    /// ⌥Tab rotates the composer session through the starred combos followed
+    /// by the most recently used selection, wrapping at the end. Entries the
+    /// session can't run — a provider it can't choose, or one switched off —
+    /// drop out of the rotation, and a recent that duplicates a favorite
+    /// adds nothing.
+    pub(super) fn cycle_favorite_model_action(
+        &mut self,
+        _: &CycleFavoriteModel,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(session) = self.composer_session() else {
+            return;
+        };
+        // Same gate the ⌘⌥n chords apply: a started session only runs its
+        // locked provider; a draft runs whichever providers are enabled.
+        let locked_provider = (!session.messages.is_empty()).then_some(session.provider);
+        let eligible = |provider: ProviderKind| {
+            session.can_choose_model(provider)
+                && (Some(provider) == locked_provider
+                    || (locked_provider.is_none() && self.provider_enabled(provider)))
+        };
+        let mut combos: Vec<(ProviderKind, String, Option<String>, bool)> = Vec::new();
+        for favorite in &self.state.favorite_models {
+            if !eligible(favorite.provider) {
+                continue;
+            }
+            let effort = favorite
+                .effort
+                .clone()
+                .or_else(|| self.model_default_effort(favorite.provider, &favorite.model));
+            combos.push((
+                favorite.provider,
+                favorite.model.clone(),
+                effort,
+                favorite.fast,
+            ));
+        }
+        if let Some(recent) = self.state.recent_model_uses.iter().find(|use_| {
+            eligible(use_.provider)
+                && !combos.iter().any(|combo| {
+                    combo.0 == use_.provider
+                        && combo.1 == use_.model
+                        && combo.2 == use_.effort
+                        && combo.3 == use_.fast
+                })
+        }) {
+            combos.push((
+                recent.provider,
+                recent.model.clone(),
+                recent.effort.clone(),
+                recent.fast,
+            ));
+        }
+        if combos.is_empty() {
+            return;
+        }
+        let current = self
+            .session_model_combo(session)
+            .map(|(model, effort, fast)| (session.provider, model, effort, fast));
+        let position =
+            current.and_then(|current| combos.iter().position(|combo| *combo == current));
+        // Off-rotation selections start the cycle from the top.
+        let next = position.map(|index| (index + 1) % combos.len()).unwrap_or(0);
+        let (provider, model, effort, fast) = combos[next].clone();
+        self.choose_model(provider, model, effort, fast, cx);
     }
 
     /// ⌘E steps the composer session's reasoning effort through the current
@@ -3100,17 +3179,7 @@ impl Waku {
         fast: bool,
         cx: &mut Context<Self>,
     ) {
-        let default_effort = self
-            .provider_probe(provider)
-            .and_then(|probe| probe.model(&model))
-            .and_then(|model| {
-                model.default_reasoning_effort.clone().or_else(|| {
-                    model
-                        .reasoning_efforts
-                        .first()
-                        .map(|option| option.id.clone())
-                })
-            });
+        let default_effort = self.model_default_effort(provider, &model);
         if let Some(index) = self.state.favorite_models.iter().position(|favorite| {
             super::composer::favorite_matches_row(
                 favorite,
