@@ -698,6 +698,9 @@ pub struct AppSettings {
     pub sidebar_shortcut_tags: bool,
     /// Where selection lands after the viewed task is archived.
     pub archive_navigation: ArchiveNavigation,
+    /// Show a task's unsent composer draft on its own line under the sidebar
+    /// row's title, in the theme's alert color.
+    pub sidebar_composer_drafts: bool,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -777,6 +780,7 @@ impl Default for AppSettings {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
+            sidebar_composer_drafts: false,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1084,6 +1088,10 @@ pub struct PersistedState {
     /// Where selection lands after the viewed task is archived.
     #[serde(default)]
     pub archive_navigation: ArchiveNavigation,
+    /// Whether a task's unsent composer draft shows on its own line under
+    /// the sidebar row's title, in the theme's alert color.
+    #[serde(default)]
+    pub sidebar_composer_drafts: bool,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1271,6 +1279,7 @@ impl PersistedState {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
+            sidebar_composer_drafts: false,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1563,6 +1572,7 @@ impl PersistedState {
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             archive_navigation: self.archive_navigation,
+            sidebar_composer_drafts: self.sidebar_composer_drafts,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1653,6 +1663,7 @@ impl PersistedState {
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.archive_navigation = settings.archive_navigation;
+        self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -2623,6 +2634,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.sidebar_shortcut_tags);
+    }
+
+    #[test]
+    fn sidebar_composer_drafts_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.sidebar_composer_drafts);
+        let mut state = PersistedState::empty();
+        assert!(!state.sidebar_composer_drafts);
+        state.sidebar_composer_drafts = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["sidebar_composer_drafts"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_composer_drafts")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.sidebar_composer_drafts);
     }
 
     #[test]

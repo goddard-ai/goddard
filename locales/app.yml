@@ -366,7 +366,7 @@ settings.computer_use:
 settings.commands:
   en: Commands
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command token speed tokens per second rate footer
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command token speed tokens per second rate footer draft composer unsent preview
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel
 settings.providers_keywords:
@@ -925,6 +925,10 @@ settings.sidebar_shortcut_tags:
   en: Sidebar shortcut tags
 settings.sidebar_shortcut_tags_description:
   en: Show %{keys} tags on the sidebar's first tasks while %{modifier} is held
+settings.sidebar_composer_drafts:
+  en: Sidebar draft previews
+settings.sidebar_composer_drafts_description:
+  en: Show a task's unsent composer draft under its title in the sidebar
 settings.completion_sound:
   en: Play sound on completed turn
 settings.completion_sound_description:

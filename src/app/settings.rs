@@ -1445,6 +1445,23 @@ impl Waku {
                 search,
             ))
             .children(setting_card(
+                tr!("settings.sidebar_composer_drafts"),
+                tr!("settings.sidebar_composer_drafts_description"),
+                toggle_switch(
+                    "sidebar-composer-drafts-toggle",
+                    self.state.sidebar_composer_drafts,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.sidebar_composer_drafts;
+                        move |this, _, cx| this.set_sidebar_composer_drafts(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
                 tr!("settings.new_worktree_default_branch"),
                 tr!("settings.new_worktree_default_branch_description"),
                 toggle_switch(
@@ -6492,6 +6509,15 @@ impl Waku {
                 self.sidebar_shortcut_hint_generation.wrapping_add(1);
             self.sidebar_shortcut_hints = false;
         }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_sidebar_composer_drafts(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.sidebar_composer_drafts == enabled {
+            return;
+        }
+        self.state.sidebar_composer_drafts = enabled;
         self.save();
         cx.notify();
     }
