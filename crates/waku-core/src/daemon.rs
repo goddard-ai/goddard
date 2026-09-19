@@ -473,7 +473,8 @@ impl Backend for WakuBackend {
     }
 
     fn set_task_state_sink(&self, sink: crate::share::TaskNotifier) {
-        self.share.set_task_notifier(sink);
+        self.share.set_task_notifier(sink.clone());
+        self.automations.set_task_notifier(sink);
     }
 
     fn set_automations_sink(&self, sink: crate::automations::AutomationsSink) {
