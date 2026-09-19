@@ -288,6 +288,9 @@ impl Waku {
         if self.file_finder.is_open() {
             self.refresh_file_finder_results(cx);
         }
+        // So does the palette's Prompts section — keep an open palette's
+        // results in step with late-arriving discovery.
+        self.refresh_open_command_palette(cx);
     }
 
     /// Invalidate and re-request both indexes for the selected workspace.
