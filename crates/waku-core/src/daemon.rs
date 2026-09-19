@@ -57,9 +57,12 @@ pub struct WakuBackend {
     terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
-    settings: DaemonSettingsStore,
+    settings: Arc<DaemonSettingsStore>,
     task_store: Arc<StateStore>,
     task_state: Arc<Mutex<PersistedState>>,
+    /// Project-memory scheduling and storage; sees every finished turn via
+    /// the runtime event forwarder.
+    memory: Arc<crate::memory::MemoryService>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
@@ -120,14 +123,22 @@ impl WakuBackend {
             AutomationService::open(data_dir.join("automations.json"))
                 .context("could not load Goddard automations")?,
         );
+        let settings = Arc::new(settings);
+        let task_state = Arc::new(Mutex::new(task_state));
+        let task_store = Arc::new(task_store);
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             terminals: Mutex::new(HashMap::new()),
             #[cfg(all(test, unix))]
             terminal_shell: None,
+            memory: crate::memory::MemoryService::new(
+                settings.clone(),
+                task_state.clone(),
+                task_store.clone(),
+            ),
             settings,
-            task_store: Arc::new(task_store),
-            task_state: Arc::new(Mutex::new(task_state)),
+            task_store,
+            task_state,
             removed_session_ids: Mutex::new(HashSet::new()),
             composer_drafts,
             attachments,
@@ -2376,6 +2387,7 @@ impl WakuBackend {
         let task_store = self.task_store.clone();
         let sessions = self.sessions.clone();
         let automations = self.automations.clone();
+        let memory = self.memory.clone();
         std::thread::Builder::new()
             .name(format!("goddard-daemon-events-{session_id}"))
             .spawn(move || {
@@ -2390,6 +2402,7 @@ impl WakuBackend {
                     task_store,
                     sessions,
                     automations,
+                    memory,
                 );
             })
             .context("could not start daemon event forwarding thread")?;
@@ -3179,6 +3192,7 @@ fn forward_driver_events(
     task_store: Arc<StateStore>,
     sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
     automations: Arc<AutomationService>,
+    memory: Arc<crate::memory::MemoryService>,
 ) {
     while let Ok(event) = event_receiver.recv() {
         agent.note_driver_event(session_id, &event);
@@ -3213,6 +3227,15 @@ fn forward_driver_events(
             DriverEvent::TurnFinished { .. } | DriverEvent::Connected { .. }
         );
         let process_exited = matches!(&event, DriverEvent::ProcessExited);
+        // A finished turn or a dead runtime is a memory-worthy boundary: mark
+        // the project for distillation. The service decides cheaply whether
+        // enough new transcript exists to spend a provider call on.
+        if matches!(
+            &event,
+            DriverEvent::TurnFinished { .. } | DriverEvent::ProcessExited
+        ) {
+            memory.note_session_activity(session_id);
+        }
         let wire = event_to_wire(event).unwrap_or_else(|error| {
             WireDriverEvent::new(
                 "error",

@@ -76,6 +76,7 @@ pub mod identity;
 pub mod issue_templates;
 pub mod issues;
 pub mod kimi_session;
+pub mod memory;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;

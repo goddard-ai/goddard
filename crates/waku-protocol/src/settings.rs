@@ -73,6 +73,11 @@ pub struct DaemonSettings {
     /// default path rather than erroring.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval: Option<EvalSettings>,
+    /// Experimental opt-in for project memory: the daemon maintains a
+    /// `.goddard/memory/` store per project, distills finished turns into it
+    /// in the background, and injects it into each session's first prompt.
+    /// Defaults on in development builds, opt-in in release builds.
+    pub memory_experiment_enabled: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -97,6 +102,7 @@ impl Default for DaemonSettings {
             subagent_tiers: BTreeMap::new(),
             provider_binary_overrides: HashMap::new(),
             eval: None,
+            memory_experiment_enabled: default_experiment_enabled(),
             extra: BTreeMap::new(),
         }
     }

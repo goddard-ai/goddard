@@ -52,4 +52,11 @@ subagent_tiers?: { [key in string]: SubagentTier }, provider_binary_overrides: {
  * `None` means no eval feature can run — callers degrade to their
  * default path rather than erroring.
  */
-eval?: EvalSettings | null, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+eval?: EvalSettings | null,
+/**
+ * Experimental opt-in for project memory: the daemon maintains a
+ * `.goddard/memory/` store per project, distills finished turns into it
+ * in the background, and injects it into each session's first prompt.
+ * Defaults on in development builds, opt-in in release builds.
+ */
+memory_experiment_enabled: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
