@@ -389,13 +389,21 @@ impl Waku {
         // an unread completion or a turn waiting on the reader — first:
         // it decides whether the transcript opens on the last turn instead
         // of the position the reader left it at.
-        let attention = self.state.unseen_completions.contains_key(&session_id)
+        let had_unseen = self.state.unseen_completions.remove(&session_id).is_some();
+        let attention = had_unseen
             || self
                 .state
                 .sessions
                 .iter()
                 .any(|session| session.id == session_id && session.status == SessionStatus::Waiting);
-        self.state.unseen_completions.remove(&session_id);
+        if had_unseen {
+            self.transcript_new_content_dot = Some(NewContentDot {
+                armed_at: Instant::now(),
+                fading: false,
+            });
+        } else if session_changed {
+            self.transcript_new_content_dot = None;
+        }
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
         // Projects, Drafts, Automations, and Inbox pages keep their state
