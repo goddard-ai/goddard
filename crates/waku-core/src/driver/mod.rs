@@ -252,6 +252,12 @@ pub struct DriverStartOptions {
     /// re-inject mid-session, which is why this is not a `SessionOptions`
     /// field.
     pub subagents: Option<waku_protocol::model::SubagentSpec>,
+    /// Connected MCP integrations, already reduced to `goddard_<id>` server
+    /// entries pointing at the local proxy. Drivers deliver them through
+    /// their own mechanism: launch flags, env config, the service API, or —
+    /// for file-based providers — nothing, because the daemon rewrote the
+    /// provider's config file at connect time.
+    pub integrations: Vec<crate::integrations::LaunchIntegration>,
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// The configured evaluation backend, snapshotted at session start.
     /// `Auto`-mode permission requests for providers without their own

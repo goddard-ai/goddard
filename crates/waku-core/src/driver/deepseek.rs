@@ -113,6 +113,7 @@ impl DeepSeekDriver {
             computer_use_enabled: _,
             agent,
             subagents: _,
+            integrations,
             provider_cursor,
             eval,
         } = options;
@@ -129,14 +130,33 @@ impl DeepSeekDriver {
             _ => (Uuid::new_v4().to_string(), false),
         };
 
-        // A session carrying the agent surface gets a dedicated host: the
-        // scoped token bakes into the host's environment, and the pooled
-        // host would leak it into every other session it serves.
-        let server = match &agent {
-            Some(agent) => PooledDeepSeekServer::dedicated(
-                crate::deepseek_session::DeepSeekServer::start_with_agent_env(&binary, agent)?,
-            ),
-            None => crate::deepseek_pool::acquire(&binary)?,
+        // Connected integrations arrive as a Cordis patch: the host is
+        // launched with `--patch` carrying a `@deepseek-ai/dsh-mcp-client`
+        // row per server. A session carrying either the agent surface or
+        // integrations gets a dedicated host — the pooled host serves many
+        // sessions and must not bake either into its launch.
+        let patch_args = if integrations.is_empty() {
+            Vec::new()
+        } else {
+            let path = std::env::temp_dir()
+                .join(format!("goddard-dsh-mcp-{}.yaml", Uuid::new_v4().simple()));
+            std::fs::write(
+                &path,
+                crate::integrations::deliver::deepseek_overlay_yaml(&integrations),
+            )
+            .context("could not write the DeepSeek MCP patch")?;
+            vec!["--patch".to_owned(), path.to_string_lossy().into_owned()]
+        };
+        let server = if agent.is_some() || !patch_args.is_empty() {
+            PooledDeepSeekServer::dedicated(
+                crate::deepseek_session::DeepSeekServer::start_with_overrides(
+                    &binary,
+                    agent.as_ref(),
+                    &patch_args,
+                )?,
+            )
+        } else {
+            crate::deepseek_pool::acquire(&binary)?
         };
         // Subscribe first. A create immediately publishes host and mux state,
         // and buffering that state closes the create/history race.

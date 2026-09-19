@@ -180,6 +180,7 @@ impl ClaudeDriver {
             computer_use_enabled: _,
             agent,
             subagents,
+            integrations: _,
             provider_cursor,
             eval: _,
         } = options;
@@ -1945,6 +1946,7 @@ mod tests {
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -2016,6 +2018,7 @@ mod tests {
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
             },
             events,

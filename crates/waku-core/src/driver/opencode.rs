@@ -213,6 +213,7 @@ impl OpenCodeDriver {
             computer_use_enabled,
             agent: agent_env,
             subagents,
+            integrations,
             provider_cursor,
             eval,
         } = options;
@@ -246,23 +247,31 @@ impl OpenCodeDriver {
         if let Some(agent_env) = &agent_env {
             crate::command_env::merge_agent_environment(&mut environment, agent_env);
         }
-        // Subagent definitions are identical for every session, so they ride
-        // the shared workspace server's config. OpenCode merges
-        // `OPENCODE_CONFIG_CONTENT` over the user's config files.
-        if let Some(config) = subagents
+        // Subagent definitions and connected integrations merge into one
+        // `OPENCODE_CONFIG_CONTENT` document layered over the user's files.
+        let mut config_doc = subagents
             .as_ref()
             .and_then(crate::subagents::opencode_config_json)
-        {
-            environment.push(("OPENCODE_CONFIG_CONTENT".into(), config));
+            .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+            .unwrap_or_else(|| json!({}));
+        if !integrations.is_empty() {
+            config_doc["mcp"] = Value::Object(
+                crate::integrations::deliver::opencode_config_entries(&integrations),
+            );
+        }
+        if config_doc.as_object().is_some_and(|doc| !doc.is_empty()) {
+            environment.push(("OPENCODE_CONFIG_CONTENT".into(), config_doc.to_string()));
         }
         // Computer Use bakes per-session configuration into the server's
         // environment, so it keeps a dedicated server. A session carrying
         // the agent surface gets one too — its scoped token must never leak
-        // into a server other sessions share. Every other session shares
-        // the workspace's one resident server — OpenCode hosts many sessions
-        // per process, and a second `opencode serve` in the same workspace
-        // contends with the live one.
-        let server = if computer_use.is_some() || agent_env.is_some() {
+        // into a server other sessions share. Integrations do force a
+        // dedicated server: their proxy bearer is per-daemon and a pooled
+        // server started without them would answer without the entries.
+        // Every other session shares the workspace's one resident server —
+        // OpenCode hosts many sessions per process, and a second
+        // `opencode serve` in the same workspace contends with the live one.
+        let server = if computer_use.is_some() || agent_env.is_some() || !integrations.is_empty() {
             PooledServer::dedicated(OpenCodeServer::start_with_env(&binary, &cwd, &environment)?)
         } else {
             crate::opencode_pool::acquire_with_env(&binary, &cwd, &environment)?
@@ -1771,6 +1780,7 @@ server.serve_forever()
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
                 eval: None,
             },
@@ -1900,6 +1910,7 @@ server.serve_forever()
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
                 eval: None,
             },
@@ -1991,6 +2002,7 @@ server.serve_forever()
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
                 eval: None,
             },

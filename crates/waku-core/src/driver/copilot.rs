@@ -116,6 +116,7 @@ impl CopilotDriver {
             computer_use_enabled: _,
             agent,
             subagents,
+            integrations: _,
             provider_cursor,
             eval,
         } = options;
@@ -950,6 +951,7 @@ mod tests {
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
             },
             events,
