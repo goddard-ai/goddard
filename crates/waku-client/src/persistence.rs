@@ -569,6 +569,7 @@ pub enum PersistedSettingsPage {
     Commands,
     Appearance,
     Git,
+    Jev,
     Experiments,
     Keybindings,
 }

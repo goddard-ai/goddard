@@ -47,7 +47,7 @@ actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 14] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -121,6 +121,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
         "settings.computer_use_keywords",
     ),
     (
+        SettingsPage::Jev,
+        "settings.jev",
+        "icons/provider-typesafe.svg",
+        "settings.jev_keywords",
+    ),
+    (
         SettingsPage::Experiments,
         "settings.experiments",
         "icons/beaker.svg",
@@ -185,16 +191,22 @@ pub(super) struct RemoteHostEditor {
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
-/// Friends is an experiment — its row only appears while the opt-in is on.
+/// Friends and Jev are experiments — their rows only appear while the opt-in
+/// is on.
 pub(super) fn visible_settings_pages(
     query: &str,
     computer_use_experiment_enabled: bool,
     friends_enabled: bool,
+    model_router_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
         .filter(move |(page, ..)| {
-            page.is_visible_in_navigation(computer_use_experiment_enabled, friends_enabled)
+            page.is_visible_in_navigation(
+                computer_use_experiment_enabled,
+                friends_enabled,
+                model_router_enabled,
+            )
         })
         .filter_map(move |(page, label_key, icon, keywords_key)| {
             let label = crate::i18n::translate(label_key);
@@ -207,7 +219,7 @@ pub(super) fn visible_settings_pages(
 /// sidebar order. The other pages are self-contained surfaces (tables,
 /// master/detail panes) with their own filters — they never appear in
 /// search results rather than rendering degenerate inside a section.
-const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 8] = [
+const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 9] = [
     SettingsPage::General,
     SettingsPage::Appearance,
     SettingsPage::Providers,
@@ -215,6 +227,7 @@ const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 8] = [
     SettingsPage::Commands,
     SettingsPage::Daemon,
     SettingsPage::ComputerUse,
+    SettingsPage::Jev,
     SettingsPage::Experiments,
 ];
 
@@ -649,6 +662,7 @@ impl Waku {
                 &query,
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
+                self.state.model_router_enabled,
             )
             .collect()
         };
@@ -820,6 +834,7 @@ impl Waku {
             &query,
             self.state.computer_use_experiment_enabled,
             self.state.friends_enabled,
+            self.state.model_router_enabled,
         )
         .map(|(page, ..)| page)
         .collect::<Vec<_>>();
@@ -894,6 +909,7 @@ impl Waku {
             .into_visible(
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
+                self.state.model_router_enabled,
             );
         let search = SettingSearch::inactive().for_page(
             page,
@@ -1004,6 +1020,7 @@ impl Waku {
                         SettingsPage::Commands => tr!("settings.commands"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
                         SettingsPage::Git => tr!("settings.git"),
+                        SettingsPage::Jev => tr!("settings.jev"),
                         SettingsPage::Experiments => tr!("settings.experiments"),
                         SettingsPage::Keybindings => tr!("keybind.title"),
                     }),
@@ -1020,6 +1037,7 @@ impl Waku {
                 SettingsPage::Commands => self.render_commands_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                 SettingsPage::Git => self.render_git_settings(window, cx),
+                SettingsPage::Jev => self.render_jev_settings(&search, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
                 SettingsPage::Keybindings => div().into_any_element(),
             });
@@ -1104,6 +1122,7 @@ impl Waku {
             if !page.is_visible_in_navigation(
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
+                self.state.model_router_enabled,
             ) {
                 continue;
             }
@@ -1132,6 +1151,7 @@ impl Waku {
                 SettingsPage::Commands => self.render_commands_settings(&search, cx),
                 SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
+                SettingsPage::Jev => self.render_jev_settings(&search, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
                 _ => continue,
             };
@@ -3878,10 +3898,14 @@ impl Waku {
                         |this, enabled, cx| this.set_memory_experiment_enabled(enabled, cx),
                     )),
             )
-            .when(self.state.model_router_enabled, |element| {
-                element.child(self.render_model_routing_settings(theme, search, cx))
-            })
             .into_any_element()
+    }
+
+    /// The Jev page — the Auto model routing experiment's home: eval backend
+    /// and credentials, then the class-level routing targets. The page only
+    /// exists in navigation while the experiment opt-in is on.
+    fn render_jev_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
+        self.render_model_routing_settings(Theme::current(cx), search, cx)
     }
 
     fn experiment_card(
@@ -3990,11 +4014,14 @@ impl Waku {
     }
 
     fn set_model_router_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled && self.settings_page == Some(SettingsPage::Jev) {
+            self.settings_page = None;
+        }
         self.state.model_router_enabled = enabled;
         if enabled {
-            // The section below the card reads the policy view and the eval
-            // mirror — warm both rather than waiting for the first frame to
-            // discover they are missing.
+            // The Jev page reads the policy view and the eval mirror — warm
+            // both rather than waiting for the first frame to discover they
+            // are missing.
             self.seed_eval_inputs(cx);
             self.request_route_policy(cx);
         }
@@ -4085,9 +4112,9 @@ impl Waku {
         cx.notify();
     }
 
-    /// The routing configuration under the experiment card: the eval backend
-    /// and its credentials, then the three class-level targets the policy
-    /// document resolves through. The document stays authoritative — the
+    /// The Jev page's routing configuration: the eval backend and its
+    /// credentials, then the three class-level targets the policy document
+    /// resolves through. The document stays authoritative — the
     /// dropdowns write through `SetRouteClassTarget` and re-read the result.
     fn render_model_routing_settings(
         &self,

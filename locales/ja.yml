@@ -169,6 +169,8 @@ settings.skills_keywords: スキル ライブラリ エージェント 無効 �
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
 settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
+settings.jev: Jev
+settings.jev_keywords: jev typesafe 評価 モデル 自動 ルーティング ルーター バックエンド APIキー 認証情報 vercel cloudflare ポリシー eval routing
 settings.commands_keywords: コマンド カスタムコマンド ターミナル シェル スクリプト ショートカット パレット 実行
 settings.archived: アーカイブ済みチャット
 settings.archived_keywords: アーカイブ チャット 会話 非表示 履歴 復元 削除

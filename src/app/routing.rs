@@ -195,6 +195,23 @@ impl Waku {
             && !self.route_candidates().is_empty()
     }
 
+    /// Whether the selected eval backend is missing the credential its Jev
+    /// call requires — the picker's Auto row warns rather than failing at
+    /// submit. Mirrors the `required` checks in waku-core's `backend_request`.
+    pub(super) fn jev_credential_missing(&self) -> bool {
+        let eval = self.state.eval.clone().unwrap_or_default();
+        let missing = |value: &Option<String>| {
+            value.as_deref().map(str::trim).unwrap_or_default().is_empty()
+        };
+        match eval.backend {
+            waku_protocol::eval::EvalBackend::TypeSafe => missing(&eval.typesafe_api_key),
+            waku_protocol::eval::EvalBackend::VercelGateway => missing(&eval.vercel_api_key),
+            waku_protocol::eval::EvalBackend::Cloudflare => {
+                missing(&eval.cloudflare_account_id) || missing(&eval.cloudflare_api_token)
+            }
+        }
+    }
+
     /// The plan a first Auto submission carries into `prepare_submission`:
     /// the route inputs plus every provider/model-dependent request field
     /// resolved per candidate while probes are cheap to read. `prompt` is
