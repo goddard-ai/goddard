@@ -704,6 +704,7 @@ impl Waku {
         Self::prune_navigation_stack(
             &self.state.projects,
             self.state.projects_page_enabled,
+            self.state.automations_enabled,
             &mut self.session_navigation.back,
         );
         // Switching terminals stacks each one on the history; fold them
@@ -734,6 +735,10 @@ impl Waku {
             Some(NavigationLocation::DraftsPage) => {
                 let _ = self.session_navigation.go_back(current);
                 self.show_drafts_page(window, cx);
+            }
+            Some(NavigationLocation::AutomationsPage) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_automations_page(window, cx);
             }
             None => {}
         }
