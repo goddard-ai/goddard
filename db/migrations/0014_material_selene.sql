@@ -1,1 +1,2 @@
-ALTER TABLE `projects` ADD `temporary` integer DEFAULT false NOT NULL;
+-- no-op: `projects.temporary` was already added by 0010_wild_mariko_yashida;
+-- this migration was generated on a branch that predated it.

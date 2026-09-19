@@ -56,6 +56,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "notice": {
+          "name": "notice",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "attachments": {
           "name": "attachments",
           "type": "text",
@@ -280,8 +287,36 @@
           "notNull": false,
           "autoincrement": false
         },
+        "dormant_at": {
+          "name": "dormant_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dormant_exempt_until": {
+          "name": "dormant_exempt_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "landed_at": {
+          "name": "landed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "workspace": {
           "name": "workspace",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "side_chat_of": {
+          "name": "side_chat_of",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
