@@ -1538,7 +1538,7 @@ impl Waku {
                             "icons/chevron-right.svg"
                         },
                         11.5,
-                        theme.text_tertiary,
+                        theme.affordance_icon(),
                     )),
             )
             .child(div().h(hairline()).flex_1().bg(theme.separator))

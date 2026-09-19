@@ -1114,7 +1114,7 @@ impl Waku {
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("open_in.choose")))
-            .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary));
+            .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon()));
 
         let weak = cx.entity().downgrade();
         let menu = dropdown_menu(
@@ -1292,7 +1292,7 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .child(format!("+{count}")),
             )
-            .child(icon("icons/chevron-down.svg", 10.0, theme.text_tertiary));
+            .child(icon("icons/chevron-down.svg", 10.0, theme.affordance_icon()));
         let menu = dropdown_menu(
             caret,
             "header-pull-request-menu-list",

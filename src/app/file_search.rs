@@ -1031,7 +1031,7 @@ impl Waku {
                             },
                             10.0,
                             if writable {
-                                theme.text_tertiary
+                                theme.affordance_icon()
                             } else {
                                 theme.text_ghost
                             },

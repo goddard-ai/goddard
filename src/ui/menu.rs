@@ -1502,7 +1502,7 @@ fn render_menu_item(
                             .child(value),
                     )
                 })
-                .child(icon("icons/chevron-right.svg", 10.0, theme.text_tertiary))
+                .child(icon("icons/chevron-right.svg", 10.0, theme.affordance_icon()))
                 .into_any_element()
         }
         MenuItem::Custom { render, on_click } => {

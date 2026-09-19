@@ -3770,7 +3770,7 @@ impl Waku {
                                         .text_color(theme.text_secondary)
                                         .child(provider.display_name().to_owned()),
                                 )
-                                .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary))
+                                .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon()))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.open_command_palette_resume_provider_view(cx);
                                     cx.stop_propagation();

@@ -76,7 +76,7 @@ use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
-    file_icon, goddard_logo, icon, icon_button, motion, progress_ring, provider_color,
+    file_icon, goddard_logo, icon, icon_button, icon_button_tinted, motion, progress_ring, provider_color,
     provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{

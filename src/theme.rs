@@ -342,6 +342,17 @@ impl Theme {
         }
     }
 
+    /// Tint for affordance icons — the caret on select-style controls and the
+    /// disclosure chevron on expandable rows. High contrast lifts them one
+    /// text tier so the "this opens" hint stays legible.
+    pub fn affordance_icon(&self) -> Hsla {
+        if high_contrast() {
+            self.text_secondary
+        } else {
+            self.text_tertiary
+        }
+    }
+
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActiveWakuTheme>() {
             cx.global::<ActiveWakuTheme>().0

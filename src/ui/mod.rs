@@ -131,6 +131,18 @@ pub fn goddard_logo(theme: &Theme) -> Svg {
 /// bespoke send control.
 #[track_caller]
 pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -> Stateful<Div> {
+    icon_button_tinted(id, path, theme, theme.text_tertiary)
+}
+
+/// `icon_button` with an explicit glyph tint — affordance icons take
+/// [`Theme::affordance_icon`] so they hold up under high contrast.
+#[track_caller]
+pub fn icon_button_tinted(
+    id: impl Into<ElementId>,
+    path: &'static str,
+    theme: Theme,
+    color: Hsla,
+) -> Stateful<Div> {
     div()
         .id(id)
         .size(px(22.0))
@@ -141,7 +153,7 @@ pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -
         .cursor_default()
         .hover(|element| element.bg(theme.overlay))
         .active(|element| element.bg(theme.overlay_strong))
-        .child(icon(path, 13.0, theme.text_tertiary))
+        .child(icon(path, 13.0, color))
 }
 
 /// Keeps a wheel gesture in a nested scrollable while it can consume the
@@ -737,7 +749,7 @@ impl RenderOnce for MenuChip {
                     }),
             )
             .when(self.caret, |element| {
-                element.child(icon("icons/chevron-down.svg", 10.5, theme.text_tertiary))
+                element.child(icon("icons/chevron-down.svg", 10.5, theme.affordance_icon()))
             })
     }
 }

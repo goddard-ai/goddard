@@ -6330,7 +6330,7 @@ impl Waku {
                     "icons/chevron-right.svg"
                 },
                 10.5,
-                theme.text_tertiary,
+                theme.affordance_icon(),
             ))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.theme_preview_expanded = !this.theme_preview_expanded;
@@ -7224,7 +7224,7 @@ impl Waku {
             );
 
             let expanded = self.expanded_provider_settings == Some(kind);
-            let expand_button = icon_button(
+            let expand_button = icon_button_tinted(
                 SharedString::from(format!("provider-expand-{}", kind.id())),
                 if expanded {
                     "icons/chevron-down.svg"
@@ -7232,6 +7232,7 @@ impl Waku {
                     "icons/chevron-right.svg"
                 },
                 theme,
+                theme.affordance_icon(),
             )
             .tab_index(0)
             .focus_visible(|style| style.border(hairline()).border_color(theme.accent))

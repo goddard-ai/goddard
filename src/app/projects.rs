@@ -1917,7 +1917,7 @@ impl Waku {
                         .truncate()
                         .child(project_name),
                 )
-                .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary)),
+                .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon())),
             "projects-selector-menu",
             &selector_menu,
             MenuAlign::BelowLeft,
@@ -2078,7 +2078,7 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(state_label),
                     )
-                    .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary)),
+                    .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon())),
                 "projects-state-menu",
                 &menu,
                 MenuAlign::BelowLeft,
@@ -2886,7 +2886,7 @@ impl Waku {
                     "icons/chevron-right.svg"
                 },
                 10.0,
-                theme.text_tertiary,
+                theme.affordance_icon(),
             ))
             .child(icon("icons/globe.svg", 12.0, theme.text_tertiary))
             .child(

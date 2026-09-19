@@ -2256,7 +2256,7 @@ impl Waku {
                             "icons/chevron-right.svg"
                         },
                         11.0,
-                        theme.text_tertiary,
+                        theme.affordance_icon(),
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_changed_files(turn_id, expanded, cx);
@@ -2547,7 +2547,7 @@ impl Waku {
                             "icons/chevron-right.svg"
                         },
                         11.5,
-                        theme.text_tertiary,
+                        theme.affordance_icon(),
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_turn_fold(turn_id, expanded, cx);
@@ -2787,7 +2787,7 @@ impl Waku {
                             "icons/chevron-right.svg"
                         },
                         10.0,
-                        theme.text_tertiary,
+                        theme.affordance_icon(),
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_activities(block_index, expanded, cx);
@@ -2983,7 +2983,7 @@ impl Waku {
                                     "icons/chevron-right.svg"
                                 },
                                 10.0,
-                                theme.text_tertiary,
+                                theme.affordance_icon(),
                             ))
                         })
                         .when(!has_detail && reasoning.is_none(), |element| {
