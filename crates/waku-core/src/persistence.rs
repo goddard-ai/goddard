@@ -346,6 +346,10 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default)]
     pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
+    /// Experimental: whether the daemon maintains project memory, mirrored
+    /// from the settings document.
+    #[serde(default = "default_experiment_enabled")]
+    pub memory_experiment_enabled: bool,
     /// Hosted evaluation-model settings mirrored from the settings document.
     /// Kept out of the on-disk state deliberately: the credential-bearing
     /// document is the daemon's `settings.json`, and this copy exists so the
@@ -463,6 +467,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
+            memory_experiment_enabled: default_experiment_enabled(),
             eval: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
@@ -613,6 +618,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
+            memory_experiment_enabled: self.memory_experiment_enabled,
             eval: self.eval.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
@@ -656,6 +662,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
+        self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.eval = settings.eval;
         self.daemon_settings_extra = settings.extra;
     }
