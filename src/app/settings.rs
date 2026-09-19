@@ -221,6 +221,33 @@ pub(super) struct SettingSearch {
     /// Set when the query matched the section's own title: every row in the
     /// section stays visible instead of only the ones matching the query.
     force: bool,
+    /// `matched` calls so far this pass. A row's ordinal is stable between
+    /// the results column and its natural page because both run the same
+    /// render function in the same order.
+    rows: Rc<Cell<usize>>,
+    /// The page this pass renders, when the pass participates in
+    /// results-column navigation — set for both sides of a jump.
+    anchor_page: Option<SettingsPage>,
+    scroll: ScrollHandle,
+    anchors: Rc<RefCell<HashMap<(SettingsPage, usize), ScrollAnchor>>>,
+    /// Set only while the results column renders — turns row titles into
+    /// links back to their page.
+    visit: Option<WeakEntity<Waku>>,
+}
+
+/// One matched row's highlights plus its jump-back context.
+pub(super) struct SettingRowMatch {
+    pub title_ranges: Vec<Range<usize>>,
+    pub description_ranges: Vec<Range<usize>>,
+    /// The row's (page, ordinal) when this pass participates in
+    /// results-column navigation — the anchor registry key, identical on
+    /// both sides of a jump.
+    pub key: Option<(SettingsPage, usize)>,
+    /// The row's persistent anchor — attached to its title element so the
+    /// natural page records where the row painted.
+    pub anchor: Option<ScrollAnchor>,
+    /// Present only in the results column: clicking the title jumps back.
+    pub visit: Option<WeakEntity<Waku>>,
 }
 
 impl SettingSearch {
@@ -229,6 +256,11 @@ impl SettingSearch {
             query: Rc::from(query),
             hits: Rc::new(Cell::new(0)),
             force: false,
+            rows: Rc::new(Cell::new(0)),
+            anchor_page: None,
+            scroll: ScrollHandle::new(),
+            anchors: Rc::new(RefCell::new(HashMap::new())),
+            visit: None,
         }
     }
 
@@ -245,6 +277,27 @@ impl SettingSearch {
         search
     }
 
+    /// Point this pass at `page`'s natural render: rows get ordinals and
+    /// persistent anchors in the shared registry, so a results-column click
+    /// can find where the same row lands outside the search.
+    fn for_page(
+        mut self,
+        page: SettingsPage,
+        scroll: &ScrollHandle,
+        anchors: &Rc<RefCell<HashMap<(SettingsPage, usize), ScrollAnchor>>>,
+    ) -> Self {
+        self.anchor_page = Some(page);
+        self.scroll = scroll.clone();
+        self.anchors = anchors.clone();
+        self
+    }
+
+    /// Results-column mode: kept rows carry a link that opens their page.
+    fn visiting(mut self, weak: WeakEntity<Waku>) -> Self {
+        self.visit = Some(weak);
+        self
+    }
+
     pub(super) fn active(&self) -> bool {
         !self.query.is_empty()
     }
@@ -256,11 +309,11 @@ impl SettingSearch {
     /// The title and description match ranges when the row stays visible —
     /// every row when `force` is on or the query is empty — else `None`.
     /// Each kept row counts toward the page's hit total while searching.
-    pub(super) fn matched(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> Option<(Vec<Range<usize>>, Vec<Range<usize>>)> {
+    /// Every call consumes an ordinal, kept or not, so ordinals match the
+    /// natural page's render order exactly.
+    pub(super) fn matched(&self, title: &str, description: &str) -> Option<SettingRowMatch> {
+        let ordinal = self.rows.get();
+        self.rows.set(ordinal + 1);
         let title_ranges = settings_match_ranges(title, &self.query);
         let description_ranges = settings_match_ranges(description, &self.query);
         if self.active() {
@@ -269,7 +322,22 @@ impl SettingSearch {
             }
             self.hits.set(self.hits.get() + 1);
         }
-        Some((title_ranges, description_ranges))
+        let key = self.anchor_page.map(|page| (page, ordinal));
+        let anchor = key.map(|key| {
+            self.anchors
+                .borrow_mut()
+                .entry(key)
+                .or_insert_with(|| ScrollAnchor::for_handle(self.scroll.clone()))
+                .clone()
+        });
+        let visit = self.visit.clone();
+        Some(SettingRowMatch {
+            title_ranges,
+            description_ranges,
+            key,
+            anchor,
+            visit,
+        })
     }
 }
 
@@ -322,6 +390,55 @@ pub(super) fn settings_search_text(
     }
 }
 
+/// A result row's title doubles as the jump back to its natural page: the
+/// anchor records where the title paints on either side of the search, and
+/// while the results column renders the title becomes a keyboard-operable
+/// link that opens the page scrolled to that spot.
+#[track_caller]
+pub(super) fn settings_title_jump(
+    title: Div,
+    matched: &SettingRowMatch,
+    theme: Theme,
+) -> AnyElement {
+    let Some((page, ordinal)) = matched.key else {
+        return title.into_any_element();
+    };
+    // `anchor_scroll` lives on StatefulInteractiveElement, so the title
+    // carries its registry key as an element id on both sides of the jump.
+    let title = title
+        .id(SharedString::from(format!(
+            "setting-jump-{}-{}",
+            page as usize, ordinal
+        )))
+        .anchor_scroll(matched.anchor.clone());
+    let Some(weak) = matched.visit.clone() else {
+        return title.into_any_element();
+    };
+    let key_weak = weak.clone();
+    title
+        .tab_index(0)
+        .cursor_pointer()
+        .hover(|element| element.text_color(theme.accent))
+        .focus_visible(|element| element.text_color(theme.accent))
+        .on_click(move |_, window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.visit_setting(page, Some(ordinal), window, cx);
+            });
+            cx.stop_propagation();
+        })
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                let _ = key_weak.update(cx, |this, cx| {
+                    this.visit_setting(page, Some(ordinal), window, cx);
+                });
+                cx.stop_propagation();
+            }
+        })
+        .into_any_element()
+}
+
 /// The title + description column every settings row shares, with the
 /// query's matches highlighted. `matched` comes from
 /// [`SettingSearch::matched`]; the caller only builds the row it wraps when
@@ -330,29 +447,31 @@ pub(super) fn settings_search_text(
 pub(super) fn settings_row_text(
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
-    matched: (Vec<Range<usize>>, Vec<Range<usize>>),
+    matched: SettingRowMatch,
     theme: Theme,
 ) -> Div {
     let title = title.into();
     let description = description.into();
-    let (title_ranges, description_ranges) = matched;
+    let title_element = div()
+        .text_size(sp(13.5))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.text)
+        .child(settings_search_text(title, matched.title_ranges.clone(), theme));
     div()
         .flex_1()
         .min_w_0()
-        .child(
-            div()
-                .text_size(sp(13.5))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text)
-                .child(settings_search_text(title, title_ranges, theme)),
-        )
+        .child(settings_title_jump(title_element, &matched, theme))
         .child(
             div()
                 .mt(px(5.0))
                 .text_size(sp(12.5))
                 .line_height(sp(18.0))
                 .text_color(theme.text_secondary)
-                .child(settings_search_text(description, description_ranges, theme)),
+                .child(settings_search_text(
+                    description,
+                    matched.description_ranges,
+                    theme,
+                )),
         )
 }
 
@@ -631,6 +750,30 @@ impl Waku {
         }
     }
 
+    /// Leave the results column for `page` itself — a section title jumps to
+    /// the page top, a row title (`ordinal`) to the anchor that row recorded
+    /// on its last natural-page paint. The anchor read happens a frame out,
+    /// once the destination page has laid out.
+    fn visit_setting(
+        &mut self,
+        page: SettingsPage,
+        ordinal: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor = ordinal.and_then(|ordinal| {
+            self.settings_row_anchors
+                .borrow()
+                .get(&(page, ordinal))
+                .cloned()
+        });
+        self.settings_search.update(cx, |input, cx| input.clear(cx));
+        self.open_settings_page(page, window, cx);
+        if let Some(anchor) = anchor {
+            anchor.scroll_to(window, cx);
+        }
+    }
+
     /// Step the selected page through the rows the search leaves visible,
     /// wrapping at both ends. The field keeps focus so typing keeps narrowing
     /// the list; the landing page renders immediately, so there is no separate
@@ -722,7 +865,6 @@ impl Waku {
         }
         self.settings_search_sections.clear();
         self.settings_search_target = None;
-        let search = SettingSearch::inactive();
         let page = self
             .settings_page
             .unwrap_or(SettingsPage::General)
@@ -730,6 +872,11 @@ impl Waku {
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
             );
+        let search = SettingSearch::inactive().for_page(
+            page,
+            &self.settings_scroll,
+            &self.settings_row_anchors,
+        );
         let right_window_controls = self.render_client_window_controls(
             super::window_chrome::WindowControlSide::Right,
             window,
@@ -951,7 +1098,9 @@ impl Waku {
                 SettingSearch::new(query)
             } else {
                 SettingSearch::forced(query)
-            };
+            }
+            .for_page(page, &self.settings_scroll, &self.settings_row_anchors)
+            .visiting(cx.entity().downgrade());
             let content = match page {
                 SettingsPage::General => self.render_general_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
@@ -979,13 +1128,37 @@ impl Waku {
                             .mx_auto()
                             .child(
                                 div()
+                                    .id(SharedString::from(format!(
+                                        "settings-section-{}",
+                                        page as usize
+                                    )))
+                                    .tab_index(0)
                                     .pt(px(2.0))
                                     .pl(px(6.0))
                                     .flex_none()
+                                    .cursor_pointer()
                                     .text_size(sp(18.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(settings_search_text(label, label_ranges, theme)),
+                                    .hover(|element| element.text_color(theme.accent))
+                                    .focus_visible(|element| element.text_color(theme.accent))
+                                    .child(settings_search_text(label, label_ranges, theme))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.visit_setting(page, None, window, cx);
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if !event.keystroke.modifiers.modified()
+                                                && matches!(
+                                                    event.keystroke.key.as_str(),
+                                                    "enter" | "space"
+                                                )
+                                            {
+                                                this.visit_setting(page, None, window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
                             )
                             .child(content),
                     ),
@@ -1380,7 +1553,7 @@ impl Waku {
                     None
                 } else {
                     let title = tr!("settings.completion_sound_name");
-                    search.matched(&title, "").map(|(ranges, _)| {
+                    search.matched(&title, "").map(|matched| {
                         div()
                             .w_full()
                             .min_h(px(52.0))
@@ -1389,15 +1562,21 @@ impl Waku {
                             .flex()
                             .items_center()
                             .gap(px(24.0))
-                            .child(
+                            .child(settings_title_jump(
                                 div()
                                     .flex_1()
                                     .min_w_0()
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(settings_search_text(title, ranges, theme)),
-                            )
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
                             .child(sound_selector)
                     })
                 };
@@ -1405,7 +1584,7 @@ impl Waku {
                     None
                 } else {
                     let title = tr!("settings.completion_sound_volume");
-                    search.matched(&title, "").map(|(ranges, _)| {
+                    search.matched(&title, "").map(|matched| {
                         div()
                             .w_full()
                             .min_h(px(52.0))
@@ -1414,15 +1593,21 @@ impl Waku {
                             .flex()
                             .items_center()
                             .gap(px(12.0))
-                            .child(
+                            .child(settings_title_jump(
                                 div()
                                     .flex_1()
                                     .min_w_0()
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(settings_search_text(title, ranges, theme)),
-                            )
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
                             .child(volume_slider.w(px(140.0)).flex_none())
                             .child(
                                 div()
@@ -1869,7 +2054,7 @@ impl Waku {
             let script = command.script.clone();
             let edit_command = command.clone();
             let agent_added = command.created_by_task.is_some();
-            let Some((label_ranges, _)) = search.matched(&label, "") else {
+            let Some(matched) = search.matched(&label, "") else {
                 continue;
             };
             column = column.child(
@@ -1896,7 +2081,7 @@ impl Waku {
                                     .flex()
                                     .items_center()
                                     .gap(px(6.0))
-                                    .child(
+                                    .child(settings_title_jump(
                                         div()
                                             .truncate()
                                             .text_size(sp(13.0))
@@ -1904,10 +2089,12 @@ impl Waku {
                                             .text_color(theme.text)
                                             .child(settings_search_text(
                                                 label,
-                                                label_ranges,
+                                                matched.title_ranges.clone(),
                                                 theme,
                                             )),
-                                    )
+                                        &matched,
+                                        theme,
+                                    ))
                                     .when(agent_added, |row| {
                                         row.child(
                                             div()
@@ -2438,7 +2625,7 @@ impl Waku {
             let description = tr!("daemon.expose_description");
             search
                 .matched(&title, &description)
-                .map(|(title_ranges, description_ranges)| {
+                .map(|matched| {
                     div()
                         .min_h(px(66.0))
                         .px(px(20.0))
@@ -2457,17 +2644,19 @@ impl Waku {
                                         .flex()
                                         .items_center()
                                         .gap(px(7.0))
-                                        .child(
+                                        .child(settings_title_jump(
                                             div()
                                                 .text_size(sp(13.5))
                                                 .font_weight(FontWeight::MEDIUM)
                                                 .text_color(theme.text)
                                                 .child(settings_search_text(
                                                     title,
-                                                    title_ranges,
+                                                    matched.title_ranges.clone(),
                                                     theme,
                                                 )),
-                                        )
+                                            &matched,
+                                            theme,
+                                        ))
                                         .child(
                                             div()
                                                 .px(px(6.0))
@@ -2499,7 +2688,7 @@ impl Waku {
                                         .text_color(theme.text_secondary)
                                         .child(settings_search_text(
                                             description,
-                                            description_ranges,
+                                            matched.description_ranges.clone(),
                                             theme,
                                         )),
                                 ),
@@ -2518,15 +2707,21 @@ impl Waku {
                 let description = tr!("daemon.connection_description");
                 search
                     .matched(&title, &description)
-                    .map(|(title_ranges, description_ranges)| {
+                    .map(|matched| {
                         div()
-                            .child(
+                            .child(settings_title_jump(
                                 div()
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(settings_search_text(title, title_ranges, theme)),
-                            )
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
                             .child(
                                 div()
                                     .mt(px(4.0))
@@ -2537,7 +2732,7 @@ impl Waku {
                                     .text_color(theme.text_secondary)
                                     .child(settings_search_text(
                                         description,
-                                        description_ranges,
+                                        matched.description_ranges.clone(),
                                         theme,
                                     )),
                             )
@@ -2546,7 +2741,7 @@ impl Waku {
             let field_row = |title: String, description: String, field: TextField| -> Option<Div> {
                 search
                     .matched(&title, &description)
-                    .map(|(title_ranges, description_ranges)| {
+                    .map(|matched| {
                         div()
                             .mt(px(14.0))
                             .flex()
@@ -2556,17 +2751,19 @@ impl Waku {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .child(
+                                    .child(settings_title_jump(
                                         div()
                                             .text_size(sp(12.5))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme.text)
                                             .child(settings_search_text(
                                                 title,
-                                                title_ranges,
+                                                matched.title_ranges.clone(),
                                                 theme,
                                             )),
-                                    )
+                                        &matched,
+                                        theme,
+                                    ))
                                     .child(
                                         div()
                                             .mt(px(3.0))
@@ -2576,7 +2773,7 @@ impl Waku {
                                             .text_color(theme.text_tertiary)
                                             .child(settings_search_text(
                                                 description,
-                                                description_ranges,
+                                                matched.description_ranges.clone(),
                                                 theme,
                                             )),
                                     ),
@@ -2625,15 +2822,21 @@ impl Waku {
                 let description = tr!("daemon.credentials_description");
                 search
                     .matched(&title, &description)
-                    .map(|(title_ranges, description_ranges)| {
+                    .map(|matched| {
                         div()
-                            .child(
+                            .child(settings_title_jump(
                                 div()
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(settings_search_text(title, title_ranges, theme)),
-                            )
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
                             .child(
                                 div()
                                     .mt(px(4.0))
@@ -2644,7 +2847,7 @@ impl Waku {
                                     .text_color(theme.text_secondary)
                                     .child(settings_search_text(
                                         description,
-                                        description_ranges,
+                                        matched.description_ranges.clone(),
                                         theme,
                                     )),
                             )
@@ -2652,21 +2855,27 @@ impl Waku {
             };
             let url_row = {
                 let title = tr!("daemon.websocket_url");
-                search.matched(&title, "").map(|(ranges, _)| {
+                search.matched(&title, "").map(|matched| {
                     div()
                         .mt(px(13.0))
                         .py(px(8.0))
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .child(
+                        .child(settings_title_jump(
                             div()
                                 .w(px(80.0))
                                 .flex_none()
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_tertiary)
-                                .child(settings_search_text(title, ranges, theme)),
-                        )
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
                         .child(
                             div()
                                 .flex_1()
@@ -2685,7 +2894,7 @@ impl Waku {
             };
             let token_row = {
                 let title = tr!("daemon.token");
-                search.matched(&title, "").map(|(ranges, _)| {
+                search.matched(&title, "").map(|matched| {
                     div()
                         .py(px(8.0))
                         .border_t(hairline())
@@ -2693,14 +2902,20 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .child(
+                        .child(settings_title_jump(
                             div()
                                 .w(px(80.0))
                                 .flex_none()
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_tertiary)
-                                .child(settings_search_text(title, ranges, theme)),
-                        )
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
                         .child(
                             div()
                                 .flex_1()
@@ -2788,7 +3003,7 @@ impl Waku {
     ) -> Option<AnyElement> {
         let title = tr!("daemon.remote_hosts_title");
         let description = tr!("daemon.remote_hosts_description");
-        let (title_ranges, description_ranges) = search.matched(&title, &description)?;
+        let matched = search.matched(&title, &description)?;
         let mut rows = div().flex().flex_col();
         for (index, host) in self.state.remote_hosts.iter().enumerate() {
             let host_id = host.id;
@@ -2967,13 +3182,19 @@ impl Waku {
             .py(px(15.0))
             .rounded(px(16.0))
             .bg(theme.raised)
-            .child(
+            .child(settings_title_jump(
                 div()
                     .text_size(sp(13.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(settings_search_text(title, title_ranges, theme)),
-            )
+                    .child(settings_search_text(
+                        title,
+                        matched.title_ranges.clone(),
+                        theme,
+                    )),
+                &matched,
+                theme,
+            ))
             .child(
                 div()
                     .mt(px(4.0))
@@ -2982,7 +3203,11 @@ impl Waku {
                     .text_size(sp(12.5))
                     .line_height(sp(16.0))
                     .text_color(theme.text_secondary)
-                    .child(settings_search_text(description, description_ranges, theme)),
+                    .child(settings_search_text(
+                        description,
+                        matched.description_ranges.clone(),
+                        theme,
+                    )),
             );
         // The editor form and the add button are chrome, not matches — a
         // search renders the card's saved rows only.
@@ -4959,7 +5184,7 @@ impl Waku {
                 None
             } else {
                 let title = tr!("settings.sidebar_transparency_amount");
-                search.matched(&title, "").map(|(ranges, _)| {
+                search.matched(&title, "").map(|matched| {
                     div()
                         .w_full()
                         .min_h(px(52.0))
@@ -4968,15 +5193,21 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(12.0))
-                        .child(
+                        .child(settings_title_jump(
                             div()
                                 .flex_1()
                                 .min_w_0()
                                 .text_size(sp(13.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text)
-                                .child(settings_search_text(title, ranges, theme)),
-                        )
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
                         .child(amount_slider.w(px(140.0)).flex_none())
                         .child(
                             div()
@@ -5181,7 +5412,7 @@ impl Waku {
     fn render_theme_preview(
         &self,
         open: bool,
-        matched: (Vec<Range<usize>>, Vec<Range<usize>>),
+        matched: SettingRowMatch,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -6054,21 +6285,27 @@ impl Waku {
 
             // The provider row is searchable on its name and the detail line
             // under it — path, model count, or the not-detected hint.
-            let Some((title_ranges, detail_ranges)) =
-                search.matched(kind.display_name(), &detail_text)
-            else {
+            let Some(matched) = search.matched(kind.display_name(), &detail_text) else {
                 continue;
             };
             let detail: AnyElement = if installed {
                 div()
                     .truncate()
-                    .child(settings_search_text(detail_text, detail_ranges, theme))
+                    .child(settings_search_text(
+                        detail_text,
+                        matched.description_ranges.clone(),
+                        theme,
+                    ))
                     .into_any_element()
             } else {
                 div()
                     .flex()
                     .items_baseline()
-                    .child(settings_search_text(detail_text, detail_ranges, theme))
+                    .child(settings_search_text(
+                        detail_text,
+                        matched.description_ranges.clone(),
+                        theme,
+                    ))
                     .into_any_element()
             };
 
@@ -6172,7 +6409,7 @@ impl Waku {
                                 .flex()
                                 .items_baseline()
                                 .gap(px(7.0))
-                                .child(
+                                .child(settings_title_jump(
                                     div()
                                         .text_size(sp(12.5))
                                         .font_weight(FontWeight::MEDIUM)
@@ -6183,10 +6420,12 @@ impl Waku {
                                         })
                                         .child(settings_search_text(
                                             kind.display_name(),
-                                            title_ranges,
+                                            matched.title_ranges.clone(),
                                             theme,
                                         )),
-                                )
+                                    &matched,
+                                    theme,
+                                ))
                                 .when_some(version, |element, version| {
                                     element.child(
                                         div()
@@ -6948,15 +7187,21 @@ impl Waku {
                 let description = tr!("computer_use.helper_access", helper = helper_name);
                 search
                     .matched(&title, &description)
-                    .map(|(title_ranges, description_ranges)| {
+                    .map(|matched| {
                         div()
-                            .child(
+                            .child(settings_title_jump(
                                 div()
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(settings_search_text(title, title_ranges, theme)),
-                            )
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
                             .child(
                                 div()
                                     .mt(px(4.0))
@@ -6964,7 +7209,7 @@ impl Waku {
                                     .text_color(theme.text_secondary)
                                     .child(settings_search_text(
                                         description,
-                                        description_ranges,
+                                        matched.description_ranges.clone(),
                                         theme,
                                     )),
                             )
@@ -7057,19 +7302,25 @@ impl Waku {
             let description = tr!("computer_use.always_allowed_apps_description");
             search
                 .matched(&title, &description)
-                .map(|(title_ranges, description_ranges)| {
+                .map(|matched| {
                     div()
                         .px(px(20.0))
                         .py(px(14.0))
                         .rounded(px(16.0))
                         .bg(theme.raised)
-                        .child(
+                        .child(settings_title_jump(
                             div()
                                 .text_size(sp(13.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text)
-                                .child(settings_search_text(title, title_ranges, theme)),
-                        )
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
                         .child(
                             div()
                                 .mt(px(4.0))
@@ -7077,7 +7328,7 @@ impl Waku {
                                 .text_color(theme.text_secondary)
                                 .child(settings_search_text(
                                     description,
-                                    description_ranges,
+                                    matched.description_ranges.clone(),
                                     theme,
                                 )),
                         )
@@ -7963,19 +8214,29 @@ fn permission_status_row(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(
+                    .child(settings_title_jump(
                         div()
                             .text_size(sp(12.5))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(settings_search_text(name, matched.0, theme)),
-                    )
+                            .child(settings_search_text(
+                                name,
+                                matched.title_ranges.clone(),
+                                theme,
+                            )),
+                        &matched,
+                        theme,
+                    ))
                     .child(
                         div()
                             .mt(px(2.0))
                             .text_size(sp(12.5))
                             .text_color(theme.text_tertiary)
-                            .child(settings_search_text(description, matched.1, theme)),
+                            .child(settings_search_text(
+                                description,
+                                matched.description_ranges.clone(),
+                                theme,
+                            )),
                     ),
             )
             .child(status),
@@ -8131,10 +8392,10 @@ mod tests {
     #[test]
     fn setting_search_inactive_matches_everything_without_counting() {
         let search = super::SettingSearch::inactive();
-        let (title_ranges, description_ranges) = search
+        let matched = search
             .matched("anything", "goes")
             .expect("inactive search keeps rows");
-        assert!(title_ranges.is_empty() && description_ranges.is_empty());
+        assert!(matched.title_ranges.is_empty() && matched.description_ranges.is_empty());
         assert_eq!(search.hits(), 0);
     }
 }
