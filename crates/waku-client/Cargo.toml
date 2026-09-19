@@ -18,9 +18,11 @@ tungstenite = { version = "0.30", default-features = false, features = [
     "handshake",
     "rustls-tls-native-roots",
 ] }
+tokio = { version = "1", features = ["rt", "macros"] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 waku-protocol = { path = "../waku-protocol" }
+waku-share = { path = "../waku-share" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -88,7 +88,10 @@ const IDLE: ConnectionStatus = {
   connections: 0,
 };
 
-function createNativeDaemonSocket(url: string): WebSocketLike {
+/** RN WebSockets send an Origin header the daemon's origin check reads;
+ * the `X-Goddard-Client: native` marker is what lets native clients in.
+ * Pairing needs the same socket, so this is shared beyond the link. */
+export function createNativeDaemonSocket(url: string): WebSocketLike {
   // React Native adds an Origin header to native sockets. This marker lets the
   // daemon distinguish them from browser WebSockets, whose API cannot add
   // custom handshake headers. The DOM constructor type omits RN's third arg.

@@ -587,6 +587,160 @@ impl Waku {
             )
         });
 
+        // -- Pair requests + paired devices -----------------------------------
+        // A device discovered this daemon over the LAN and asked for a
+        // token; approving mints one just for it, so revoking later drops
+        // that device without disturbing the master credential.
+        let pairing = &self.pairing_state;
+        let mut pair_rows = Vec::new();
+        for request in &pairing.pending {
+            let device_name = request.device_name.clone();
+            let transport = request.transport.clone();
+            let request_id = request.request_id;
+            let approve_id = request_id;
+            let decline_id = request_id;
+            if search.matched(&device_name, "").is_none() {
+                continue;
+            }
+            pair_rows.push(
+                div()
+                    .mt(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.0))
+                                    .text_color(theme.text)
+                                    .child(format!("{device_name} · {transport}")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("pairing.wants_to_pair")),
+                            ),
+                    )
+                    .child(self.friends_button(
+                        SharedString::from(format!("pair-approve-{approve_id}")),
+                        tr!("pairing.approve"),
+                        &theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::RespondPairRequest {
+                                    request_id: approve_id,
+                                    accept: true,
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.friends_button(
+                        SharedString::from(format!("pair-decline-{decline_id}")),
+                        tr!("pairing.decline"),
+                        &theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::RespondPairRequest {
+                                    request_id: decline_id,
+                                    accept: false,
+                                },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .into_any_element(),
+            );
+        }
+        let pairing_title_matched = search.matched(&tr!("pairing.requests"), "").is_some();
+        let pairing_card = (!pair_rows.is_empty() || pairing_title_matched).then(|| {
+            self.friends_card(
+                &theme,
+                std::iter::once(
+                    self.friends_section_title(&theme, tr!("pairing.requests"))
+                        .into_any_element(),
+                )
+                .chain(pair_rows)
+                .collect::<Vec<_>>(),
+            )
+        });
+
+        let mut paired_rows = Vec::new();
+        for client in &pairing.clients {
+            let client_id = client.client_id;
+            let name = client.name.clone();
+            let ago = format_time_ago(unix_time_millis().saturating_sub(client.added_at_ms) / 1_000);
+            if search.matched(&name, "").is_none() {
+                continue;
+            }
+            paired_rows.push(
+                div()
+                    .mt(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.0))
+                                    .text_color(theme.text)
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("pairing.added", ago = ago)),
+                            ),
+                    )
+                    .child(self.friends_button(
+                        SharedString::from(format!("pair-revoke-{client_id}")),
+                        tr!("pairing.revoke"),
+                        &theme,
+                        move |this, cx| {
+                            this.friends_command(
+                                waku_client::Command::RevokePairedClient { client_id },
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .into_any_element(),
+            );
+        }
+        if paired_rows.is_empty() && !search.active() {
+            paired_rows.push(
+                div()
+                    .mt(px(10.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("pairing.none"))
+                    .into_any_element(),
+            );
+        }
+        let paired_title_matched = search.matched(&tr!("pairing.paired"), "").is_some();
+        let paired_card = (paired_title_matched || !search.active() || !paired_rows.is_empty())
+            .then(|| {
+                self.friends_card(
+                    &theme,
+                    std::iter::once(
+                        self.friends_section_title(&theme, tr!("pairing.paired"))
+                            .into_any_element(),
+                    )
+                    .chain(paired_rows)
+                    .collect::<Vec<_>>(),
+                )
+            });
+
         let requests_title_matched = search.matched(&tr!("friends.requests"), "").is_some();
         // Sync alerts lead the page — a stopped rebase blocks sync until
         // someone picks a decision.
@@ -638,6 +792,12 @@ impl Waku {
                     .collect::<Vec<_>>(),
                 ),
             );
+        }
+        if let Some(pairing_card) = pairing_card {
+            column = column.child(pairing_card);
+        }
+        if let Some(paired_card) = paired_card {
+            column = column.child(paired_card);
         }
         if let Some(transfers_card) = transfers_card {
             column = column.child(transfers_card);

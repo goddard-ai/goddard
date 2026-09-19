@@ -42,6 +42,7 @@ struct ClientInner {
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
     settings_subscribers: Mutex<Vec<Sender<DaemonSettings>>>,
     friends_subscribers: Mutex<Vec<Sender<waku_protocol::friends::FriendsState>>>,
+    pairing_subscribers: Mutex<Vec<Sender<waku_protocol::pairing::PairingState>>>,
     automations_subscribers: Mutex<Vec<Sender<waku_protocol::automations::AutomationsState>>>,
     /// `ReviewChanged` broadcasts — the origin URL whose QA state moved.
     review_subscribers: Mutex<Vec<Sender<String>>>,
@@ -130,6 +131,7 @@ impl DaemonClient {
             task_state_subscribers: Mutex::new(Vec::new()),
             settings_subscribers: Mutex::new(Vec::new()),
             friends_subscribers: Mutex::new(Vec::new()),
+            pairing_subscribers: Mutex::new(Vec::new()),
             automations_subscribers: Mutex::new(Vec::new()),
             review_subscribers: Mutex::new(Vec::new()),
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
@@ -265,6 +267,14 @@ impl DaemonClient {
         receiver
     }
 
+    /// Every `pairingChanged` the daemon broadcasts — pair requests
+    /// arriving, resolving, or paired clients being revoked.
+    pub fn subscribe_pairing(&self) -> Receiver<waku_protocol::pairing::PairingState> {
+        let (events, receiver) = unbounded();
+        self.inner.pairing_subscribers.lock().push(events);
+        receiver
+    }
+
     /// Every `automationsChanged` the daemon broadcasts — a definition edit
     /// or a run recording progress — lands here as the authoritative
     /// document.
@@ -371,6 +381,69 @@ impl DaemonClient {
 
     pub fn shutdown(&self) {
         let _ = self.inner.outgoing.send(Outgoing::Shutdown);
+    }
+}
+
+/// The terminal answer to a `PairRequest` — what the daemon's owner
+/// decided about this device.
+#[derive(Clone, Debug)]
+pub enum PairReply {
+    /// Approved; `token` authenticates a normal `DaemonClient::connect`,
+    /// `daemon_name` labels the remote host.
+    Granted { token: String, daemon_name: String },
+    Declined { message: String },
+}
+
+/// Ask the daemon at `address` for a client token on this device's
+/// behalf. Opens a short-lived socket, sends the pre-hello `PairRequest`,
+/// and parks until the owner decides — `timeout` bounds the wait locally;
+/// the daemon also expires unanswered requests on its own clock.
+pub fn pair(address: &str, device_name: &str, timeout: Duration) -> anyhow::Result<PairReply> {
+    let url = daemon_url(address)?;
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_WIRE_MESSAGE_BYTES))
+        .max_frame_size(Some(MAX_WIRE_MESSAGE_BYTES));
+    let (mut socket, _) = tungstenite::client::connect_with_config(url.as_str(), Some(config), 3)
+        .context("could not connect to Goddard daemon")?;
+    write_json(
+        &mut socket,
+        &ClientMessage::PairRequest {
+            protocol_version: PROTOCOL_VERSION,
+            device_name: device_name.to_string(),
+        },
+    )?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            bail!("pair request timed out waiting for approval");
+        }
+        set_client_read_timeout(&mut socket, Some(remaining.min(READ_POLL_INTERVAL * 200)))?;
+        match socket.read() {
+            Ok(Message::Text(text)) => {
+                let message: ServerMessage = serde_json::from_str(text.as_ref())?;
+                match message {
+                    ServerMessage::PairPending => {}
+                    ServerMessage::PairGranted { token, daemon_name } => {
+                        return Ok(PairReply::Granted { token, daemon_name });
+                    }
+                    ServerMessage::PairDeclined { message } => {
+                        return Ok(PairReply::Declined { message });
+                    }
+                    ServerMessage::Rejected { message } => {
+                        bail!("daemon rejected pair request: {message}")
+                    }
+                    other => bail!("daemon sent an invalid pairing response: {other:?}"),
+                }
+            }
+            Ok(Message::Ping(_)) => {
+                let _ = socket.flush();
+            }
+            Ok(Message::Close(_)) => bail!("daemon closed during pairing"),
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(error)) if retryable_io(&error) => {}
+            Err(error) => return Err(error).context("pair request failed"),
+        }
     }
 }
 
@@ -484,6 +557,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(state.clone()).is_ok());
                     }
+                    ServerMessage::PairingChanged { state } => {
+                        inner
+                            .pairing_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send(state.clone()).is_ok());
+                    }
                     ServerMessage::AutomationsChanged { state } => {
                         inner
                             .automations_subscribers
@@ -506,7 +585,11 @@ fn run_client(
                             .retain(|subscriber| subscriber.send((session_id, revoked)).is_ok());
                     }
                     ServerMessage::ShuttingDown => break,
-                    ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
+                    ServerMessage::Hello { .. }
+                    | ServerMessage::Rejected { .. }
+                    | ServerMessage::PairPending
+                    | ServerMessage::PairGranted { .. }
+                    | ServerMessage::PairDeclined { .. } => {}
                 }
             }
             Ok(Message::Close(_)) => break,
@@ -542,6 +625,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.task_state_subscribers.lock().clear();
     inner.settings_subscribers.lock().clear();
     inner.friends_subscribers.lock().clear();
+    inner.pairing_subscribers.lock().clear();
     inner.automations_subscribers.lock().clear();
     inner.review_subscribers.lock().clear();
     inner.friend_session_closed_subscribers.lock().clear();

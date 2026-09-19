@@ -2104,6 +2104,20 @@ pub struct Waku {
     friends_state: waku_client::friends::FriendsState,
     friends_tx: Sender<waku_client::friends::FriendsState>,
     friends_events: Receiver<waku_client::friends::FriendsState>,
+    /// `pairingChanged` broadcasts forwarded by the task-state sync worker:
+    /// pending pair requests and the paired-device roster.
+    pairing_state: waku_client::pairing::PairingState,
+    pairing_tx: Sender<waku_client::pairing::PairingState>,
+    pairing_events: Receiver<waku_client::pairing::PairingState>,
+    /// LAN browser feeding Settings → Daemon's nearby-daemon rows. Bound
+    /// lazily the first time the page opens; `updates` drains on the
+    /// event pump like the other crossbeam channels.
+    daemon_discovery: Option<Arc<waku_client::DaemonDiscovery>>,
+    /// Endpoint id string → the latest record that daemon announced.
+    nearby_daemons: HashMap<String, waku_client::discover::DiscoveredDaemon>,
+    /// Endpoint ids with a pair request awaiting the remote user's
+    /// decision — their rows render "waiting" instead of a Pair button.
+    pair_requests_in_flight: HashSet<String>,
     /// `automationsChanged` documents from every connected daemon — the
     /// per-daemon mirrors live in `automations`.
     automations_tx: Sender<(
@@ -4238,6 +4252,7 @@ impl Waku {
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
+        let (pairing_tx, pairing_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
@@ -5242,6 +5257,12 @@ impl Waku {
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,
+                pairing_state: waku_client::pairing::PairingState::default(),
+                pairing_tx,
+                pairing_events,
+                daemon_discovery: None,
+                nearby_daemons: HashMap::new(),
+                pair_requests_in_flight: HashSet::new(),
                 automations_tx,
                 automations_events,
                 review_tx,

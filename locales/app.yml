@@ -836,6 +836,20 @@ daemon.remote_host_required:
   en: Enter an SSH destination, or both an address and a token.
 daemon.remote_host_save:
   en: Save host
+daemon.nearby_title:
+  en: On your network
+daemon.pair:
+  en: Pair
+daemon.pair_waiting:
+  en: Waiting…
+daemon.pair_added:
+  en: Paired with {name}
+daemon.pair_no_address:
+  en: "{name} approved, but it is not accepting WebSocket connections."
+daemon.pair_declined:
+  en: "{name} declined the pair request"
+daemon.pair_failed:
+  en: "Pair request failed: {error}"
 daemon.ssh_password_title:
   en: SSH authentication
 daemon.ssh_password_label:
@@ -3980,6 +3994,24 @@ friends.accept:
   en: Accept
 friends.decline:
   en: Decline
+pairing.requests:
+  en: Pair requests
+pairing.wants_to_pair:
+  en: wants to connect to this daemon
+pairing.approve:
+  en: Approve
+pairing.decline:
+  en: Decline
+pairing.paired:
+  en: Paired devices
+pairing.paired_hint:
+  en: Devices that hold a token for this daemon. Revoking drops their access.
+pairing.revoke:
+  en: Revoke
+pairing.added:
+  en: "paired %{ago} ago"
+pairing.none:
+  en: No devices paired yet.
 friends.list:
   en: Friends
 friends.empty:

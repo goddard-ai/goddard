@@ -380,6 +380,11 @@ struct ShareInner {
     session_sink: Option<FriendSessionSink>,
     /// Open session feeds we serve to peers, keyed `(peer, session)`.
     session_feeds: HashMap<(EndpointId, Uuid), SessionFeedHandle>,
+    /// Daemon metadata + pairing handlers for the `waku-link` ALPN. The
+    /// daemon installs both once; the runtime turns them into a
+    /// `LinkProtocol` at spawn.
+    link_info: Option<waku_share::link::InfoHandler>,
+    link_pair: Option<waku_share::link::PairHandler>,
     friend_code: String,
 }
 
@@ -552,6 +557,8 @@ impl ShareService {
                 session_streamer: None,
                 session_sink: None,
                 session_feeds: HashMap::new(),
+                link_info: None,
+                link_pair: None,
                 friend_code: String::new(),
             })),
             sink: Arc::new(Mutex::new(None)),
@@ -595,6 +602,20 @@ impl ShareService {
     /// from peer session subscriptions.
     pub fn set_friend_session_sink(&self, sink: FriendSessionSink) {
         self.state.lock().session_sink = Some(sink);
+    }
+
+    /// Where the daemon installs the `waku-link` handlers — what metadata
+    /// LAN-discovered daemons report and how their pair requests resolve.
+    /// Installed before the runtime starts; a runtime already running
+    /// keeps whatever it spawned with.
+    pub fn set_link_handlers(
+        &self,
+        info: waku_share::link::InfoHandler,
+        pair: waku_share::link::PairHandler,
+    ) {
+        let mut inner = self.state.lock();
+        inner.link_info = Some(info);
+        inner.link_pair = Some(pair);
     }
 
     /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required,
@@ -2406,7 +2427,17 @@ fn run_runtime(
             },
         );
 
-        let share_node = match ShareNode::spawn(&dir, secret, RelayMode::Default, proto).await {
+        let link = {
+            let inner = state.lock();
+            match (inner.link_info.clone(), inner.link_pair.clone()) {
+                (Some(info), Some(pair)) => {
+                    Some(waku_share::link::LinkProtocol::new(info, pair))
+                }
+                _ => None,
+            }
+        };
+        let share_node = match ShareNode::spawn(&dir, secret, RelayMode::Default, proto, link).await
+        {
             Ok(n) => Arc::new(n),
             Err(e) => {
                 drop(ready_tx.send(Err(e)));

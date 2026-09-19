@@ -6,8 +6,10 @@
 //! returns a sendme-compatible ticket; `fetch_to()` dials a ticket and
 //! streams a verified copy out.
 
+pub mod discover;
 pub mod friends;
 pub mod identity;
+pub mod link;
 pub mod projects;
 
 pub use iroh::{EndpointId, RelayMode};
@@ -18,6 +20,7 @@ use std::path::Path;
 use anyhow::{Context as _, bail};
 use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
 use iroh::protocol::Router;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use iroh_blobs::{
     BlobFormat, BlobsProtocol, Hash,
     api::Store,
@@ -36,38 +39,64 @@ pub type Ticket = BlobTicket;
 /// the transfer instead of hanging it.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// One peer: endpoint + blob store + protocol router. In the daemon this is
-/// a singleton; the spike runs two in one process.
+/// One peer: endpoint + blob store + protocol router + LAN address lookup.
+/// In the daemon this is a singleton; the spike runs two in one process.
 pub struct ShareNode {
     router: Router,
     store: FsStore,
+    /// Kept alive so the endpoint keeps announcing itself on the LAN;
+    /// `subscribe()` feeds "nearby endpoints" surfaces.
+    mdns: MdnsAddressLookup,
 }
 
 impl ShareNode {
     /// Bind an endpoint for `secret`, host `friends` on
-    /// [`friends::ALPN_FRIENDS`] and blobs on `iroh_blobs::ALPN`.
-    /// `dir` holds the FsStore. `RelayMode::Default` uses n0's public relays
-    /// and DNS discovery; `Disabled` is LAN-only (tests).
+    /// [`friends::ALPN_FRIENDS`], blobs on `iroh_blobs::ALPN`, and the
+    /// daemon-link protocol on [`link::ALPN_WAKU_LINK`] when `link` is
+    /// provided. `dir` holds the FsStore. `RelayMode::Default` uses n0's
+    /// public relays and DNS discovery; `Disabled` is LAN-only (tests).
+    /// Every node also announces itself via multicast so browsers and LAN
+    /// friends resolve it without a relay.
     pub async fn spawn(
         dir: &Path,
         secret: SecretKey,
         relay: RelayMode,
         friends: friends::FriendsProtocol,
+        link: Option<link::LinkProtocol>,
     ) -> anyhow::Result<Self> {
         tokio::fs::create_dir_all(dir.join("blobs")).await?;
         let endpoint = Endpoint::builder(presets::N0)
             .secret_key(secret)
             .relay_mode(relay)
+            .user_data_for_address_lookup(
+                discover::WAKU_USER_DATA
+                    .parse()
+                    .context("static user data marker is invalid")?,
+            )
             .bind()
             .await
             .context("binding iroh endpoint")?;
+        let mdns = MdnsAddressLookup::builder()
+            .build(endpoint.id())
+            .context("building mdns address lookup")?;
+        endpoint
+            .address_lookup()
+            .context("endpoint has no address lookup registry")?
+            .add(mdns.clone());
         let store = FsStore::load(dir.join("blobs")).await?;
         let blobs = BlobsProtocol::new(&store, None);
-        let router = Router::builder(endpoint)
+        let mut router = Router::builder(endpoint)
             .accept(friends::ALPN_FRIENDS, friends)
-            .accept(iroh_blobs::ALPN, blobs)
-            .spawn();
-        Ok(Self { router, store })
+            .accept(iroh_blobs::ALPN, blobs);
+        if let Some(link) = link {
+            router = router.accept(link::ALPN_WAKU_LINK, link);
+        }
+        let router = router.spawn();
+        Ok(Self {
+            router,
+            store,
+            mdns,
+        })
     }
 
     pub fn endpoint(&self) -> &Endpoint {
@@ -85,6 +114,12 @@ impl ShareNode {
     /// Wait for relay/discovery so tickets carry a reachable address.
     pub async fn wait_online(&self) {
         let _ = self.router.endpoint().online().await;
+    }
+
+    /// Stream of LAN discovery events — which endpoints are announcing
+    /// themselves nearby right now.
+    pub async fn nearby(&self) -> impl StreamExt<Item = iroh_mdns_address_lookup::DiscoveryEvent> {
+        self.mdns.subscribe().await
     }
 
     /// Import `path` and return the ticket plus the temp tag that keeps it

@@ -9,6 +9,7 @@ description = "Friend-to-friend file sharing over iroh (P2P QUIC, blake3-verifie
 anyhow = "1.0"
 iroh = "1.0"
 iroh-blobs = "0.103"
+iroh-mdns-address-lookup = "0.5"
 n0-future = "0.3"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }

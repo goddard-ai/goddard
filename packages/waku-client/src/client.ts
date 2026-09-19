@@ -3,6 +3,7 @@ import {
   type ClientMessage,
   type Command,
   type DaemonSettings,
+  type PairingState,
   type ReplayCursor,
   type ResponsePayload,
   type SequencedEvent,
@@ -125,6 +126,7 @@ export class WakuClient {
   private pendingEvents = new Map<string, SequencedEvent[]>();
   private taskStateListeners = new Set<(revision: number) => void>();
   private settingsListeners = new Set<(settings: DaemonSettings) => void>();
+  private pairingListeners = new Set<(state: PairingState) => void>();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
   private connectionGeneration = 0;
@@ -390,6 +392,14 @@ export class WakuClient {
     return () => this.settingsListeners.delete(listener);
   }
 
+  /** Every `pairingChanged` the daemon broadcasts — pair requests arriving
+   * or resolving, paired clients being revoked — lands here as the
+   * authoritative document. */
+  subscribePairing(listener: (state: PairingState) => void): () => void {
+    this.pairingListeners.add(listener);
+    return () => this.pairingListeners.delete(listener);
+  }
+
   /** Observes connection changes, including remote socket closure. */
   subscribeConnectionState(listener: ConnectionStateListener): () => void {
     this.connectionStateListeners.add(listener);
@@ -478,6 +488,10 @@ export class WakuClient {
       for (const listener of this.settingsListeners) listener(message.settings);
       return;
     }
+    if (message.type === "pairingChanged") {
+      for (const listener of this.pairingListeners) listener(message.state);
+      return;
+    }
     if (message.type === "shuttingDown") {
       this.socket?.close(1000, "daemon shutting down");
     }
@@ -501,6 +515,94 @@ export class WakuClient {
     this.state = state;
     for (const listener of this.connectionStateListeners) listener(state);
   }
+}
+
+/** The terminal answer to a pair request — the daemon owner's decision. */
+export type PairOutcome =
+  | { status: "granted"; token: string; daemonName: string }
+  | { status: "declined"; message: string };
+
+export interface PairOptions {
+  /** Bounds the whole exchange; the daemon also expires unanswered
+   * requests on its own clock. Defaults to just past that expiry. */
+  timeoutMs?: number;
+  webSocketFactory?: (url: string) => WebSocketLike;
+}
+
+/** Ask the daemon at `address` for a client token on this device's
+ * behalf. The socket stays open while the owner decides; `pairPending`
+ * means a human is looking at it. Rejects only on transport failure —
+ * a refusal resolves as `declined`, not an error. */
+export function requestPair(
+  address: string,
+  deviceName: string,
+  options: PairOptions = {},
+): Promise<PairOutcome> {
+  const timeoutMs = options.timeoutMs ?? 100_000;
+  const socketFactory =
+    options.webSocketFactory ??
+    ((url) => {
+      if (typeof WebSocket === "undefined") {
+        throw new Error("WebSocket is unavailable; provide webSocketFactory");
+      }
+      return new WebSocket(url);
+    });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let socket: WebSocketLike;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => {
+        socket.close(1000, "pair timeout");
+        reject(new Error("pair request timed out waiting for approval"));
+      });
+    }, timeoutMs);
+    try {
+      socket = socketFactory(daemonUrl(address));
+    } catch (error) {
+      finish(() => reject(asError(error)));
+      return;
+    }
+    socket.addEventListener("open", () => {
+      const request: ClientMessage = {
+        type: "pairRequest",
+        protocolVersion: PROTOCOL_VERSION,
+        deviceName,
+      };
+      socket.send(JSON.stringify(request));
+    });
+    socket.addEventListener("message", (event) => {
+      let message: ServerMessage;
+      try {
+        message = JSON.parse(String(event.data)) as ServerMessage;
+      } catch {
+        finish(() => reject(new Error("Goddard daemon sent invalid JSON")));
+        return;
+      }
+      if (message.type === "pairPending") return;
+      if (message.type === "pairGranted") {
+        finish(() =>
+          resolve({ status: "granted", token: message.token, daemonName: message.daemonName }),
+        );
+        socket.close(1000, "paired");
+        return;
+      }
+      if (message.type === "pairDeclined") {
+        finish(() => resolve({ status: "declined", message: message.message }));
+        socket.close(1000, "declined");
+        return;
+      }
+      finish(() => reject(new Error("Goddard daemon sent an invalid pairing response")));
+    });
+    socket.addEventListener("close", () => {
+      finish(() => reject(new Error("Goddard daemon disconnected during pairing")));
+    });
+  });
 }
 
 export function daemonUrl(address: string): string {

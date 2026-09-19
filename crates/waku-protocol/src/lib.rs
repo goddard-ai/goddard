@@ -47,6 +47,7 @@ pub mod integrations;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;
+pub mod pairing;
 pub mod persistence;
 pub mod pid;
 pub mod projectless;

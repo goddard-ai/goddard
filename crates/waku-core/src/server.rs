@@ -80,6 +80,43 @@ pub trait Backend: Send + Sync + 'static {
         None
     }
 
+    /// Whether a paired client's minted token authenticates as a full
+    /// client. The default answers for backends without a pairing store.
+    fn authenticate_paired(&self, token: &str) -> bool {
+        let _ = token;
+        false
+    }
+
+    /// Queue a device name for a local pairing decision and wait for it.
+    /// Runs on the connection's own thread. The default declines — pairing
+    /// exists only where the backend stores minted tokens.
+    fn request_pair(&self, device_name: &str, transport: &str) -> crate::pairing::PairReply {
+        let _ = (device_name, transport);
+        crate::pairing::PairReply::Declined {
+            message: "this daemon does not support pairing".into(),
+        }
+    }
+
+    /// Where the pairing document's `PairingChanged` broadcast is
+    /// installed — `serve` sets this before accepting connections.
+    fn set_pairing_sink(&self, _sink: crate::pairing::PairingSink) {}
+
+    /// The name granted clients and LAN browsers see for this daemon.
+    fn daemon_name(&self) -> String {
+        "Goddard".into()
+    }
+
+    /// The `(name, instance_id)` a non-loopback listener advertises over
+    /// DNS-SD. `None` (the default) suppresses the advertisement entirely.
+    fn lan_advertisement(&self) -> Option<(String, String)> {
+        None
+    }
+
+    /// Kick any lazily-started reachability surfaces awake — `serve` calls
+    /// this when it binds a non-loopback listener, since being reachable
+    /// is exactly when LAN discovery matters.
+    fn kickstart_reachability(&self) {}
+
     /// `agent` is `Some` when the connection authenticated with a scoped
     /// agent credential; the id names the sending Waku task, which the
     /// backend uses for provenance.
@@ -563,6 +600,17 @@ impl Hub {
         );
     }
 
+    /// The pairing document changed outside any request — a pair request
+    /// arrived, resolved, or a paired client was revoked.
+    fn pairing_changed(&self, state: waku_protocol::pairing::PairingState) {
+        let mut hub_state = self.state.lock();
+        Self::broadcast(
+            &mut hub_state,
+            &ServerMessage::PairingChanged { state },
+            None,
+        );
+    }
+
     /// The automations document changed outside any request — the scheduler
     /// recorded a run transition, or another client edited a definition.
     /// Broadcast to every subscriber; there is no initiator to skip.
@@ -704,6 +752,14 @@ impl RequestDispatcher {
         self.backend.authenticate_agent(token)
     }
 
+    fn authenticate_paired(&self, token: &str) -> bool {
+        self.backend.authenticate_paired(token)
+    }
+
+    fn request_pair(&self, device_name: &str) -> crate::pairing::PairReply {
+        self.backend.request_pair(device_name, "ws")
+    }
+
     fn dispatch(
         &self,
         request: Request,
@@ -838,6 +894,10 @@ pub fn serve(
     }
     {
         let hub = hub.clone();
+        backend.set_pairing_sink(Arc::new(move |state| hub.pairing_changed(state)));
+    }
+    {
+        let hub = hub.clone();
         backend.set_task_state_sink(Arc::new(move || hub.task_state_changed(u64::MAX)));
     }
     {
@@ -869,6 +929,29 @@ pub fn serve(
     }
     let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
     let options = Arc::new(options);
+    // A daemon reachable off-loopback advertises itself on the LAN and
+    // wakes its share endpoint so iroh discovery can find it too. Held for
+    // the server's lifetime; the registration drops with it.
+    let _lan_advert = listener.local_addr().ok().and_then(|address| {
+        if address.ip().is_loopback() {
+            return None;
+        }
+        backend.kickstart_reachability();
+        backend.lan_advertisement().and_then(|(name, instance_id)| {
+            match crate::lan::LanAdvert::start(
+                &name,
+                &instance_id,
+                address.port(),
+                PROTOCOL_VERSION,
+            ) {
+                Ok(advert) => Some(advert),
+                Err(error) => {
+                    eprintln!("could not advertise the daemon on the LAN: {error:#}");
+                    None
+                }
+            }
+        })
+    });
     let active_connections = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
@@ -936,6 +1019,39 @@ fn handle_connection(
     )
     .context("WebSocket handshake failed")?;
     let hello = read_client_message(&mut socket)?;
+    // A pair request is the only legal pre-hello message: park this
+    // connection until a connected client answers it, reply, and close —
+    // the pairing socket never becomes a session client.
+    if let ClientMessage::PairRequest {
+        protocol_version,
+        device_name,
+    } = &hello
+    {
+        if *protocol_version != PROTOCOL_VERSION {
+            write_json(
+                &mut socket,
+                &ServerMessage::PairDeclined {
+                    message: format!(
+                        "protocol {protocol_version} is unsupported; expected {PROTOCOL_VERSION}"
+                    ),
+                },
+            )?;
+            return Ok(());
+        }
+        write_json(&mut socket, &ServerMessage::PairPending)?;
+        let reply = match dispatcher.request_pair(device_name) {
+            crate::pairing::PairReply::Granted { token } => ServerMessage::PairGranted {
+                token,
+                daemon_name: dispatcher.backend.daemon_name(),
+            },
+            crate::pairing::PairReply::Declined { message }
+            | crate::pairing::PairReply::Busy { message } => {
+                ServerMessage::PairDeclined { message }
+            }
+        };
+        write_json(&mut socket, &reply)?;
+        return Ok(());
+    }
     let (resume_from, agent) = match hello {
         ClientMessage::Hello {
             protocol_version, ..
@@ -952,7 +1068,11 @@ fn handle_connection(
         }
         ClientMessage::Hello {
             token, resume_from, ..
-        } if token_matches(expected_token, &token) => (resume_from, None),
+        } if token_matches(expected_token, &token)
+            || dispatcher.authenticate_paired(&token) =>
+        {
+            (resume_from, None)
+        }
         ClientMessage::Hello { token, .. } => match dispatcher.authenticate_agent(&token) {
             // A scoped agent credential names the Waku task it belongs to.
             // The connection gets command responses but no event replay or
@@ -1043,7 +1163,9 @@ fn handle_connection(
                         },
                     )?;
                 }
-                Ok(ClientMessage::Hello { .. }) => {}
+                // Late hellos and pair requests are protocol noise on an
+                // authenticated connection — pairing only lives pre-hello.
+                Ok(ClientMessage::Hello { .. } | ClientMessage::PairRequest { .. }) => {}
                 Err(error) => {
                     eprintln!("goddard-daemon ignored invalid message: {error}");
                 }
@@ -1545,6 +1667,209 @@ mod tests {
                 _ => Ok(ResponsePayload::Ack),
             }
         }
+    }
+
+    /// A pairing backend backed by the real service — requests flow
+    /// through `request_blocking` and the test drives decisions through
+    /// the same commands a connected client would.
+    struct PairingBackend {
+        pairing: Arc<crate::pairing::PairingService>,
+    }
+
+    impl Backend for PairingBackend {
+        fn authenticate_paired(&self, token: &str) -> bool {
+            self.pairing.authenticate(token)
+        }
+
+        fn request_pair(&self, device_name: &str, transport: &str) -> crate::pairing::PairReply {
+            self.pairing.request_blocking(device_name, transport)
+        }
+
+        fn set_pairing_sink(&self, sink: crate::pairing::PairingSink) {
+            self.pairing.set_sink(sink);
+        }
+
+        fn daemon_name(&self) -> String {
+            "testbox".into()
+        }
+
+        fn handle(
+            &self,
+            request: Request,
+            _events: EventSink,
+            _agent: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
+            match request.command {
+                Command::GetPairing => Ok(ResponsePayload::Pairing {
+                    state: self.pairing.state(),
+                }),
+                Command::RespondPairRequest { request_id, accept } => {
+                    self.pairing.respond(request_id, accept)?;
+                    Ok(ResponsePayload::Ack)
+                }
+                Command::RevokePairedClient { client_id } => {
+                    self.pairing.revoke(client_id)?;
+                    Ok(ResponsePayload::Ack)
+                }
+                _ => Ok(ResponsePayload::Ack),
+            }
+        }
+    }
+
+    struct PairingDir(PathBuf);
+    impl Drop for PairingDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn pairing_backend() -> (PairingDir, Arc<PairingBackend>) {
+        let dir = std::env::temp_dir().join(format!("waku-pairing-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        (
+            PairingDir(dir.clone()),
+            Arc::new(PairingBackend {
+                pairing: Arc::new(crate::pairing::PairingService::new(&dir, "testbox".into())),
+            }),
+        )
+    }
+
+    fn pairing_server(
+        backend: Arc<dyn Backend>,
+    ) -> (std::net::SocketAddr, Arc<AtomicBool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                backend,
+                server_shutdown,
+                ServerOptions::default(),
+            )
+            .unwrap()
+        });
+        (address, shutdown)
+    }
+
+    /// Runs `pair` on a worker thread — the call blocks until a decision.
+    fn pair_device(
+        address: String,
+        device: &'static str,
+    ) -> std::thread::JoinHandle<anyhow::Result<waku_client::PairReply>> {
+        std::thread::spawn(move || {
+            waku_client::pair(&address, device, Duration::from_secs(30))
+        })
+    }
+
+    #[test]
+    fn pair_request_waits_for_approval_then_connects() {
+        let (_dir, backend) = pairing_backend();
+        let (address, shutdown) = pairing_server(backend);
+        let owner = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let pairing_updates = owner.subscribe_pairing();
+
+        let request = pair_device(address.to_string(), "phone");
+        // The owner's pairing document shows the pending device; approving
+        // it by command is what releases the token.
+        let pending = loop {
+            match pairing_updates.recv_timeout(Duration::from_secs(5)).unwrap() {
+                state if !state.pending.is_empty() => break state.pending[0].clone(),
+                _ => continue,
+            }
+        };
+        assert_eq!(pending.device_name, "phone");
+        assert_eq!(pending.transport, "ws");
+        owner
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RespondPairRequest {
+                    request_id: pending.request_id,
+                    accept: true,
+                },
+            )
+            .unwrap();
+
+        let waku_client::PairReply::Granted { token, daemon_name } =
+            request.join().unwrap().unwrap()
+        else {
+            panic!("expected the pair request to be granted");
+        };
+        assert_eq!(daemon_name, "testbox");
+
+        // The minted token authenticates like the bearer, as a full client.
+        let paired = DaemonClient::connect(&address.to_string(), token.clone()).unwrap();
+        assert!(matches!(
+            paired
+                .request(Uuid::nil(), Uuid::nil(), Command::GetPairing)
+                .unwrap(),
+            ResponsePayload::Pairing { .. }
+        ));
+
+        // Revoking it through the owner rejects the next connection.
+        let client_id = paired
+            .request(Uuid::nil(), Uuid::nil(), Command::GetPairing)
+            .map(|payload| match payload {
+                ResponsePayload::Pairing { state } => state.clients[0].client_id,
+                _ => panic!("expected pairing state"),
+            })
+            .unwrap();
+        owner
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RevokePairedClient { client_id },
+            )
+            .unwrap();
+        assert!(DaemonClient::connect(&address.to_string(), token).is_err());
+
+        paired.shutdown();
+        owner.shutdown();
+        shutdown.store(true, Ordering::Release);
+    }
+
+    #[test]
+    fn declined_pair_request_gets_no_token() {
+        let (_dir, backend) = pairing_backend();
+        let (address, shutdown) = pairing_server(backend.clone());
+        let owner = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let pairing_updates = owner.subscribe_pairing();
+
+        let request = pair_device(address.to_string(), "phone");
+        let pending = loop {
+            match pairing_updates.recv_timeout(Duration::from_secs(5)).unwrap() {
+                state if !state.pending.is_empty() => break state.pending[0].clone(),
+                _ => continue,
+            }
+        };
+        owner
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RespondPairRequest {
+                    request_id: pending.request_id,
+                    accept: false,
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(
+            request.join().unwrap().unwrap(),
+            waku_client::PairReply::Declined { .. }
+        ));
+        // A decline is not a permission: the store stays empty.
+        assert!(matches!(
+            owner
+                .request(Uuid::nil(), Uuid::nil(), Command::GetPairing)
+                .unwrap(),
+            ResponsePayload::Pairing { state } if state.clients.is_empty()
+        ));
+
+        owner.shutdown();
+        shutdown.store(true, Ordering::Release);
     }
 
     #[test]
