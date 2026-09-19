@@ -10,26 +10,6 @@ use crate::custom_commands::CustomCommand;
 use crate::eval::EvalSettings;
 use crate::model::ProviderKind;
 
-/// A provider-native model/effort target for one subagent tier. Either side
-/// may be absent — an absent model inherits the session's model, an absent
-/// effort the provider's default.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
-#[serde(default)]
-pub struct SubagentTierTarget {
-    pub model: Option<String>,
-    pub effort: Option<String>,
-}
-
-/// One harness-neutral tier ("fast", "medium", "heavy"), mapped per provider
-/// so the same `goddard-fast` agent can be a cheap model on every harness at
-/// once. A provider missing from the map gets the tier's prompt with the
-/// session's own model.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
-#[serde(default)]
-pub struct SubagentTier {
-    pub providers: HashMap<ProviderKind, SubagentTierTarget>,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(default)]
 pub struct DaemonSettings {
@@ -60,12 +40,6 @@ pub struct DaemonSettings {
     /// Off by default in release builds, on in debug builds (`bun run dev`);
     /// toggling affects only sessions started afterwards.
     pub subagents_enabled: bool,
-    /// Named subagent tiers injected into every session's harness, keyed by
-    /// tier name ("explore", "fast", "medium", "heavy"). Empty → only the
-    /// built-in read-only `goddard-explore` agent is injected. Ignored while
-    /// `subagents_enabled` is off.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub subagent_tiers: BTreeMap<String, SubagentTier>,
     /// Experimental: prepend a token-budgeted structural map of the session's
     /// workspace to the first prompt of every new session, so providers skip
     /// cold repo exploration. Off by default in release builds, on in debug
@@ -104,7 +78,6 @@ impl Default for DaemonSettings {
             custom_commands: Vec::new(),
             disabled_providers: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
-            subagent_tiers: BTreeMap::new(),
             project_map_enabled: default_experiment_enabled(),
             provider_binary_overrides: HashMap::new(),
             eval: None,
