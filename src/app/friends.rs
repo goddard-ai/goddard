@@ -730,8 +730,8 @@ impl Waku {
         cx.notify();
     }
 
-    /// File picker → `SendFileToFriend`. The daemon dials fresh regardless
-    /// of the cached probe verdict.
+    /// File picker → the send dialog's optional note → `SendFileToFriend`.
+    /// The daemon dials fresh regardless of the cached probe verdict.
     fn pick_and_send_file(&self, node_id: String, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -743,15 +743,15 @@ impl Waku {
             if let Ok(Ok(Some(paths))) = receiver.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| {
-                    this.friends_command(
-                        waku_client::Command::SendFileToFriend {
-                            node_id,
-                            path,
-                            note: None,
-                        },
-                        cx,
-                    );
+                let _ = this.update_in(cx, |this, window, cx| {
+                    let peer_name = this
+                        .friends_state
+                        .friends
+                        .iter()
+                        .find(|friend| friend.node_id == node_id)
+                        .map(|friend| friend_display_name(friend).to_owned())
+                        .unwrap_or_default();
+                    this.open_send_file_dialog(node_id, peer_name, path, window, cx);
                 });
             }
         })

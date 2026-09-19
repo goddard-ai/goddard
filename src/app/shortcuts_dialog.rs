@@ -1145,6 +1145,7 @@ mod tests {
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
+            crate::app::init_send_file_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);

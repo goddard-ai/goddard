@@ -3766,6 +3766,14 @@ friends.send_file:
   en: Send file…
 friends.send_file_prompt:
   en: Choose a file or folder to send
+friends.send_dialog_title:
+  en: "Send to %{name}"
+friends.send_dialog_message:
+  en: Message
+friends.send_dialog_message_placeholder:
+  en: Add a message (optional)
+friends.send_dialog_send:
+  en: Send
 friends.remove:
   en: Remove
 friends.transfers:

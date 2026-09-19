@@ -500,6 +500,7 @@ impl Render for Waku {
             let archive_dialog = self.render_archive_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
+            let send_file_dialog = self.render_send_file_dialog(cx);
             let ssh_prompt = self.render_ssh_prompt(window, cx);
             let toast = self.render_active_toast(window, cx);
             let content = div()
@@ -546,6 +547,7 @@ impl Render for Waku {
                 .children(archive_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
+                .children(send_file_dialog)
                 .children(ssh_prompt)
                 .children(image_preview)
                 .children(task_switcher)
@@ -575,6 +577,7 @@ impl Render for Waku {
         let archive_dialog = self.render_archive_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
+        let send_file_dialog = self.render_send_file_dialog(cx);
         let ssh_prompt = self.render_ssh_prompt(window, cx);
         let sync_branch_modal = self.render_sync_branch(window, cx);
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
@@ -935,6 +938,7 @@ impl Render for Waku {
             .children(archive_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
+            .children(send_file_dialog)
             .children(ssh_prompt)
             .children(sync_branch_modal)
             .children(git_panel_overlays)

@@ -1,4 +1,5 @@
 - Move Friends — the friend-to-friend file transfer page — behind a Settings → Experiments toggle, off by default in release builds
+- Attach an optional message when sending a file or folder to a friend — the receiver's chat shows the note above the delivered file as an agent-style message
 - Harden friend transfers against lost control messages: a missed done receipt no longer fails a completed download or hides the received file, sends dial with timeouts and stall to Failed instead of sitting at 0 B, and failures log their cause
 - Apply friend-request responses in one click — accepting mirrors the friend into the roster immediately instead of waiting for the protocol task, and repeat responds resolve as no-ops
 - Add a customizable display name (what friends see) and per-friend local nicknames; completed transfers now also get a readable `Name-file` symlink under `~/Documents/Goddard/From Friends/`
