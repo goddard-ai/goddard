@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::keybindings::PlatformSet;
+use crate::keybindings::{CommandId, PlatformSet};
 
 /// How two same-sequence bindings collide.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -251,6 +251,20 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Builtin command pairs that intentionally share a chord: the
+/// later-registered binding wins the dispatch tie and calls
+/// `cx.propagate()` when its runtime gate fails, so the earlier binding
+/// still receives the keystroke (see `cycle_project_switcher` and
+/// `open_toast_session_action`). The fall-through lives in the action
+/// handler, invisible to predicate analysis — declared here so the pair
+/// is not reported as `Hard`. Tuples are `(winner, fall-through target)`;
+/// matching is unordered.
+const FALLTHROUGH_PAIRS: &[(CommandId, CommandId)] = &[
+    ("switcher.project_forward", "app.new_task"),
+    ("switcher.project_backward", "app.new_task_in"),
+    ("app.view_unarchived_task", "app.open_localhost"),
+];
+
 /// A binding as the analyzer sees it.
 pub struct BindingFact<'a> {
     pub command: &'a str,
@@ -277,6 +291,12 @@ pub fn analyze_conflicts<'a>(
                 continue;
             }
             if a.command == b.command {
+                continue;
+            }
+            if FALLTHROUGH_PAIRS.iter().any(|&(winner, target)| {
+                (a.command == winner && b.command == target)
+                    || (a.command == target && b.command == winner)
+            }) {
                 continue;
             }
             let (Some(ctx_a), Some(_ctx_b)) = (a.context, b.context) else {
@@ -334,5 +354,63 @@ fn push<'a>(
             other: other.command.to_string(),
             other_context: other.context.map(str::to_string),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keybindings::catalog::ENTRIES;
+
+    fn catalog_conflicts() -> Vec<(String, Vec<Conflict>)> {
+        let facts: Vec<BindingFact> = ENTRIES
+            .iter()
+            .map(|entry| BindingFact {
+                command: entry.command,
+                sequence: entry.sequence,
+                context: entry.context,
+                platform: entry.platform,
+            })
+            .collect();
+        analyze_conflicts(&facts, PlatformSet::CURRENT)
+            .into_iter()
+            .map(|(command, conflicts)| (command.to_string(), conflicts))
+            .collect()
+    }
+
+    /// ⌘N, ⌘⇧N, and ⌘⌥O are shared chords by design: the winner propagates
+    /// to the fall-through target when its runtime gate fails. The
+    /// declared pairs must not surface as conflicts.
+    #[test]
+    fn declared_fallthrough_pairs_do_not_conflict() {
+        let conflicts = catalog_conflicts();
+        for &(winner, target) in FALLTHROUGH_PAIRS {
+            for command in [winner, target] {
+                let mate = if command == winner { target } else { winner };
+                let reported = conflicts
+                    .iter()
+                    .filter(|(id, _)| *id == command)
+                    .flat_map(|(_, conflicts)| conflicts.iter())
+                    .any(|conflict| conflict.other == mate);
+                assert!(!reported, "{command} still conflicts with {mate}");
+            }
+        }
+    }
+
+    /// Outside the declared pairs the builtin keymap has no hard
+    /// conflicts — same chord under an identical predicate would leave
+    /// one binding unreachable.
+    #[test]
+    fn catalog_defaults_have_no_hard_conflicts() {
+        let hard: Vec<String> = catalog_conflicts()
+            .iter()
+            .flat_map(|(command, conflicts)| {
+                conflicts
+                    .iter()
+                    .filter(|conflict| conflict.kind == ConflictKind::Hard)
+                    .map(move |conflict| format!("{command} vs {}", conflict.other))
+            })
+            .collect();
+        assert!(hard.is_empty(), "hard conflicts in defaults: {hard:?}");
     }
 }
