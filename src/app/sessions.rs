@@ -398,11 +398,13 @@ impl Waku {
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
-        // Projects and Drafts pages keep their state for the next visit.
+        // Projects, Drafts, Automations, and Inbox pages keep their state
+        // for the next visit.
         self.projects_page = None;
         self.drafts_page = false;
         self.automations_page = false;
         self.automations_detail = None;
+        self.notifications.open = false;
         if let Some((
             project_id,
             provider,

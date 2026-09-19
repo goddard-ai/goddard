@@ -676,7 +676,13 @@ impl Waku {
         }
         self.settings_page = None;
         self.projects_page = None;
+        self.drafts_page = false;
+        self.automations_page = false;
+        self.automations_detail = None;
         self.selected_terminal = None;
+        // An activation still in flight must not hand the area back once
+        // its hydration lands — same guard the Projects page takes.
+        self.pending_session_activation = None;
         if self
             .sidebar_collapsed_groups
             .insert(SidebarGroup::Terminals)

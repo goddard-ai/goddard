@@ -316,6 +316,9 @@ impl super::Waku {
             self.keybindings = Some(KeybindingsUi::new(window, cx));
         }
         self.settings_page = Some(super::SettingsPage::Keybindings);
+        // Settings-family pages close the inbox on open; the early return
+        // in `open_settings_page` skips its clear, so match it here.
+        self.notifications.open = false;
         if let Some(ui) = &self.keybindings {
             ui.search.read(cx).focus().focus(window, cx);
         }

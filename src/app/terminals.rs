@@ -660,6 +660,7 @@ impl Waku {
         self.drafts_page = false;
         self.automations_page = false;
         self.automations_detail = None;
+        self.notifications.open = false;
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
