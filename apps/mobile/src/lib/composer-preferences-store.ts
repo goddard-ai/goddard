@@ -16,7 +16,7 @@ export interface NewTaskExtras {
 
 const EXTRAS_KEY = 'waku.mobile.new-task.v1';
 const DEFAULT_EXTRAS: NewTaskExtras = {
-  runtimeMode: 'fullAccess',
+  runtimeMode: 'autoAcceptEdits',
   isolated: false,
   projectId: null,
 };
@@ -88,7 +88,7 @@ export async function loadNewTaskExtras(daemonAddress: string): Promise<NewTaskE
     if (typeof value !== 'object' || value === null) return { ...DEFAULT_EXTRAS };
     const extras = value as Partial<NewTaskExtras>;
     return {
-      runtimeMode: isRuntimeMode(extras.runtimeMode) ? extras.runtimeMode : 'fullAccess',
+      runtimeMode: isRuntimeMode(extras.runtimeMode) ? extras.runtimeMode : 'autoAcceptEdits',
       isolated: extras.isolated === true,
       projectId: typeof extras.projectId === 'string' ? extras.projectId : null,
     };

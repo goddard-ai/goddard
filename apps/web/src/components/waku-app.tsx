@@ -663,7 +663,7 @@ export function WakuApp() {
       project.id,
       summary,
       history,
-      activeSession?.runtime_mode ?? 'fullAccess',
+      activeSession?.runtime_mode ?? 'autoAcceptEdits',
     )
     const saved = await saveSession(session, existingProject ? undefined : project)
     pendingPaletteFocusSession.current = saved.id

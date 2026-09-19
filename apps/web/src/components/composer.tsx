@@ -1620,7 +1620,7 @@ function AccessControl({
   returnFocus: RefObject<HTMLElement | null>
 }) {
   const { t } = useI18n()
-  const selected = ACCESS_MODES.find((mode) => mode.id === session.runtime_mode) ?? ACCESS_MODES[3]!
+  const selected = ACCESS_MODES.find((mode) => mode.id === session.runtime_mode) ?? ACCESS_MODES[1]!
   return (
     <ControlMenu
       caret={false}

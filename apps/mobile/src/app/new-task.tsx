@@ -82,7 +82,7 @@ export default function NewTaskScreen() {
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [serviceTier, setServiceTier] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState<string | null>(null);
-  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('fullAccess');
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('autoAcceptEdits');
   const [isolated, setIsolated] = useState(false);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');

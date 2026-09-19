@@ -674,7 +674,7 @@ export function createSession(
     workspace: isolated ? { kind: 'newWorktree' } : { kind: 'local' },
     provider,
     model: null,
-    runtime_mode: 'fullAccess',
+    runtime_mode: 'autoAcceptEdits',
     reasoning_effort: null,
     service_tier: null,
     context_window: null,
@@ -698,7 +698,7 @@ export function createResumedSession(
   projectId: string,
   summary: ProviderSessionSummary,
   history: ProviderSessionHistory,
-  runtimeMode: RuntimeMode = 'fullAccess',
+  runtimeMode: RuntimeMode = 'autoAcceptEdits',
 ): AgentSession {
   const now = unixTime()
   const createdAt = summary.created_at || now

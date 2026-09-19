@@ -538,9 +538,9 @@ pub enum RuntimeMode {
     /// Older state files used `plan` as a combined read-only mode. Keep those
     /// sessions readable without retaining it as a product mode.
     Ask,
+    #[default]
     AutoAcceptEdits,
     Auto,
-    #[default]
     FullAccess,
 }
 
@@ -1477,7 +1477,7 @@ impl AgentSession {
             workspace_moved_from: None,
             provider,
             model: None,
-            runtime_mode: RuntimeMode::FullAccess,
+            runtime_mode: RuntimeMode::default(),
             sandboxed: false,
             reasoning_effort: None,
             service_tier: None,
