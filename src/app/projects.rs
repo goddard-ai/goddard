@@ -27,11 +27,14 @@ pub(super) enum ProjectsTab {
     Branches,
     Issues,
     PullRequests,
+    /// The `qa` branch's review queue — proposed commits and their
+    /// decisions, oldest first, ahead of promotion to the base branch.
+    Review,
 }
 
 impl ProjectsTab {
     /// The Projects page's tab strip — its ⌘⌥n chords index this list.
-    pub const ALL: [Self; 2] = [Self::Issues, Self::PullRequests];
+    pub const ALL: [Self; 3] = [Self::Issues, Self::PullRequests, Self::Review];
 
     /// The Settings → Git page's sub-tabs.
     pub const GIT_TABS: [Self; 2] = [Self::Worktrees, Self::Branches];
@@ -47,6 +50,7 @@ impl ProjectsTab {
             Self::Branches => tr!("projects.tab_branches"),
             Self::Issues => tr!("github.tab_issues"),
             Self::PullRequests => tr!("github.tab_pull_requests"),
+            Self::Review => tr!("projects.tab_review"),
         }
     }
 
@@ -67,6 +71,8 @@ pub(super) enum ProjectsRowKey {
     Worktree(PathBuf),
     /// `heads/<name>` for locals, `remotes/<remote>/<name>` for tracking refs.
     Branch(String),
+    /// A proposed commit on `qa` — its sha.
+    Review(String),
 }
 
 impl ProjectsRowKey {
@@ -82,6 +88,7 @@ impl ProjectsRowKey {
         match self {
             Self::Worktree(_) => ProjectsTab::Worktrees,
             Self::Branch(_) => ProjectsTab::Branches,
+            Self::Review(_) => ProjectsTab::Review,
         }
     }
 }
@@ -100,6 +107,16 @@ enum ProjectsListRow {
     },
     Branch {
         index: usize,
+    },
+    /// A proposed commit on `qa` — index into the queue's entries.
+    Review {
+        index: usize,
+    },
+    /// One `Test-Plan:` line under a review row — the check a reviewer
+    /// runs. Not selectable; it belongs to its commit's row.
+    ReviewPlan {
+        index: usize,
+        plan_index: usize,
     },
 }
 
@@ -271,8 +288,18 @@ pub(super) struct ProjectsPageState {
     branch_filter: Entity<TextInput>,
     issue_filter: Entity<TextInput>,
     pr_filter: Entity<TextInput>,
+    review_filter: Entity<TextInput>,
     pub worktrees: github::GitHubFetch<Rc<Vec<RepoWorktree>>>,
     pub branches: github::GitHubFetch<Rc<Vec<RepoBranch>>>,
+    /// The `qa` review queue — `Loaded(None)` outside a git repo or
+    /// without an `origin` remote to read proposed work from.
+    pub review: github::GitHubFetch<Rc<waku_client::git::ReviewQueue>>,
+    /// An approve/reject/promote op is in flight; its controls disable.
+    review_pending: bool,
+    /// The last review op's failure — shown until the next one succeeds.
+    review_error: Option<String>,
+    /// Superseded review replies drop instead of overwriting newer state.
+    review_generation: u64,
     pub selection: HashSet<ProjectsRowKey>,
     /// Anchor for shift-range selection — the last plainly clicked row.
     anchor: Option<ProjectsRowKey>,
@@ -325,8 +352,13 @@ impl ProjectsPageState {
             branch_filter: filter_input(tr!("projects.filter_branches"), window, cx),
             issue_filter: filter_input(tr!("projects.filter_issues"), window, cx),
             pr_filter: filter_input(tr!("projects.filter_pull_requests"), window, cx),
+            review_filter: filter_input(tr!("projects.filter_review"), window, cx),
             worktrees: github::GitHubFetch::Loading,
             branches: github::GitHubFetch::Loading,
+            review: github::GitHubFetch::Loading,
+            review_pending: false,
+            review_error: None,
+            review_generation: 0,
             selection: HashSet::new(),
             anchor: None,
             expanded_remotes: HashSet::from(["origin".to_owned()]),
@@ -362,6 +394,7 @@ impl ProjectsPageState {
             ProjectsTab::Branches => &self.branch_filter,
             ProjectsTab::Issues => &self.issue_filter,
             ProjectsTab::PullRequests => &self.pr_filter,
+            ProjectsTab::Review => &self.review_filter,
         }
     }
 
@@ -944,11 +977,161 @@ impl Waku {
         })
         .detach();
 
+        if self
+            .projects_page_states
+            .get(&project_id)
+            .is_some_and(|state| state.tab == ProjectsTab::Review)
+        {
+            self.projects_refresh_review(project_id, cx);
+        }
         self.github_refresh(project_id, cx);
     }
 
-    /// `tab`'s flattened Worktrees/Branches rows — the GitHub tabs have no
-    /// row list and return empty.
+    /// Fetch the `qa` review queue — the daemon walks `origin/qa` and
+    /// `refs/notes/qa` on its side.
+    pub(super) fn projects_refresh_review(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(cwd) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            return;
+        };
+        let Some(state) = self.projects_page_states.get_mut(&project_id) else {
+            return;
+        };
+        state.review_generation = state.review_generation.wrapping_add(1);
+        let generation = state.review_generation;
+        if !matches!(state.review, github::GitHubFetch::Loaded(Some(_))) {
+            state.review = github::GitHubFetch::Loading;
+        }
+        cx.notify();
+        cx.spawn(async move |waku, cx| {
+            let resolved = cx
+                .background_executor()
+                .spawn(async move {
+                    workspace
+                        .request(waku_client::WorkspaceOperation::ReviewQueue { cwd })
+                        .ok()
+                        .and_then(|result| match result {
+                            waku_client::WorkspaceResult::ReviewQueue { queue } => queue,
+                            _ => None,
+                        })
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(state) = waku.projects_page_states.get_mut(&project_id) else {
+                    return;
+                };
+                if state.review_generation != generation {
+                    return;
+                }
+                state.review = github::GitHubFetch::Loaded(resolved.map(Rc::new));
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Approve, reject, or promote — the daemon's reply is the refreshed
+    /// queue, applied straight to the tab.
+    fn projects_review_op(
+        &mut self,
+        project_id: Uuid,
+        operation: waku_client::WorkspaceOperation,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            return;
+        };
+        let Some(state) = self.projects_page_states.get_mut(&project_id) else {
+            return;
+        };
+        if state.review_pending {
+            return;
+        }
+        state.review_generation = state.review_generation.wrapping_add(1);
+        let generation = state.review_generation;
+        state.review_pending = true;
+        state.review_error = None;
+        cx.notify();
+        cx.spawn(async move |waku, cx| {
+            let resolved = cx
+                .background_executor()
+                .spawn(async move { workspace.request(operation) })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(state) = waku.projects_page_states.get_mut(&project_id) else {
+                    return;
+                };
+                if state.review_generation != generation {
+                    return;
+                }
+                state.review_pending = false;
+                match resolved {
+                    Ok(waku_client::WorkspaceResult::ReviewQueue { queue }) => {
+                        state.review = github::GitHubFetch::Loaded(queue.map(Rc::new));
+                        state.review_error = None;
+                    }
+                    Ok(_) => {}
+                    Err(error) => state.review_error = Some(error.to_string()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Record `approve`/`reject` on the proposed commit `sha`.
+    fn projects_review_decide(
+        &mut self,
+        project_id: Uuid,
+        sha: String,
+        approve: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cwd) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let operation = if approve {
+            waku_client::WorkspaceOperation::ReviewApprove { cwd, sha }
+        } else {
+            waku_client::WorkspaceOperation::ReviewReject { cwd, sha }
+        };
+        self.projects_review_op(project_id, operation, cx);
+    }
+
+    /// Fast-forward the base branch to the approved frontier.
+    fn projects_review_promote(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(cwd) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        self.projects_review_op(
+            project_id,
+            waku_client::WorkspaceOperation::ReviewPromote { cwd },
+            cx,
+        );
+    }
+
+    /// `tab`'s flattened Worktrees/Branches/Review rows — the GitHub tabs
+    /// have no row list and return empty.
     fn projects_list_rows(
         &self,
         project_id: Uuid,
@@ -972,8 +1155,42 @@ impl Waku {
                 .projects_branch_rows(project_id, cx)
                 .map(|(_, rows)| rows)
                 .unwrap_or_default(),
+            ProjectsTab::Review => self.review_list_rows(project_id, cx),
             _ => Vec::new(),
         }
+    }
+
+    /// The Review tab's flattened rows: one commit row per queue entry,
+    /// each trailed by a row per `Test-Plan:` line it carries.
+    fn review_list_rows(&self, project_id: Uuid, cx: &App) -> Vec<ProjectsListRow> {
+        let Some(state) = self.projects_page_states.get(&project_id) else {
+            return Vec::new();
+        };
+        let filter = state
+            .filter_text(ProjectsTab::Review, cx)
+            .trim()
+            .to_lowercase();
+        let github::GitHubFetch::Loaded(Some(queue)) = &state.review else {
+            return Vec::new();
+        };
+        queue
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                filter.is_empty()
+                    || entry.commit.subject.to_lowercase().contains(&filter)
+                    || entry.commit.sha.starts_with(filter.as_str())
+                    || entry.commit.author.to_lowercase().contains(&filter)
+            })
+            .flat_map(|(index, entry)| {
+                std::iter::once(ProjectsListRow::Review { index }).chain(
+                    (0..entry.test_plans.len()).map(move |plan_index| {
+                        ProjectsListRow::ReviewPlan { index, plan_index }
+                    }),
+                )
+            })
+            .collect()
     }
 
     /// The worktree rows passing the tab's filter, as indices into the
@@ -1032,7 +1249,14 @@ impl Waku {
                     .map(|entry| ProjectsRowKey::branch(entry.remote.as_deref(), &entry.name)),
                 _ => None,
             },
-            ProjectsListRow::RemoteHeader { .. } => None,
+            ProjectsListRow::Review { index } => match &state.review {
+                github::GitHubFetch::Loaded(Some(queue)) => queue
+                    .entries
+                    .get(*index)
+                    .map(|entry| ProjectsRowKey::Review(entry.commit.sha.clone())),
+                _ => None,
+            },
+            ProjectsListRow::RemoteHeader { .. } | ProjectsListRow::ReviewPlan { .. } => None,
         }
     }
 
@@ -1535,6 +1759,7 @@ impl Waku {
                 ProjectsTab::Worktrees | ProjectsTab::Branches => {
                     self.render_projects_table(project_id, tab, window, cx)
                 }
+                ProjectsTab::Review => self.render_projects_review(project_id, cx),
                 tab => {
                     let github_tab = tab.github_tab().unwrap_or(github::GitHubTab::PullRequests);
                     let filter = self
@@ -2059,6 +2284,15 @@ impl Waku {
                                 ProjectsListRow::Branch { index } => {
                                     ProjectsListRow::Branch { index: *index }
                                 }
+                                ProjectsListRow::Review { index } => {
+                                    ProjectsListRow::Review { index: *index }
+                                }
+                                ProjectsListRow::ReviewPlan { index, plan_index } => {
+                                    ProjectsListRow::ReviewPlan {
+                                        index: *index,
+                                        plan_index: *plan_index,
+                                    }
+                                }
                             };
                             entity
                                 .upgrade()
@@ -2074,6 +2308,520 @@ impl Waku {
                     ),
             )
             .into_any_element()
+    }
+
+    /// The Review tab: the `qa` train's promotion bar over the queue —
+    /// oldest proposed commit first, each trailed by its `Test-Plan:`
+    /// lines, with per-commit approve/reject controls.
+    fn render_projects_review(&mut self, project_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(state) = self.projects_page_states.get(&project_id) else {
+            return div().into_any_element();
+        };
+        let github::GitHubFetch::Loaded(queue) = &state.review else {
+            return github::github_centered(
+                icon("icons/loader-circle.svg", 16.0, theme.text_tertiary).into_any_element(),
+                tr!("github.loading"),
+                &theme,
+            );
+        };
+        let Some(queue) = queue else {
+            return github::github_centered(
+                icon("icons/git-branch.svg", 16.0, theme.text_tertiary).into_any_element(),
+                tr!("projects.review_no_queue"),
+                &theme,
+            );
+        };
+        let total = queue.entries.len();
+        let frontier_count = queue
+            .frontier
+            .as_ref()
+            .and_then(|frontier| {
+                queue
+                    .entries
+                    .iter()
+                    .position(|entry| &entry.commit.sha == frontier)
+            })
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let pending = queue
+            .entries
+            .iter()
+            .filter(|entry| !entry.approved && !entry.rejected && !entry.reverted)
+            .count();
+        let base = queue.base_branch.clone();
+        let error = state.review_error.clone();
+        let in_flight = state.review_pending;
+
+        let rows = self.review_list_rows(project_id, cx);
+        let body = if total == 0 {
+            github::github_centered(
+                icon("icons/git-commit-horizontal.svg", 16.0, theme.text_tertiary)
+                    .into_any_element(),
+                tr!("projects.review_empty"),
+                &theme,
+            )
+        } else if rows.is_empty() {
+            github::github_centered(
+                icon("icons/git-commit-horizontal.svg", 16.0, theme.text_tertiary)
+                    .into_any_element(),
+                tr!("github.no_matches"),
+                &theme,
+            )
+        } else {
+            let Some(state) = self.projects_page_states.get(&project_id) else {
+                return div().into_any_element();
+            };
+            let list_state = state.list_state.clone();
+            if list_state.item_count() != rows.len() {
+                list_state.reset_with_uniform_height(rows.len(), px(PROJECTS_ROW_HEIGHT));
+            }
+            let rows = Rc::new(rows);
+            let entity = cx.entity().downgrade();
+            div()
+                .flex_1()
+                .min_h_0()
+                .child(
+                    list(list_state, move |index, _window, cx| {
+                        let Some(row) = rows.get(index) else {
+                            return div().into_any_element();
+                        };
+                        let row = match row {
+                            ProjectsListRow::Review { index } => {
+                                ProjectsListRow::Review { index: *index }
+                            }
+                            ProjectsListRow::ReviewPlan { index, plan_index } => {
+                                ProjectsListRow::ReviewPlan {
+                                    index: *index,
+                                    plan_index: *plan_index,
+                                }
+                            }
+                            _ => return div().into_any_element(),
+                        };
+                        entity
+                            .upgrade()
+                            .map(|entity| {
+                                entity.update(cx, |this, cx| {
+                                    this.render_projects_row(project_id, row, cx)
+                                })
+                            })
+                            .unwrap_or_else(|| div().into_any_element())
+                    })
+                    .pb(px(PROJECTS_LIST_BOTTOM_PADDING))
+                    .size_full(),
+                )
+                .into_any_element()
+        };
+
+        let promotable = frontier_count > 0 && !in_flight;
+        let promote = div()
+            .id("projects-review-promote")
+            .tab_index(0)
+            .h(px(24.0))
+            .px(px(10.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .when(!promotable, |element| element.opacity(0.4))
+            .when(promotable, |element| {
+                element
+                    .cursor_default()
+                    .bg(theme.inverse)
+                    .text_color(theme.on_inverse)
+                    .hover(|style| style.opacity(0.9))
+                    .active(|style| style.opacity(0.8))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.projects_review_promote(project_id, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.projects_review_promote(project_id, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(icon("icons/git-merge.svg", 11.0, theme.on_inverse))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(tr!("projects.review_promote", branch = base.unwrap_or_default())),
+            );
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(36.0))
+                    .w_full()
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .border_b(hairline())
+                    .border_color(theme.separator)
+                    .child(icon(
+                        "icons/git-commit-horizontal.svg",
+                        12.0,
+                        theme.text_tertiary,
+                    ))
+                    .child(
+                        div()
+                            .text_size(sp(14.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!(
+                                "projects.review_train",
+                                approved = frontier_count,
+                                total = total
+                            )),
+                    )
+                    .when(pending > 0, |element| {
+                        element.child(
+                            div()
+                                .text_size(sp(13.0))
+                                .text_color(theme.warning)
+                                .child(tr!("projects.review_pending_count", count = pending)),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(promote),
+            )
+            .children(error.map(|error| {
+                div()
+                    .flex_none()
+                    .w_full()
+                    .px(px(12.0))
+                    .py(px(6.0))
+                    .border_b(hairline())
+                    .border_color(theme.separator)
+                    .text_size(sp(12.5))
+                    .text_color(theme.danger)
+                    .truncate()
+                    .child(error)
+            }))
+            .child(body)
+            .into_any_element()
+    }
+
+    /// An icon-button that records `approve`/`reject` on `sha` — stops
+    /// propagation so the row's selection click doesn't also fire.
+    fn review_decide_button(
+        &self,
+        id: &str,
+        path: &'static str,
+        color: Hsla,
+        tip: String,
+        approve: bool,
+        sha: String,
+        project_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let click_sha = sha.clone();
+        div()
+            .id(SharedString::from(id.to_owned()))
+            .tab_index(0)
+            .w(px(22.0))
+            .h(px(22.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .tooltip(Tooltip::text(tip))
+            .child(icon(path, 12.0, color))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.projects_review_decide(project_id, click_sha.clone(), approve, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.stop_propagation();
+                    this.projects_review_decide(project_id, sha.clone(), approve, cx);
+                }
+            }))
+    }
+
+    /// One proposed commit: status icon, sha, subject, author + age,
+    /// reviewers, and approve/reject controls while it needs a human.
+    fn render_projects_review_row(
+        &mut self,
+        project_id: Uuid,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(state) = self.projects_page_states.get(&project_id) else {
+            return div().into_any_element();
+        };
+        let github::GitHubFetch::Loaded(Some(queue)) = &state.review else {
+            return div().into_any_element();
+        };
+        let Some(entry) = queue.entries.get(index) else {
+            return div().into_any_element();
+        };
+        let in_flight = state.review_pending;
+        let key = ProjectsRowKey::Review(entry.commit.sha.clone());
+        let is_frontier = queue.frontier.as_ref() == Some(&entry.commit.sha);
+
+        let (status_icon, status_color, status_label) = if entry.rejected {
+            (
+                "icons/alert.svg",
+                theme.danger,
+                tr!("projects.review_rejected"),
+            )
+        } else if entry.reverted {
+            (
+                "icons/minus.svg",
+                theme.text_tertiary,
+                tr!("projects.review_reverted"),
+            )
+        } else if entry.approved && entry.needs_review {
+            (
+                "icons/check.svg",
+                theme.success,
+                tr!("projects.review_approved"),
+            )
+        } else if entry.approved {
+            (
+                "icons/check.svg",
+                theme.text_tertiary,
+                tr!("projects.review_auto"),
+            )
+        } else {
+            (
+                "icons/eye.svg",
+                theme.warning,
+                tr!("projects.review_needs_review"),
+            )
+        };
+        let actionable = !entry.approved && !entry.rejected && !entry.reverted;
+        let reviewers = entry
+            .reviews
+            .iter()
+            .map(|record| {
+                record
+                    .reviewer
+                    .split('<')
+                    .next()
+                    .unwrap_or(&record.reviewer)
+                    .trim()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sha = entry.commit.sha.clone();
+        let short = entry.commit.short_sha.clone();
+        let subject = entry.commit.subject.clone();
+        let author = entry.commit.author.clone();
+        let age = sidebar::format_time_ago(unix_time().saturating_sub(entry.commit.authored_at));
+
+        let row = div()
+            .min_w_0()
+            .child(icon(status_icon, 12.0, status_color))
+            .child(
+                div()
+                    .flex_none()
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(short),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(14.5))
+                    .text_color(theme.text)
+                    .child(subject),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_tertiary)
+                    .child(format!("{author} · {age}")),
+            )
+            .when(!reviewers.is_empty(), |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(13.0))
+                        .text_color(theme.text_tertiary)
+                        .child(reviewers),
+                )
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .text_color(status_color)
+                    .child(status_label),
+            )
+            .when(is_frontier, |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .h(px(18.0))
+                        .px(px(6.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .bg(theme.accent.opacity(0.12))
+                        .text_size(sp(11.5))
+                        .text_color(theme.accent)
+                        .child(tr!("projects.review_frontier")),
+                )
+            })
+            .when(actionable && !in_flight, |element| {
+                element
+                    .child(self.review_decide_button(
+                        &format!("review-approve-{index}-{sha}"),
+                        "icons/check.svg",
+                        theme.success,
+                        tr!("projects.review_approve"),
+                        true,
+                        sha.clone(),
+                        project_id,
+                        &theme,
+                        cx,
+                    ))
+                    .child(self.review_decide_button(
+                        &format!("review-reject-{index}-{sha}"),
+                        "icons/alert.svg",
+                        theme.danger,
+                        tr!("projects.review_reject"),
+                        false,
+                        sha.clone(),
+                        project_id,
+                        &theme,
+                        cx,
+                    ))
+            });
+
+        self.projects_row_frame(
+            project_id,
+            key,
+            row,
+            move |this, targets, cx| this.projects_review_menu(project_id, targets, cx),
+            cx,
+        )
+    }
+
+    /// One `Test-Plan:` line under its commit's row — the check a
+    /// reviewer runs before approving.
+    fn render_projects_review_plan(
+        &mut self,
+        project_id: Uuid,
+        index: usize,
+        plan_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let plan = self
+            .projects_page_states
+            .get(&project_id)
+            .and_then(|state| match &state.review {
+                github::GitHubFetch::Loaded(Some(queue)) => queue
+                    .entries
+                    .get(index)
+                    .and_then(|entry| entry.test_plans.get(plan_index))
+                    .cloned(),
+                _ => None,
+            });
+        let Some(plan) = plan else {
+            return div().into_any_element();
+        };
+        div()
+            .w_full()
+            .h(px(PROJECTS_ROW_HEIGHT))
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .border_b(hairline())
+            .border_color(theme.separator)
+            .child(div().w(px(26.0)).flex_none())
+            .child(icon("icons/check.svg", 10.0, theme.text_tertiary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(plan),
+            )
+            .into_any_element()
+    }
+
+    /// The right-click menu for a proposed commit — decide on it.
+    fn projects_review_menu(
+        &mut self,
+        project_id: Uuid,
+        targets: Vec<ProjectsRowKey>,
+        cx: &mut Context<Self>,
+    ) -> Vec<MenuItem> {
+        let shas: Vec<String> = targets
+            .iter()
+            .filter_map(|key| match key {
+                ProjectsRowKey::Review(sha) => Some(sha.clone()),
+                _ => None,
+            })
+            .collect();
+        if shas.len() != 1 {
+            return Vec::new();
+        }
+        let entry = self
+            .projects_page_states
+            .get(&project_id)
+            .and_then(|state| match &state.review {
+                github::GitHubFetch::Loaded(Some(queue)) => queue
+                    .entries
+                    .iter()
+                    .find(|entry| entry.commit.sha == shas[0])
+                    .cloned(),
+                _ => None,
+            });
+        let Some(entry) = entry else {
+            return Vec::new();
+        };
+        let weak = cx.entity().downgrade();
+        let mut items = Vec::new();
+        let actionable = !entry.approved && !entry.rejected && !entry.reverted;
+        if actionable || entry.rejected {
+            let sha = shas[0].clone();
+            let weak = weak.clone();
+            items.push(MenuItem::new(
+                tr!("projects.review_approve"),
+                move |_, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.projects_review_decide(project_id, sha.clone(), true, cx);
+                    });
+                },
+            ));
+        }
+        if actionable || entry.approved {
+            let sha = shas[0].clone();
+            items.push(MenuItem::new(
+                tr!("projects.review_reject"),
+                move |_, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.projects_review_decide(project_id, sha.clone(), false, cx);
+                    });
+                },
+            ));
+        }
+        items
     }
 
     fn render_projects_row(
@@ -2093,6 +2841,12 @@ impl Waku {
             }
             ProjectsListRow::Branch { index } => {
                 self.render_projects_branch_row(project_id, index, cx)
+            }
+            ProjectsListRow::Review { index } => {
+                self.render_projects_review_row(project_id, index, cx)
+            }
+            ProjectsListRow::ReviewPlan { index, plan_index } => {
+                self.render_projects_review_plan(project_id, index, plan_index, cx)
             }
         }
     }
