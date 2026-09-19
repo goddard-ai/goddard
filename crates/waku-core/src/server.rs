@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
+use std::io::Write as _;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
@@ -31,6 +32,10 @@ const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// bound, so it is dropped; clients reconnect and resume from their cursors.
 const SOCKET_WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_HANDSHAKE_MESSAGE_BYTES: usize = 64 * 1024;
+/// Webhook sniffing needs only the request line — a `POST` plus the trigger
+/// path is well under a kilobyte; anything longer falls through to the
+/// WebSocket handshake to reject.
+const MAX_REQUEST_LINE_BYTES: usize = 1024;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_REPLAY_EVENTS_PER_SESSION: usize = 2048;
 /// Per-subscriber cap on queued daemon messages. A subscriber that falls this
@@ -156,6 +161,17 @@ pub trait Backend: Send + Sync + 'static {
     /// Where friend-session updates arriving from peer subscriptions are
     /// published — the hub turns them into `ServerMessage`s for clients.
     fn set_friend_session_sink(&self, _sink: crate::share::FriendSessionSink) {}
+
+    /// A plain-HTTP `POST /automations/{id}/trigger?key=…` on the daemon
+    /// listener. Backends without automations report every id as unknown.
+    fn trigger_automation_webhook(
+        &self,
+        automation_id: Uuid,
+        key: &str,
+    ) -> anyhow::Result<Option<waku_protocol::automations::AutomationRun>> {
+        let _ = (automation_id, key);
+        Ok(None)
+    }
 }
 
 #[derive(Clone)]
@@ -760,6 +776,14 @@ impl RequestDispatcher {
         self.backend.request_pair(device_name, "ws")
     }
 
+    fn trigger_automation_webhook(
+        &self,
+        automation_id: Uuid,
+        key: &str,
+    ) -> anyhow::Result<Option<waku_protocol::automations::AutomationRun>> {
+        self.backend.trigger_automation_webhook(automation_id, key)
+    }
+
     fn dispatch(
         &self,
         request: Request,
@@ -1006,6 +1030,9 @@ fn handle_connection(
     // get their bounded polling behavior from SO_RCVTIMEO below.
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    if answer_automation_webhook(&stream, &dispatcher)? {
+        return Ok(());
+    }
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_HANDSHAKE_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_HANDSHAKE_MESSAGE_BYTES));
@@ -1182,6 +1209,93 @@ fn handle_connection(
     }
     hub.unsubscribe(subscriber_id);
     Ok(())
+}
+
+/// The daemon's one plain-HTTP route: `POST /automations/{id}/trigger?key=…`
+/// fires a webhook-armed automation. Webhook callers do not speak the
+/// WebSocket protocol, so the request line is sniffed before the handshake;
+/// anything else falls through with the peeked bytes untouched. `Ok(true)`
+/// means a response was written and the connection is done.
+fn answer_automation_webhook(
+    stream: &TcpStream,
+    dispatcher: &RequestDispatcher,
+) -> anyhow::Result<bool> {
+    let mut buffer = [0u8; MAX_REQUEST_LINE_BYTES];
+    let mut filled = 0usize;
+    let line = loop {
+        match stream.peek(&mut buffer[filled..]) {
+            Ok(0) => return Ok(false),
+            Ok(read) => {
+                filled += read;
+                if let Some(end) = buffer[..filled].windows(2).position(|pair| pair == b"\r\n") {
+                    break String::from_utf8_lossy(&buffer[..end]).into_owned();
+                }
+                if filled == buffer.len() {
+                    return Ok(false);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error).context("could not peek at the daemon request"),
+        }
+    };
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let target = parts.next().unwrap_or_default();
+    if !target.starts_with("/automations/") {
+        return Ok(false);
+    }
+    let respond = |status: StatusCode, body: String| -> anyhow::Result<bool> {
+        let mut writer = io::BufWriter::new(stream);
+        write!(
+            writer,
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )?;
+        writer.flush()?;
+        // FIN follows the response, then drain whatever the caller still
+        // had in flight — closing with unread request data would RST the
+        // connection and could cost the caller the response.
+        stream.shutdown(std::net::Shutdown::Write).ok();
+        let mut inbound = stream;
+        let _ = io::copy(&mut inbound, &mut io::sink());
+        Ok(true)
+    };
+    if method != "POST" {
+        return respond(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{\"error\":\"automation triggers require POST\"}".to_owned(),
+        );
+    }
+    let path = target.split('?').next().unwrap_or_default();
+    let id = path
+        .strip_prefix("/automations/")
+        .and_then(|route| route.strip_suffix("/trigger"))
+        .and_then(|id| Uuid::parse_str(id).ok());
+    let Some(id) = id else {
+        return respond(
+            StatusCode::NOT_FOUND,
+            "{\"error\":\"unknown webhook endpoint\"}".to_owned(),
+        );
+    };
+    let key = target
+        .split_once('?')
+        .map(|(_, query)| query)
+        .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("key=")))
+        .unwrap_or_default();
+    match dispatcher.trigger_automation_webhook(id, key) {
+        Ok(Some(run)) => respond(
+            StatusCode::OK,
+            serde_json::json!({ "runId": run.id, "status": run.status }).to_string(),
+        ),
+        Ok(None) => respond(
+            StatusCode::NOT_FOUND,
+            "{\"error\":\"unknown automation\"}".to_owned(),
+        ),
+        Err(error) => respond(
+            StatusCode::CONFLICT,
+            serde_json::json!({ "error": format!("{error:#}") }).to_string(),
+        ),
+    }
 }
 
 fn validate_handshake(
@@ -3606,5 +3720,116 @@ mod tests {
             computer_use_enabled: false,
             provider_cursor: None,
         }
+    }
+
+    #[derive(Default)]
+    struct WebhookBackend {
+        calls: Mutex<Vec<(Uuid, String)>>,
+    }
+
+    impl Backend for WebhookBackend {
+        fn handle(
+            &self,
+            _request: Request,
+            _events: EventSink,
+            _agent: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
+            Ok(ResponsePayload::Ack)
+        }
+
+        fn trigger_automation_webhook(
+            &self,
+            automation_id: Uuid,
+            key: &str,
+        ) -> anyhow::Result<Option<waku_protocol::automations::AutomationRun>> {
+            self.calls.lock().push((automation_id, key.to_owned()));
+            if key != "secret-key" {
+                return Ok(None);
+            }
+            let now = waku_protocol::model::unix_time();
+            Ok(Some(waku_protocol::automations::AutomationRun {
+                id: Uuid::new_v4(),
+                automation_id,
+                trigger: waku_protocol::automations::AutomationTrigger::Webhook,
+                status: waku_protocol::automations::AutomationRunStatus::Pending,
+                scheduled_for: now,
+                started_at: None,
+                finished_at: None,
+                session_id: None,
+                error: None,
+                precheck: None,
+                refusal_key: None,
+                refusal_count: 0,
+                created_at: now,
+                updated_at: now,
+            }))
+        }
+    }
+
+    #[test]
+    fn automation_webhook_answers_plain_http_posts() {
+        use std::io::Read as _;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let backend = Arc::new(WebhookBackend::default());
+        let server_backend = backend.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                server_backend,
+                server_shutdown,
+                ServerOptions::default(),
+            )
+            .unwrap()
+        });
+
+        let automation_id = Uuid::new_v4();
+        let post = |target: &str| -> String {
+            let mut stream = TcpStream::connect(address).unwrap();
+            write!(
+                stream,
+                "POST {target} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        };
+
+        let response = post(&format!(
+            "/automations/{automation_id}/trigger?key=secret-key"
+        ));
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert_eq!(
+            backend.calls.lock().as_slice(),
+            &[(automation_id, "secret-key".to_owned())]
+        );
+
+        let response = post(&format!("/automations/{automation_id}/trigger?key=wrong"));
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        let response = post("/automations/not-a-uuid/trigger?key=secret-key");
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+
+        // A non-POST request on the route is a 405; anything else — like the
+        // WebSocket client below — still falls through to the handshake.
+        let mut stream = TcpStream::connect(address).unwrap();
+        write!(
+            stream,
+            "GET /automations/{automation_id}/trigger?key=secret-key HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        )
+        .unwrap();
+        stream.flush().unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 405"), "{response}");
+
+        DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
     }
 }

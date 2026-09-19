@@ -4350,6 +4350,12 @@ automations.preset_weekly:
   en: Weekly
 automations.preset_cron:
   en: Cron
+automations.preset_webhook:
+  en: Webhook
+automations.field_webhook:
+  en: Webhook
+automations.webhook_hint:
+  en: POSTs to the webhook URL fire a run — the URL is generated on save.
 automations.schedule_none:
   en: No schedule
 automations.schedule_hourly:
@@ -4416,6 +4422,8 @@ automations.trigger_scheduled:
   en: Scheduled
 automations.trigger_manual:
   en: Manual
+automations.trigger_webhook:
+  en: Webhook
 automations.refusal_count:
   en: skipped %{count}×
 automations.grace_value:

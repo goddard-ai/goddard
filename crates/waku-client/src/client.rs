@@ -30,6 +30,9 @@ enum Outgoing {
 
 struct ClientInner {
     outgoing: Sender<Outgoing>,
+    /// The address this connection was opened against — the one a webhook
+    /// URL must point at to reach the same daemon.
+    address: String,
     daemon_version: String,
     daemon_commit: Option<String>,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
@@ -122,6 +125,7 @@ impl DaemonClient {
         let (outgoing, outgoing_rx) = unbounded();
         let inner = Arc::new(ClientInner {
             outgoing,
+            address: address.to_owned(),
             daemon_version,
             daemon_commit,
             pending: Mutex::new(HashMap::new()),
@@ -144,6 +148,15 @@ impl DaemonClient {
             .spawn(move || run_client(socket, outgoing_rx, thread_inner))
             .context("could not start Goddard daemon client thread")?;
         Ok(Self { inner })
+    }
+
+    /// The address this client connected to — `ws://`/`wss://` URL or a
+    /// bare `host:port`, exactly as passed to [`connect`]. Plain-HTTP routes
+    /// on the daemon (automation webhooks) share the same port.
+    ///
+    /// [`connect`]: Self::connect
+    pub fn address(&self) -> &str {
+        &self.inner.address
     }
 
     /// The version the connected daemon reported in the hello handshake.

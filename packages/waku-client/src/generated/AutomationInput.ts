@@ -8,4 +8,9 @@ import type { ProviderKind } from "./ProviderKind";
  * Create or update payload for `upsertAutomation`. `id == None` creates;
  * `Some(id)` replaces the matching record's editable fields.
  */
-export type AutomationInput = { id: string | null, name: string, prompt: string, provider: ProviderKind, model: string | null, projectPath: string, workspace: AutomationWorkspace, baseBranch: string | null, sessionId: string | null, schedule: AutomationSchedule | null, timezone: string | null, enabled: boolean, precheck: AutomationPrecheck | null, missedRunGraceMinutes: number | null, reuseSession: boolean, };
+export type AutomationInput = { id: string | null, name: string, prompt: string, provider: ProviderKind, model: string | null, projectPath: string, workspace: AutomationWorkspace, baseBranch: string | null, sessionId: string | null, schedule: AutomationSchedule | null,
+/**
+ * Arm the automation's webhook URL. The daemon keeps an existing
+ * secret or mints one; `false` disarms it.
+ */
+webhook: boolean, timezone: string | null, enabled: boolean, precheck: AutomationPrecheck | null, missedRunGraceMinutes: number | null, reuseSession: boolean, };

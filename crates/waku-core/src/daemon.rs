@@ -752,6 +752,14 @@ impl Backend for WakuBackend {
         self.share.set_friend_session_sink(sink);
     }
 
+    fn trigger_automation_webhook(
+        &self,
+        automation_id: Uuid,
+        key: &str,
+    ) -> anyhow::Result<Option<waku_protocol::automations::AutomationRun>> {
+        self.automations.trigger_webhook(automation_id, key)
+    }
+
     fn handle(
         &self,
         request: Request,

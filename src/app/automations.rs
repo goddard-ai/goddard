@@ -63,8 +63,8 @@ impl AutomationsTab {
     const ALL: [AutomationsTab; 2] = [AutomationsTab::Schedules, AutomationsTab::Runs];
 }
 
-/// The editor's schedule segmented control — one variant per
-/// [`AutomationSchedule`] kind.
+/// The editor's trigger segmented control — one variant per
+/// [`AutomationSchedule`] kind, plus Webhook for HTTP-fired automations.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum SchedulePreset {
     Hourly,
@@ -73,6 +73,7 @@ enum SchedulePreset {
     Weekdays,
     Weekly,
     Cron,
+    Webhook,
 }
 
 /// A deferred open. The editor's `TextInput`s need a `Window`, which click
@@ -343,6 +344,70 @@ impl Waku {
         }
     }
 
+    /// The POST URL that fires this automation — plain-HTTP routes share
+    /// the daemon's port, so the client's connect address is the base.
+    fn automation_webhook_url(&self, key: DaemonKey, automation: &Automation) -> Option<String> {
+        let secret = automation.webhook_secret.as_deref()?;
+        let client = self.daemons.supervisor(key)?.client();
+        Some(format!(
+            "{}/automations/{}/trigger?key={secret}",
+            webhook_http_base(client.address()),
+            automation.id
+        ))
+    }
+
+    /// A copy-on-click chip showing the webhook URL. The key in the URL is
+    /// the credential, so it stays readable for wiring into the caller.
+    fn webhook_url_chip(
+        &self,
+        automation_id: Uuid,
+        url: String,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let feedback_id = format!("automation-webhook-copy-{automation_id}");
+        let copied = self.control_was_copied(&feedback_id);
+        let weak = cx.entity().downgrade();
+        let label = url.clone();
+        div()
+            .id(ElementId::Name(
+                format!("automation-webhook-{automation_id}").into(),
+            ))
+            .h(px(24.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .bg(theme.composer)
+            .cursor_pointer()
+            .hover(|element| element.bg(theme.overlay))
+            .on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                let _ = weak.update(cx, |this, cx| {
+                    this.show_control_copied(feedback_id.clone(), cx);
+                });
+            })
+            .child(
+                div()
+                    .max_w(px(360.0))
+                    .truncate()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .child(label),
+            )
+            .child(icon(
+                if copied {
+                    "icons/check.svg"
+                } else {
+                    "icons/copy.svg"
+                },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .into_any_element()
+    }
+
     // ── Commands ─────────────────────────────────────────────────────────
 
     /// Fire a daemon command on a worker thread. The broadcast that answers
@@ -564,7 +629,11 @@ impl Waku {
                     preset = SchedulePreset::Cron;
                     cron.update(cx, |input, cx| input.set_content(expression.clone(), cx));
                 }
-                None => {}
+                None => {
+                    if automation.webhook_secret.is_some() {
+                        preset = SchedulePreset::Webhook;
+                    }
+                }
             }
         }
 
@@ -673,34 +742,41 @@ impl Waku {
             return;
         }
         let schedule = match editor.preset {
-            SchedulePreset::Hourly => parse_clock(&editor.time.read(cx).content())
-                .map(|(_, minute)| AutomationSchedule::Hourly { minute }),
-            SchedulePreset::Daily => parse_clock(&editor.time.read(cx).content())
-                .map(|(hour, minute)| AutomationSchedule::Daily { hour, minute }),
-            SchedulePreset::Weekdays => parse_clock(&editor.time.read(cx).content())
-                .map(|(hour, minute)| AutomationSchedule::Weekdays { hour, minute }),
-            SchedulePreset::Weekly => {
-                parse_clock(&editor.time.read(cx).content()).map(|(hour, minute)| {
-                    AutomationSchedule::Weekly {
-                        day_of_week: editor.day_of_week,
-                        hour,
-                        minute,
+            SchedulePreset::Webhook => None,
+            _ => {
+                let schedule = match editor.preset {
+                    SchedulePreset::Hourly => parse_clock(&editor.time.read(cx).content())
+                        .map(|(_, minute)| AutomationSchedule::Hourly { minute }),
+                    SchedulePreset::Daily => parse_clock(&editor.time.read(cx).content())
+                        .map(|(hour, minute)| AutomationSchedule::Daily { hour, minute }),
+                    SchedulePreset::Weekdays => parse_clock(&editor.time.read(cx).content())
+                        .map(|(hour, minute)| AutomationSchedule::Weekdays { hour, minute }),
+                    SchedulePreset::Weekly => {
+                        parse_clock(&editor.time.read(cx).content()).map(|(hour, minute)| {
+                            AutomationSchedule::Weekly {
+                                day_of_week: editor.day_of_week,
+                                hour,
+                                minute,
+                            }
+                        })
                     }
-                })
+                    SchedulePreset::Cron => {
+                        let expression = editor.cron.read(cx).content().trim().to_owned();
+                        if expression.is_empty() {
+                            None
+                        } else {
+                            Some(AutomationSchedule::Cron { expression })
+                        }
+                    }
+                    SchedulePreset::Webhook => unreachable!(),
+                };
+                let Some(schedule) = schedule else {
+                    fail(editor, tr!("automations.error_schedule_invalid"));
+                    cx.notify();
+                    return;
+                };
+                Some(schedule)
             }
-            SchedulePreset::Cron => {
-                let expression = editor.cron.read(cx).content().trim().to_owned();
-                if expression.is_empty() {
-                    None
-                } else {
-                    Some(AutomationSchedule::Cron { expression })
-                }
-            }
-        };
-        let Some(schedule) = schedule else {
-            fail(editor, tr!("automations.error_schedule_invalid"));
-            cx.notify();
-            return;
         };
         let Some(project_path) = editor.project_path.clone() else {
             fail(editor, tr!("automations.error_project_required"));
@@ -729,7 +805,8 @@ impl Waku {
             workspace: editor.workspace,
             base_branch: (!base_branch.is_empty()).then_some(base_branch),
             session_id: editor.session_id,
-            schedule: Some(schedule),
+            schedule,
+            webhook: editor.preset == SchedulePreset::Webhook,
             timezone: (!timezone.is_empty()).then_some(timezone),
             enabled: editor.enabled,
             precheck: (!precheck_command.is_empty()).then(|| AutomationPrecheck {
@@ -1069,11 +1146,7 @@ impl Waku {
             return div().into_any_element();
         };
         let now = unix_time();
-        let schedule_label = automation
-            .schedule
-            .as_ref()
-            .map(|schedule| schedule_label(schedule, &automation.timezone))
-            .unwrap_or_else(|| tr!("automations.schedule_none"));
+        let schedule_label = trigger_label(automation);
         let next_label = automation
             .next_run_at
             .filter(|_| automation.enabled)
@@ -1280,6 +1353,7 @@ impl Waku {
                     .child(match run.trigger {
                         AutomationTrigger::Scheduled => tr!("automations.trigger_scheduled"),
                         AutomationTrigger::Manual => tr!("automations.trigger_manual"),
+                        AutomationTrigger::Webhook => tr!("automations.trigger_webhook"),
                     }),
             )
             .child(
@@ -1339,6 +1413,7 @@ impl Waku {
         };
         let now = unix_time();
         let runs = self.automation_runs(key, id);
+        let webhook_url = self.automation_webhook_url(key, &automation);
         let (_, _, status_label) = automation
             .last_run_status
             .map(|status| run_status_badge(&theme, status))
@@ -1595,12 +1670,25 @@ impl Waku {
                     .gap(px(6.0))
                     .child(field(
                         tr!("automations.field_schedule"),
-                        automation
-                            .schedule
-                            .as_ref()
-                            .map(|schedule| schedule_label(schedule, &automation.timezone))
-                            .unwrap_or_else(|| tr!("automations.schedule_none")),
+                        trigger_label(&automation),
                     ))
+                    .when_some(webhook_url, |element, url| {
+                        element.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(12.0))
+                                .child(
+                                    div()
+                                        .w(px(96.0))
+                                        .flex_none()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(tr!("automations.field_webhook")),
+                                )
+                                .child(self.webhook_url_chip(id, url, theme, cx)),
+                        )
+                    })
                     .child(field(
                         tr!("automations.field_next_run"),
                         automation
@@ -1784,11 +1872,35 @@ impl Waku {
                 SchedulePreset::Cron,
                 tr!("automations.preset_cron"),
                 "preset-cron",
+            ))
+            .child(preset_chip(
+                SchedulePreset::Webhook,
+                tr!("automations.preset_webhook"),
+                "preset-webhook",
             ));
         let mut schedule_controls = div().flex().items_center().flex_wrap().gap(px(6.0));
         schedule_controls = match editor.preset {
             SchedulePreset::Cron => {
                 schedule_controls.child(div().w(px(150.0)).child(input_shell(&editor.cron)))
+            }
+            SchedulePreset::Webhook => {
+                let found = editor.id.and_then(|id| {
+                    self.automation(editor.daemon, id).and_then(|automation| {
+                        self.automation_webhook_url(editor.daemon, automation)
+                            .map(|url| (automation.id, url))
+                    })
+                });
+                match found {
+                    Some((id, url)) => {
+                        schedule_controls.child(self.webhook_url_chip(id, url, &theme, cx))
+                    }
+                    None => schedule_controls.child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("automations.webhook_hint")),
+                    ),
+                }
             }
             _ => schedule_controls.child(div().w(px(70.0)).child(input_shell(&editor.time))),
         };
@@ -1824,8 +1936,10 @@ impl Waku {
                 },
             ));
         }
-        schedule_controls =
-            schedule_controls.child(div().w(px(130.0)).child(input_shell(&editor.timezone)));
+        if editor.preset != SchedulePreset::Webhook {
+            schedule_controls =
+                schedule_controls.child(div().w(px(130.0)).child(input_shell(&editor.timezone)));
+        }
         let schedule_row = div()
             .flex()
             .flex_col()
@@ -2426,6 +2540,7 @@ fn automation_input(automation: &Automation, enabled: bool) -> AutomationInput {
         base_branch: automation.base_branch.clone(),
         session_id: automation.session_id,
         schedule: automation.schedule.clone(),
+        webhook: automation.webhook_secret.is_some(),
         timezone: automation.timezone.clone(),
         enabled,
         precheck: automation.precheck.clone(),
@@ -2446,6 +2561,38 @@ fn parse_clock(text: &str) -> Option<(u8, u8)> {
     let hour: u8 = hour.trim().parse().ok()?;
     let minute: u8 = minute.trim().parse().ok()?;
     (hour < 24 && minute < 60).then_some((hour, minute))
+}
+
+/// The Schedule column's text — the cron description for scheduled
+/// automations, "Webhook" for HTTP-armed ones, "No schedule" for a bare
+/// paused definition.
+fn trigger_label(automation: &Automation) -> String {
+    automation
+        .schedule
+        .as_ref()
+        .map(|schedule| schedule_label(schedule, &automation.timezone))
+        .unwrap_or_else(|| {
+            if automation.webhook_secret.is_some() {
+                tr!("automations.trigger_webhook")
+            } else {
+                tr!("automations.schedule_none")
+            }
+        })
+}
+
+/// A daemon client address (`ws://host:port/v1`, `wss://`, or bare
+/// `host:port`) as the `http(s)://host:port` base the daemon's plain-HTTP
+/// routes share.
+fn webhook_http_base(address: &str) -> String {
+    let http = if let Some(rest) = address.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = address.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else {
+        format!("http://{address}")
+    };
+    let http = http.trim_end_matches('/');
+    http.strip_suffix("/v1").unwrap_or(http).to_owned()
 }
 
 /// Human schedule text for the list and detail — locale-free, matching
