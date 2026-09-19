@@ -28,6 +28,7 @@ menu.focus_terminal: 将焦点移到终端
 menu.toggle_model_picker: 打开或关闭模型选择器
 menu.toggle_branch_picker: 打开或关闭分支选择器
 menu.toggle_runtime_mode_picker: 打开或关闭模式选择器
+menu.toggle_environment: 切换环境
 menu.toggle_workspace: 切换工作位置
 menu.toggle_usage_panel: 打开或关闭用量面板
 menu.window: 窗口
@@ -67,6 +68,17 @@ command_palette.no_projects: 没有项目
 command_palette.no_projects_hint: 打开一个项目以运行其脚本
 command_palette.no_scripts: 未找到脚本
 command_palette.no_scripts_hint: 项目根目录下没有 package.json、makefile 或 justfile
+command_palette.templates: 模板
+command_palette.new_github_issue: 新建 GitHub Issue
+command_palette.issue_project_placeholder: 选择要创建 Issue 的项目…
+command_palette.issue_template_placeholder: 选择 Issue 模板…
+command_palette.loading_issue_templates: 正在加载 Issue 模板…
+command_palette.blank_issue: 空白 Issue
+command_palette.blank_issue_search: blank issue new no template 空白 issue
+command_palette.opens_on_web: 在 GitHub 上打开
+command_palette.no_issue_projects_hint: 打开项目即可创建 Issue
+command_palette.no_issue_templates: 没有 Issue 模板
+command_palette.no_issue_templates_hint: 请改为创建空白 Issue
 command_palette.open_on_github: 在 GitHub 上打开
 command_palette.land_changes: 合入更改
 command_palette.new_custom_command: 新建自定义命令…
@@ -155,6 +167,7 @@ settings.archived_empty: 没有已归档的聊天。
 settings.archived_search: 搜索已归档的聊天
 settings.archived_all_projects: 所有项目
 settings.archived_no_match: 没有符合当前条件的已归档聊天。
+settings.archived_landed: 已合入
 settings.back: 返回
 settings.search: 搜索设置
 
@@ -266,8 +279,13 @@ settings.light_theme: 浅色主题
 settings.light_theme_description: 浅色外观下使用的主题
 settings.dark_theme: 深色主题
 settings.dark_theme_description: 深色外观下使用的主题
+settings.preview: 预览
+settings.preview_description: 所选主题下的聊天与代码示例
+settings.preview_user_message: 能帮我修一下问候函数吗？
+settings.preview_assistant_reply: 已完成——函数现在会返回问候语。
 settings.sidebar_transparency: 侧边栏透明
 settings.sidebar_transparency_description: 在侧边栏后方透出桌面。关闭后使用纯色背景。
+settings.sidebar_transparency_amount: 透明程度
 settings.ui_font: 界面字体
 settings.ui_font_description: 整个界面与消息使用的字体
 settings.code_font: 代码字体
@@ -283,6 +301,8 @@ settings.terminal_font_size: 终端字号
 settings.terminal_font_size_description: 内置终端的文字大小。与代码字号相同时随之变化
 settings.thick_borders: 粗边框
 settings.thick_borders_description: 以 1 像素绘制边框与分隔线，而非 0.5 像素细线
+settings.border_intensity: 边框强度
+settings.border_intensity_description: 调整边框与分隔线的显眼程度。0% 完全隐藏，100% 为原始强度
 settings.render_math: 渲染数学公式
 settings.render_math_description: 在 Markdown 中显示排版后的公式。关闭后显示 LaTeX 源码。
 settings.show_response_token_speed: 显示回复的令牌速度
@@ -291,6 +311,11 @@ settings.markdown_preview: 预览 Markdown 文件
 settings.markdown_preview_description: 以渲染后的预览而非源码形式打开 Markdown 文件
 settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提问
 settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
+settings.archive_navigation: 归档任务后
+settings.archive_navigation_description: 选择归档正在查看的任务后跳转的位置
+settings.archive_navigation_next_unread: 前往下一个未读完成
+settings.archive_navigation_next_session: 前往侧栏中的下一个会话
+settings.archive_navigation_new_task: 撰写新任务
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
 settings.new_worktree_default_branch: 新工作树始终基于默认分支
@@ -483,6 +508,24 @@ github.more_commits: "… 还有 {count} 个"
 github.comment_placeholder: 撰写评论
 github.post_comment: 发表评论
 github.loading_media: 正在加载媒体…
+
+issue.new: 新建 Issue
+issue.title: 标题
+issue.title_placeholder: Issue 标题
+issue.title_required: 请填写 Issue 标题
+issue.body: 正文
+issue.body_placeholder: Markdown 正文——模板内容已填入
+issue.labels: 标签
+issue.labels_placeholder: bug, help wanted
+issue.assignees: 负责人
+issue.assignees_placeholder: octocat, hubot
+issue.milestone: 里程碑
+issue.milestone_placeholder: 里程碑名称或编号
+issue.create: 创建 Issue
+issue.creating: 正在创建 Issue…
+issue.created: Issue 已创建
+issue.created_numbered: "Issue #%{number} 已创建"
+issue.view: 查看
 
 project.new_project: 新建项目…
 project.no_project: 不使用项目
@@ -1273,6 +1316,8 @@ transcript.conversation_turns: 对话轮次
 transcript.turn_label: "第 %{number} 轮：%{prompt}"
 transcript.edit_message: 编辑消息
 transcript.sent_by_agent: 由智能体发送
+transcript.landed: 已合入 %{base}
+transcript.landed_more: "…以及另外 %{count} 个提交"
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
 duration.minute: "%{count} 分钟"
@@ -1452,6 +1497,7 @@ git_panel.land_onto: 合入 %{base}
 git_panel.landing: 正在合入…
 git_panel.landing_onto: "正在合入 %{base}…"
 git_panel.landed: 已合入 %{base}
+git_panel.land_local_checkout: 此任务直接在项目检出目录中工作，没有需要合入的内容
 git_panel.already_landed: "%{base} 已包含此处的所有提交"
 git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
 git_panel.resolve_land_rebase_prompt: "此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"

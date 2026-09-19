@@ -11,7 +11,11 @@ export type FriendsState = {
 /**
  * This install's shareable code (`gfr-<endpoint id>`).
  */
-friendCode: string, friends: Array<FriendInfo>,
+friendCode: string,
+/**
+ * The name friends see on our requests and offers.
+ */
+displayName: string, friends: Array<FriendInfo>,
 /**
  * Friend requests awaiting a local decision.
  */

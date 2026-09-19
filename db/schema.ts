@@ -50,6 +50,8 @@ export const sessions = sqliteTable(
     archivedAt: integer("archived_at"),
     /** When the session was pinned to the sidebar top, unix seconds. */
     pinnedAt: integer("pinned_at"),
+    /** When the session's workspace landed on its base, unix seconds. */
+    landedAt: integer("landed_at"),
     /**
      * JSON-serialized SessionWorkspace, duplicated from `session_details.data`
      * so list rows can show worktree state without hydrating the session.
@@ -83,6 +85,8 @@ export const messages = sqliteTable(
     content: text("content").notNull(),
     /** User-visible text before provider-facing attachment mentions. */
     displayContent: text("display_content"),
+    /** JSON-serialized TranscriptNotice — a structured system row's payload. */
+    notice: text("notice"),
     /** JSON-serialized MessageAttachment array. */
     attachments: text("attachments").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),

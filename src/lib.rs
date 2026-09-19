@@ -28,6 +28,7 @@ macro_rules! tr_cow {
     };
 }
 
+mod agy;
 mod analytics;
 mod app;
 mod assets;
@@ -89,6 +90,7 @@ actions!(
         DismissProjectsLayer,
         ToggleInboxPage,
         DismissInbox,
+        DismissDraftsLayer,
         ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
@@ -116,9 +118,11 @@ actions!(
         ToggleModelPicker,
         ToggleBranchPicker,
         ToggleRuntimeModePicker,
+        ToggleEnvironment,
         ToggleUsagePanel,
         ToggleWorkspace,
         SaveFile,
+        SyncBranch,
         ArchiveSession,
         ToggleSessionPin,
         ToggleTerminals,
@@ -151,7 +155,9 @@ actions!(
         WebviewPaste,
         WebviewSelectAll,
         OpenLocalhostUrl,
-        OpenLocalhostUrlInTab
+        OpenLocalhostUrlInTab,
+        OpenCreatedIssueInGitHub,
+        OpenToastSession
     ]
 );
 
@@ -179,6 +185,29 @@ pub struct SelectSidebarSession {
 #[action(namespace = waku, no_json)]
 pub struct SelectProjectsTab {
     pub index: usize,
+}
+
+/// Apply the nth starred model selection to the composer session (⌘⌥1–⌘⌥9),
+/// ordered as in the model picker's favorites section. Carries the target
+/// index so nine bindings share one action.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct SelectFavoriteModel {
+    pub index: usize,
+}
+
+/// Step the composer session's reasoning effort through the current model's
+/// ladder, wrapping at the ends. ⌘E moves `Forward`, ⌘⇧E `Backward`.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct CycleReasoningEffort {
+    pub direction: EffortCycleDirection,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum EffortCycleDirection {
+    Forward,
+    Backward,
 }
 
 /// Step a surface's font size one preset in `direction`. The same ⌘= / ⌘-
@@ -323,7 +352,9 @@ pub fn run() {
             crate::app::init_command_palette(cx);
             crate::app::init_element_inspector(cx);
             crate::app::init_file_finder(cx);
+            crate::app::init_sync_branch(cx);
             crate::app::init_commit_dialog_keys(cx);
+            crate::app::init_issue_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
@@ -332,6 +363,7 @@ pub fn run() {
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);
+            crate::app::init_drafts_keys(cx);
             crate::app::init_shortcuts_dialog_keys(cx);
             crate::terminal::init_command_bar_keys(cx);
             crate::theme::init(cx);
@@ -447,6 +479,7 @@ pub fn run() {
                         theme.sidebar_drag_background,
                         theme.is_dark,
                         waku.sidebar_transparency(),
+                        waku.sidebar_transparency_amount(),
                     );
                     cx.activate(true);
                 })
@@ -495,9 +528,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("secondary-w", CloseWindow, None),
         KeyBinding::new("secondary-n", NewSession, None),
-        // ⌘⇧N opens the "New task in…" directory picker in the palette; the
-        // project switcher keeps backward cycling on the chord while its
-        // overlay owns focus.
+        // ⌘⇧N opens the "New task in…" directory picker in the palette when
+        // no draft can host the project switcher — the same fall-through
+        // ⌘N gives New Session.
         KeyBinding::new("secondary-shift-n", NewTaskIn, None),
         KeyBinding::new("secondary-o", NewProject, None),
         KeyBinding::new("secondary-,", OpenSettings, None),
@@ -539,12 +572,86 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // the recent-project cycle the modifier release commits.
         KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),
         // ⌘⇧I opens the notification inbox — the same page contract the
-        // Projects page has. ⌘⇧N stays on ToggleWorkspace.
+        // Projects page has.
         KeyBinding::new("secondary-shift-i", ToggleInboxPage, None),
-        // ⌘⌥1–2 name the page's tabs; with the page closed the same
-        // chords open it straight onto that tab.
-        KeyBinding::new("secondary-alt-1", SelectProjectsTab { index: 0 }, None),
-        KeyBinding::new("secondary-alt-2", SelectProjectsTab { index: 1 }, None),
+        // ⌘⌥1–2 switch the page's tabs while it is open. The chords used
+        // to deep-link to a tab from anywhere; the model picker's
+        // ⌘⌥1–⌘⌥9 favorite jump owns the workspace scope now.
+        KeyBinding::new(
+            "secondary-alt-1",
+            SelectProjectsTab { index: 0 },
+            Some("ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-2",
+            SelectProjectsTab { index: 1 },
+            Some("ProjectsPage"),
+        ),
+        // ⌘⌥1–⌘⌥9 apply the nth starred model selection to the composer
+        // session — a draft or an idle task, ordered as in the picker's
+        // favorites section. The terminal keeps every chord as pty input;
+        // the Projects page keeps its own ⌘⌥ tab chords.
+        KeyBinding::new(
+            "secondary-alt-1",
+            SelectFavoriteModel { index: 0 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-2",
+            SelectFavoriteModel { index: 1 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-3",
+            SelectFavoriteModel { index: 2 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-4",
+            SelectFavoriteModel { index: 3 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-5",
+            SelectFavoriteModel { index: 4 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-6",
+            SelectFavoriteModel { index: 5 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-7",
+            SelectFavoriteModel { index: 6 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-8",
+            SelectFavoriteModel { index: 7 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-9",
+            SelectFavoriteModel { index: 8 },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        // ⌘E cycles the composer session's reasoning effort through the
+        // current model's ladder; ⌘⇧E walks it in reverse.
+        KeyBinding::new(
+            "secondary-e",
+            CycleReasoningEffort {
+                direction: EffortCycleDirection::Forward,
+            },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-shift-e",
+            CycleReasoningEffort {
+                direction: EffortCycleDirection::Backward,
+            },
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own
         // ⌘A and first Escape. The Settings → Git page keeps the same
@@ -603,19 +710,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // the same depth, the chord wins the tie and only falls
         // through to creating a task when no draft can take it.
         KeyBinding::new("secondary-n", SwitchProjectForward, None),
-        // ⌘⇧N is "New task in…" at the root context; the switcher
-        // keeps backward cycling on the chord only while an overlay
-        // that consumes it owns focus.
-        KeyBinding::new(
-            "secondary-shift-n",
-            SwitchProjectBackward,
-            Some("ProjectSwitcher"),
-        ),
-        KeyBinding::new(
-            "secondary-shift-n",
-            SwitchProjectBackward,
-            Some("BigPicture"),
-        ),
+        // ⌘⇧N mirrors the forward chord at the root: the overlay's focus
+        // lands on a two-frame defer, so only a root binding keeps a fast
+        // ⌘N-then-⌘⇧N from slipping to "New task in…" — which still gets
+        // the keystroke when no draft can take the switcher.
+        KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
         KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
         KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
         // Re-bound on the overlay context so the chord cancels when
@@ -661,6 +760,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
         KeyBinding::new("secondary-alt-shift-n", ToggleBranchPicker, None),
         KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
+        // ⌘⇧. flips the draft between this Mac and the sandbox VM — the
+        // Environment section of the same menu, without opening it.
+        KeyBinding::new("secondary-shift-.", ToggleEnvironment, None),
         // ⌘⇧T is the Terminals group chord: it expands the sidebar
         // section (selecting the last-shown terminal, or spawning one
         // in ~ when none exists), and once a full-width terminal is
@@ -828,6 +930,14 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // adding shift opens it in a built-in browser tab instead.
         KeyBinding::new("secondary-alt-o", OpenLocalhostUrl, None),
         KeyBinding::new("secondary-alt-shift-o", OpenLocalhostUrlInTab, None),
+        // The unarchive toast's "View now" — shares ⌘⌥O with the localhost
+        // open above. A session toast takes the chord; anything else
+        // propagates back to the URL open.
+        KeyBinding::new("secondary-alt-o", OpenToastSession, None),
+        // The last-created GitHub issue — the toast's "View" without the
+        // mouse. Deep-links the GitHub browser when its project and
+        // number are known, falls back to the external URL.
+        KeyBinding::new("secondary-alt-i", OpenCreatedIssueInGitHub, None),
     ]);
 
     #[cfg(target_os = "macos")]

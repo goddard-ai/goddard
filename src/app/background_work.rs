@@ -91,7 +91,12 @@ impl BackgroundWorkRegistry {
                     item.updated_at_ms = unix_time_millis();
                 }
             }
-            BackgroundWorkEvent::StopFailed { key, message } => {
+            BackgroundWorkEvent::StopFailed {
+                key,
+                message,
+                message_i18n,
+            } => {
+                let message = message_i18n.map(|i18n| i18n.render()).unwrap_or(message);
                 if let Some(item) = self
                     .items
                     .get_mut(&key)
@@ -140,8 +145,10 @@ impl BackgroundWorkRegistry {
                 current.status == BackgroundWorkStatus::Stopping && incoming.status.is_stoppable();
             if incoming.title.is_empty() {
                 incoming.title.clone_from(&current.title);
+                incoming.title_i18n.clone_from(&current.title_i18n);
             }
             current.title = incoming.title;
+            current.title_i18n = incoming.title_i18n;
             merge_option(&mut current.detail, incoming.detail);
             merge_option(&mut current.command, incoming.command);
             merge_option(&mut current.cwd, incoming.cwd);
@@ -299,6 +306,24 @@ impl BackgroundWorkRegistry {
                 self.remove(&key);
             }
         }
+    }
+
+    /// Foreground items the provider must still be told to stop when the turn
+    /// is cancelled: the registry marks them Stopped locally, but a retained
+    /// runtime keeps them running without an explicit stop request. Detached
+    /// items are excluded — they survive the turn by design and carry their
+    /// own stop control. Without a `control_id` there is nothing to send.
+    pub(super) fn live_stoppable_foreground_keys(&self) -> Vec<BackgroundWorkKey> {
+        self.items
+            .values()
+            .filter(|item| {
+                !item.background
+                    && item.status.is_stoppable()
+                    && item.can_stop
+                    && item.control_id.is_some()
+            })
+            .map(|item| item.key.clone())
+            .collect()
     }
 
     fn has_live(&self) -> bool {
@@ -669,6 +694,7 @@ impl Waku {
                 DriverEvent::TurnFinished {
                     success: true,
                     summary: None,
+                    summary_i18n: None,
                 },
                 true,
                 cx,
@@ -1439,7 +1465,7 @@ impl Waku {
                                     .text_size(sp(12.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(single_line_label(&item.title)),
+                                    .child(single_line_label(&item.display_title())),
                             )
                             .child(
                                 div()
@@ -2166,7 +2192,7 @@ fn render_background_summary_row(
                 } else {
                     theme.text
                 })
-                .child(single_line_label(&item.title)),
+                .child(single_line_label(&item.display_title())),
         )
         .children(trailing)
         .on_click(move |_, window, cx| {
@@ -2372,6 +2398,47 @@ mod tests {
             registry.items[&BackgroundWorkKey::new(BackgroundWorkKind::Process, "background")]
                 .status,
             BackgroundWorkStatus::Running
+        );
+    }
+
+    #[test]
+    fn turn_stop_selects_only_stoppable_foreground_work() {
+        let stoppable = |id: &str, status: BackgroundWorkStatus, background: bool| {
+            let mut item = item(id, status, background);
+            item.can_stop = true;
+            item.control_id = Some(format!("control-{id}"));
+            item
+        };
+        let mut registry = BackgroundWorkRegistry::default();
+        registry.upsert(stoppable(
+            "foreground",
+            BackgroundWorkStatus::Running,
+            false,
+        ));
+        // Detached work survives Stop by design; it keeps its own control.
+        registry.upsert(stoppable(
+            "detached",
+            BackgroundWorkStatus::Running,
+            true,
+        ));
+        // Already-halting work needs no second request.
+        registry.upsert(stoppable(
+            "halting",
+            BackgroundWorkStatus::Stopping,
+            false,
+        ));
+        // No control channel means there is nothing to send.
+        let mut uncontrolled = item("uncontrolled", BackgroundWorkStatus::Running, false);
+        uncontrolled.can_stop = true;
+        registry.upsert(uncontrolled);
+        registry.upsert(item("inert", BackgroundWorkStatus::Running, false));
+
+        assert_eq!(
+            registry.live_stoppable_foreground_keys(),
+            vec![BackgroundWorkKey::new(
+                BackgroundWorkKind::Process,
+                "foreground"
+            )]
         );
     }
 }

@@ -90,6 +90,31 @@ impl CommandCategory {
             Self::Other => "keybind.category.other",
         }
     }
+
+    /// Display order in the manager table — the surfaces a user remaps
+    /// most often lead; text-entry internals and miscellany trail.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Global => 0,
+            Self::Workspace => 1,
+            Self::Switchers => 2,
+            Self::Terminal => 3,
+            Self::Projects => 4,
+            Self::Editor => 5,
+            Self::Find => 6,
+            Self::FileFinder => 7,
+            Self::Browser => 8,
+            Self::Git => 9,
+            Self::BigPicture => 10,
+            Self::CommandPalette => 11,
+            Self::Settings => 12,
+            Self::Dialogs => 13,
+            Self::Menus => 14,
+            Self::Skills => 15,
+            Self::TextInput => 16,
+            Self::Other => 17,
+        }
+    }
 }
 
 /// Whether the manager may offer capture for this command's bindings.
@@ -219,6 +244,9 @@ pub fn command_rows() -> Vec<CommandRow> {
             });
         }
     }
+    // Table order is by product surface, not registration order — the
+    // stable sort keeps each category's authored sequence.
+    rows.sort_by_key(|row| row.descriptor.category.rank());
     rows
 }
 
@@ -344,6 +372,7 @@ mod tests {
             crate::app::init_settings_keys(cx);
             crate::app::init_command_palette(cx);
             crate::app::init_file_finder(cx);
+            crate::app::init_sync_branch(cx);
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
@@ -353,6 +382,7 @@ mod tests {
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);
+            crate::app::init_drafts_keys(cx);
             crate::app::init_shortcuts_dialog_keys(cx);
             crate::terminal::init_command_bar_keys(cx);
             crate::bind_keys(cx);

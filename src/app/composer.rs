@@ -66,6 +66,41 @@ impl gpui::Render for SidebarSessionDragView {
     }
 }
 
+/// A starred model selection dragged within the picker to reorder the
+/// favorites section. `index` is its position in `state.favorite_models`.
+#[derive(Clone)]
+pub(super) struct FavoriteModelDrag {
+    pub index: usize,
+    pub label: SharedString,
+}
+
+/// The view GPUI drags under the cursor for a [`FavoriteModelDrag`]: the
+/// starred row's model name as a chip.
+pub(super) struct FavoriteModelDragView {
+    pub label: SharedString,
+}
+
+impl gpui::Render for FavoriteModelDragView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div()
+            .h(px(24.0))
+            .pl(px(6.0))
+            .pr(px(10.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.composer)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .child(icon("icons/star-filled.svg", 11.0, theme.favorite))
+            .child(self.label.clone())
+    }
+}
+
 /// The hover card behind every "Pasted text" chip: the paste's leading
 /// characters wrapped over the raised surface.
 struct PastedTextPreview {
@@ -253,7 +288,13 @@ impl Waku {
                     })
                     .active(|element| element.opacity(0.8))
                     .focus_visible(|style| style.border_color(theme.accent))
-                    .child(SharedString::from(option.label.clone()))
+                    .child(SharedString::from(
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone()),
+                    ))
                     .on_activation(cx, move |this, _, cx| {
                         this.respond_permission(request_id.clone(), option_id.clone(), cx);
                     }),
@@ -291,7 +332,13 @@ impl Waku {
                                     .text_size(sp(12.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(SharedString::from(permission.title.clone())),
+                                    .child(SharedString::from(
+                                            permission
+                                                .title_i18n
+                                                .as_ref()
+                                                .map(waku_client::WireTranslation::render)
+                                                .unwrap_or_else(|| permission.title.clone()),
+                                        )),
                             ),
                     )
                     .child(
@@ -308,7 +355,13 @@ impl Waku {
                             .line_height(sp(16.0))
                             .text_color(theme.text_secondary)
                             .whitespace_normal()
-                            .child(SharedString::from(permission.detail.clone())),
+                            .child(SharedString::from(
+                                permission
+                                    .detail_i18n
+                                    .as_ref()
+                                    .map(waku_client::WireTranslation::render)
+                                    .unwrap_or_else(|| permission.detail.clone()),
+                            )),
                     )
                     .child(buttons),
             ),
@@ -1121,8 +1174,19 @@ impl Waku {
         let theme = Theme::current(cx);
         let session = self.composer_session();
         let provider = session.map(|session| session.provider).unwrap_or_default();
+        let auto_route = session.is_some_and(|session| session.auto_route);
+        let routed = session.is_some_and(|session| session.route_decision.is_some());
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
-        let selected_model_name = self.model_display_name(provider, selected_model);
+        let selected_model_name = if auto_route {
+            tr!("models.auto")
+        } else if routed {
+            tr!(
+                "models.auto_routed",
+                model = self.model_display_name(provider, selected_model)
+            )
+        } else {
+            self.model_display_name(provider, selected_model)
+        };
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
@@ -1130,11 +1194,7 @@ impl Waku {
 
         if !picker_enabled {
             return MenuChip::new("composer-provider-model")
-                .provider(
-                    &theme,
-                    provider,
-                    provider_color(&theme, provider).opacity(0.9),
-                )
+                .provider(&theme, provider, theme.text_tertiary)
                 .label(selected_model_name)
                 .caret(false)
                 .disabled(true)
@@ -1144,12 +1204,12 @@ impl Waku {
         let search_query = self.model_search.read(cx).content().to_owned();
         let normalized_query = search_query.trim().to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
-        let selected_tab = self.model_picker_tab;
-        let selected_model = selected_model.map(str::to_owned);
         let probes = self.probes.clone();
         let disabled_providers = self.state.disabled_providers.clone();
+        let remote = self.daemon.is_remote();
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
         let favorites = self.state.favorite_models.clone();
+        let recents = self.state.recent_model_uses.clone();
         let weak = cx.entity().downgrade();
         let search = self.model_search.clone();
         let search_focus = search.read(cx).focus_handle(cx);
@@ -1168,50 +1228,23 @@ impl Waku {
                 let _ = reset_weak.update(cx, |this, cx| {
                     if open {
                         empty = this.model_picker_has_no_providers();
-                        let session = this.composer_session();
-                        let locked_provider = session
+                        let locked_provider = this
+                            .composer_session()
                             .filter(|session| !session.messages.is_empty())
                             .map(|session| session.provider);
-                        // The picker reopens on the rail it was last left on.
-                        // A remembered tab only falls back when it can no
-                        // longer be drawn — its provider switched off, or
-                        // another provider holding the session lock. Before
-                        // detection settles an unlisted provider tab is "not
-                        // known yet", not unusable, so it survives too. The
-                        // fallback is the session's provider — or, for a draft
-                        // sitting on a provider since switched off, the first
-                        // usable one rather than a tab whose rows the filter
-                        // would leave empty.
-                        let remembered = this.model_picker_tab;
-                        let usable = visible_picker_tabs(
-                            &this.probes,
-                            &this.state.disabled_providers,
-                            locked_provider,
-                        )
-                        .contains(&remembered);
-                        let unknown = this.provider_detection_checked_at.is_none()
-                            && matches!(remembered, ModelPickerTab::Provider(_));
-                        if !usable && !unknown {
-                            let provider =
-                                session.map(|session| session.provider).unwrap_or_default();
-                            let provider = if locked_provider.is_none()
-                                && this.state.disabled_providers.contains(&provider)
-                            {
-                                ProviderKind::ALL
-                                    .into_iter()
-                                    .find(|kind| this.provider_enabled(*kind))
-                                    .unwrap_or(provider)
-                            } else {
-                                provider
-                            };
-                            this.model_picker_tab = ModelPickerTab::Provider(provider);
-                        }
-                        // Opening re-runs the shown tab's catalog discovery so
-                        // models authored since launch appear without a
-                        // restart; the other rails refresh when selected, not
-                        // all at once.
-                        if let ModelPickerTab::Provider(provider) = this.model_picker_tab {
-                            this.refresh_provider_model_discovery(provider);
+                        // Opening re-runs catalog discovery for every provider
+                        // the merged list can draw, so models authored since
+                        // launch appear without a restart.
+                        for kind in ProviderKind::ALL {
+                            if picker_lists_provider(
+                                &this.probes,
+                                &this.state.disabled_providers,
+                                locked_provider,
+                                this.daemon.is_remote(),
+                                kind,
+                            ) {
+                                this.refresh_provider_model_discovery(kind);
+                            }
                         }
                         this.model_picker_highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
@@ -1254,23 +1287,38 @@ impl Waku {
         // Built out here rather than in the body so the key handler and the
         // rendered rows index one ordering and cannot disagree about what
         // `enter` selects.
-        let available_models = Rc::new(if handle.is_open() {
-            visible_picker_models(
+        let available_rows = Rc::new(if handle.is_open() {
+            visible_picker_rows(
                 &probes,
                 &favorites,
+                &recents,
                 &disabled_providers,
                 locked_provider,
-                selected_tab,
                 &normalized_query,
+                self.auto_route_available(),
+                PickerGranularity::Combos,
             )
         } else {
             Vec::new()
         });
         let highlight = self
             .model_picker_highlight
-            .filter(|index| *index < available_models.len());
-        let scroll = self.model_picker_scroll.clone();
+            .filter(|index| *index < available_rows.len());
+        let list_state = self.model_picker_list.clone();
         let scrollbar_state = self.model_picker_scrollbar.clone();
+        // The filled "current" row is the session's effective combo, which a
+        // suffix-encoded id (Cursor) or an unset effort resolves the same way
+        // the traits chip does.
+        let session_selection = session.and_then(|session| {
+            self.session_model_combo(session)
+                .map(|(model_id, effort, fast)| (session.provider, model_id, effort, fast))
+        });
+        // The rail offers a favorites jump only when a combo is starred and a
+        // recents jump only when a session use was recorded — either list may
+        // hold entries the merged rows no longer draw, but the jump then just
+        // clears the filter without a scroll target.
+        let rail_favorites = !favorites.is_empty();
+        let rail_recents = !recents.is_empty();
 
         // With nothing to pick from, naming a model the app cannot run would
         // be a lie. The chip says so instead, and stays a trigger because the
@@ -1282,11 +1330,7 @@ impl Waku {
                 .label(tr!("models.no_providers"))
         } else {
             MenuChip::new("composer-provider-model")
-                .provider(
-                    &theme,
-                    provider,
-                    provider_color(&theme, provider).opacity(0.9),
-                )
+                .provider(&theme, provider, theme.text_tertiary)
                 .label(selected_model_name)
                 .tooltip(tr!("command_palette.choose_model"))
                 .shortcut_action(&ToggleModelPicker)
@@ -1298,13 +1342,33 @@ impl Waku {
             MenuAlign::AboveLeft,
             move |popover, _window, _cx| {
                 let popover = popover.clone();
-                let available_models = available_models.clone();
+                let available_rows = available_rows.clone();
 
                 if no_providers {
                     return model_picker_empty_state(&theme, &empty_focus, popover, weak.clone());
                 }
 
-                let mut sidebar = div()
+                // The rail jumps rather than filters: a button drops the
+                // query and brings its section's first row into view.
+                let rail_target = |id: SharedString, section: ModelPickerSection| {
+                    let rail_weak = weak.clone();
+                    div()
+                        .id(id)
+                        .w(px(38.0))
+                        .h(px(38.0))
+                        .rounded(px(9.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .hover(|element| element.bg(theme.overlay))
+                        .on_click(move |_, _, cx| {
+                            let _ = rail_weak.update(cx, |this, cx| {
+                                this.scroll_model_picker_to_section(section, cx);
+                            });
+                        })
+                };
+                let mut rail = div()
                     .w(px(50.0))
                     .h_full()
                     .flex_none()
@@ -1318,106 +1382,37 @@ impl Waku {
                     .bg(theme.canvas)
                     .border_r(hairline())
                     .border_color(theme.separator);
-
-                let favorites_selected = selected_tab == ModelPickerTab::Favorites && !searching;
-                let favorite_weak = weak.clone();
-                sidebar = sidebar
-                    .child(
-                        div()
-                            .id("model-tab-favorites")
-                            .w(px(38.0))
-                            .h(px(38.0))
-                            .rounded(px(9.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .when(favorites_selected, |element| {
-                                element.bg(theme.overlay_strong)
-                            })
-                            .hover(|element| element.bg(theme.overlay))
-                            .child(icon(
-                                "icons/star.svg",
-                                17.0,
-                                if favorites_selected {
-                                    theme.text
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .on_click(move |_, _, cx| {
-                                let _ = favorite_weak.update(cx, |this, cx| {
-                                    this.select_model_picker_tab_from_rail(
-                                        ModelPickerTab::Favorites,
-                                        cx,
-                                    );
-                                });
-                            }),
-                    )
-                    .child(
+                if rail_favorites {
+                    rail = rail.child(
+                        rail_target("model-rail-favorites".into(), ModelPickerSection::Favorites)
+                            .child(icon("icons/star.svg", 17.0, theme.text_tertiary)),
+                    );
+                }
+                if rail_recents {
+                    rail = rail.child(
+                        rail_target("model-rail-recents".into(), ModelPickerSection::Recents)
+                            .child(icon("icons/hourglass.svg", 17.0, theme.text_tertiary)),
+                    );
+                }
+                if rail_favorites || rail_recents {
+                    rail = rail.child(
                         div()
                             .w(px(34.0))
                             .h(hairline())
                             .my(px(3.0))
                             .bg(theme.separator),
                     );
-
-                // One predicate with the `tab` cycle, so clicking and cycling
-                // agree on which tabs are usable.
-                let rail_tabs = visible_picker_tabs(&probes, &disabled_providers, locked_provider);
+                }
                 for kind in ProviderKind::ALL {
-                    // A provider with no CLI on the machine, or one switched
-                    // off in the Providers settings, leaves the rail entirely
-                    // rather than sitting there dimmed: a tab that can never
-                    // open only advertises a choice settings already ruled
-                    // out. Being locked out by the current session is a
-                    // different claim — that tab stays, dimmed, because it is
-                    // true only until the next session.
-                    if !picker_rail_shows_provider(
-                        &probes,
-                        &disabled_providers,
-                        locked_provider,
-                        kind,
-                    ) {
+                    if !picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, kind) {
                         continue;
                     }
-                    let usable = rail_tabs.contains(&ModelPickerTab::Provider(kind));
-                    let selected = selected_tab == ModelPickerTab::Provider(kind) && !searching;
-                    let tab_weak = weak.clone();
-                    sidebar = sidebar.child(
-                        div()
-                            .id(SharedString::from(format!("model-tab-{}", kind.id())))
-                            .w(px(38.0))
-                            .h(px(38.0))
-                            .rounded(px(9.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .when(selected, |element| element.bg(theme.overlay_strong))
-                            .when(!usable, |element| element.opacity(0.35))
-                            .when(usable, |element| {
-                                element.hover(|element| element.bg(theme.overlay)).on_click(
-                                    move |_, _, cx| {
-                                        let _ = tab_weak.update(cx, |this, cx| {
-                                            this.select_model_picker_tab_from_rail(
-                                                ModelPickerTab::Provider(kind),
-                                                cx,
-                                            );
-                                        });
-                                    },
-                                )
-                            })
-                            .child(provider_mark(
-                                &theme,
-                                kind,
-                                18.0,
-                                provider_color(&theme, kind).opacity(if selected {
-                                    1.0
-                                } else {
-                                    0.82
-                                }),
-                            )),
+                    rail = rail.child(
+                        rail_target(
+                            SharedString::from(format!("model-rail-{}", kind.id())),
+                            ModelPickerSection::Provider(kind),
+                        )
+                        .child(provider_mark(&theme, kind, 18.0, theme.text_tertiary)),
                     );
                 }
 
@@ -1443,27 +1438,25 @@ impl Waku {
                             .child(div().flex_1().min_w_0().child(search.clone())),
                     );
 
-                let mut rows = div()
-                    .id("model-picker-list")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&scroll)
-                    .p(px(9.0));
-                if available_models.is_empty() {
+                let mut rows = div().id("model-picker-list").size_full();
+                if available_rows.is_empty() {
                     let label = if searching {
                         tr!("models.none_found")
-                    } else if selected_tab == ModelPickerTab::Favorites {
-                        tr!("models.favorite_hint")
-                    } else if matches!(
-                        selected_tab,
-                        ModelPickerTab::Provider(provider)
-                            if pending_discoveries.contains(&provider)
-                    ) {
+                    } else if ProviderKind::ALL.into_iter().any(|kind| {
+                        pending_discoveries.contains(&kind)
+                            && picker_lists_provider(
+                                &probes,
+                                &disabled_providers,
+                                locked_provider,
+                                remote,
+                                kind,
+                            )
+                    }) {
                         tr!("models.loading")
                     } else {
                         tr!("models.none_reported")
                     };
-                    rows = rows.child(
+                    rows = rows.p(px(9.0)).child(
                         div()
                             .h_full()
                             .flex()
@@ -1473,136 +1466,361 @@ impl Waku {
                             .text_color(theme.text_ghost)
                             .child(label),
                     );
-                }
-
-                for (row_index, (kind, model)) in available_models.iter().enumerate() {
-                    let kind = *kind;
-                    let is_selected =
-                        kind == provider && selected_model.as_deref() == Some(model.id.as_str());
-                    let is_highlighted = highlight == Some(row_index);
-                    let is_favorite = favorites
-                        .iter()
-                        .any(|favorite| favorite.provider == kind && favorite.model == model.id);
-                    let model_id = model.id.clone();
-                    let select_weak = weak.clone();
-                    let select_popover = popover.clone();
-                    let favorite_model_id = model.id.clone();
-                    let favorite_weak = weak.clone();
-                    let subtitle = model_picker_subtitle(kind, model.sub_provider.as_deref());
+                } else {
+                    // The list is virtualized and every row is one height, so
+                    // the item count resyncs here and before every scroll —
+                    // `reset` drops the scroll position, which is also what a
+                    // changed total should mean.
+                    if list_state.item_count() != available_rows.len() {
+                        list_state.reset_with_uniform_height(
+                            available_rows.len(),
+                            MODEL_PICKER_ROW_HEIGHT,
+                        );
+                    }
+                    let list_rows = available_rows.clone();
+                    let list_weak = weak.clone();
+                    let list_popover = popover.clone();
+                    let list_selection = session_selection.clone();
+                    let list_auto = auto_route;
                     rows = rows.child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "model-row-{}-{}",
-                                kind.id(),
-                                model.id
-                            )))
-                            .h(px(58.0))
-                            .px(px(12.0))
-                            .rounded(px(11.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(10.0))
-                            .cursor_default()
-                            // Reserved on every row so highlighting one cannot
-                            // resize it and shift the list by a pixel.
-                            .border(hairline())
-                            .border_color(gpui::transparent_black())
-                            .when(is_selected, |element| element.bg(theme.overlay_strong))
-                            // The keyboard cursor reads as a ring rather than a
-                            // fill, so it stays legible on the current model's
-                            // already-filled row.
-                            .when(is_highlighted, |element| {
-                                element.bg(theme.overlay).border_color(theme.accent)
-                            })
-                            .hover(|element| element.bg(theme.overlay))
-                            .active(|element| element.opacity(0.85))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .child(
+                        list(list_state.clone(), move |row_index, window, cx| {
+                            let theme = Theme::current(cx);
+                            let weak = &list_weak;
+                            let popover = &list_popover;
+                            let session_selection = &list_selection;
+                            let auto_route = list_auto;
+                            let Some(row) = list_rows.get(row_index) else {
+                                return div().into_any_element();
+                            };
+                            let is_highlighted = highlight == Some(row_index);
+                            if row.auto {
+                                // The router row: same hit target and highlight
+                                // treatment as a model row, but the star slot stays
+                                // empty — there is no concrete model to favorite.
+                                let select_weak = weak.clone();
+                                let select_popover = popover.clone();
+                                return div()
+                                        .id("model-row-auto")
+                                        .w_full()
+                                        .h(MODEL_PICKER_ROW_HEIGHT)
+                                        .px(px(12.0))
+                                        .rounded(px(11.0))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(10.0))
+                                        .cursor_default()
+                                        .border(hairline())
+                                        .border_color(gpui::transparent_black())
+                                        .when(auto_route, |element| element.bg(theme.overlay_strong))
+                                        .when(is_highlighted, |element| {
+                                            element.bg(theme.overlay).border_color(theme.accent)
+                                        })
+                                        .hover(|element| element.bg(theme.overlay))
+                                        .active(|element| element.opacity(0.85))
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(8.0))
+                                                        .child(
+                                                            div()
+                                                                .min_w_0()
+                                                                .truncate()
+                                                                .text_size(sp(13.0))
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(theme.text)
+                                                                .child(SharedString::from(tr!(
+                                                                    "models.auto"
+                                                                ))),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .flex_none()
+                                                                .truncate()
+                                                                .text_size(sp(12.5))
+                                                                .text_color(theme.text_tertiary)
+                                                                .child(SharedString::from(tr!(
+                                                                    "models.auto_hint"
+                                                                ))),
+                                                        ),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .mt(px(4.0))
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(8.0))
+                                                        .child(icon(
+                                                            "icons/provider-typesafe.svg",
+                                                            12.0,
+                                                            theme.text_tertiary,
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .min_w_0()
+                                                                .truncate()
+                                                                .text_size(sp(12.5))
+                                                                .text_color(theme.text_tertiary)
+                                                                .child("Jev"),
+                                                        ),
+                                                ),
+                                        )
+                                        .on_click(move |_, window, cx| {
+                                            let _ = select_weak.update(cx, |this, cx| {
+                                                this.choose_auto_route(cx);
+                                            });
+                                            select_popover.close(window, cx);
+                                        })
+                                        .into_any_element();
+                            }
+                            let kind = row.provider;
+                            let model = &row.model;
+                            let is_selected = session_selection.as_ref().is_some_and(
+                                |(provider, model_id, effort, fast)| {
+                                    *provider == kind
+                                        && model_id == &model.id
+                                        && effort == &row.effort
+                                        && *fast == row.fast
+                                },
+                            );
+                            let favorite_index = row.favorite_index;
+                            let is_favorite = favorite_index.is_some();
+                            let model_id = model.id.clone();
+                            let favorite_model_id = model.id.clone();
+                            let effort = row.effort.clone();
+                            let favorite_effort = row.effort.clone();
+                            let fast = row.fast;
+                            let select_weak = weak.clone();
+                            let select_popover = popover.clone();
+                            let favorite_weak = weak.clone();
+                            let drop_weak = weak.clone();
+                            let effort_label = row.effort.as_deref().and_then(|effort| {
+                                model
+                                    .reasoning_efforts
+                                    .iter()
+                                    .find(|option| option.id == effort)
+                                    .map(|option| {
+                                        option
+                                            .label_i18n
+                                            .as_ref()
+                                            .map(waku_client::WireTranslation::render)
+                                            .unwrap_or_else(|| option.label.clone())
+                                    })
+                            });
+                            let sub_provider = model
+                                .sub_provider
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|name| !name.is_empty());
+                            let detail = model_picker_subtitle(kind, sub_provider);
+                            // The ⌘⌥1–⌘⌥9 chord rides on the first nine starred rows.
+                            // Resolve against the live keymap so a remapped chord
+                            // still advertises itself; fall back to the default's
+                            // label when the picker's own context path cannot see the
+                            // scoped binding.
+                            let shortcut_hint = favorite_index.filter(|index| *index < 9).map(|index| {
+                                crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                                    .resolve(window, cx)
+                                    .unwrap_or_else(|| {
+                                        crate::ui::shortcut::sequence_label(&format!(
+                                            "secondary-alt-{}",
+                                            index + 1
+                                        ))
+                                    })
+                            });
+                            let mut row_element = div()
+                                .id(SharedString::from(format!(
+                                    "model-row-{}-{}-{}-{}",
+                                    kind.id(),
+                                    model.id,
+                                    row.effort.as_deref().unwrap_or("base"),
+                                    row.fast
+                                )))
+                                .w_full()
+                                .h(MODEL_PICKER_ROW_HEIGHT)
+                                .px(px(12.0))
+                                .rounded(px(11.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(10.0))
+                                .cursor_default()
+                                // Reserved on every row so highlighting one cannot
+                                // resize it and shift the list by a pixel.
+                                .border(hairline())
+                                .border_color(gpui::transparent_black())
+                                .when(is_selected, |element| element.bg(theme.overlay_strong))
+                                // The keyboard cursor reads as a ring rather than a
+                                // fill, so it stays legible on the current model's
+                                // already-filled row.
+                                .when(is_highlighted, |element| {
+                                    element.bg(theme.overlay).border_color(theme.accent)
+                                })
+                                .hover(|element| element.bg(theme.overlay))
+                                .active(|element| element.opacity(0.85))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.0))
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .truncate()
+                                                        .text_size(sp(13.0))
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .text_color(theme.text)
+                                                        .child(SharedString::from(
+                                                            model
+                                                                .name_i18n
+                                                                .as_ref()
+                                                                .map(waku_client::WireTranslation::render)
+                                                                .unwrap_or_else(|| model.name.clone()),
+                                                        )),
+                                                )
+                                                .when_some(effort_label, |element, label| {
+                                                    element.child(
+                                                        div()
+                                                            .flex_none()
+                                                            .truncate()
+                                                            .text_size(sp(12.5))
+                                                            .text_color(theme.text_tertiary)
+                                                            .child(SharedString::from(label)),
+                                                    )
+                                                })
+                                                .when(fast, |element| {
+                                                    element.child(icon(
+                                                        "icons/zap.svg",
+                                                        11.5,
+                                                        theme.text_tertiary,
+                                                    ))
+                                                }),
+                                        )
+                                        .child(
+                                            div()
+                                                .mt(px(4.0))
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.0))
+                                                .child(provider_mark(
+                                                    &theme,
+                                                    kind,
+                                                    12.0,
+                                                    theme.text_tertiary,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .truncate()
+                                                        .text_size(sp(12.5))
+                                                        .text_color(theme.text_tertiary)
+                                                        .child(SharedString::from(detail)),
+                                                ),
+                                        ),
+                                )
+                                .when_some(shortcut_hint, |element, hint| {
+                                    element.child(
                                         div()
-                                            .truncate()
-                                            .text_size(sp(13.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(theme.text)
-                                            .child(SharedString::from(model.name.clone())),
+                                            .flex_none()
+                                            .text_size(sp(11.0))
+                                            .text_color(theme.text_ghost)
+                                            .child(SharedString::from(hint)),
                                     )
-                                    .child(
-                                        div()
-                                            .mt(px(4.0))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(6.0))
-                                            .child(provider_mark(
-                                                &theme,
-                                                kind,
-                                                10.5,
-                                                provider_color(&theme, kind).opacity(0.85),
-                                            ))
-                                            .child(
-                                                div()
-                                                    .truncate()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(SharedString::from(subtitle)),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "favorite-model-{}-{}",
-                                        kind.id(),
-                                        model.id
-                                    )))
-                                    .w(px(28.0))
-                                    .h(px(28.0))
-                                    .rounded(px(8.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .hover(|element| element.bg(theme.overlay_strong))
-                                    .child(icon(
-                                        if is_favorite {
-                                            "icons/star-filled.svg"
-                                        } else {
-                                            "icons/star.svg"
-                                        },
-                                        14.0,
-                                        if is_favorite {
-                                            theme.favorite
-                                        } else {
-                                            theme.text_ghost
-                                        },
-                                    ))
-                                    .on_click(move |_, _, cx| {
-                                        cx.stop_propagation();
-                                        let _ = favorite_weak.update(cx, |this, cx| {
-                                            this.toggle_favorite_model(
-                                                kind,
-                                                favorite_model_id.clone(),
-                                                cx,
-                                            );
-                                        });
-                                    }),
-                            )
-                            .on_click(move |_, window, cx| {
-                                let _ = select_weak.update(cx, |this, cx| {
-                                    this.choose_model(kind, model_id.clone(), cx);
+                                })
+                                .child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "favorite-model-{}-{}-{}-{}",
+                                            kind.id(),
+                                            model.id,
+                                            row.effort.as_deref().unwrap_or("base"),
+                                            row.fast
+                                        )))
+                                        .w(px(28.0))
+                                        .h(px(28.0))
+                                        .rounded(px(8.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .hover(|element| element.bg(theme.overlay_strong))
+                                        .child(icon(
+                                            if is_favorite {
+                                                "icons/star-filled.svg"
+                                            } else {
+                                                "icons/star.svg"
+                                            },
+                                            14.0,
+                                            if is_favorite {
+                                                theme.favorite
+                                            } else {
+                                                theme.text_ghost
+                                            },
+                                        ))
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            let _ = favorite_weak.update(cx, |this, cx| {
+                                                this.toggle_favorite_model(
+                                                    kind,
+                                                    favorite_model_id.clone(),
+                                                    favorite_effort.clone(),
+                                                    fast,
+                                                    cx,
+                                                );
+                                            });
+                                        }),
+                                )
+                                .on_click(move |_, window, cx| {
+                                    let _ = select_weak.update(cx, |this, cx| {
+                                        this.choose_model(kind, model_id.clone(), effort.clone(), fast, cx);
+                                    });
+                                    select_popover.close(window, cx);
                                 });
-                                select_popover.close(window, cx);
-                            }),
+                            // Starred rows are the drag-reorder surface: dragging one
+                            // onto another favorite takes that row's slot.
+                            if let Some(target) = favorite_index {
+                                let label = SharedString::from(model.name.clone());
+                                row_element = row_element
+                                    .on_drag(
+                                        FavoriteModelDrag {
+                                            index: target,
+                                            label,
+                                        },
+                                        move |drag, _, _, cx| {
+                                            cx.new(|_| FavoriteModelDragView {
+                                                label: drag.label.clone(),
+                                            })
+                                        },
+                                    )
+                                    .drag_over::<FavoriteModelDrag>(move |style, _, _, _| {
+                                        style.bg(theme.overlay_strong)
+                                    })
+                                    .on_drop(move |drag: &FavoriteModelDrag, _, cx| {
+                                        let _ = drop_weak.update(cx, |this, cx| {
+                                            this.move_favorite_model(drag.index, target, cx);
+                                        });
+                                    });
+                            }
+                            row_element.into_any_element()
+                        })
+                        .size_full()
+                        .p(px(9.0)),
                     );
                 }
 
-                let next_models = available_models.clone();
-                let previous_models = available_models.clone();
-                let confirm_models = available_models.clone();
+                let next_models = available_rows.clone();
+                let previous_models = available_rows.clone();
+                let confirm_models = available_rows.clone();
                 let next_weak = weak.clone();
                 let previous_weak = weak.clone();
-                let next_tab_weak = weak.clone();
-                let previous_tab_weak = weak.clone();
+                let next_section_weak = weak.clone();
+                let previous_section_weak = weak.clone();
                 let confirm_weak = weak.clone();
                 let confirm_popover = popover.clone();
                 div()
@@ -1612,7 +1830,7 @@ impl Waku {
                     .overflow_hidden()
                     .border(hairline())
                     .border_color(theme.border_subtle)
-                    .bg(theme.raised)
+                    .bg(theme.surface)
                     .shadow_lg()
                     .flex()
                     // The filter field keeps focus and the selected row is only
@@ -1631,13 +1849,13 @@ impl Waku {
                         });
                     })
                     .on_action(move |_: &SelectNextTab, _, cx| {
-                        let _ = next_tab_weak.update(cx, |this, cx| {
-                            this.cycle_model_picker_tab("down", cx);
+                        let _ = next_section_weak.update(cx, |this, cx| {
+                            this.cycle_model_picker_section("down", cx);
                         });
                     })
                     .on_action(move |_: &SelectPreviousTab, _, cx| {
-                        let _ = previous_tab_weak.update(cx, |this, cx| {
-                            this.cycle_model_picker_tab("up", cx);
+                        let _ = previous_section_weak.update(cx, |this, cx| {
+                            this.cycle_model_picker_section("up", cx);
                         });
                     })
                     .on_action(move |_: &ConfirmEntry, window, cx| {
@@ -1647,7 +1865,7 @@ impl Waku {
                         confirm_popover.close(window, cx);
                         window.refresh();
                     })
-                    .child(sidebar)
+                    .child(rail)
                     .child(
                         div()
                             .min_w_0()
@@ -1664,7 +1882,7 @@ impl Waku {
                                     .min_h_0()
                                     .relative()
                                     .child(rows)
-                                    .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                                    .child(scrollbar::vertical(&list_state, &scrollbar_state)),
                             ),
                     )
                     .into_any_element()
@@ -1677,95 +1895,200 @@ impl Waku {
     fn move_model_picker_highlight(
         &mut self,
         key: &str,
-        models: &[(ProviderKind, ProviderModel)],
+        rows: &[ModelPickerRow],
         cx: &mut Context<Self>,
     ) {
         // With nothing highlighted yet the cursor sits on the session's
-        // model — the row the reveal scrolled into view — so the first arrow
-        // moves relative to it rather than jumping to an end. A row that is
-        // not listed (another tab's list, an unknown model) keeps the old
+        // combo — the row the reveal scrolled into view — so the first arrow
+        // moves relative to it rather than jumping to an end. A combo that is
+        // not listed (an unknown model, an unlisted effort) keeps the old
         // behavior of starting at an edge.
         let current = self
             .model_picker_highlight
-            .filter(|index| *index < models.len())
+            .filter(|index| *index < rows.len())
             .or_else(|| {
-                let session = self.composer_session();
-                let provider = session.map(|session| session.provider).unwrap_or_default();
-                let model = session.and_then(|session| self.catalog_model_id_for_session(session));
-                picker_selected_model_index(provider, model, models)
+                let session = self.composer_session()?;
+                let selection = self
+                    .session_model_combo(session)
+                    .map(|(model, effort, fast)| (session.provider, model, effort, fast));
+                picker_selected_row_index(selection.as_ref(), session.auto_route, rows)
             });
-        let Some(next) = next_picker_highlight(current, models.len(), key) else {
+        let Some(next) = next_picker_highlight(current, rows.len(), key) else {
             return;
         };
         self.model_picker_highlight = Some(next);
-        self.model_picker_scroll.scroll_to_item(next);
+        self.model_picker_list.scroll_to_reveal_item(next);
         cx.notify();
     }
 
-    /// Step the sidebar rail to the adjacent usable tab, wrapping at both
-    /// ends. `tab`/`shift-tab` land here from under the focused filter field,
-    /// the same route the arrows take. A live query hides which tab is
-    /// selected and searches across all of them, so cycling waits until the
-    /// field is cleared.
-    fn cycle_model_picker_tab(&mut self, key: &str, cx: &mut Context<Self>) {
-        if !self.model_search.read(cx).content().trim().is_empty() {
-            return;
+    /// Keep the virtualized list's item count in step with the rows a scroll
+    /// is about to target — `reset` drops the scroll position, so it only
+    /// runs when the total changed, right before the scroll is issued.
+    fn sync_model_picker_list(&self, count: usize) {
+        if self.model_picker_list.item_count() != count {
+            self.model_picker_list
+                .reset_with_uniform_height(count, MODEL_PICKER_ROW_HEIGHT);
         }
+    }
+
+    /// Bring the current selection's row into view whenever the picker shows
+    /// the unfiltered list — on open and on a cleared query.
+    ///
+    /// The offset sits in the list state until the row list next paints, so
+    /// it may be issued from the open toggle before the deferred panel
+    /// exists, and a provider whose models are still loading reveals the row
+    /// once they arrive. Without a row to reveal it falls back to the top, so
+    /// a scroll offset from an earlier open never leaks into a fresh list.
+    pub(super) fn reveal_selected_picker_model(&self) {
+        let session = self.composer_session();
+        let locked_provider = session
+            .filter(|session| !session.messages.is_empty())
+            .map(|session| session.provider);
+        let rows = visible_picker_rows(
+            &self.probes,
+            &self.state.favorite_models,
+            &self.state.recent_model_uses,
+            &self.state.disabled_providers,
+            locked_provider,
+            "",
+            self.auto_route_available(),
+            PickerGranularity::Combos,
+        );
+        let selection = session.and_then(|session| {
+            self.session_model_combo(session)
+                .map(|(model, effort, fast)| (session.provider, model, effort, fast))
+        });
+        let auto_route = session.is_some_and(|session| session.auto_route);
+        let index =
+            picker_selected_row_index(selection.as_ref(), auto_route, &rows).unwrap_or(0);
+        self.sync_model_picker_list(rows.len());
+        self.model_picker_list.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: Pixels::ZERO,
+        });
+    }
+
+    /// A rail button's jump: drop the filter and bring the section's first
+    /// row into view, leaving the keyboard cursor on it so the next arrow
+    /// moves from there. Clearing the query routes back through the search
+    /// subscription's selection reveal, so the section scroll issued after
+    /// it is the request that lands.
+    fn scroll_model_picker_to_section(
+        &mut self,
+        section: ModelPickerSection,
+        cx: &mut Context<Self>,
+    ) {
+        self.model_search.update(cx, |search, cx| search.clear(cx));
         let locked_provider = self
             .composer_session()
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
-        let tabs = visible_picker_tabs(
+        let rows = visible_picker_rows(
             &self.probes,
+            &self.state.favorite_models,
+            &self.state.recent_model_uses,
             &self.state.disabled_providers,
             locked_provider,
+            "",
+            self.auto_route_available(),
+            PickerGranularity::Combos,
         );
-        let current = tabs.iter().position(|tab| *tab == self.model_picker_tab);
-        let Some(next) = next_picker_highlight(current, tabs.len(), key) else {
-            return;
-        };
-        self.select_model_picker_tab(tabs[next], cx);
+        let first = rows
+            .iter()
+            .position(|row| picker_row_section(row) == section);
+        self.model_picker_highlight = first;
+        if let Some(index) = first {
+            self.sync_model_picker_list(rows.len());
+            self.model_picker_list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: Pixels::ZERO,
+            });
+        }
+        cx.notify();
     }
 
-    /// Bring the current model's row into view whenever the picker shows the
-    /// unfiltered list — on open, on a cleared query, and on tab switches.
-    ///
-    /// The request parks in the scroll handle until the row list next paints,
-    /// so it may be issued from the open toggle before the deferred panel
-    /// exists, and a tab whose models are still loading reveals the row once
-    /// they arrive. Without a row to reveal it falls back to the top, so a
-    /// scroll offset from an earlier open never leaks into a fresh list.
-    pub(super) fn reveal_selected_picker_model(&self) {
+    /// Step the rail to the adjacent section, wrapping at both ends.
+    /// `tab`/`shift-tab` land here from under the focused filter field, the
+    /// same route the arrows take. A live query filters across all
+    /// sections, so cycling waits until the field is cleared.
+    fn cycle_model_picker_section(&mut self, key: &str, cx: &mut Context<Self>) {
+        if !self.model_search.read(cx).content().trim().is_empty() {
+            return;
+        }
         let session = self.composer_session();
-        let provider = session.map(|session| session.provider).unwrap_or_default();
-        let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
-        let models = visible_picker_models(
+        let rows = visible_picker_rows(
             &self.probes,
             &self.state.favorite_models,
+            &self.state.recent_model_uses,
             &self.state.disabled_providers,
             locked_provider,
-            self.model_picker_tab,
             "",
+            self.auto_route_available(),
+            PickerGranularity::Combos,
         );
-        let index = picker_selected_model_index(provider, selected_model, &models).unwrap_or(0);
-        self.model_picker_scroll.scroll_to_item(index);
+        let mut sections = Vec::new();
+        let mut previous = None;
+        for (index, row) in rows.iter().enumerate() {
+            let section = picker_row_section(row);
+            if previous != Some(section) {
+                sections.push(index);
+                previous = Some(section);
+            }
+        }
+        if sections.is_empty() {
+            return;
+        }
+        // The section the keyboard cursor sits in — seeded from the
+        // session combo's row the way the reveal lands, so the first tab
+        // steps relative to the selection rather than an end.
+        let current_row = self.model_picker_highlight.unwrap_or_else(|| {
+            let selection = session.and_then(|session| {
+                self.session_model_combo(session)
+                    .map(|(model, effort, fast)| (session.provider, model, effort, fast))
+            });
+            picker_selected_row_index(
+                selection.as_ref(),
+                session.is_some_and(|session| session.auto_route),
+                &rows,
+            )
+            .unwrap_or(0)
+        });
+        let current_section = sections
+            .iter()
+            .rposition(|start| *start <= current_row)
+            .unwrap_or(0);
+        let Some(next) = next_picker_highlight(Some(current_section), sections.len(), key) else {
+            return;
+        };
+        self.model_picker_highlight = Some(sections[next]);
+        self.sync_model_picker_list(rows.len());
+        self.model_picker_list.scroll_to(ListOffset {
+            item_ix: sections[next],
+            offset_in_item: Pixels::ZERO,
+        });
+        cx.notify();
     }
 
     /// Take the row the selection is on, defaulting to the first so `enter`
     /// works the moment the panel opens.
-    fn choose_highlighted_model(
-        &mut self,
-        models: &[(ProviderKind, ProviderModel)],
-        cx: &mut Context<Self>,
-    ) {
-        let Some((kind, model)) = models.get(self.model_picker_highlight.unwrap_or(0)) else {
+    fn choose_highlighted_model(&mut self, rows: &[ModelPickerRow], cx: &mut Context<Self>) {
+        let Some(row) = rows.get(self.model_picker_highlight.unwrap_or(0)) else {
             return;
         };
-        let (kind, model_id) = (*kind, model.id.clone());
-        self.choose_model(kind, model_id, cx);
+        if row.auto {
+            self.choose_auto_route(cx);
+            return;
+        }
+        let (kind, model_id, effort, fast) = (
+            row.provider,
+            row.model.id.clone(),
+            row.effort.clone(),
+            row.fast,
+        );
+        self.choose_model(kind, model_id, effort, fast, cx);
     }
 
     pub(super) fn render_model_traits_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1828,7 +2151,13 @@ impl Waku {
                     .reasoning_efforts
                     .iter()
                     .find(|option| option.id == selected)
-                    .map(|option| option.label.clone())
+                    .map(|option| {
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone())
+                    })
             })
         };
 
@@ -1853,7 +2182,13 @@ impl Waku {
                 .service_tiers
                 .iter()
                 .find(|option| option.id == selected_tier)
-                .map(|option| option.label.clone())
+                .map(|option| {
+                    option
+                        .label_i18n
+                        .as_ref()
+                        .map(waku_client::WireTranslation::render)
+                        .unwrap_or_else(|| option.label.clone())
+                })
                 .unwrap_or_else(|| selected_tier.clone())
         };
         let selected_window = session
@@ -1883,7 +2218,13 @@ impl Waku {
                     .context_windows
                     .iter()
                     .find(|option| option.id == selected)
-                    .map(|option| option.label.clone())
+                    .map(|option| {
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone())
+                    })
             });
 
         let fast = selected_tier == "fast" || tier_label.eq_ignore_ascii_case("fast");
@@ -1895,22 +2236,17 @@ impl Waku {
             (label, None) => label,
         };
         let reasoning_efforts = model.reasoning_efforts.clone();
-        let default_effort = model.default_reasoning_effort.clone();
         let service_tiers = model.service_tiers.clone();
         let context_windows = model.context_windows.clone();
-        let default_window = model.default_context_window.clone();
-        let default_tier = model
-            .default_service_tier
-            .clone()
-            .unwrap_or_else(|| "default".to_owned());
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("model-traits", cx);
         Some(dropdown_menu(
             MenuChip::new("model-traits")
                 .when(fast, |trigger| {
-                    trigger.icon("icons/zap.svg", theme.text_secondary)
+                    trigger.icon("icons/zap.svg", theme.text_tertiary)
                 })
                 .label(trigger_label)
+                .label_color(theme.text_tertiary)
                 .caret(false)
                 .selected(handle.is_open()),
             "model-traits-menu",
@@ -1926,7 +2262,6 @@ impl Waku {
                             traits_choice(
                                 theme,
                                 tr!("common.default"),
-                                true,
                                 selected_effort.is_none(),
                             )
                             .on_click(move |_, cx| {
@@ -1938,12 +2273,15 @@ impl Waku {
                     }
                     for option in reasoning_efforts.clone() {
                         let weak = weak.clone();
+                        let label = option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or(option.label);
                         let effort = option.id;
-                        let is_default = !supports_default_reset
-                            && default_effort.as_deref() == Some(effort.as_str());
                         let selected = selected_effort.as_deref() == Some(effort.as_str());
                         items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
+                            traits_choice(theme, label, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_reasoning_effort(effort.clone(), cx);
@@ -1963,7 +2301,6 @@ impl Waku {
                         traits_choice(
                             theme,
                             tr!("models.standard"),
-                            default_tier == "default",
                             selected_tier == "default",
                         )
                         .on_click(move |_, cx| {
@@ -1974,11 +2311,15 @@ impl Waku {
                     );
                     for option in service_tiers.clone() {
                         let weak = weak.clone();
+                        let label = option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or(option.label);
                         let tier = option.id;
-                        let is_default = default_tier == tier;
                         let selected = selected_tier == tier;
                         items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
+                            traits_choice(theme, label, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_service_tier(tier.clone(), cx);
@@ -1995,11 +2336,15 @@ impl Waku {
                     items.push(MenuItem::Header(tr!("models.context_window").into()));
                     for option in context_windows.clone() {
                         let weak = weak.clone();
+                        let label = option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or(option.label);
                         let window = option.id;
-                        let is_default = default_window.as_deref() == Some(window.as_str());
                         let selected = selected_window.as_deref() == Some(window.as_str());
                         items.push(
-                            traits_choice(theme, option.label, is_default, selected).on_click(
+                            traits_choice(theme, label, selected).on_click(
                                 move |_, cx| {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.set_context_window(window.clone(), cx);
@@ -3922,6 +4267,20 @@ impl Waku {
             )
     }
 
+    /// Per-render push of the composer card's native glass surface — the
+    /// counterpart of `sync_browser_webviews`; see
+    /// [`crate::platform::sync_composer_glass`] for the probe-generation
+    /// scheme that keeps it from outliving the card.
+    pub(super) fn sync_composer_glass(&self, window: &Window, cx: &mut Context<Self>) {
+        let theme = Theme::current(cx);
+        crate::platform::sync_composer_glass(
+            window,
+            theme.composer,
+            self.sidebar_transparency_amount(),
+            crate::platform::composer_glass_enabled(self.sidebar_transparency()),
+        );
+    }
+
     pub(super) fn render_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let session = self.composer_session();
@@ -3975,6 +4334,10 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
+        // With transparent chrome on, the card's fill is the liquid-glass
+        // surface sitting behind the Metal layer — the probe below keeps its
+        // frame pinned to these bounds.
+        let composer_glass = crate::platform::composer_glass_enabled(self.sidebar_transparency());
         div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
             div()
                 .w_full()
@@ -3983,7 +4346,11 @@ impl Waku {
                 .rounded(px(18.0))
                 .border(hairline())
                 .border_color(theme.border_subtle)
-                .bg(theme.composer)
+                .bg(if composer_glass {
+                    gpui::transparent_black()
+                } else {
+                    theme.composer
+                })
                 // Horizontal insets live on each row (and inside the field's
                 // scroll viewport, via `padding_x`) rather than on the card,
                 // so the field's overlay scrollbar can hug the card's edge.
@@ -4013,6 +4380,19 @@ impl Waku {
                 .child(super::autocomplete::composer_card_bounds_probe(
                     self.composer_autocomplete.card_bounds_cell(),
                 ))
+                // The liquid-glass surface behind the card follows these
+                // bounds every paint; unmounting the card starves the probe
+                // and the per-render sync hides it.
+                .child(
+                    canvas(
+                        move |bounds: Bounds<Pixels>, window, _| {
+                            crate::platform::report_composer_glass_bounds(window, bounds);
+                        },
+                        |_, _, _, _| (),
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
                 // Only while the popup has selectable rows: the key context
                 // routes arrows, `enter`, `tab` and `escape` here as actions,
                 // out from under the focused field. The loading state takes
@@ -4062,6 +4442,7 @@ impl Waku {
                         .children(self.render_model_traits_control(cx))
                         .children(self.render_agent_preset_control(cx))
                         .child(self.render_access_control(cx))
+                        .children(self.render_drafts_count_button(cx))
                         .children(self.render_goal_control(cx))
                         .child(div().flex_1())
                         .child(match submit_action {
@@ -5618,39 +5999,27 @@ pub(super) fn next_picker_highlight(
     }
 }
 
-/// The row `provider`/`model_id` occupies in `models`, when it is listed.
+/// The row the session's effective selection occupies, when it is listed —
+/// the Auto row while the draft is routed, else the row matching its combo.
 /// Shared by the scroll reveal and by the keyboard cursor's seed so the
-/// filled "current model" row and the first arrow press agree on where the
+/// filled "current" row and the first arrow press agree on where the
 /// selection sits.
-pub(super) fn picker_selected_model_index(
-    provider: ProviderKind,
-    model_id: Option<&str>,
-    models: &[(ProviderKind, ProviderModel)],
+pub(super) fn picker_selected_row_index(
+    selection: Option<&(ProviderKind, String, Option<String>, bool)>,
+    auto_route: bool,
+    rows: &[ModelPickerRow],
 ) -> Option<usize> {
-    models
-        .iter()
-        .position(|(kind, model)| *kind == provider && model_id == Some(model.id.as_str()))
-}
-
-/// The sidebar tabs the picker can land on, in rail order: favorites first,
-/// then every installed provider a new session may use.
-///
-/// Shared by the rail's click gating and by `tab`'s cycle handler so the two
-/// agree on which tabs are usable. A locked session keeps its own provider
-/// usable even if it was switched off afterwards — disabling is for new work —
-/// while every other provider drops out for the lock's duration.
-pub(super) fn visible_picker_tabs(
-    probes: &[ProviderProbe],
-    disabled_providers: &[ProviderKind],
-    locked_provider: Option<ProviderKind>,
-) -> Vec<ModelPickerTab> {
-    let mut tabs = vec![ModelPickerTab::Favorites];
-    tabs.extend(ProviderKind::ALL.into_iter().filter_map(|kind| {
-        let drawn = picker_rail_shows_provider(probes, disabled_providers, locked_provider, kind);
-        let allowed = locked_provider.is_none() || locked_provider == Some(kind);
-        (drawn && allowed).then_some(ModelPickerTab::Provider(kind))
-    }));
-    tabs
+    if auto_route {
+        return rows.iter().position(|row| row.auto);
+    }
+    let (provider, model_id, effort, fast) = selection?;
+    rows.iter().position(|row| {
+        !row.auto
+            && row.provider == *provider
+            && row.model.id == *model_id
+            && row.effort == *effort
+            && row.fast == *fast
+    })
 }
 
 /// The picker's whole body when nothing can back a session: no agent CLI
@@ -5760,20 +6129,26 @@ fn open_provider_settings_from_picker(
     });
 }
 
-/// Whether the rail draws a tab for the provider at all, usable or not.
+/// Whether the provider contributes rows to the merged list at all.
 ///
 /// Installed on this machine and not switched off in the Providers settings.
-/// Both of those are settings-level facts the user has already decided, so the
-/// tab is absent rather than dimmed — the rail offers what could be picked,
-/// not a catalog of everything Goddard can speak to. A session locked to a
-/// provider switched off afterwards keeps its own tab, since the picker is
-/// that session's only route to another model.
-pub(super) fn picker_rail_shows_provider(
+/// Both of those are settings-level facts the user has already decided, so
+/// the provider's rows are absent rather than dimmed — the list offers what
+/// could be picked, not a catalog of everything Goddard can speak to. A
+/// session locked to a provider switched off afterwards keeps its rows,
+/// since the picker is that session's only route to another model.
+pub(super) fn picker_lists_provider(
     probes: &[ProviderProbe],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
+    remote: bool,
     kind: ProviderKind,
 ) -> bool {
+    // Antigravity's surface is a local PTY running the CLI's TUI — a remote
+    // daemon cannot host it, so the tab does not exist there.
+    if remote && kind == ProviderKind::Antigravity {
+        return false;
+    }
     let installed = probes
         .iter()
         .any(|probe| probe.provider == kind && probe.installed);
@@ -5809,28 +6184,202 @@ pub(super) fn picker_has_no_providers(
     probes: &[ProviderProbe],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
+    remote: bool,
     detection_settled: bool,
 ) -> bool {
     detection_settled
         && !ProviderKind::ALL.into_iter().any(|kind| {
-            picker_rail_shows_provider(probes, disabled_providers, locked_provider, kind)
+            picker_lists_provider(probes, disabled_providers, locked_provider, remote, kind)
         })
 }
 
-/// The models the picker lists, in display order.
+/// Every picker row's fixed height — the list is uniform, which lets
+/// `ListState` size its scrollbar before any row has painted.
+pub(super) const MODEL_PICKER_ROW_HEIGHT: Pixels = px(58.0);
+
+/// A rail button's destination in the merged picker: one of the two
+/// leading sections or the first row of a provider's block.
+#[derive(Clone, Copy, PartialEq)]
+enum ModelPickerSection {
+    /// The router row — its provider field is a placeholder, so it cannot
+    /// borrow a provider's section.
+    Auto,
+    Favorites,
+    Recents,
+    Provider(ProviderKind),
+}
+
+/// A row's jump section in the merged list: Auto leads alone, then
+/// favorites and recents each form one block ahead of the provider blocks.
+fn picker_row_section(row: &ModelPickerRow) -> ModelPickerSection {
+    if row.auto {
+        ModelPickerSection::Auto
+    } else if row.favorite_index.is_some() {
+        ModelPickerSection::Favorites
+    } else if row.recent_rank.is_some() {
+        ModelPickerSection::Recents
+    } else {
+        ModelPickerSection::Provider(row.provider)
+    }
+}
+
+/// One selectable row in the merged model picker: a model pinned to a
+/// concrete effort and fast-tier choice. Favorites, recents, and the
+/// ⌘⌥1–⌘⌥9 chords all address rows, not bare models. `auto` marks the
+/// router row, which heads the list while the session can still be routed —
+/// picking it defers the provider/model decision to the evaluation route at
+/// first submit. Its model/effort fields are placeholders; `auto` guards
+/// every read of them.
+pub(super) struct ModelPickerRow {
+    pub provider: ProviderKind,
+    pub model: ProviderModel,
+    /// The effort id the row selects; `None` when the model advertises no
+    /// effort options at all.
+    pub effort: Option<String>,
+    /// Whether the row selects the `fast` service tier.
+    pub fast: bool,
+    /// Position in `favorite_models` when this exact selection is starred.
+    pub favorite_index: Option<usize>,
+    /// Rank among recently used selections — present only on the fast-variant
+    /// that was actually started last, so one of `effort` and `effort-fast`
+    /// ever carries it.
+    pub recent_rank: Option<usize>,
+    /// The Auto router row, not a concrete combo.
+    pub auto: bool,
+}
+
+impl ModelPickerRow {
+    /// The router row placeholder — only ever built by `visible_picker_rows`
+    /// and always read through its `auto` guard.
+    fn auto() -> Self {
+        Self {
+            provider: ProviderKind::default(),
+            model: ProviderModel::new("", ""),
+            effort: None,
+            fast: false,
+            favorite_index: None,
+            recent_rank: None,
+            auto: true,
+        }
+    }
+}
+
+/// The model's effective effort when the user picks it without naming one:
+/// its declared default, else the first advertised option.
+fn model_default_effort(model: &ProviderModel) -> Option<String> {
+    model.default_reasoning_effort.clone().or_else(|| {
+        model
+            .reasoning_efforts
+            .first()
+            .map(|option| option.id.clone())
+    })
+}
+
+/// Whether a starred entry marks this row. Favorites saved before rows were
+/// combos carry no effort; one claims the model's default-effort row so a
+/// bare `{provider, model}` star still lands on something selectable.
+pub(super) fn favorite_matches_row(
+    favorite: &FavoriteModel,
+    provider: ProviderKind,
+    model: &str,
+    effort: Option<&str>,
+    fast: bool,
+    default_effort: Option<&str>,
+) -> bool {
+    if favorite.provider != provider || favorite.model != model || favorite.fast != fast {
+        return false;
+    }
+    match favorite.effort.as_deref() {
+        Some(favorite_effort) => Some(favorite_effort) == effort,
+        None => effort == default_effort,
+    }
+}
+
+/// How much of a model each picker row names: the composer's full combos, or
+/// one row per model for pickers whose value is a bare `provider:model`
+/// target — the routing policy cannot encode an effort or a tier.
+#[derive(Clone, Copy)]
+pub(super) enum PickerGranularity {
+    Combos,
+    Models,
+}
+
+/// Every (effort, tier) combination a catalog model expands into: one row per
+/// advertised effort — a single row when the model has none — crossed with
+/// the standard/fast pair when the provider offers a fast tier.
+fn picker_model_rows(provider: ProviderKind, model: ProviderModel) -> Vec<ModelPickerRow> {
+    let efforts: Vec<Option<String>> = if model.reasoning_efforts.is_empty() {
+        vec![None]
+    } else {
+        model
+            .reasoning_efforts
+            .iter()
+            .map(|option| Some(option.id.clone()))
+            .collect()
+    };
+    let fast_variants: &[bool] = if model.service_tiers.iter().any(|option| option.id == "fast") {
+        &[false, true]
+    } else {
+        &[false]
+    };
+    let mut rows = Vec::with_capacity(efforts.len() * fast_variants.len());
+    for effort in efforts {
+        for fast in fast_variants {
+            rows.push(ModelPickerRow {
+                provider,
+                model: model.clone(),
+                effort: effort.clone(),
+                fast: *fast,
+                favorite_index: None,
+                recent_rank: None,
+                auto: false,
+            });
+        }
+    }
+    rows
+}
+
+/// The provider's slot in `ProviderKind::ALL`, which keeps the merged list's
+/// fallback ordering stable and consistent with the rest of the app.
+fn provider_sort_rank(provider: ProviderKind) -> usize {
+    ProviderKind::ALL
+        .iter()
+        .position(|kind| *kind == provider)
+        .unwrap_or(usize::MAX)
+}
+
+/// A row's slot within its model: the ladder index of its effort, or zero
+/// for models that name no effort at all.
+fn effort_sort_rank(row: &ModelPickerRow) -> usize {
+    row.model
+        .reasoning_efforts
+        .iter()
+        .position(|option| Some(option.id.as_str()) == row.effort.as_deref())
+        .unwrap_or(0)
+}
+
+/// The rows the picker lists, in display order: the Auto row first while the
+/// session can still be routed, then starred selections in their drag order,
+/// then selections a session was actually started with — most recent first —
+/// then everything else by provider, model name, and the model's own effort
+/// ladder with the standard tier before its fast twin.
 ///
-/// Shared by the panel body and by `enter`'s handler so a keyboard cursor index
-/// always means the same row in both.
-pub(super) fn visible_picker_models(
+/// Shared by the panel body and by `enter`'s handler so a keyboard cursor
+/// index always means the same row in both. `auto_route` prepends the router
+/// row; a query keeps it only while "auto" matches the same token rule models
+/// follow.
+pub(super) fn visible_picker_rows(
     probes: &[ProviderProbe],
     favorites: &[FavoriteModel],
+    recents: &[RecentModelUse],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
-    selected_tab: ModelPickerTab,
     normalized_query: &str,
-) -> Vec<(ProviderKind, ProviderModel)> {
+    auto_route: bool,
+    granularity: PickerGranularity,
+) -> Vec<ModelPickerRow> {
     let searching = !normalized_query.is_empty();
-    let mut models = probes
+    let mut rows: Vec<ModelPickerRow> = probes
         .iter()
         .filter(|probe| probe.installed)
         .flat_map(|probe| {
@@ -5838,41 +6387,154 @@ pub(super) fn visible_picker_models(
                 .models
                 .iter()
                 .cloned()
-                .map(move |model| (probe.provider, model))
+                .flat_map(move |model| match granularity {
+                    PickerGranularity::Combos => picker_model_rows(probe.provider, model),
+                    PickerGranularity::Models => vec![ModelPickerRow {
+                        provider: probe.provider,
+                        model,
+                        effort: None,
+                        fast: false,
+                        favorite_index: None,
+                        recent_rank: None,
+                        auto: false,
+                    }],
+                })
         })
-        .filter(|(kind, _)| locked_provider.is_none() || locked_provider == Some(*kind))
+        .filter(|row| locked_provider.is_none() || locked_provider == Some(row.provider))
         // Switched-off providers keep serving the session already locked to
         // them, but offer nothing to new work — including favorites.
-        .filter(|(kind, _)| !disabled_providers.contains(kind) || locked_provider == Some(*kind))
-        .filter(|(kind, model)| {
-            if searching {
-                let searchable = format!(
-                    "{} {} {} {}",
-                    model.name,
-                    model.id,
-                    kind.short_name(),
-                    model.sub_provider.as_deref().unwrap_or("")
-                )
-                .to_ascii_lowercase();
-                return normalized_query
-                    .split_whitespace()
-                    .all(|token| searchable.contains(token));
-            }
-            match selected_tab {
-                ModelPickerTab::Favorites => favorites
-                    .iter()
-                    .any(|favorite| favorite.provider == *kind && favorite.model == model.id),
-                ModelPickerTab::Provider(provider) => provider == *kind,
-            }
+        .filter(|row| {
+            !disabled_providers.contains(&row.provider) || locked_provider == Some(row.provider)
         })
-        .collect::<Vec<_>>();
-    if !searching && selected_tab == ModelPickerTab::Favorites {
-        models.sort_by_key(|(kind, model)| {
-            favorites
+        .filter(|row| {
+            if !searching {
+                return true;
+            }
+            let searchable = format!(
+                "{} {} {} {} {} {}",
+                row.model.name,
+                row.model.id,
+                row.provider.short_name(),
+                row.model.sub_provider.as_deref().unwrap_or(""),
+                row.effort.as_deref().unwrap_or(""),
+                if row.fast { "fast" } else { "" },
+            )
+            .to_ascii_lowercase();
+            normalized_query
+                .split_whitespace()
+                .all(|token| searchable.contains(token))
+        })
+        .collect();
+
+    // Stored selections may name a packed Cursor alias (`grok-4.6-xhigh-fast`)
+    // from before the catalog folded aliases into base models — resolve each
+    // back to base plus the traits its suffix carries so stars and recents
+    // still land on their combo row.
+    let cursor_ids: Vec<&str> = probes
+        .iter()
+        .find(|probe| probe.provider == ProviderKind::Cursor)
+        .map(|probe| {
+            probe
+                .models
                 .iter()
-                .position(|favorite| favorite.provider == *kind && favorite.model == model.id)
-                .unwrap_or(usize::MAX)
+                .map(|model| model.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    let cursor_combo = |provider: ProviderKind,
+                        stored: &str,
+                        effort: &Option<String>,
+                        fast: bool,
+                        model: &ProviderModel|
+     -> (String, Option<String>, bool) {
+        let Some(selection) = (provider == ProviderKind::Cursor)
+            .then(|| {
+                waku_protocol::model_catalog::resolve_cursor_model(
+                    cursor_ids.iter().copied(),
+                    stored,
+                )
+            })
+            .flatten()
+            .filter(|selection| !selection.suffix.is_empty())
+        else {
+            return (stored.to_owned(), effort.clone(), fast);
+        };
+        (
+            selection.value,
+            effort.clone().or_else(|| {
+                waku_protocol::model_catalog::cursor_suffix_reasoning_effort(
+                    &selection.suffix,
+                    &model.reasoning_efforts,
+                )
+            }),
+            fast || waku_protocol::model_catalog::cursor_suffix_service_tier(
+                &selection.suffix,
+                &model.service_tiers,
+            )
+            .is_some(),
+        )
+    };
+    for row in &mut rows {
+        let default_effort = model_default_effort(&row.model);
+        row.favorite_index = favorites.iter().position(|favorite| {
+            let (model, effort, fast) = cursor_combo(
+                favorite.provider,
+                &favorite.model,
+                &favorite.effort,
+                favorite.fast,
+                &row.model,
+            );
+            let normalized = FavoriteModel {
+                provider: favorite.provider,
+                model,
+                effort,
+                fast,
+            };
+            favorite_matches_row(
+                &normalized,
+                row.provider,
+                &row.model.id,
+                row.effort.as_deref(),
+                row.fast,
+                default_effort.as_deref(),
+            )
+        });
+        row.recent_rank = recents.iter().position(|use_| {
+            let (model, effort, fast) = cursor_combo(
+                use_.provider,
+                &use_.model,
+                &use_.effort,
+                use_.fast,
+                &row.model,
+            );
+            use_.provider == row.provider
+                && model == row.model.id
+                && effort == row.effort
+                && fast == row.fast
         });
     }
-    models
+    rows.sort_by_key(|row| {
+        (
+            row.favorite_index.is_none(),
+            row.favorite_index.unwrap_or(usize::MAX),
+            row.recent_rank.is_none(),
+            row.recent_rank.unwrap_or(usize::MAX),
+            provider_sort_rank(row.provider),
+            row.model.name.to_lowercase(),
+            effort_sort_rank(row),
+            row.fast,
+        )
+    });
+
+    let router_row = auto_route
+        && (!searching
+            || normalized_query
+                .split_whitespace()
+                .all(|token| "auto jev".contains(token)));
+    let mut picker_rows = Vec::with_capacity(rows.len() + usize::from(router_row));
+    if router_row {
+        picker_rows.push(ModelPickerRow::auto());
+    }
+    picker_rows.extend(rows);
+    picker_rows
 }

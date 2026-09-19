@@ -21,7 +21,7 @@ use gpui::{
 use uuid::Uuid;
 
 use crate::checkpoint;
-use crate::composer_complete::{FileEntry, SlashCommand};
+use crate::composer_complete::{ComposerWorkItem, FileEntry, SlashCommand};
 use crate::computer_use::{
     ComputerPermissions, ComputerTarget, ComputerUsePhase, ComputerUseState,
     PendingComputerApproval,
@@ -30,6 +30,7 @@ use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::git_branch::BranchSnapshot;
 use crate::input::{
     ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerTextPaste, InputEvent, TextInput,
+    Undo,
 };
 use crate::md;
 use crate::model::{
@@ -38,7 +39,7 @@ use crate::model::{
     ContextUsage, DriverEvent, FavoriteModel, Message, MessageAttachment, MessageRole,
     PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe, ProviderResumeCursor,
     ProviderSessionHistory, ProviderSessionSummary, QueuedMessage, ReasoningBlock, RuntimeMode,
-    SessionStatus, SessionWorkspace, TranscriptBlock, TurnStatus, UserInputAnswer,
+    SessionStatus, SessionWorkspace, TranscriptBlock, TranscriptNotice, TurnStatus, UserInputAnswer,
     UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -59,11 +60,13 @@ use crate::ui::tooltip::Tooltip;
 
 use crate::browser::BrowserView;
 use crate::persistence::{
-    CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, CustomCommandIcon,
-    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, PersistedDiffSource,
+    ArchiveNavigation, CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand,
+    CustomCommandIcon,
+    DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH,
+    PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
-    PersistedWindowState, SidebarGrouping, SidebarOrdering, StateStore,
+    PersistedWindowState, RecentModelUse, SidebarGrouping, SidebarOrdering, StateStore,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -71,25 +74,27 @@ use crate::terminal::{TerminalLaunch, TerminalView, TerminalViewEvent};
 use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
-    MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, contain_scroll, file_icon,
-    goddard_logo, icon, icon_button, motion, progress_ring, provider_color, provider_mark,
-    rem_scale, status_color, thinking, toggle_switch,
+    MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
+    file_icon, goddard_logo, icon, icon_button, motion, progress_ring, provider_color,
+    provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    DismissInbox, DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
+    CycleReasoningEffort, DismissDraftsLayer, DismissInbox, DismissProjectsLayer,
+    EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
     FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
     MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
     NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
     OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
-    SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab,
-    SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward,
-    SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette,
-    ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
-    ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage,
-    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
-    ToggleUsagePanel, ToggleWorkspace,
+    SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
+    SelectProjectsTab, SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward,
+    SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleBigPicture, ToggleBranchPicker,
+    ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder, ToggleFindCaseSensitive,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage,
+    ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
+    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
+    ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -121,6 +126,14 @@ const UPDATER_BUTTON_COLLAPSED_WIDTH: f32 = 20.0;
 const UPDATER_BUTTON_EXPANDED_WIDTH: f32 = 58.0;
 const RIGHT_PANEL_MIN_WIDTH: f32 = 280.0;
 const RIGHT_PANEL_MAX_WIDTH: f32 = 1000.0;
+/// The Git panel column's fixed header.
+const GIT_PANEL_HEADER_HEIGHT: f32 = 44.0;
+/// Drag bounds for the Git panel's top region — the commit box or an open
+/// commit's file tree — split from the commit log.
+const GIT_PANEL_TOP_MIN_HEIGHT: f32 = 140.0;
+const GIT_PANEL_TOP_MAX_HEIGHT: f32 = 1200.0;
+/// The commit log keeps at least this much room under the top region.
+const GIT_PANEL_COMMITS_MIN_HEIGHT: f32 = 140.0;
 const DEFAULT_FILE_TREE_WIDTH: f32 = 184.0;
 const FILE_TREE_MIN_WIDTH: f32 = 140.0;
 const FILE_TREE_MAX_WIDTH: f32 = 360.0;
@@ -232,12 +245,6 @@ enum StreamDeltaKind {
     Reasoning,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ModelPickerTab {
-    Favorites,
-    Provider(ProviderKind),
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum BranchPickerMode {
     #[default]
@@ -269,14 +276,30 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use is still experimental, so only development builds expose
-    /// its navigation entry points. Keeping this decision on the page itself
-    /// makes the Settings sidebar and command palette use the same gate.
-    fn is_visible_in_navigation(self) -> bool {
+    /// Computer Use and Friends are still experimental, so their navigation
+    /// entry points only appear once the Experiments opt-in is on. Keeping
+    /// this decision on the page itself makes the Settings sidebar and
+    /// command palette use the same gate.
+    fn is_visible_in_navigation(
+        self,
+        computer_use_experiment_enabled: bool,
+        friends_enabled: bool,
+    ) -> bool {
         match self {
-            Self::ComputerUse => crate::computer_use::is_available(),
+            Self::ComputerUse => computer_use_experiment_enabled,
+            Self::Friends => friends_enabled,
             Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
+        }
+    }
+
+    /// A persisted page whose navigation gate closed falls back to General
+    /// rather than rendering a surface the sidebar no longer lists.
+    fn into_visible(self, computer_use_experiment_enabled: bool, friends_enabled: bool) -> Self {
+        if self.is_visible_in_navigation(computer_use_experiment_enabled, friends_enabled) {
+            self
+        } else {
+            Self::General
         }
     }
 }
@@ -309,13 +332,18 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    /// The horizontal divider between the Git panel's top region and its
+    /// commit log — the one drag that moves on the y axis.
+    GitPanelTop,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct PanelResizeDrag {
     target: PanelResizeTarget,
     start_mouse_x: f32,
-    start_width: f32,
+    start_mouse_y: f32,
+    /// Width for the vertical edges, height for `GitPanelTop`.
+    start_size: f32,
 }
 
 #[derive(Debug)]
@@ -370,6 +398,13 @@ enum ToastActionKind {
     LocalhostUrl,
     /// A missing project folder's "Locate Folder…" picker.
     RelocateProject(Uuid),
+    /// Open the created issue — the in-app GitHub browser when its project
+    /// and number are known, the URL otherwise. `project` keys the browser.
+    GitHubIssue {
+        project: Option<Uuid>,
+        number: Option<u64>,
+        url: SharedString,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -625,6 +660,19 @@ fn widened_panel_width_for_review(panel_width: f32) -> f32 {
     .max(REVIEW_INITIAL_WIDTH)
 }
 
+/// The Git panel's top region as laid out this frame: the stored height
+/// clamped so the commit log below it keeps its minimum room.
+fn fitted_git_panel_top_height(viewport_height: f32, height: f32) -> f32 {
+    let maximum = (viewport_height - GIT_PANEL_HEADER_HEIGHT - GIT_PANEL_COMMITS_MIN_HEIGHT)
+        .clamp(GIT_PANEL_TOP_MIN_HEIGHT, GIT_PANEL_TOP_MAX_HEIGHT);
+    sanitize_panel_width(
+        height,
+        DEFAULT_GIT_PANEL_TOP_HEIGHT.clamp(GIT_PANEL_TOP_MIN_HEIGHT, maximum),
+        GIT_PANEL_TOP_MIN_HEIGHT,
+        maximum,
+    )
+}
+
 fn fitted_panel_widths(
     viewport_width: f32,
     sidebar_visible: bool,
@@ -747,6 +795,10 @@ struct PreparedSubmission {
     /// `None` reuses an already-live runtime. `Some` contains the result of a
     /// provider process start performed on the background executor.
     driver: Option<anyhow::Result<PreparedDriver>>,
+    /// The routing decision an Auto submission produced — `None` on direct
+    /// starts and on route-RPC failures (which fall back to the draft's own
+    /// provider).
+    route_decision: Option<waku_protocol::routing::RouteDecision>,
 }
 
 /// Everything needed to start a provider process, captured while the session
@@ -953,6 +1005,17 @@ struct RightPanelFileEditor {
     /// lands, `Some(Err)` on failure so the pane shows a fallback instead of
     /// re-requesting every frame.
     image: Option<Result<Arc<gpui::Image>, String>>,
+    /// Image-pixels → screen-pixels scale; `0.0` means "unset" until the
+    /// first layout can compute the fit-to-view zoom.
+    image_zoom: f32,
+    /// The image's top offset inside the viewport — `0` when it's shorter
+    /// than the pane (which then centers it), clamped into
+    /// `[viewport − scaled height, 0]` while it's taller.
+    image_pan_y: Pixels,
+    /// Viewport bounds and decoded pixel size recorded during prepaint —
+    /// the wheel handler needs both to clamp pan and zoom around the cursor.
+    image_viewport: Option<Bounds<Pixels>>,
+    image_natural: Option<(f32, f32)>,
     /// SVG only: edit the source instead of viewing the rendered preview.
     /// Other image formats have no meaningful text view.
     show_source: bool,
@@ -1021,9 +1084,9 @@ impl RightPanelSessionState {
     }
 }
 
-/// One choice in the model-traits menu: a label plus a badge marking the
-/// provider's own default, so the current selection and the default read apart.
-fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) -> MenuItem {
+/// One choice in the model-traits menu: a label, with a check on the
+/// current selection.
+fn traits_choice(theme: Theme, label: String, selected: bool) -> MenuItem {
     MenuItem::custom(move |_, _| {
         div()
             .w(px(190.0))
@@ -1039,24 +1102,6 @@ fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) 
                     .text_color(theme.text_secondary)
                     .child(label.clone()),
             )
-            .when(is_default, |element| {
-                element.child(
-                    div()
-                        .h(px(18.0))
-                        .px(px(5.0))
-                        .flex_none()
-                        .rounded(px(4.0))
-                        .border(hairline())
-                        .border_color(theme.border)
-                        .bg(theme.overlay)
-                        .flex()
-                        .items_center()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("common.default")),
-                )
-            })
             .when(selected, |element| {
                 element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
             })
@@ -1205,6 +1250,7 @@ enum NavigationLocation {
     Task(Uuid),
     Terminal(Uuid),
     ProjectsPage(Uuid),
+    DraftsPage,
 }
 
 #[derive(Debug, Default)]
@@ -1218,7 +1264,14 @@ struct SessionNavigation {
 
 impl SessionNavigation {
     fn visit(&mut self, current: Option<NavigationLocation>, next: NavigationLocation) {
+        // `next` becomes the current location, so it can no longer be a
+        // back/forward target — an entry pointing at it is a dead hop.
+        self.back.retain(|entry| *entry != next);
+        self.forward.retain(|entry| *entry != next);
         if let Some(current) = current.filter(|current| *current != next) {
+            // `current` is pushed exactly once; earlier visits to it are
+            // folded away so the stack never repeats a location.
+            self.back.retain(|entry| *entry != current);
             self.back.push(current);
             self.forward.clear();
         }
@@ -1320,6 +1373,7 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
     match location {
         NavigationLocation::Task(id) => Some(PersistedNavigationLocation::Task(id)),
         NavigationLocation::ProjectsPage(id) => Some(PersistedNavigationLocation::ProjectsPage(id)),
+        NavigationLocation::DraftsPage => Some(PersistedNavigationLocation::DraftsPage),
         NavigationLocation::Terminal(_) => None,
     }
 }
@@ -1637,10 +1691,15 @@ pub struct Waku {
     composer_draft_save_generation: u64,
     command_palette: command_palette::CommandPaletteUi,
     file_finder: file_finder::FileFinderUi,
+    /// The ⌘S "Sync branch…" picker — a modal over the session's repository.
+    sync_branch: sync_branch::SyncBranchUi,
     task_switcher: task_switcher::TaskSwitcherUi,
     project_switcher: project_switcher::ProjectSwitcherUi,
     big_picture: big_picture::BigPictureUi,
     model_search: Entity<TextInput>,
+    /// The routing class picker's filter field — one shared set serves all
+    /// three class menus; only one can be open at a time.
+    route_class_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     /// The Appearance page's two font pickers — one per configurable face.
     ui_font_selector: settings::FontSelector,
@@ -1652,6 +1711,15 @@ pub struct Waku {
     worktree_sync_branches_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
     daemon_token_revealed: bool,
+    /// The evaluation credentials editor's fields — one set per eval backend,
+    /// seeded from the daemon's settings mirror when the routing section
+    /// first shows. Secrets stay masked and never render elsewhere.
+    eval_typesafe_key_input: Entity<TextInput>,
+    eval_vercel_key_input: Entity<TextInput>,
+    eval_vercel_team_input: Entity<TextInput>,
+    eval_cloudflare_account_input: Entity<TextInput>,
+    eval_cloudflare_token_input: Entity<TextInput>,
+    eval_inputs_seeded: bool,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -1743,6 +1811,11 @@ pub struct Waku {
     usage_window: crate::usage_history::UsageWindow,
     usage_metric: UsageMetric,
     usage_breakdown: UsageBreakdown,
+    /// Drag-resized widths for the usage breakdown tables' fixed columns —
+    /// model (cost, share, tokens) and day (per-provider, total, tokens).
+    usage_model_col_widths: [f32; 3],
+    usage_day_col_widths: [f32; 4],
+    usage_col_resize: Rc<column_resize::ColumnResize>,
     /// Scroll position of the monthly statement card, which scrolls
     /// internally like the projects card so the two list views feel alike.
     usage_months_scroll: ScrollHandle,
@@ -1771,12 +1844,19 @@ pub struct Waku {
     /// executor. Render only reads this; empty means not resolved yet (or
     /// nothing to offer) and hides the control.
     open_in_apps: Rc<Vec<crate::platform::ExternalApp>>,
-    model_picker_tab: ModelPickerTab,
     /// Keyboard cursor over the model picker's filtered rows. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
     model_picker_highlight: Option<usize>,
-    model_picker_scroll: ScrollHandle,
+    model_picker_list: ListState,
     model_picker_scrollbar: Rc<ScrollbarState>,
+    /// The class-target picker's drawn selection and list state — same shape
+    /// as the model picker's, shared by the three class menus.
+    route_class_highlight: Option<usize>,
+    route_class_scroll: ScrollHandle,
+    route_class_scrollbar: Rc<ScrollbarState>,
+    /// The class whose target picker is open — routes `enter` and the
+    /// empty-query reveal to the right policy slot.
+    route_class_picker: Option<waku_protocol::routing::TaskClass>,
     /// Focus for the picker's no-providers state. The panel takes focus on
     /// open so `escape` has a focused descendant to dispatch up from, and
     /// normally that is the filter field — which the empty state does not
@@ -1810,6 +1890,12 @@ pub struct Waku {
     /// Window-modal Git commit/push UI. Its repository snapshot is filled
     /// off-thread; frames only read this in-memory value.
     commit_dialog: Option<commit_dialog::CommitDialogState>,
+    /// Window-modal new-GitHub-issue UI opened from the command palette.
+    /// The template scan runs in the palette; this is just the form.
+    issue_dialog: Option<issue_dialog::IssueDialogState>,
+    /// The issue the last `gh issue create` landed — what the success
+    /// toast's "View" and ⌘⌥I open.
+    last_created_issue: Option<issue_dialog::CreatedIssue>,
     /// The archive confirmation shown when a checkout still holds
     /// uncommitted or unpushed work; `archive_preview_pending` dedupes the
     /// background inspection that decides whether it opens.
@@ -1849,6 +1935,9 @@ pub struct Waku {
     mention_file_index: Rc<Vec<FileEntry>>,
     mention_file_index_path: Option<PathBuf>,
     mention_file_index_loading: bool,
+    /// `#` work-item mention state per workspace root: resolved repo, latest
+    /// landed search, and the number→item map for expansion and chips.
+    work_item_mentions: HashMap<PathBuf, autocomplete::WorkItemMentions>,
     /// Set when a driver reports its command registry mid-drain; the drain
     /// has no `Context` to rebuild the drawn index itself.
     composer_sources_stale: bool,
@@ -1892,9 +1981,25 @@ pub struct Waku {
     friends_events: Receiver<waku_client::friends::FriendsState>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
+    /// The Settings → Friends display-name field — the name friends see on
+    /// our requests and offers.
+    friend_name_input: Entity<TextInput>,
+    /// Shared single-line editor for a friend's local nickname; one friend
+    /// row borrows it at a time.
+    friend_nickname_input: Entity<TextInput>,
+    /// Node id of the friend whose nickname is being edited, if any.
+    editing_friend_nickname: Option<String>,
     /// Generation guard for the while-open presence re-probe loop — a new
     /// loop (or leaving the page) retires the previous one.
     friends_probe_generation: Cell<u64>,
+    /// GetRoutePolicy answers (and SetRouteClassTarget write+refreshes)
+    /// landing for the settings surface's routing section.
+    route_policy_tx: Sender<Result<waku_protocol::routing::RoutePolicyView, String>>,
+    route_policy_events: Receiver<Result<waku_protocol::routing::RoutePolicyView, String>>,
+    /// The newest policy view the settings page has; `None` until a fetch
+    /// answers, which also covers "routing not supported yet".
+    route_policy: Option<waku_protocol::routing::RoutePolicyView>,
+    route_policy_pending: bool,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -1960,6 +2065,13 @@ pub struct Waku {
     /// Sidebar terminal currently showing its inline rename field — the
     /// same `session_rename_input` editor serves both rows.
     terminal_rename: Option<Uuid>,
+    /// Sessions ⌘-clicked into the sidebar's multi-selection: a batch target
+    /// for row menus and session shortcuts that never steals the active
+    /// surface. Runtime-only — any unmodified click or Escape clears it.
+    sidebar_multi_selection: HashSet<Uuid>,
+    /// Pivot a ⌘⇧-click range grows from: the last row a modified click
+    /// touched, kept even when a toggle removed it from the set.
+    sidebar_multi_selection_anchor: Option<Uuid>,
     /// One stable field reused across sidebar rows so virtualization never
     /// replaces the focused editor while a rename is in progress.
     session_rename_input: Entity<TextInput>,
@@ -1992,6 +2104,9 @@ pub struct Waku {
     /// Stable keyboard focus for each terminal row's hover-revealed close
     /// control.
     sidebar_terminal_close_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
+    /// Stable keyboard focus for each terminal row's hover-revealed pin
+    /// control.
+    sidebar_terminal_pin_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     /// Stable keyboard focus for each virtualized project-history reveal row.
     sidebar_show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     sidebar_visible: bool,
@@ -2001,6 +2116,9 @@ pub struct Waku {
     /// The Git panel shares the right panel's slot and never shows with it:
     /// opening one dismisses the other. See `git_panel.rs`.
     git_panel_visible: bool,
+    /// The persisted height of the panel's top region — commit box or open
+    /// commit's file tree — before the frame's viewport clamp applies.
+    git_panel_top_height: f32,
     git_panel: Option<git_panel::GitPanelState>,
     /// The commit/push/sync the panel's action button is running, if any.
     git_panel_operation: Option<git_panel::GitPanelOperation>,
@@ -2074,6 +2192,10 @@ pub struct Waku {
     /// Window-relative PiP position, independent of incoming preview frames.
     computer_use_preview_position: Option<gpui::Point<Pixels>>,
     right_panel_session_states: HashMap<Uuid, RightPanelSessionState>,
+    /// Panel state parked while no task owns the strip — a full-width
+    /// terminal or the Projects page. Swapped in and out exactly like a
+    /// session's, so the detached context keeps its own tabs and visibility.
+    right_panel_detached_state: RightPanelSessionState,
     right_panel_surfaces: Vec<RightPanelSurface>,
     right_panel_active_surface: Option<usize>,
     right_panel_tabs_scroll_handle: ScrollHandle,
@@ -2170,6 +2292,25 @@ pub struct Waku {
     /// keyed by the provider they set up. They live outside the right panel
     /// surfaces because Settings covers the workspace while they run.
     provider_setup_terminals: HashMap<ProviderKind, Entity<TerminalView>>,
+    /// The PTY running an Antigravity session's TUI, keyed by session id.
+    /// It is the session's main surface — not a right-panel tab — and it
+    /// exists only while the process does.
+    agy_terminals: HashMap<Uuid, Entity<TerminalView>>,
+    /// The last time each live Antigravity terminal was on screen. The idle
+    /// sweep frees a process only once this exceeds the grace window while
+    /// the session is deselected and idle.
+    agy_last_visible: HashMap<Uuid, Instant>,
+    /// Spawn time per live Antigravity terminal — the bound conversation-id
+    /// discovery compares summary rows against.
+    agy_spawned_at: HashMap<Uuid, u64>,
+    /// Sessions whose TUI spawn ran before provider detection finished and
+    /// found no `agy` probe yet; the poll tick retries them once probes land.
+    agy_pending_spawns: HashSet<Uuid>,
+    /// Poller results land here like every other background queue; a single
+    /// `agy_poll_pending` flag keeps one poll in flight at a time.
+    agy_poll_tx: Sender<agy::AgyPollUpdate>,
+    agy_poll_events: Receiver<agy::AgyPollUpdate>,
+    agy_poll_pending: bool,
     right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
@@ -2240,6 +2381,13 @@ pub struct Waku {
     /// slides under it.
     settings_scroll: ScrollHandle,
     settings_scrollbar: Rc<ScrollbarState>,
+    /// Sections the settings search rendered, in scroll order — each is a
+    /// direct child of the content scroll element, so its index here is the
+    /// `scroll_to_top_of_item` target the sidebar and arrow keys use.
+    settings_search_sections: Vec<SettingsPage>,
+    /// The section the last search-mode navigation landed on; arrow cycling
+    /// steps from it rather than from the selected page.
+    settings_search_target: Option<SettingsPage>,
     /// Filter query over the Archived Chats page's rows.
     archived_search: Entity<TextInput>,
     /// Project the archived list is narrowed to; `None` shows every project.
@@ -2254,9 +2402,16 @@ pub struct Waku {
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
+    /// The sidebar-transparency slider's in-flight drag, same reason.
+    sidebar_transparency_slider: Rc<SliderState>,
+    /// The border-intensity slider's in-flight drag, same reason.
+    border_intensity_slider: Rc<SliderState>,
     /// Set while a settings menu is previewing a theme it has not committed;
     /// the persisted settings go back on screen when the menu dismisses.
     theme_preview_active: bool,
+    /// The Appearance page's code/chat sample, opened on demand; a theme
+    /// selector opening also reveals it for the duration of the pick.
+    theme_preview_expanded: bool,
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
@@ -2283,6 +2438,10 @@ pub struct Waku {
     /// Fingerprint + snapshot pair backing `sidebar_rows_cached`.
     sidebar_rows_fingerprint: Cell<Option<u64>>,
     sidebar_rows_snapshot: RefCell<Rc<Vec<SidebarRow>>>,
+    /// Member session ids per collapsed group, rebuilt with the row
+    /// snapshot so a folded header can aggregate its hidden rows' unread
+    /// state without re-running the grouping.
+    sidebar_collapsed_group_members: RefCell<Rc<HashMap<SidebarGroup, Vec<Uuid>>>>,
     /// Branch labels for ordinary local project paths, resolved together on a
     /// background executor so sidebar rows only read memory.
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
@@ -2325,6 +2484,26 @@ pub struct Waku {
     last_projects_page_project: Option<Uuid>,
     /// Per-project page state kept across page toggles.
     projects_page_states: HashMap<Uuid, projects::ProjectsPageState>,
+    /// The Drafts page claiming the main column, like `projects_page`.
+    drafts_page: bool,
+    /// Drafts whose "Use" is still undoable: each was consumed from the
+    /// list, and ⌘Z puts it back and returns to the page.
+    draft_use_undos: Vec<saved_drafts::DraftUseUndo>,
+    /// Filter query over the Drafts page's cards.
+    drafts_search: Entity<TextInput>,
+    /// The page's shown/hidden switch — hidden drafts only appear under
+    /// the Hidden view.
+    drafts_show_hidden: bool,
+    /// Virtualized list over the filtered draft cards.
+    drafts_list_state: ListState,
+    drafts_scrollbar: Rc<ScrollbarState>,
+    /// The draft ids the current filter leaves visible, newest first —
+    /// refreshed once per frame so card builders read only this.
+    drafts_rows: RefCell<Vec<Uuid>>,
+    /// The card in inline-edit mode; its field lives in
+    /// `drafts_edit_input`.
+    drafts_editing: Option<Uuid>,
+    drafts_edit_input: Entity<TextInput>,
     /// The Settings → Git page's project selection — which repo's worktrees
     /// and branches the page lists.
     settings_git_project: Option<Uuid>,
@@ -2551,6 +2730,7 @@ pub struct Waku {
 }
 
 mod activity_diff;
+mod agy;
 mod annotations;
 mod archive_dialog;
 mod autocomplete;
@@ -2573,20 +2753,24 @@ mod go_to_line;
 mod goal_dialog;
 mod keybindings_page;
 mod image_preview;
+mod issue_dialog;
 mod notifications;
 mod project_switcher;
 mod projects;
 mod relocate;
 mod render;
 mod right_panel;
+mod routing;
 mod run_script;
 mod runtime;
+mod saved_drafts;
 mod sessions;
 mod settings;
 mod shortcuts_dialog;
 mod sidebar;
 mod skills_page;
 mod streaming;
+mod sync_branch;
 mod task_switcher;
 mod terminals;
 mod transcript;
@@ -2612,11 +2796,14 @@ pub use file_finder::init as init_file_finder;
 pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
+pub use issue_dialog::init as init_issue_dialog_keys;
+pub use saved_drafts::init as init_drafts_keys;
 pub use settings::init as init_settings_keys;
 pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow, format_time_ago, mix_str};
 pub use skills_page::init as init_skills_keys;
+pub use sync_branch::init as init_sync_branch;
 
 // Re-exported for the keybinding catalog (`crate::keybindings`), which needs
 // every dispatchable action by path without making each module public.
@@ -2629,7 +2816,7 @@ pub use command_palette::{
     SelectPrevious,
 };
 pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog};
-pub use git_panel::{DismissGitPanelModal, GitPanelPrimaryAction};
+pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use settings::{FocusNext, FocusPrevious};
@@ -2803,6 +2990,27 @@ impl Waku {
             Some(ToastAction {
                 label: tr!("session.view_now").into(),
                 kind: ToastActionKind::Session(session_id),
+            }),
+        );
+    }
+
+    /// Confirms a `gh issue create` — "View" deep-links into the in-app
+    /// GitHub browser, matching what ⌘⌥I does while the toast is up.
+    pub(super) fn show_issue_created_toast(&mut self, created: &issue_dialog::CreatedIssue) {
+        let message = match created.number {
+            Some(number) => tr!("issue.created_numbered", number = number),
+            None => tr!("issue.created"),
+        };
+        self.show_toast_with_tone(
+            message,
+            ToastTone::Success,
+            Some(ToastAction {
+                label: tr!("issue.view").into(),
+                kind: ToastActionKind::GitHubIssue {
+                    project: created.project,
+                    number: created.number,
+                    url: created.url.clone().into(),
+                },
             }),
         );
     }
@@ -3019,6 +3227,28 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.open_detected_localhost_url(true, window, cx);
+    }
+
+    /// The unarchive toast's "View now" without the mouse. ⌘⌥O is shared
+    /// with `OpenLocalhostUrl`: while a session toast is up this jumps to
+    /// the task, anything else falls through to the localhost open.
+    fn open_toast_session_action(
+        &mut self,
+        _: &crate::OpenToastSession,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = match self.toast.as_ref().and_then(|toast| toast.action.as_ref()) {
+            Some(ToastAction {
+                kind: ToastActionKind::Session(session_id),
+                ..
+            }) => *session_id,
+            _ => {
+                cx.propagate();
+                return;
+            }
+        };
+        self.open_toast_session(session_id, cx);
     }
 
     fn set_toast(&mut self, mut toast: ToastState) {
@@ -3281,7 +3511,19 @@ impl Waku {
                 .accessibility_label(tr!("a11y.file_finder"))
                 .placeholder(tr!("file_finder.placeholder"))
         });
+        let sync_branch_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("a11y.sync_branch"))
+                .placeholder(tr!("input.search_branches"))
+        });
         let model_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("input.search_models"))
+                .placeholder(tr!("input.search_models"))
+        });
+        let route_class_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
                 .accessibility_label(tr!("input.search_models"))
@@ -3317,6 +3559,17 @@ impl Waku {
                 .accessibility_label(tr!("friends.code_placeholder"))
                 .placeholder(tr!("friends.code_placeholder"))
         });
+        let friend_name_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("friends.display_name"))
+                .placeholder(tr!("friends.display_name_placeholder"))
+        });
+        let friend_nickname_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("friends.nickname"))
+                .placeholder(tr!("friends.nickname_placeholder"))
+        });
         let archived_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -3351,11 +3604,62 @@ impl Waku {
             input.set_content(state.new_worktree_sync_branches.join(", "), cx);
             input
         });
+        let mut eval_secret_input =
+            |cx: &mut App, label: SharedString, placeholder: SharedString| {
+                cx.new(|cx| {
+                    TextInput::new(window, cx)
+                        .masked()
+                        .select_all_on_focus_click()
+                        .accessibility_label(label)
+                        .placeholder(placeholder)
+                })
+            };
+        let eval_typesafe_key_input = eval_secret_input(
+            cx,
+            tr!("routing.typesafe_key").into(),
+            tr!("routing.typesafe_key_placeholder").into(),
+        );
+        let eval_vercel_key_input = eval_secret_input(
+            cx,
+            tr!("routing.vercel_key").into(),
+            tr!("routing.vercel_key_placeholder").into(),
+        );
+        let eval_cloudflare_token_input = eval_secret_input(
+            cx,
+            tr!("routing.cloudflare_token").into(),
+            tr!("routing.cloudflare_token_placeholder").into(),
+        );
+        let eval_vercel_team_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("routing.vercel_team"))
+                .placeholder(tr!("routing.optional"))
+        });
+        let eval_cloudflare_account_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("routing.cloudflare_account"))
+                .placeholder(tr!("routing.cloudflare_account_placeholder"))
+        });
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
                 .accessibility_label(tr!("skills.search"))
                 .placeholder(tr!("skills.search"))
+        });
+        let drafts_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("drafts.search"))
+                .placeholder(tr!("drafts.search"))
+        });
+        let drafts_edit_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(12)
+                .accessibility_label(tr!("a11y.draft_edit"))
+                .placeholder(tr!("drafts.edit_placeholder"))
         });
         let session_rename_input =
             cx.new(|cx| TextInput::new(window, cx).accessibility_label(tr!("a11y.task_name")));
@@ -3407,8 +3711,15 @@ impl Waku {
             RIGHT_PANEL_MIN_WIDTH,
             RIGHT_PANEL_MAX_WIDTH,
         );
+        let git_panel_top_height = sanitize_panel_width(
+            state.git_panel_top_height,
+            DEFAULT_GIT_PANEL_TOP_HEIGHT,
+            GIT_PANEL_TOP_MIN_HEIGHT,
+            GIT_PANEL_TOP_MAX_HEIGHT,
+        );
         state.sidebar_width = sidebar_width;
         state.right_panel_width = right_panel_width;
+        state.git_panel_top_height = git_panel_top_height;
         // First launch has no persisted frame yet; seed from the freshly
         // opened window so an immediate zoom or fullscreen still has a
         // floating frame to restore to. The bounds observer keeps it current
@@ -3421,8 +3732,15 @@ impl Waku {
             ));
         }
         crate::theme::set_thick_borders(state.thick_borders);
+        crate::theme::set_border_intensity(state.border_intensity);
         crate::theme::set_high_contrast(state.high_contrast);
-        crate::theme::apply_theme_preference(state.theme, state.sidebar_transparency, window, cx);
+        crate::theme::apply_theme_preference(
+            state.theme,
+            state.sidebar_transparency,
+            state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         crate::platform::set_trackpad_navigation_swipe_enabled(
             window,
@@ -3564,12 +3882,14 @@ impl Waku {
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
+        let (agy_poll_tx, agy_poll_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
+        let (route_policy_tx, route_policy_events) = unbounded();
         #[cfg(target_os = "macos")]
-        if crate::computer_use::is_available() {
+        if state.computer_use_experiment_enabled {
             let computer_permission_tx = computer_permission_tx.clone();
             let event_wake = event_wake_tx.clone();
             let daemon = daemon.client();
@@ -3593,13 +3913,6 @@ impl Waku {
                 })
                 .ok();
         }
-        let model_picker_tab = ModelPickerTab::Provider(
-            state
-                .selected_session
-                .and_then(|id| state.sessions.iter().find(|session| session.id == id))
-                .map(|session| session.provider)
-                .unwrap_or(state.last_provider),
-        );
         let mut session_navigation = SessionNavigation::default();
         if let Some(session_id) = state.selected_session.filter(|session_id| {
             state
@@ -3731,6 +4044,7 @@ impl Waku {
                     crate::theme::apply_theme_preference(
                         this.state.theme,
                         this.state.sidebar_transparency,
+                        this.state.sidebar_transparency_amount,
                         window,
                         cx,
                     );
@@ -3831,10 +4145,16 @@ impl Waku {
                         }
                     }
                     ComposerEvent::SubmitSteer(prompt) => {
-                        if this.big_picture.is_open() {
-                            if !(prompt.trim().is_empty() && this.composer_pasted_blocks.is_empty())
-                                && let Some(submission) =
-                                    this.submission_with_attachments(prompt, cx)
+                        // An empty field is only an empty draft when nothing
+                        // is staged alongside it — attachments, pasted
+                        // blocks, and annotations all steer as a submission.
+                        let empty_draft = prompt.trim().is_empty()
+                            && this.composer_attachments.is_empty()
+                            && this.composer_pasted_blocks.is_empty()
+                            && !this.has_annotations();
+                        if this.big_picture.is_open() && !empty_draft {
+                            if let Some(submission) =
+                                this.submission_with_attachments(prompt, cx)
                             {
                                 this.steer_big_picture_submission(submission, cx);
                             }
@@ -3842,6 +4162,20 @@ impl Waku {
                             // Nothing on the page can be steered — a steered
                             // draft is a send there.
                             this.projects_submit(prompt, cx);
+                        } else if empty_draft {
+                            if this
+                                .composer_session()
+                                .is_some_and(composer::session_awaits_continue)
+                            {
+                                // Cmd+Enter on an empty composer continues a
+                                // stopped turn too; its queued follow-ups
+                                // still drain once that turn settles.
+                                this.continue_interrupted_session(cx);
+                            } else {
+                                // A truly empty composer activates the
+                                // oldest queued follow-up's Steer control.
+                                this.steer_oldest_queued_message(cx);
+                            }
                         } else if let Some(session_id) =
                             this.selected_session().and_then(|session| {
                                 this.response_fork_preparations
@@ -3854,31 +4188,6 @@ impl Waku {
                             this.submission_with_attachments(prompt, cx)
                         {
                             this.steer_composer_submission(submission, cx);
-                        }
-                    }
-                    ComposerEvent::SteerQueued => {
-                        // Staged attachments, pasted blocks, and annotations
-                        // make this a real draft even when the text field is
-                        // empty. Preserve the shortcut's previous no-op
-                        // behavior until that draft is sent or cleared.
-                        if this.projects_page.is_some() {
-                            let prompt = this.composer.read(cx).content(cx).to_owned();
-                            this.projects_submit(&prompt, cx);
-                        } else if this.composer_attachments.is_empty()
-                            && this.composer_pasted_blocks.is_empty()
-                            && !this.has_annotations()
-                        {
-                            if this
-                                .composer_session()
-                                .is_some_and(composer::session_awaits_continue)
-                            {
-                                // Cmd+Enter on an empty composer continues a
-                                // stopped turn too; its queued follow-ups
-                                // still drain once that turn settles.
-                                this.continue_interrupted_session(cx);
-                            } else {
-                                this.steer_oldest_queued_message(cx);
-                            }
                         }
                     }
                     ComposerEvent::Edited => {
@@ -3984,7 +4293,33 @@ impl Waku {
                             this.reveal_selected_picker_model();
                         } else {
                             this.model_picker_highlight = Some(0);
-                            this.model_picker_scroll.scroll_to_item(0);
+                            this.model_picker_list.scroll_to(ListOffset {
+                                item_ix: 0,
+                                offset_in_item: Pixels::ZERO,
+                            });
+                        }
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &route_class_search,
+                |this: &mut Self, search, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        // Same contract as the model picker: a live filter
+                        // pins the cursor to the first row so `enter` has a
+                        // visible target; clearing returns to the opening
+                        // state — nothing highlighted, the class's target
+                        // row back in view.
+                        if search.read(cx).content().trim().is_empty() {
+                            this.route_class_highlight = None;
+                            if let Some(class) = this.route_class_picker {
+                                this.reveal_route_class_target(class);
+                            }
+                        } else {
+                            this.route_class_highlight = Some(0);
+                            this.route_class_scroll.scroll_to_item(0);
                         }
                         cx.notify();
                     }
@@ -4006,6 +4341,15 @@ impl Waku {
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         this.file_finder_query_edited(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &sync_branch_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.sync_branch_query_edited(cx);
                     }
                 },
             )
@@ -4038,8 +4382,12 @@ impl Waku {
             .detach();
             cx.subscribe(
                 &settings_search,
-                |_: &mut Self, _, event: &InputEvent, cx| {
+                |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
+                        // A new query rebuilds the result list, so the scroll
+                        // offset and any arrow-key target no longer apply.
+                        this.settings_scroll.set_offset(point(px(0.0), px(0.0)));
+                        this.settings_search_target = None;
                         cx.notify();
                     }
                 },
@@ -4051,6 +4399,35 @@ impl Waku {
                     if matches!(event, InputEvent::Edited) {
                         cx.notify();
                     }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &friend_code_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.send_friend_request(cx),
+                    // Repaint so the Send button's enabled state tracks the
+                    // field while typing.
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &friend_name_input,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Submit(_)) {
+                        this.save_friend_display_name(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &friend_nickname_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.commit_friend_nickname(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
                 },
             )
             .detach();
@@ -4091,7 +4468,30 @@ impl Waku {
                 },
             )
             .detach();
+            for input in [
+                &eval_typesafe_key_input,
+                &eval_vercel_key_input,
+                &eval_vercel_team_input,
+                &eval_cloudflare_account_input,
+                &eval_cloudflare_token_input,
+            ] {
+                cx.subscribe(
+                    input,
+                    |this: &mut Self, _, event: &InputEvent, cx| match event {
+                        InputEvent::Submit(_) => this.save_eval_credentials(cx),
+                        InputEvent::Edited => cx.notify(),
+                        _ => {}
+                    },
+                )
+                .detach();
+            }
             cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(&drafts_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
                 }
@@ -4237,6 +4637,24 @@ impl Waku {
             })
             .detach();
 
+            // Antigravity's TUI owns its sessions, so the CLI's own
+            // summaries db is the only status source. The poll early-outs
+            // while no Antigravity session needs it.
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(agy::AGY_POLL_INTERVAL)
+                        .await;
+                    if this
+                        .update(cx, |this, cx| this.maybe_poll_agy_sessions(cx))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+
             let markdown_link_handler: md::render::LinkHandler = {
                 let waku = cx.entity().downgrade();
                 Rc::new(move |target, _, cx| {
@@ -4279,10 +4697,12 @@ impl Waku {
                 composer_draft_save_generation: 0,
                 command_palette: command_palette::CommandPaletteUi::new(command_palette_search),
                 file_finder: file_finder::FileFinderUi::new(file_finder_search),
+                sync_branch: sync_branch::SyncBranchUi::new(sync_branch_search),
                 task_switcher,
                 project_switcher,
                 big_picture,
                 model_search,
+                route_class_search,
                 branch_search,
                 branch_create_input,
                 worktree_name_input,
@@ -4291,6 +4711,9 @@ impl Waku {
                 worktree_move_pending: HashSet::new(),
                 settings_search,
                 friend_code_input,
+                friend_name_input,
+                friend_nickname_input,
+                editing_friend_nickname: None,
                 ui_font_selector,
                 code_font_selector,
                 daemon_port_input,
@@ -4298,6 +4721,12 @@ impl Waku {
                 worktree_sync_branches_input,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
+                eval_typesafe_key_input,
+                eval_vercel_key_input,
+                eval_vercel_team_input,
+                eval_cloudflare_account_input,
+                eval_cloudflare_token_input,
+                eval_inputs_seeded: false,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,
@@ -4350,6 +4779,9 @@ impl Waku {
                 usage_window: crate::usage_history::UsageWindow::TrailingDays(30),
                 usage_metric: UsageMetric::Cost,
                 usage_breakdown: UsageBreakdown::Model,
+                usage_model_col_widths: [84.0, 64.0, 84.0],
+                usage_day_col_widths: [84.0; 4],
+                usage_col_resize: column_resize::ColumnResize::new(),
                 usage_months_scroll: ScrollHandle::new(),
                 usage_months_scrollbar: ScrollbarState::new(),
                 usage_project_filter,
@@ -4362,10 +4794,14 @@ impl Waku {
                 computer_use_app_icons: RefCell::new(HashMap::new()),
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
-                model_picker_tab,
                 model_picker_highlight: None,
-                model_picker_scroll: ScrollHandle::new(),
+                model_picker_list: ListState::new(0, ListAlignment::Top, px(512.0))
+                    .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 model_picker_scrollbar: ScrollbarState::new(),
+                route_class_highlight: None,
+                route_class_scroll: ScrollHandle::new(),
+                route_class_scrollbar: ScrollbarState::new(),
+                route_class_picker: None,
                 model_picker_empty_focus,
                 branch_picker_mode: BranchPickerMode::Browse,
                 branch_picker_highlight: None,
@@ -4375,6 +4811,8 @@ impl Waku {
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,
+                issue_dialog: None,
+                last_created_issue: None,
                 archive_dialog: None,
                 archive_preview_pending: HashSet::new(),
                 shortcuts_dialog: None,
@@ -4394,6 +4832,7 @@ impl Waku {
                 mention_file_index: Rc::new(Vec::new()),
                 mention_file_index_path: None,
                 mention_file_index_loading: false,
+                work_item_mentions: HashMap::new(),
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,
@@ -4409,6 +4848,10 @@ impl Waku {
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,
+                route_policy_tx,
+                route_policy_events,
+                route_policy: None,
+                route_policy_pending: false,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),
@@ -4432,6 +4875,8 @@ impl Waku {
                 session_navigation,
                 session_rename: None,
                 terminal_rename: None,
+                sidebar_multi_selection: HashSet::new(),
+                sidebar_multi_selection_anchor: None,
                 session_rename_input,
                 // The Terminals group starts folded every launch — its rows
                 // are opt-in, unlike the session history below them.
@@ -4445,12 +4890,14 @@ impl Waku {
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_terminal_close_focuses: RefCell::new(HashMap::new()),
+                sidebar_terminal_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
                 sidebar_visible,
                 sidebar_width,
                 right_panel_visible,
                 right_panel_width,
                 git_panel_visible,
+                git_panel_top_height,
                 git_panel: None,
                 git_panel_operation: None,
                 git_panel_generation: 0,
@@ -4496,6 +4943,7 @@ impl Waku {
                 panel_resize_drag: None,
                 computer_use_preview_position: None,
                 right_panel_session_states: HashMap::new(),
+                right_panel_detached_state: RightPanelSessionState::empty(false),
                 right_panel_surfaces: Vec::new(),
                 right_panel_active_surface: None,
                 right_panel_tabs_scroll_handle: ScrollHandle::new(),
@@ -4546,6 +4994,13 @@ impl Waku {
                 right_panel_terminal_commands: HashMap::new(),
                 custom_command_runs: HashMap::new(),
                 provider_setup_terminals: HashMap::new(),
+                agy_terminals: HashMap::new(),
+                agy_last_visible: HashMap::new(),
+                agy_spawned_at: HashMap::new(),
+                agy_poll_tx,
+                agy_poll_events,
+                agy_pending_spawns: HashSet::new(),
+                agy_poll_pending: false,
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
@@ -4574,13 +5029,18 @@ impl Waku {
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
+                settings_search_sections: Vec::new(),
+                settings_search_target: None,
                 archived_search,
                 archived_project_filter: None,
                 archived_sessions_list: ListState::new(0, ListAlignment::Top, px(256.0)),
                 archived_sessions_scrollbar: ScrollbarState::new(),
                 archived_session_rows: RefCell::new(Vec::new()),
                 completion_volume_slider: SliderState::new(),
+                sidebar_transparency_slider: SliderState::new(),
+                border_intensity_slider: SliderState::new(),
                 theme_preview_active: false,
+                theme_preview_expanded: false,
                 header_drag_armed: false,
                 toast: startup_toast.map(|message| ToastState {
                     message,
@@ -4610,6 +5070,7 @@ impl Waku {
                 sidebar_row_cache: RefCell::new(Vec::new()),
                 sidebar_rows_fingerprint: Cell::new(None),
                 sidebar_rows_snapshot: RefCell::new(Rc::new(Vec::new())),
+                sidebar_collapsed_group_members: RefCell::new(Rc::new(HashMap::new())),
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),
@@ -4629,6 +5090,15 @@ impl Waku {
                 projects_page: None,
                 last_projects_page_project: None,
                 projects_page_states: HashMap::new(),
+                drafts_page: false,
+                draft_use_undos: Vec::new(),
+                drafts_search,
+                drafts_show_hidden: false,
+                drafts_list_state: ListState::new(0, ListAlignment::Top, px(640.0)),
+                drafts_scrollbar: ScrollbarState::new(),
+                drafts_rows: RefCell::new(Vec::new()),
+                drafts_editing: None,
+                drafts_edit_input,
                 settings_git_project: None,
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),
@@ -4727,7 +5197,24 @@ impl Waku {
             this.start_task_state_sync(waku_client::DaemonKey::Local, this.daemon.clone());
             this.connect_remote_hosts(cx);
             for session_id in startup_live_session_ids {
-                this.start_runtime_attachment(session_id, cx);
+                // Antigravity's runtime is the app-local TUI terminal, not a
+                // daemon attachment. It respawns lazily — only the selected
+                // session's surface exists at launch.
+                let is_agy = this
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|session| {
+                        session.id == session_id
+                            && session.provider == ProviderKind::Antigravity
+                    });
+                if is_agy {
+                    if this.state.selected_session == Some(session_id) {
+                        this.ensure_agy_terminal(session_id, cx);
+                    }
+                } else {
+                    this.start_runtime_attachment(session_id, cx);
+                }
             }
             this.start_pending_checkpoint_captures(cx);
             // The autocomplete indexes prefetch alongside, so typing `/` or

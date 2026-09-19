@@ -176,6 +176,21 @@ impl Inbox {
         self.threads.iter().filter(|thread| thread.unread).count()
     }
 
+    /// Drop everything a poll produced — the experiment toggle's off path,
+    /// so a disabled inbox holds no stale threads, dots, or validators.
+    pub(super) fn reset(&mut self) {
+        self.open = false;
+        self.availability = None;
+        self.threads.clear();
+        self.etag = None;
+        self.last_modified = None;
+        self.next_poll = Instant::now();
+        self.seen.clear();
+        self.primed = false;
+        self.unread_subjects.clear();
+        self.mutating.clear();
+    }
+
     /// The project whose checkout resolves to this repo, when one is known.
     fn project_for_repo(&self, repo: &str) -> Option<Uuid> {
         self.repo_projects.get(&repo.to_lowercase()).copied()
@@ -238,7 +253,10 @@ impl Waku {
     /// conditional fetch when the interval says one is due. All work is on
     /// the background executor; only the store swap touches the UI.
     pub(super) fn maybe_poll_notifications(&mut self, cx: &mut Context<Self>) {
-        if self.notifications.in_flight || Instant::now() < self.notifications.next_poll {
+        if !self.state.github_enabled
+            || self.notifications.in_flight
+            || Instant::now() < self.notifications.next_poll
+        {
             return;
         }
         self.notifications.in_flight = true;
@@ -269,6 +287,10 @@ impl Waku {
     ) {
         self.notifications.in_flight = false;
         self.notifications.next_poll = Instant::now() + self.notifications.poll_interval;
+        if !self.state.github_enabled {
+            // Toggled off mid-flight — the reset already owns the store.
+            return;
+        }
         let Ok(WorkspaceResult::Notifications { poll }) = result else {
             // A transient failure keeps the last page — triage state is
             // still good enough to render, and the next tick retries.
@@ -649,6 +671,9 @@ impl Waku {
     /// The page's open/close — same "claims the main area" contract as the
     /// Projects page.
     pub(super) fn open_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.state.github_enabled {
+            return;
+        }
         self.settings_page = None;
         self.projects_page = None;
         self.selected_terminal = None;

@@ -5,6 +5,7 @@ use gpui::{
     StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb, svg,
 };
 
+pub mod column_resize;
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
@@ -355,10 +356,12 @@ where
     }
 }
 
-/// Brand hue for each provider's official mark.
+/// Brand hue for each provider — a series color key where the chart needs
+/// one. Provider marks themselves tint neutral; see [`provider_mark`].
 pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
     match provider {
         ProviderKind::Amp => rgb(0xF34E3F).into(),
+        ProviderKind::Antigravity => rgb(0x3186FF).into(),
         ProviderKind::Claude => rgb(0xD97757).into(),
         ProviderKind::DeepSeek => rgb(0x4D6BFE).into(),
         ProviderKind::Codex
@@ -387,6 +390,7 @@ pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
 pub fn provider_icon(provider: ProviderKind) -> &'static str {
     match provider {
         ProviderKind::Amp => "icons/provider-amp.svg",
+        ProviderKind::Antigravity => "icons/provider-antigravity.svg",
         ProviderKind::Claude => "icons/provider-claude.svg",
         ProviderKind::Codex => "icons/provider-openai.svg",
         ProviderKind::Copilot => "icons/provider-copilot.svg",
@@ -501,6 +505,9 @@ pub struct MenuChip {
     /// A second, separately coloured icon layer — see [`provider_mark`].
     badge: Option<(&'static str, Hsla)>,
     label: SharedString,
+    /// Overrides the label's `text_secondary` default — trait chips sit a
+    /// step dimmer than the model name they qualify.
+    label_color: Option<Hsla>,
     tooltip: Option<SharedString>,
     /// A shortcut rendered dim inside the tooltip.
     shortcut: Option<ShortcutHint>,
@@ -521,6 +528,7 @@ impl MenuChip {
             icon: None,
             badge: None,
             label: SharedString::default(),
+            label_color: None,
             tooltip: None,
             shortcut: None,
             caret: true,
@@ -569,6 +577,13 @@ impl MenuChip {
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = label.into();
+        self
+    }
+
+    /// Label color when the default `text_secondary` reads too strong —
+    /// trait labels dim a step below the model name beside them.
+    pub fn label_color(mut self, color: Hsla) -> Self {
+        self.label_color = Some(color);
         self
     }
 
@@ -685,7 +700,7 @@ impl RenderOnce for MenuChip {
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_color(theme.text_secondary)
+                    .text_color(self.label_color.unwrap_or(theme.text_secondary))
                     .child(self.label),
             )
             .when(self.caret, |element| {
@@ -839,6 +854,8 @@ mod tests {
             paths.push(provider_icon(provider));
             paths.extend(provider_badge(provider));
         }
+        // The Auto route's mark — not a ProviderKind, so no provider_icon arm.
+        paths.push("icons/provider-typesafe.svg");
         for kind in [
             ActivityKind::Reasoning,
             ActivityKind::Command,

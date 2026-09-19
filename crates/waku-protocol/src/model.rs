@@ -7,9 +7,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+use crate::git::CommitEntry;
+use crate::routing::RouteDecision;
+
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
+    Antigravity,
     Amp,
     Claude,
     #[default]
@@ -30,7 +36,8 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
+        Self::Antigravity,
         Self::Amp,
         Self::Claude,
         Self::Codex,
@@ -51,6 +58,7 @@ impl ProviderKind {
 
     pub fn id(self) -> &'static str {
         match self {
+            Self::Antigravity => "antigravity",
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -72,6 +80,7 @@ impl ProviderKind {
 
     pub fn display_name(self) -> &'static str {
         match self {
+            Self::Antigravity => "Antigravity CLI",
             Self::Amp => "Amp",
             Self::Claude => "Claude Code",
             Self::Codex => "Codex CLI",
@@ -93,6 +102,7 @@ impl ProviderKind {
 
     pub fn short_name(self) -> &'static str {
         match self {
+            Self::Antigravity => "Antigravity",
             Self::Amp => "Amp",
             Self::Claude => "Claude",
             Self::Codex => "Codex",
@@ -114,6 +124,7 @@ impl ProviderKind {
 
     pub fn command(self) -> &'static str {
         match self {
+            Self::Antigravity => "agy",
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -140,6 +151,14 @@ impl ProviderKind {
     /// The Settings page shows these verbatim and can run them in a terminal.
     pub fn setup(self) -> ProviderSetup {
         match self {
+            // Antigravity signs in inside its own TUI, so the sign-in step
+            // simply launches `agy`.
+            Self::Antigravity => ProviderSetup {
+                install: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+                sign_in: Some("agy"),
+                api_key_env: Some("GEMINI_API_KEY"),
+                docs_url: "https://antigravity.google/docs/cli/overview",
+            },
             Self::Amp => ProviderSetup {
                 install: "curl -fsSL https://ampcode.com/install.sh | bash",
                 sign_in: Some("amp login"),
@@ -252,11 +271,13 @@ impl ProviderKind {
         }
     }
 
-    /// Kimi Code, Fx, Devin, and Droid are deliberately absent from this
-    /// list and from [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork`
-    /// copies a whole session and takes no turn count, and Fx, Devin, and Droid expose
-    /// no turn-aware fork or truncation method. None of them can reproduce
-    /// Goddard's "drop the last N turns" semantics without corrupting history.
+    /// Kimi Code, Fx, Devin, Droid, and Antigravity are deliberately absent
+    /// from this list and from [`Self::supports_conversation_fork`]. Kimi's
+    /// ACP `session/fork` copies a whole session and takes no turn count, and
+    /// Fx, Devin, and Droid expose no turn-aware fork or truncation method.
+    /// Antigravity is terminal-backed: its sessions are its own TUI, not
+    /// Goddard turns. None of them can reproduce Goddard's "drop the last N
+    /// turns" semantics without corrupting history.
     /// Copilot is present: `sessions.fork` truncates at an event boundary, and
     /// rewinding resumes the task on the truncated fork.
     pub fn supports_conversation_rollback(self) -> bool {
@@ -298,7 +319,8 @@ impl ProviderKind {
     pub fn supports_model_discovery(self) -> bool {
         matches!(
             self,
-            Self::Claude
+            Self::Antigravity
+                | Self::Claude
                 | Self::Codex
                 | Self::Copilot
                 | Self::Cursor
@@ -350,6 +372,9 @@ pub struct ProviderSetup {
     tag = "provider"
 )]
 pub enum ProviderResumeCursor {
+    Antigravity {
+        conversation_id: String,
+    },
     Amp {
         thread_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -419,6 +444,9 @@ pub enum ProviderResumeCursor {
 impl ProviderResumeCursor {
     pub fn from_session_id(provider: ProviderKind, id: String) -> Self {
         match provider {
+            ProviderKind::Antigravity => Self::Antigravity {
+                conversation_id: id,
+            },
             ProviderKind::Amp => Self::Amp {
                 thread_id: id,
                 fork_context: None,
@@ -461,6 +489,7 @@ impl ProviderResumeCursor {
 
     pub fn provider(&self) -> ProviderKind {
         match self {
+            Self::Antigravity { .. } => ProviderKind::Antigravity,
             Self::Amp { .. } => ProviderKind::Amp,
             Self::Claude { .. } => ProviderKind::Claude,
             Self::Codex { .. } => ProviderKind::Codex,
@@ -482,6 +511,7 @@ impl ProviderResumeCursor {
 
     pub fn native_id(&self) -> &str {
         match self {
+            Self::Antigravity { conversation_id } => conversation_id,
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
             | Self::Copilot { session_id }
@@ -572,8 +602,15 @@ impl RuntimeMode {
 pub struct ProviderModelOption {
     pub id: String,
     pub label: String,
+    /// The i18n semantic behind `label`, when the daemon composed it from a
+    /// known key rather than a provider name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_i18n: Option<crate::protocol::WireTranslation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The i18n semantic behind `description`, same contract as `label_i18n`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_i18n: Option<crate::protocol::WireTranslation>,
 }
 
 impl ProviderModelOption {
@@ -581,8 +618,38 @@ impl ProviderModelOption {
         Self {
             id: id.into(),
             label: label.into(),
+            label_i18n: None,
             description: None,
+            description_i18n: None,
         }
+    }
+
+    /// A `localized!` pair supplies both the English label and its semantic.
+    pub fn keyed(
+        id: impl Into<String>,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self {
+            label_i18n: Some(pair.1),
+            ..Self::new(id, pair.0)
+        }
+    }
+
+    /// An optional semantic for `label`, for sites where the pair itself is
+    /// conditional. A `Some` pairs with the already-set label text.
+    pub fn with_label_i18n(mut self, i18n: Option<crate::protocol::WireTranslation>) -> Self {
+        self.label_i18n = i18n;
+        self
+    }
+
+    /// A `localized!` pair for `description`, same contract as `keyed`.
+    pub fn keyed_description(
+        mut self,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        self.description = Some(pair.0);
+        self.description_i18n = Some(pair.1);
+        self
     }
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
@@ -598,6 +665,10 @@ impl ProviderModelOption {
 pub struct ProviderModel {
     pub id: String,
     pub name: String,
+    /// The i18n semantic behind `name`, when the daemon composed it from a
+    /// known key rather than a provider name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_i18n: Option<crate::protocol::WireTranslation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_provider: Option<String>,
     #[serde(default)]
@@ -623,6 +694,13 @@ pub struct ProviderModel {
 pub struct FavoriteModel {
     pub provider: ProviderKind,
     pub model: String,
+    /// The picker treats a favorite as a model+effort+fast selection, not a
+    /// bare model. `None` predates combo favorites and resolves to the
+    /// model's default effort at match time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
 }
 
 /// One provider-owned agent composition available when a task starts.
@@ -734,6 +812,7 @@ impl ProviderModel {
         Self {
             id: id.into(),
             name: name.into(),
+            name_i18n: None,
             sub_provider: None,
             is_default: false,
             reasoning_efforts: Vec::new(),
@@ -742,6 +821,17 @@ impl ProviderModel {
             default_service_tier: None,
             context_windows: Vec::new(),
             default_context_window: None,
+        }
+    }
+
+    /// A `localized!` pair supplies both the English name and its semantic.
+    pub fn keyed(
+        id: impl Into<String>,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self {
+            name_i18n: Some(pair.1),
+            ..Self::new(id, pair.0)
         }
     }
 
@@ -1268,6 +1358,16 @@ pub struct AgentSession {
     /// conversation history exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_preset: Option<String>,
+    /// The draft's model selection is Auto: the first submission routes the
+    /// task through the evaluation router instead of starting `provider`
+    /// directly. Meaningless once the session has started — `route_decision`
+    /// is the record of what routing chose.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto_route: bool,
+    /// The routing decision that produced this session's provider and model.
+    /// Present only on sessions that started through Auto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_decision: Option<RouteDecision>,
     pub status: SessionStatus,
     pub created_at: u64,
     /// Any mutation, including title edits and truncation. Use
@@ -1292,6 +1392,10 @@ pub struct AgentSession {
     /// the daemon refuses prompts while this is set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub quarantined: bool,
+    /// When the session's workspace landed on its base branch, unix seconds.
+    /// `None` while the session's work has not been landed through the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed_at: Option<u64>,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Slash commands the provider reported for this session's live process,
@@ -1372,6 +1476,8 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             agent_preset: None,
+            auto_route: false,
+            route_decision: None,
             status: SessionStatus::Idle,
             created_at: now,
             updated_at: now,
@@ -1379,6 +1485,7 @@ impl AgentSession {
             archived_at: None,
             pinned_at: None,
             quarantined: false,
+            landed_at: None,
             detail_loaded: true,
             provider_cursor: None,
             available_commands: Vec::new(),
@@ -1416,6 +1523,8 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             agent_preset: None,
+            auto_route: self.auto_route,
+            route_decision: self.route_decision.clone(),
             status: self.status,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -1423,6 +1532,7 @@ impl AgentSession {
             archived_at: self.archived_at,
             pinned_at: self.pinned_at,
             quarantined: self.quarantined,
+            landed_at: self.landed_at,
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
@@ -1598,7 +1708,9 @@ impl AgentSession {
         for block in &mut self.transcript_blocks {
             for activity in &mut block.activities {
                 if activity.kind == ActivityKind::Search && activity.title.trim() == "Search for" {
-                    activity.title = tr!("activity.browsed_web");
+                    // Persisted titles stay locale-neutral: stored English,
+                    // not a tr! baked in whichever process migrated the row.
+                    activity.title = "Browsed the web".to_owned();
                 }
                 let named_kind = ActivityKind::from_tool_name(&activity.title);
                 if named_kind != ActivityKind::Tool
@@ -2072,6 +2184,23 @@ pub struct MessageAttachment {
     pub session_id: Option<Uuid>,
 }
 
+/// A structured transcript element persisted on a [`Message`]. `content`
+/// always carries a plain-text rendering of the same event so clients that
+/// predate a variant still show the pill; renderers that know it draw the
+/// bespoke element instead.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum TranscriptNotice {
+    /// The workspace's commits were landed on `base` — rebase-or-merge
+    /// integration plus a base fast-forward. `commits` is newest-first and
+    /// may be capped shorter than `ahead`, the true total.
+    Landed {
+        base: String,
+        commits: Vec<CommitEntry>,
+        ahead: u64,
+    },
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct Message {
     pub id: Uuid,
@@ -2079,6 +2208,10 @@ pub struct Message {
     pub turn_id: Option<Uuid>,
     pub role: MessageRole,
     pub content: String,
+    /// Structured rendering of a system row; `None` for ordinary messages.
+    /// Clients without the variant fall back to `content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<TranscriptNotice>,
     /// User-visible text before provider-facing attachment mentions were
     /// appended. Plain and legacy messages omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2106,6 +2239,7 @@ impl Message {
             turn_id: None,
             role,
             content: content.into(),
+            notice: None,
             display_content: None,
             attachments: Vec::new(),
             sent_by_task: None,
@@ -2327,7 +2461,11 @@ pub enum DriverEvent {
     Permission {
         request_id: String,
         title: String,
+        /// The i18n semantic behind `title`/`detail`, when the daemon
+        /// composed them from a known key rather than provider text.
+        title_i18n: Option<crate::protocol::WireTranslation>,
         detail: String,
+        detail_i18n: Option<crate::protocol::WireTranslation>,
         options: Vec<PermissionOption>,
     },
     /// Structured questions the provider needs answered before it can
@@ -2351,6 +2489,9 @@ pub enum DriverEvent {
     SteerRejected {
         message: String,
         reason: String,
+        /// The i18n semantic behind `reason`, when the daemon composed it
+        /// from a known key rather than provider text.
+        reason_i18n: Option<crate::protocol::WireTranslation>,
     },
     /// Context-window occupancy reported by the live stream. Fields arrive at
     /// different moments — token counts with each assistant message, the
@@ -2371,9 +2512,71 @@ pub enum DriverEvent {
     TurnFinished {
         success: bool,
         summary: Option<String>,
+        /// The i18n semantic behind `summary`, when the daemon knew it.
+        /// Absent on older daemons — clients render `summary` as-is.
+        summary_i18n: Option<crate::protocol::WireTranslation>,
+    },
+    /// A user-facing error whose text is a known i18n key: `message` is the
+    /// English fallback, `i18n` lets each client render its own locale.
+    /// Provider-supplied error text still travels as [`Self::Error`].
+    LocalizedError {
+        message: String,
+        i18n: crate::protocol::WireTranslation,
     },
     Error(String),
     ProcessExited,
+}
+
+impl DriverEvent {
+    /// Wrap the `(fallback, translation)` pair produced by `localized!`.
+    pub fn localized_error(pair: (String, crate::protocol::WireTranslation)) -> Self {
+        Self::LocalizedError {
+            message: pair.0,
+            i18n: pair.1,
+        }
+    }
+
+    /// Provider-or-fallback error text: carries the i18n semantic when the
+    /// daemon composed the message, stays an opaque `Error` when the text
+    /// came from the provider.
+    pub fn error_or_localized(
+        text: String,
+        i18n: Option<crate::protocol::WireTranslation>,
+    ) -> Self {
+        match i18n {
+            Some(i18n) => Self::LocalizedError {
+                message: text,
+                i18n,
+            },
+            None => Self::Error(text),
+        }
+    }
+
+    /// A rejected steer whose reason is a known i18n key — the `localized!`
+    /// pair supplies both the English fallback and the semantic.
+    pub fn steer_rejected_keyed(
+        message: String,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self::SteerRejected {
+            message,
+            reason: pair.0,
+            reason_i18n: Some(pair.1),
+        }
+    }
+
+    /// A settled turn whose reason is a known i18n key — the `localized!`
+    /// pair supplies both the English fallback and the semantic.
+    pub fn turn_finished_keyed(
+        success: bool,
+        pair: (String, crate::protocol::WireTranslation),
+    ) -> Self {
+        Self::TurnFinished {
+            success,
+            summary: Some(pair.0),
+            summary_i18n: Some(pair.1),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
@@ -2431,6 +2634,10 @@ impl BackgroundWorkKey {
 pub struct BackgroundWorkItem {
     pub key: BackgroundWorkKey,
     pub title: String,
+    /// The i18n semantic behind `title`, when the daemon composed it from a
+    /// known key (e.g. the kind's generic label) rather than provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_i18n: Option<crate::protocol::WireTranslation>,
     pub detail: Option<String>,
     pub command: Option<String>,
     pub cwd: Option<String>,
@@ -2454,6 +2661,15 @@ pub struct BackgroundWorkItem {
 }
 
 impl BackgroundWorkItem {
+    /// The title to show: the i18n semantic rendered in this process's locale
+    /// when present, the daemon's fallback text otherwise.
+    pub fn display_title(&self) -> String {
+        self.title_i18n
+            .as_ref()
+            .map(crate::protocol::WireTranslation::render)
+            .unwrap_or_else(|| self.title.clone())
+    }
+
     pub fn new(
         kind: BackgroundWorkKind,
         provider_id: impl Into<String>,
@@ -2464,6 +2680,7 @@ impl BackgroundWorkItem {
         Self {
             key: BackgroundWorkKey::new(kind, provider_id),
             title: title.into(),
+            title_i18n: None,
             detail: None,
             command: None,
             cwd: None,
@@ -2506,6 +2723,10 @@ pub enum BackgroundWorkEvent {
     StopFailed {
         key: BackgroundWorkKey,
         message: String,
+        /// The i18n semantic behind `message`, when the daemon composed it
+        /// from a known key rather than provider text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_i18n: Option<crate::protocol::WireTranslation>,
     },
 }
 
@@ -2558,7 +2779,27 @@ impl<'de> Deserialize<'de> for ReportedCommand {
 pub struct PermissionOption {
     pub id: String,
     pub label: String,
+    /// The i18n semantic behind `label`, when the daemon composed it from a
+    /// known key rather than relaying provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_i18n: Option<crate::protocol::WireTranslation>,
     pub allow: bool,
+}
+
+impl PermissionOption {
+    /// A `localized!` pair supplies both the English label and its semantic.
+    pub fn keyed(
+        id: impl Into<String>,
+        pair: (String, crate::protocol::WireTranslation),
+        allow: bool,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: pair.0,
+            label_i18n: Some(pair.1),
+            allow,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -2635,6 +2876,11 @@ pub struct ActivityItem {
     pub source_id: Option<String>,
     pub kind: ActivityKind,
     pub title: String,
+    /// The i18n semantic behind `title`, when the daemon composed it from a
+    /// known key (an arg-bearing label like "Searching for %{query}") rather
+    /// than provider text or a bare kind label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_i18n: Option<crate::protocol::WireTranslation>,
     /// Native tool identity, separate from the human-readable activity title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
@@ -2646,6 +2892,11 @@ pub struct ActivityItem {
     pub arguments: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// Any bounded text field (`output`, `arguments`, `detail`) was clipped
+    /// at the source cap. Renderers append the localized truncation marker
+    /// at display time; the stored text itself stays locale-neutral.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub output_truncated: bool,
     /// Images returned by a tool, kept separate from text so large data URLs
     /// are never truncated or treated as literal activity output.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2689,11 +2940,13 @@ impl ActivityItem {
             source_id,
             kind,
             title,
+            title_i18n: None,
             tool_name: None,
             mcp_server: None,
             detail,
             arguments: None,
             output: None,
+            output_truncated: false,
             image_urls: Vec::new(),
             failed: false,
             complete,
@@ -3059,6 +3312,19 @@ fn fallback_activity_display_target(kind: ActivityKind, title: &str) -> Option<S
     .then(|| compact_activity_target(title))
 }
 
+/// The locale every shipped translation renders `key` under. Generic titles
+/// persisted by earlier builds were baked in whatever locale the writing
+/// process ran, so checking only the current locale misses them.
+const SHIPPED_LOCALES: [&str; 3] = ["en", "zh-CN", "ja"];
+
+fn title_in_any_locale(title: &str, keys: &[&str]) -> bool {
+    keys.iter().any(|key| {
+        SHIPPED_LOCALES
+            .iter()
+            .any(|locale| title == rust_i18n::t!(*key, locale = *locale))
+    })
+}
+
 pub fn is_generic_activity_title(kind: ActivityKind, title: &str) -> bool {
     // Classification falling back to `Tool` only means the name is not one of
     // the semantic kinds above. It does not make the provider-supplied tool
@@ -3068,17 +3334,19 @@ pub fn is_generic_activity_title(kind: ActivityKind, title: &str) -> bool {
         return true;
     }
     match kind {
-        ActivityKind::Command => title == tr!("activity.run_command"),
+        ActivityKind::Command => title_in_any_locale(title, &["activity.run_command"]),
         ActivityKind::FileChange => {
-            title == tr!("activity.edit_file") || title == tr!("activity.write_file")
+            title_in_any_locale(title, &["activity.edit_file", "activity.write_file"])
         }
-        ActivityKind::FileRead => title == tr!("activity.read_file"),
+        ActivityKind::FileRead => title_in_any_locale(title, &["activity.read_file"]),
         ActivityKind::FileSearch => {
-            title == tr!("activity.search_files") || title == tr!("activity.find_files")
+            title_in_any_locale(title, &["activity.search_files", "activity.find_files"])
         }
-        ActivityKind::FileList => title == tr!("activity.list_files"),
-        ActivityKind::Plan => title == tr!("activity.plan_updated"),
-        ActivityKind::Tool => title.eq_ignore_ascii_case("tool") || title == tr!("activity.tool"),
+        ActivityKind::FileList => title_in_any_locale(title, &["activity.list_files"]),
+        ActivityKind::Plan => title_in_any_locale(title, &["activity.plan_updated"]),
+        ActivityKind::Tool => {
+            title.eq_ignore_ascii_case("tool") || title_in_any_locale(title, &["activity.tool"])
+        }
         _ => false,
     }
 }
@@ -3921,7 +4189,11 @@ impl<'de> Deserialize<'de> for TranscriptBlock {
 pub struct PendingPermission {
     pub request_id: String,
     pub title: String,
+    /// The i18n semantic behind `title`/`detail`, when the daemon composed
+    /// them from a known key rather than provider text.
+    pub title_i18n: Option<crate::protocol::WireTranslation>,
     pub detail: String,
+    pub detail_i18n: Option<crate::protocol::WireTranslation>,
     pub options: Vec<PermissionOption>,
 }
 
@@ -4656,7 +4928,11 @@ mod tests {
         for provider in ProviderKind::ALL {
             let supported = !matches!(
                 provider,
-                ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi
+                ProviderKind::Antigravity
+                    | ProviderKind::Devin
+                    | ProviderKind::Droid
+                    | ProviderKind::Fx
+                    | ProviderKind::Kimi
             );
             assert_eq!(provider.supports_conversation_fork(), supported);
             assert_eq!(provider.supports_conversation_rollback(), supported);
@@ -4665,6 +4941,7 @@ mod tests {
 
     #[test]
     fn only_dynamic_provider_catalogs_are_discovered() {
+        assert!(ProviderKind::Antigravity.supports_model_discovery());
         assert!(!ProviderKind::Amp.supports_model_discovery());
         assert!(ProviderKind::Claude.supports_model_discovery());
         assert!(ProviderKind::Codex.supports_model_discovery());
@@ -4741,7 +5018,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 15);
+        assert_eq!(ProviderKind::ALL.len(), 17);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

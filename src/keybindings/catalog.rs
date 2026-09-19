@@ -169,6 +169,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "dialog.commit.dismiss", action: || Box::new(crate::app::DismissCommitDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.git.primary", action: || Box::new(crate::app::GitPanelPrimaryAction), title_key: "shortcuts.git_primary", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.git.dismiss", action: || Box::new(crate::app::DismissGitPanelModal), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.git.confirm", action: || Box::new(crate::app::ConfirmGitPanelModal), title_key: "shortcuts.confirm", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.archive.confirm", action: || Box::new(crate::app::ConfirmArchiveDialog), title_key: "shortcuts.confirm_archive", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "dialog.archive.dismiss", action: || Box::new(crate::app::DismissArchiveDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "dialog.goal.confirm", action: || Box::new(crate::app::ConfirmGoalDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
@@ -196,6 +197,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "app.quit", action: || Box::new(crate::Quit), title_key: "menu.quit", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.close_window", action: || Box::new(crate::CloseWindow), title_key: "menu.close_window", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.new_task", action: || Box::new(crate::NewSession), title_key: "menu.new_task", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.new_task_in", action: || Box::new(crate::NewTaskIn), title_key: "menu.new_task_in", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.new_project", action: || Box::new(crate::NewProject), title_key: "menu.new_project", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_settings", action: || Box::new(crate::OpenSettings), title_key: "shortcuts.open_settings", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.toggle_sidebar", action: || Box::new(crate::ToggleSidebar), title_key: "menu.toggle_sidebar", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
@@ -208,11 +210,16 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "app.hide_others", action: || Box::new(crate::HideOthers), title_key: "menu.hide_others", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.big_picture", action: || Box::new(crate::ToggleBigPicture), title_key: "shortcuts.big_picture", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.projects_page", action: || Box::new(crate::ToggleProjectsPage), title_key: "shortcuts.projects_page", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.inbox_page", action: || Box::new(crate::ToggleInboxPage), title_key: "sidebar.inbox", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "inbox.dismiss", action: || Box::new(crate::DismissInbox), title_key: "shortcuts.dismiss", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.usage_panel", action: || Box::new(crate::ToggleUsagePanel), title_key: "shortcuts.usage_panel", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.run_script", action: || Box::new(crate::RunProjectScript), title_key: "menu.run_project_script", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.save_file", action: || Box::new(crate::SaveFile), title_key: "shortcuts.save_file", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.sync_branch", action: || Box::new(crate::SyncBranch), title_key: "command_palette.sync_branch", title_index: None, category: C::Git, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_localhost", action: || Box::new(crate::OpenLocalhostUrl), title_key: "shortcuts.open_localhost", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_localhost_tab", action: || Box::new(crate::OpenLocalhostUrlInTab), title_key: "shortcuts.open_localhost_tab", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.view_unarchived_task", action: || Box::new(crate::OpenToastSession), title_key: "shortcuts.view_unarchived_task", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.open_created_issue", action: || Box::new(crate::OpenCreatedIssueInGitHub), title_key: "shortcuts.open_created_issue", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.navigate_back", action: || Box::new(crate::NavigateBack), title_key: "shortcuts.navigate_back", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.navigate_forward", action: || Box::new(crate::NavigateForward), title_key: "shortcuts.navigate_forward", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.previous_turn", action: || Box::new(crate::GoToPreviousTurn), title_key: "shortcuts.previous_turn", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
@@ -232,8 +239,11 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "workspace.toggle_model_picker", action: || Box::new(crate::ToggleModelPicker), title_key: "menu.toggle_model_picker", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.toggle_branch_picker", action: || Box::new(crate::ToggleBranchPicker), title_key: "menu.toggle_branch_picker", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.toggle_runtime_mode_picker", action: || Box::new(crate::ToggleRuntimeModePicker), title_key: "menu.toggle_runtime_mode_picker", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "workspace.toggle_environment", action: || Box::new(crate::ToggleEnvironment), title_key: "menu.toggle_environment", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.toggle_workspace", action: || Box::new(crate::ToggleWorkspace), title_key: "menu.toggle_workspace", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "workspace.toggle_terminals", action: || Box::new(crate::ToggleTerminals), title_key: "shortcuts.toggle_terminals", title_index: None, category: C::Terminal, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "terminal.new", action: || Box::new(crate::NewTerminal), title_key: "right_panel.new_terminal", title_index: None, category: C::Terminal, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "editor.go_to_line", action: || Box::new(crate::OpenGoToLine), title_key: "shortcuts.go_to_line", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "sidebar.task.1", action: || Box::new(crate::SelectSidebarSession { index: 0 }), title_key: "keybind.command.sidebar_task", title_index: Some(0), category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "sidebar.task.2", action: || Box::new(crate::SelectSidebarSession { index: 1 }), title_key: "keybind.command.sidebar_task", title_index: Some(1), category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "sidebar.task.3", action: || Box::new(crate::SelectSidebarSession { index: 2 }), title_key: "keybind.command.sidebar_task", title_index: Some(2), category: C::Workspace, editability: EDITABLE, builtin_label: None },
@@ -246,10 +256,20 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "projects.select_all", action: || Box::new(crate::SelectAllProjectsRows), title_key: "menu.select_all", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.focus_filter", action: || Box::new(crate::FocusProjectsFilter), title_key: "shortcuts.find", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.dismiss_layer", action: || Box::new(crate::DismissProjectsLayer), title_key: "shortcuts.dismiss", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "drafts.dismiss_layer", action: || Box::new(crate::DismissDraftsLayer), title_key: "shortcuts.dismiss", title_index: None, category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.tab.1", action: || Box::new(crate::SelectProjectsTab { index: 0 }), title_key: "keybind.command.projects_tab", title_index: Some(0), category: C::Projects, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "projects.tab.2", action: || Box::new(crate::SelectProjectsTab { index: 1 }), title_key: "keybind.command.projects_tab", title_index: Some(1), category: C::Projects, editability: EDITABLE, builtin_label: None },
-    CommandDescriptor { id: "projects.tab.3", action: || Box::new(crate::SelectProjectsTab { index: 2 }), title_key: "keybind.command.projects_tab", title_index: Some(2), category: C::Projects, editability: EDITABLE, builtin_label: None },
-    CommandDescriptor { id: "projects.tab.4", action: || Box::new(crate::SelectProjectsTab { index: 3 }), title_key: "keybind.command.projects_tab", title_index: Some(3), category: C::Projects, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.1", action: || Box::new(crate::SelectFavoriteModel { index: 0 }), title_key: "keybind.command.favorite_model", title_index: Some(0), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.2", action: || Box::new(crate::SelectFavoriteModel { index: 1 }), title_key: "keybind.command.favorite_model", title_index: Some(1), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.3", action: || Box::new(crate::SelectFavoriteModel { index: 2 }), title_key: "keybind.command.favorite_model", title_index: Some(2), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.4", action: || Box::new(crate::SelectFavoriteModel { index: 3 }), title_key: "keybind.command.favorite_model", title_index: Some(3), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.5", action: || Box::new(crate::SelectFavoriteModel { index: 4 }), title_key: "keybind.command.favorite_model", title_index: Some(4), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.6", action: || Box::new(crate::SelectFavoriteModel { index: 5 }), title_key: "keybind.command.favorite_model", title_index: Some(5), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.7", action: || Box::new(crate::SelectFavoriteModel { index: 6 }), title_key: "keybind.command.favorite_model", title_index: Some(6), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.8", action: || Box::new(crate::SelectFavoriteModel { index: 7 }), title_key: "keybind.command.favorite_model", title_index: Some(7), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.favorite.9", action: || Box::new(crate::SelectFavoriteModel { index: 8 }), title_key: "keybind.command.favorite_model", title_index: Some(8), category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.cycle_effort", action: || Box::new(crate::CycleReasoningEffort { direction: crate::EffortCycleDirection::Forward }), title_key: "keybind.command.cycle_effort", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "model.cycle_effort_backward", action: || Box::new(crate::CycleReasoningEffort { direction: crate::EffortCycleDirection::Backward }), title_key: "keybind.command.cycle_effort_backward", title_index: None, category: C::Workspace, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "switcher.task_forward", action: || Box::new(crate::SwitchTaskForward), title_key: "shortcuts.task_switcher", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "switcher.task_backward", action: || Box::new(crate::SwitchTaskBackward), title_key: "shortcuts.task_switcher_back", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "switcher.task_first", action: || Box::new(crate::SelectFirstTask), title_key: "shortcuts.switcher_first", title_index: None, category: C::Switchers, editability: EDITABLE, builtin_label: None },
@@ -441,6 +461,19 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("palette.select_page_up", All, "pageup", FinderSearch),
     e("palette.confirm", All, "enter", FinderSearch),
     e("palette.dismiss", All, "escape", FileFinder),
+    // === app::init_sync_branch =======================================================
+    e("palette.select_next", All, "down", SyncBranchSearch),
+    e("palette.select_previous", All, "up", SyncBranchSearch),
+    e("palette.select_next", All, "ctrl-n", SyncBranchSearch),
+    e("palette.select_previous", All, "ctrl-p", SyncBranchSearch),
+    e("palette.select_next", All, "tab", SyncBranchSearch),
+    e("palette.select_previous", All, "shift-tab", SyncBranchSearch),
+    e("palette.select_first", All, "home", SyncBranchSearch),
+    e("palette.select_last", All, "end", SyncBranchSearch),
+    e("palette.select_page_down", All, "pagedown", SyncBranchSearch),
+    e("palette.select_page_up", All, "pageup", SyncBranchSearch),
+    e("palette.confirm", All, "enter", SyncBranchSearch),
+    e("palette.dismiss", All, "escape", SyncBranchCard),
     // === app::init_commit_dialog_keys ==============================================
     e("dialog.commit.confirm", All, "secondary-enter", CommitInput),
     e("dialog.commit.confirm", All, "secondary-enter", CommitDialog),
@@ -450,6 +483,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.git.primary", All, "secondary-enter", GitPanel),
     e("dialog.git.dismiss", All, "escape", GitPanel),
     e("dialog.git.dismiss", All, "escape", GitPanelModal),
+    e("dialog.git.confirm", All, "enter", GitPanelModal),
     // === app::init_archive_dialog_keys ===============================================
     e("dialog.archive.confirm", All, "enter", ArchiveDialog),
     e("dialog.archive.dismiss", All, "escape", ArchiveDialog),
@@ -480,6 +514,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_skills_keys ================================================================
     e("menu.select_next", All, "down", SkillsSearch),
     e("menu.select_previous", All, "up", SkillsSearch),
+    // === app::init_drafts_keys ================================================================
+    e("text.undo", All, "secondary-z", Waku),
+    e("drafts.dismiss_layer", All, "escape", DraftsPage),
     // === app::init_shortcuts_dialog_keys ======================================================
     e("dialog.shortcuts.dismiss", All, "escape", ShortcutsDialog),
     // === terminal::init_command_bar_keys ======================================================
@@ -491,6 +528,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("app.quit", All, "secondary-q", ""),
     e("app.close_window", All, "secondary-w", ""),
     e("app.new_task", All, "secondary-n", ""),
+    e("app.new_task_in", All, "secondary-shift-n", ""),
     e("app.new_project", All, "secondary-o", ""),
     e("app.open_settings", All, "secondary-,", ""),
     e("app.toggle_sidebar", All, "secondary-b", ""),
@@ -513,13 +551,27 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("sidebar.task.9", All, "secondary-9", ""),
     e("app.big_picture", All, "secondary-0", ""),
     e("app.projects_page", All, "secondary-shift-p", ""),
-    e("projects.tab.1", All, "secondary-alt-1", ""),
-    e("projects.tab.2", All, "secondary-alt-2", ""),
-    e("projects.tab.3", All, "secondary-alt-3", ""),
-    e("projects.tab.4", All, "secondary-alt-4", ""),
+    e("app.inbox_page", All, "secondary-shift-i", ""),
+    e("projects.tab.1", All, "secondary-alt-1", ProjectsPage),
+    e("projects.tab.2", All, "secondary-alt-2", ProjectsPage),
+    e("model.favorite.1", All, "secondary-alt-1", ComposerScope),
+    e("model.favorite.2", All, "secondary-alt-2", ComposerScope),
+    e("model.favorite.3", All, "secondary-alt-3", ComposerScope),
+    e("model.favorite.4", All, "secondary-alt-4", ComposerScope),
+    e("model.favorite.5", All, "secondary-alt-5", ComposerScope),
+    e("model.favorite.6", All, "secondary-alt-6", ComposerScope),
+    e("model.favorite.7", All, "secondary-alt-7", ComposerScope),
+    e("model.favorite.8", All, "secondary-alt-8", ComposerScope),
+    e("model.favorite.9", All, "secondary-alt-9", ComposerScope),
+    e("model.cycle_effort", All, "secondary-e", ComposerScope),
+    e("model.cycle_effort_backward", All, "secondary-shift-e", ComposerScope),
     e("projects.select_all", All, "secondary-a", ProjectsPage),
     e("projects.focus_filter", All, "secondary-f", ProjectsPage),
     e("projects.dismiss_layer", All, "escape", ProjectsPage),
+    e("projects.select_all", All, "secondary-a", GitSettingsPage),
+    e("projects.focus_filter", All, "secondary-f", GitSettingsPage),
+    e("projects.dismiss_layer", All, "escape", GitSettingsPage),
+    e("inbox.dismiss", All, "escape", InboxPage),
     e("workspace.previous_turn", All, "secondary-alt-up", WakuNotTerminal),
     e("workspace.next_turn", All, "secondary-alt-down", WakuNotTerminal),
     e("workspace.latest_unseen", All, "ctrl-`", Waku),
@@ -556,11 +608,13 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("workspace.add_to_chat", All, "secondary-l", TranscriptOrEditor),
     e("workspace.focus_terminal", All, "secondary-j", ""),
     e("app.run_script", All, "secondary-r", ""),
-    e("workspace.toggle_terminals", All, "secondary-t", ""),
+    e("terminal.new", All, "secondary-t", ""),
     e("workspace.toggle_model_picker", All, "secondary-/", ""),
-    e("workspace.toggle_branch_picker", All, "secondary-shift-b", ""),
+    e("workspace.toggle_branch_picker", All, "secondary-alt-shift-n", ""),
     e("workspace.toggle_runtime_mode_picker", All, "secondary-.", ""),
-    e("workspace.toggle_workspace", All, "secondary-shift-t", ""),
+    e("workspace.toggle_environment", All, "secondary-shift-.", ""),
+    e("workspace.toggle_terminals", All, "secondary-shift-t", ""),
+    e("workspace.toggle_workspace", All, "secondary-alt-n", ""),
     e("app.usage_panel", All, "secondary-u", ""),
     e("app.save_file", All, "secondary-s", ""),
     e("font.terminal_increase", All, "secondary-=", Terminal),
@@ -583,6 +637,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("find.open_replace", All, "secondary-alt-f", Waku),
     e("find.next", All, "secondary-g", Waku),
     e("find.previous", All, "secondary-shift-g", Waku),
+    e("editor.go_to_line", All, "ctrl-g", WakuNotTerminal),
     e("find.close", All, "escape", FileEditorPane),
     e("find.close", All, "escape", FindBar),
     e("editor.exit_panel_fullscreen", All, "escape", PanelFullscreenNotTerminal),
@@ -605,6 +660,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("browser.address_cancel", All, "escape", BrowserAddress),
     e("app.open_localhost", All, "secondary-alt-o", ""),
     e("app.open_localhost_tab", All, "secondary-alt-shift-o", ""),
+    e("app.view_unarchived_task", All, "secondary-alt-o", ""),
+    e("app.open_created_issue", All, "secondary-alt-i", ""),
     // === crate::bind_keys — macOS only ==========================================
     e("app.hide", MacOS, "cmd-h", ""),
     e("app.hide_others", MacOS, "alt-cmd-h", ""),
@@ -627,6 +684,8 @@ mod ctx {
     pub const CommandPalette: &str = "CommandPalette";
     pub const FinderSearch: &str = "FileFinder > TextInput";
     pub const FileFinder: &str = "FileFinder";
+    pub const SyncBranchSearch: &str = "SyncBranch > TextInput";
+    pub const SyncBranchCard: &str = "SyncBranch";
     pub const CommitInput: &str = "CommitDialog > TextInput";
     pub const CommitDialog: &str = "CommitDialog";
     pub const GitPanelInput: &str = "GitPanel > TextInput";
@@ -646,7 +705,14 @@ mod ctx {
     pub const NotTerminal: &str = "!Terminal";
     pub const Waku: &str = "Waku";
     pub const ProjectsPage: &str = "ProjectsPage";
+    pub const GitSettingsPage: &str = "GitSettingsPage";
+    pub const InboxPage: &str = "InboxPage";
+    pub const DraftsPage: &str = "DraftsPage";
     pub const WakuNotTerminal: &str = "Waku && !Terminal";
+    /// Where the composer session is reachable without covering the
+    /// surfaces that own their own chords: the terminal (pty input) and
+    /// the Projects page (its ⌘⌥ tab chords).
+    pub const ComposerScope: &str = "Waku && !Terminal && !ProjectsPage";
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";

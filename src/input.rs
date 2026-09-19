@@ -2210,6 +2210,9 @@ impl TextInput {
         }
         let Some((content, selection, selection_reversed)) = self.history.undo(&self.content)
         else {
+            // Nothing left to undo here — let a surrounding handler take it
+            // (the workspace restores a used draft on ⌘Z).
+            cx.propagate();
             return;
         };
         self.apply_history_step(content, selection, selection_reversed, cx);
@@ -3470,11 +3473,11 @@ pub enum ComposerEvent {
     /// Enter: send the prompt, or queue it behind the running turn.
     Submit(String),
     /// Primary modifier + Enter: deliver the prompt into the running turn
-    /// instead of queueing it behind the turn.
+    /// instead of queueing it behind the turn. An empty value means only
+    /// the field held no text — staged attachments or annotations may
+    /// still make a real draft, and with nothing staged at all the owner
+    /// steers the oldest queued follow-up instead.
     SubmitSteer(String),
-    /// Primary modifier + Enter in an empty composer: activate the oldest
-    /// queued follow-up's Steer control.
-    SteerQueued,
     Focus,
     Edited,
     /// Backspace in an already-empty composer — the chat idiom for "remove
@@ -3662,12 +3665,13 @@ impl Render for ComposerInput {
             // The embedded field propagates SubmitSteer; this ancestor
             // handler is where steering becomes a composer event.
             .on_action(cx.listener(|composer, _: &SubmitSteer, _, cx| {
+                // Same contract as Enter: the owner knows whether staged
+                // attachments or annotations make an empty field a real
+                // draft, so the event always reports the keystroke.
                 let value = composer.content(cx).trim().to_owned();
-                if value.is_empty() {
-                    cx.emit(ComposerEvent::SteerQueued);
-                    return;
+                if !value.is_empty() {
+                    composer.input.update(cx, |input, cx| input.clear(cx));
                 }
-                composer.input.update(cx, |input, cx| input.clear(cx));
                 cx.emit(ComposerEvent::SubmitSteer(value));
             }))
             .child(self.input.clone())
@@ -3818,7 +3822,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn secondary_enter_steers_text_or_activates_the_queue(cx: &mut TestAppContext) {
+    fn secondary_enter_reports_the_draft_or_an_empty_field(cx: &mut TestAppContext) {
         let (composer, cx) = setup_composer(cx);
         let events: Rc<RefCell<Vec<ComposerEvent>>> = Rc::default();
         let sink = events.clone();
@@ -3832,7 +3836,7 @@ mod tests {
         cx.simulate_keystrokes("secondary-enter");
         assert!(matches!(
             events.borrow().last(),
-            Some(ComposerEvent::SteerQueued)
+            Some(ComposerEvent::SubmitSteer(text)) if text.is_empty()
         ));
 
         composer.update(cx, |composer, cx| composer.set_content("hold on", cx));

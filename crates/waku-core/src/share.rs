@@ -17,9 +17,9 @@ use waku_protocol::friends::{
     FriendInfo, FriendRequestInfo, FriendsState, TransferDirection, TransferInfo, TransferStatus,
 };
 use waku_share::friends::{
-    self, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
+    self, Friend, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
 };
-use waku_share::{EndpointId, RelayMode, ShareNode};
+use waku_share::{EndpointId, RelayMode, ShareNode, TempTag};
 
 /// How long a probe verdict stays fresh before a surface should re-dial.
 const PROBE_CACHE_MS: u64 = 30_000;
@@ -29,6 +29,19 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// those complete asynchronously and the command returns after the offer is
 /// accepted, not after the bytes land.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+/// Bound on dialing a friend and delivering an offer — iroh's internal
+/// retries can otherwise pin the command loop far past the caller's wait.
+const OFFER_TIMEOUT: Duration = Duration::from_secs(60);
+/// Bound on waiting for a relay address before minting a ticket — the send
+/// must still proceed for LAN/discovery-only peers when no relay answers.
+const ONLINE_WAIT: Duration = Duration::from_secs(10);
+/// Bound on the receiver's done receipt — it is courtesy bookkeeping, not
+/// part of the verified download.
+const NOTIFY_TIMEOUT: Duration = Duration::from_secs(30);
+/// An outgoing transfer's only completion signal is the receiver's
+/// TransferDone receipt; past this it is declared stalled. A late receipt
+/// still flips the row back to Done.
+const TRANSFER_STALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Installed by the server so async share events (incoming request, offer,
 /// progress) reach every subscribed client.
@@ -86,6 +99,9 @@ struct ShareInner {
     pending: HashMap<String, tokio::sync::oneshot::Sender<RequestDecision>>,
     /// ticket string → outgoing transfer id, so `TransferDone` can match.
     outgoing_tickets: HashMap<String, Uuid>,
+    /// transfer id → temp tag keeping the offered blob pinned against GC
+    /// for the transfer's lifetime.
+    outgoing_tags: HashMap<Uuid, TempTag>,
     transfer_hook: Option<TransferHook>,
     task_notifier: Option<TaskNotifier>,
     friend_code: String,
@@ -96,6 +112,7 @@ impl ShareInner {
         let store = self.store.lock();
         FriendsState {
             friend_code: self.friend_code.clone(),
+            display_name: store.display_name.clone(),
             friends: store
                 .friends
                 .values()
@@ -110,6 +127,7 @@ impl ShareInner {
                     FriendInfo {
                         node_id: id,
                         name: f.name.clone(),
+                        nickname: f.nickname.clone(),
                         last_seen_ms: f.last_seen_ms,
                         online,
                     }
@@ -153,16 +171,24 @@ impl ShareService {
     /// Does not bind sockets — the runtime starts lazily on the first
     /// command so tests and headless runs pay nothing.
     pub fn new(dir: PathBuf, our_name: String) -> Self {
+        // Load eagerly so store-level commands (nicknames, display name)
+        // work before the endpoint has ever started, and so pre-runtime
+        // mutations land in the file the runtime will reload.
+        let mut store = FriendStore::load(&dir).unwrap_or_default();
+        if store.display_name.is_empty() {
+            store.display_name = our_name.clone();
+        }
         Self {
             dir,
             our_name,
             cmd: Mutex::new(None),
             state: Arc::new(Mutex::new(ShareInner {
-                store: Arc::new(Mutex::new(FriendStore::default())),
+                store: Arc::new(Mutex::new(store)),
                 transfers: Vec::new(),
                 probes: HashMap::new(),
                 pending: HashMap::new(),
                 outgoing_tickets: HashMap::new(),
+                outgoing_tags: HashMap::new(),
                 transfer_hook: None,
                 task_notifier: None,
                 friend_code: String::new(),
@@ -187,9 +213,28 @@ impl ShareService {
         self.state.lock().task_notifier = Some(notifier);
     }
 
-    /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required.
+    /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required,
+    /// though the friend code is resolved lazily from the identity file so
+    /// it displays before the endpoint has ever started.
     pub fn state(&self) -> FriendsState {
-        self.state.lock().snapshot()
+        let mut inner = self.state.lock();
+        if inner.friend_code.is_empty() {
+            if let Ok(secret) = waku_share::identity::load_or_create(&self.dir) {
+                inner.friend_code = waku_share::identity::friend_code(secret.public());
+            }
+        }
+        inner.snapshot()
+    }
+
+    /// Begin binding the endpoint without blocking the caller on
+    /// readiness — surfaces that make this install reachable (opening
+    /// Friends, connecting a client) kick this so requests and offers
+    /// can arrive, while their own reply returns immediately.
+    pub fn kickstart(self: &Arc<Self>) {
+        let this = self.clone();
+        std::thread::spawn(move || {
+            let _ = this.ensure_started();
+        });
     }
 
     fn ensure_started(&self) -> anyhow::Result<Sender<ShareCommand>> {
@@ -244,6 +289,65 @@ impl ShareService {
         })
     }
 
+    /// Drop a pending outgoing request. Store mutation only, so it works
+    /// without the endpoint and before the runtime has ever started.
+    pub fn withdraw_friend_request(&self, node_id: String) -> anyhow::Result<()> {
+        let id = node_id.parse::<EndpointId>()?;
+        let inner = self.state.lock();
+        let mut store = inner.store.lock();
+        let before = store.requests.len();
+        store
+            .requests
+            .retain(|r| !(r.node_id == id && !r.incoming));
+        if store.requests.len() == before {
+            anyhow::bail!("no outgoing request to that code");
+        }
+        let _ = store.save();
+        drop(store);
+        drop(inner);
+        publish(&self.state, &self.sink);
+        Ok(())
+    }
+
+    /// Store-level mutation like `withdraw_friend_request` — no endpoint
+    /// needed. A blank name resets to the default the service was built
+    /// with.
+    pub fn set_display_name(&self, name: String) -> anyhow::Result<()> {
+        {
+            let inner = self.state.lock();
+            let mut store = inner.store.lock();
+            store.display_name = name.trim().to_string();
+            if store.display_name.is_empty() {
+                store.display_name = self.our_name.clone();
+            }
+            let _ = store.save();
+        }
+        publish(&self.state, &self.sink);
+        Ok(())
+    }
+
+    /// Store a local nickname override for a friend and re-point any
+    /// transfer links that carried the old name.
+    pub fn set_friend_nickname(
+        &self,
+        node_id: String,
+        nickname: Option<String>,
+    ) -> anyhow::Result<()> {
+        let id = node_id.parse::<EndpointId>()?;
+        {
+            let inner = self.state.lock();
+            let mut store = inner.store.lock();
+            if !store.friends.contains_key(&id) {
+                anyhow::bail!("no friend with that code");
+            }
+            store.set_nickname(&id, nickname);
+            let _ = store.save();
+        }
+        publish(&self.state, &self.sink);
+        relink_peer_transfers(&self.state, &id);
+        Ok(())
+    }
+
     pub fn remove_friend(&self, node_id: String) -> anyhow::Result<()> {
         self.call(|reply| ShareCommand::Remove { node_id, reply })
     }
@@ -292,6 +396,125 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// `~/Documents/Goddard/From Friends` — the human-readable mirror of the
+/// real `transfers/<uuid>` folders. Links are cosmetic: the canonical path
+/// stays on the transfer, a missing or stale link costs nothing.
+fn friends_links_dir() -> Option<PathBuf> {
+    dirs::document_dir().map(|d| d.join("Goddard").join("From Friends"))
+}
+
+/// Make a wire-supplied name safe as a single path component: no
+/// separators, control characters, leading dots, or unbounded length.
+fn sanitize_link_component(raw: &str, fallback: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if c == '/' || c.is_control() { '-' } else { c })
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').trim_end();
+    let cleaned: String = cleaned.chars().take(60).collect();
+    let cleaned = cleaned.trim_end();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// Ensure `base` has a `<peer>-<title>` symlink to the transfer's
+/// `dest_dir` — suffixing with the transfer id on a name collision and
+/// removing stale links to the same folder left by an older name.
+fn sync_transfer_link(base: &std::path::Path, peer: &str, transfer: &TransferInfo) {
+    let Some(dest) = &transfer.dest_dir else { return };
+    let peer = sanitize_link_component(peer, "friend");
+    let title = sanitize_link_component(&transfer.title, "files");
+    let mut name = format!("{peer}-{title}");
+    // True when `name` is already taken by something that isn't this
+    // transfer's destination — a real file or a link to another folder.
+    let occupied = |name: &str| {
+        let path = base.join(name);
+        match std::fs::read_link(&path) {
+            Ok(target) => target != *dest,
+            Err(_) => path.symlink_metadata().is_ok(),
+        }
+    };
+    if occupied(&name) {
+        let short: String = transfer.id.simple().to_string().chars().take(4).collect();
+        name = format!("{peer}-{title}-{short}");
+        if occupied(&name) {
+            return;
+        }
+    }
+    // Drop stale links pointing at this destination under other names —
+    // a rename leaves the old label behind otherwise.
+    if let Ok(entries) = std::fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_name() == name.as_str() {
+                continue;
+            }
+            if std::fs::read_link(&path).is_ok_and(|t| t == *dest) {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    let link = base.join(&name);
+    if std::fs::read_link(&link).is_ok_and(|t| t == *dest) {
+        return;
+    }
+    let _ = crate::fs_ext::symlink(dest, &link);
+}
+
+/// The name this install renders for `peer_id`: nickname, else the
+/// friend's self-reported name, else the transfer's recorded name.
+fn resolved_peer_name(inner: &ShareInner, peer_id: &str, fallback: &str) -> String {
+    let store = inner.store.lock();
+    peer_id
+        .parse::<EndpointId>()
+        .map(|id| store.resolved_name(&id, fallback))
+        .unwrap_or_else(|_| {
+            if fallback.is_empty() {
+                "friend".to_string()
+            } else {
+                fallback.to_string()
+            }
+        })
+}
+
+/// Publish a finished incoming transfer into `~/Documents/Goddard/From
+/// Friends` so the files are findable by name, not just by UUID.
+fn link_transfer(state: &Arc<Mutex<ShareInner>>, transfer: &TransferInfo) {
+    let Some(base) = friends_links_dir() else { return };
+    if std::fs::create_dir_all(&base).is_err() {
+        return;
+    }
+    let peer = {
+        let inner = state.lock();
+        resolved_peer_name(&inner, &transfer.peer_id, &transfer.peer_name)
+    };
+    sync_transfer_link(&base, &peer, transfer);
+}
+
+/// Re-point this friend's transfer links after a nickname change. Only
+/// runs when the links directory already exists — no side effects for
+/// users who never received a file.
+fn relink_peer_transfers(state: &Arc<Mutex<ShareInner>>, peer: &EndpointId) {
+    let Some(base) = friends_links_dir() else { return };
+    if std::fs::read_dir(&base).is_err() {
+        return;
+    }
+    let inner = state.lock();
+    let peer_id = peer.to_string();
+    let peer_name = resolved_peer_name(&inner, &peer_id, "");
+    for transfer in inner.transfers.iter().filter(|t| {
+        t.direction == TransferDirection::Incoming
+            && t.status == TransferStatus::Done
+            && t.dest_dir.is_some()
+            && t.peer_id == peer_id
+    }) {
+        sync_transfer_link(&base, &peer_name, transfer);
+    }
+}
+
 fn run_runtime(
     dir: PathBuf,
     our_name: String,
@@ -321,6 +544,13 @@ fn run_runtime(
         let friend_code = waku_share::identity::friend_code(secret.public());
         let store = state.lock().store.clone();
         *store.lock() = FriendStore::load(&dir)?;
+        {
+            let mut store = store.lock();
+            if store.display_name.is_empty() {
+                store.display_name = our_name.clone();
+                let _ = store.save();
+            }
+        }
         state.lock().friend_code = friend_code;
         publish(&state, &sink);
 
@@ -333,16 +563,14 @@ fn run_runtime(
             {
                 let state = state.clone();
                 let sink = sink.clone();
-                let our_name = our_name.clone();
                 Arc::new(move |id: EndpointId, name: String| {
                     let (tx, rx) = tokio::sync::oneshot::channel();
                     {
                         let mut s = state.lock();
                         if s.store.lock().is_friend(&id) {
                             // Re-adding an existing friend: accept silently.
-                            let _ = tx.send(RequestDecision::Accept {
-                                our_name: our_name.clone(),
-                            });
+                            let our_name = s.store.lock().display_name.clone();
+                            let _ = tx.send(RequestDecision::Accept { our_name });
                             return rx;
                         }
                         s.store.lock().requests.push(PendingRequest {
@@ -388,7 +616,25 @@ fn run_runtime(
                             });
                         }
                         publish(&state, &sink);
-                        let node = node.lock().await.clone().expect("share node up");
+                        let node = match node.lock().await.clone() {
+                            Some(node) => node,
+                            None => {
+                                // Runtime gone — fail the row instead of
+                                // panicking the task and stranding it.
+                                {
+                                    let mut s = state.lock();
+                                    if let Some(t) = s
+                                        .transfers
+                                        .iter_mut()
+                                        .find(|t| t.id == id)
+                                    {
+                                        t.status = TransferStatus::Failed;
+                                    }
+                                }
+                                publish(&state, &sink);
+                                return;
+                            }
+                        };
                         let progress = {
                             let state = state.clone();
                             let sink = sink.clone();
@@ -418,24 +664,46 @@ fn run_runtime(
                             std::fs::create_dir_all(&dest_dir)?;
                             let dest = dest_dir.join(&offer.file_name);
                             node.export(hash, &dest).await?;
-                            friends::notify_transfer_done(
-                                node.endpoint(),
-                                ticket.addr().clone(),
-                                &offer.ticket,
+                            // The done receipt is courtesy bookkeeping for
+                            // the sender — the bytes are already verified on
+                            // disk, so a missed callback must not fail the
+                            // transfer or hide the file.
+                            let notified = tokio::time::timeout(
+                                NOTIFY_TIMEOUT,
+                                friends::notify_transfer_done(
+                                    node.endpoint(),
+                                    ticket.addr().clone(),
+                                    &offer.ticket,
+                                ),
                             )
-                            .await?;
+                            .await;
+                            match notified {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => eprintln!(
+                                    "share: done-notify for transfer {id} failed: {error:#}"
+                                ),
+                                Err(_) => eprintln!(
+                                    "share: done-notify for transfer {id} timed out"
+                                ),
+                            }
                             anyhow::Ok(dest_dir)
                         }
                         .await;
                         let (hook, notifier) = {
                             let mut s = state.lock();
                             if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
-                                match result {
+                                match &result {
                                     Ok(dest) => {
                                         t.status = TransferStatus::Done;
-                                        t.dest_dir = Some(dest);
+                                        t.dest_dir = Some(dest.clone());
                                     }
-                                    Err(_) => t.status = TransferStatus::Failed,
+                                    Err(error) => {
+                                        eprintln!(
+                                            "share: incoming transfer {id} from {} failed: {error:#}",
+                                            offer.name
+                                        );
+                                        t.status = TransferStatus::Failed;
+                                    }
                                 }
                             }
                             let transfer = s.transfers.iter().find(|t| t.id == id).cloned();
@@ -446,6 +714,9 @@ fn run_runtime(
                                 s.task_notifier.clone(),
                             )
                         };
+                        if let Some((transfer, _)) = &hook {
+                            link_transfer(&state, transfer);
+                        }
                         if let Some((transfer, hook)) = hook {
                             let session_id = hook(&transfer);
                             if let Some(session_id) = session_id {
@@ -473,11 +744,12 @@ fn run_runtime(
                         let mut s = state.lock();
                         s.store.lock().mark_seen(&from);
                         let _ = s.store.lock().save();
-                        if let Some(id) = s.outgoing_tickets.get(&ticket).copied()
-                            && let Some(t) = s.transfers.iter_mut().find(|t| t.id == id)
-                        {
-                            t.status = TransferStatus::Done;
-                            t.bytes_done = t.bytes_total;
+                        if let Some(id) = s.outgoing_tickets.remove(&ticket) {
+                            if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
+                                t.status = TransferStatus::Done;
+                                t.bytes_done = t.bytes_total;
+                            }
+                            s.outgoing_tags.remove(&id);
                         }
                     }
                     publish(&state, &sink);
@@ -520,25 +792,46 @@ fn run_runtime(
                 ShareCommand::SendRequest { code, name, reply } => {
                     let result = async {
                         let id = waku_share::identity::parse_friend_code(&code)?;
+                        if id == share_node.endpoint().id() {
+                            anyhow::bail!("that's your own friend code");
+                        }
                         // Record the outgoing request.
                         {
                             let s = state.lock();
-                            s.store.lock().requests.push(PendingRequest {
-                                name: name.clone(),
-                                node_id: id,
-                                incoming: false,
-                                at_ms: now_ms(),
-                            });
-                            let _ = s.store.lock().save();
+                            let mut store = s.store.lock();
+                            if !store
+                                .requests
+                                .iter()
+                                .any(|r| r.node_id == id && !r.incoming)
+                            {
+                                store.requests.push(PendingRequest {
+                                    name: name.clone(),
+                                    node_id: id,
+                                    incoming: false,
+                                    at_ms: now_ms(),
+                                });
+                                let _ = store.save();
+                            }
                         }
                         publish(&state, &sink);
-                        friends::send_friend_request(
+                        if let Err(e) = friends::send_friend_request(
                             share_node.endpoint(),
                             id,
                             &name,
                             &store,
                         )
-                        .await?;
+                        .await
+                        {
+                            // A failed send must not strand a pending row —
+                            // there is no peer who could resolve it.
+                            let s = state.lock();
+                            s.store
+                                .lock()
+                                .requests
+                                .retain(|r| !(r.node_id == id && !r.incoming));
+                            let _ = s.store.lock().save();
+                            return Err(e);
+                        }
                         anyhow::Ok(())
                     }
                     .await;
@@ -551,6 +844,7 @@ fn run_runtime(
                     reply,
                 } => {
                     let decision = state.lock().pending.remove(&node_id);
+                    let our_name = state.lock().store.lock().display_name.clone();
                     let result = match decision {
                         Some(tx) => {
                             let _ = tx.send(if accept {
@@ -560,17 +854,56 @@ fn run_runtime(
                             } else {
                                 RequestDecision::Decline
                             });
-                            if !accept {
+                            // Mirror the store mutation the protocol handler
+                            // performs once it wakes on the decision — the
+                            // publish below would otherwise snapshot a stale
+                            // request card and no friend row, and nothing
+                            // re-publishes when the handler later lands.
+                            if let Ok(id) = node_id.parse::<EndpointId>() {
                                 let s = state.lock();
-                                s.store
-                                    .lock()
-                                    .requests
-                                    .retain(|r| r.node_id.to_string() != node_id);
-                                let _ = s.store.lock().save();
+                                let mut store = s.store.lock();
+                                let name = accept.then(|| {
+                                    store
+                                        .requests
+                                        .iter()
+                                        .find(|r| r.node_id == id && r.incoming)
+                                        .map(|r| r.name.clone())
+                                });
+                                if let Some(Some(name)) = name {
+                                    store.friends.insert(
+                                        id,
+                                        Friend {
+                                            name,
+                                            node_id: id,
+                                            added_at_ms: now_ms(),
+                                            last_seen_ms: Some(now_ms()),
+                                            nickname: None,
+                                        },
+                                    );
+                                }
+                                store.requests.retain(|r| r.node_id != id);
+                                let _ = store.save();
                             }
                             Ok(())
                         }
-                        None => Err(anyhow::anyhow!("no pending request from that code")),
+                        None => {
+                            // A repeat respond racing the broadcast resolves
+                            // to a no-op — the first one already answered.
+                            let resolved = node_id
+                                .parse::<EndpointId>()
+                                .ok()
+                                .is_some_and(|id| {
+                                    let s = state.lock();
+                                    let store = s.store.lock();
+                                    !store.requests.iter().any(|r| r.node_id == id)
+                                        && (!accept || store.is_friend(&id))
+                                });
+                            if resolved {
+                                Ok(())
+                            } else {
+                                Err(anyhow::anyhow!("no pending request from that code"))
+                            }
+                        }
                     };
                     publish(&state, &sink);
                     let _ = reply.send(result);
@@ -594,7 +927,16 @@ fn run_runtime(
                 } => {
                     let result = async {
                         let id: EndpointId = node_id.parse()?;
-                        let (ticket, _tag) = share_node.provide(&path).await?;
+                        // Mint the ticket once the endpoint reports a
+                        // dialable address — an early ticket can carry no
+                        // relay path. Bounded so LAN/discovery-only sends
+                        // still proceed when no relay answers.
+                        let _ = tokio::time::timeout(
+                            ONLINE_WAIT,
+                            share_node.wait_online(),
+                        )
+                        .await;
+                        let (ticket, tag) = share_node.provide(&path).await?;
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         let title = path
                             .file_name()
@@ -612,6 +954,7 @@ fn run_runtime(
                                 .map(|f| f.name.clone())
                                 .unwrap_or_default();
                             s.outgoing_tickets.insert(ticket_str.clone(), transfer_id);
+                            s.outgoing_tags.insert(transfer_id, tag);
                             s.transfers.push(TransferInfo {
                                 id: transfer_id,
                                 direction: TransferDirection::Outgoing,
@@ -627,22 +970,51 @@ fn run_runtime(
                             });
                         }
                         publish(&state, &sink);
-                        friends::send_offer(
-                            share_node.endpoint(),
-                            id,
-                            &our_name,
-                            &title,
-                            size,
-                            note,
-                            &ticket_str,
+                        let our_name = state.lock().store.lock().display_name.clone();
+                        tokio::time::timeout(
+                            OFFER_TIMEOUT,
+                            friends::send_offer(
+                                share_node.endpoint(),
+                                id,
+                                &our_name,
+                                &title,
+                                size,
+                                note,
+                                &ticket_str,
+                            ),
                         )
-                        .await?;
+                        .await
+                        .map_err(|_| anyhow::anyhow!("offer timed out"))??;
+                        // The receiver's TransferDone is the only completion
+                        // signal an outgoing transfer gets — if it never
+                        // lands, fail the row instead of leaving it at "0 B"
+                        // forever. A late receipt still flips it to Done.
+                        {
+                            let state = state.clone();
+                            let sink = sink.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(TRANSFER_STALL_TIMEOUT).await;
+                                {
+                                    let mut s = state.lock();
+                                    if let Some(t) =
+                                        s.transfers.iter_mut().find(|t| {
+                                            t.id == transfer_id
+                                                && t.status == TransferStatus::Transferring
+                                        })
+                                    {
+                                        t.status = TransferStatus::Failed;
+                                    }
+                                }
+                                publish(&state, &sink);
+                            });
+                        }
                         anyhow::Ok(())
                     }
                     .await;
-                    if result.is_err() {
+                    if let Err(error) = &result {
+                        eprintln!("share: send to {node_id} failed: {error:#}");
                         let mut s = state.lock();
-                        if let Some(t) = s
+                        let failed_id = s
                             .transfers
                             .iter_mut()
                             .rev()
@@ -651,8 +1023,12 @@ fn run_runtime(
                                     && t.peer_id == node_id
                                     && t.status == TransferStatus::Transferring
                             })
-                        {
-                            t.status = TransferStatus::Failed;
+                            .map(|t| {
+                                t.status = TransferStatus::Failed;
+                                t.id
+                            });
+                        if let Some(failed_id) = failed_id {
+                            s.outgoing_tags.remove(&failed_id);
                         }
                     }
                     publish(&state, &sink);
@@ -664,6 +1040,7 @@ fn run_runtime(
                         if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
                             t.status = TransferStatus::Cancelled;
                         }
+                        s.outgoing_tags.remove(&id);
                     }
                     publish(&state, &sink);
                     let _ = reply.send(Ok(()));

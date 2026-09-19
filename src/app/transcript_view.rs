@@ -497,7 +497,12 @@ impl Waku {
             })
             .or_else(|| self.toast_selection.selection.borrow().selected_text())
             .or_else(|| self.skills_selection.selection.borrow().selected_text())
-            .or_else(|| self.transcript_selection.selection.borrow().selected_text());
+            .or_else(|| {
+                self.transcript_selection
+                    .selection
+                    .borrow()
+                    .selected_markdown()
+            });
         match selected {
             Some(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
             None => cx.propagate(),
@@ -1459,7 +1464,11 @@ impl Waku {
                             cx,
                         )
                         .with_context_menu(menu.clone())
-                        .with_commit_refs(message.role == MessageRole::Assistant);
+                        // Structured notices carry SHAs too — the landed
+                        // row's commits get the same link treatment.
+                        .with_commit_refs(
+                            message.role == MessageRole::Assistant || message.notice.is_some(),
+                        );
                     if message.role == MessageRole::User {
                         ctx = ctx.with_file_link_root(
                             self.selected_workspace_path()
@@ -1480,6 +1489,15 @@ impl Waku {
                     // Human and assistant messages share the Markdown path.
                     // Parse only visible rows rather than doing work for every
                     // driver delta or every off-screen prompt.
+                    let work_item_refs = (message.role == MessageRole::User)
+                        .then(|| {
+                            self.work_item_refs_for_content(
+                                self.selected_session()
+                                    .and_then(|session| self.workspace_path_for_session(session)),
+                                message.visible_content(),
+                            )
+                        })
+                        .unwrap_or_default();
                     let mut markdown = self.message_markdown.borrow_mut();
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
@@ -1505,6 +1523,7 @@ impl Waku {
                             attachment_images,
                             attachments_can_reveal,
                             markdown: view,
+                            work_item_refs,
                             ctx: &ctx,
                             menu,
                             waku,
@@ -2498,9 +2517,17 @@ impl Waku {
                 .saturating_sub(turn.started_at)
             })
             .unwrap_or(0);
-        // A parked turn is waiting on detached work, not working.
+        // A parked turn is waiting on detached work, not working; a
+        // first-turn route call that has not answered yet reads as routing,
+        // not connecting.
         let label = if session.is_some_and(|session| session.status == SessionStatus::Background) {
             tr!("transcript.waiting_background")
+        } else if session.is_some_and(|session| {
+            session.status == SessionStatus::Connecting
+                && session.auto_route
+                && session.route_decision.is_none()
+        }) {
+            tr!("routing.in_progress")
         } else {
             tr!(
                 "transcript.working_for",

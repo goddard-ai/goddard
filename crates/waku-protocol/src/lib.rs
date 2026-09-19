@@ -5,6 +5,10 @@
 //! This crate contains serializable data only. It performs no provider,
 //! database, workspace, Git, attachment, or transport I/O, so native and web
 //! clients can depend on it without pulling in the daemon implementation.
+//! The one exception is the `.waku` → `.goddard` adoption layer — `migration`
+//! and `pid` touch the filesystem and host processes because the migration
+//! conventions (artifact names, link policy) must be shared by every build
+//! that can launch, and no daemon owns the app's home directory.
 
 rust_i18n::i18n!("../../locales", fallback = "en");
 
@@ -33,6 +37,7 @@ pub mod composer;
 pub mod computer_use;
 pub mod custom_commands;
 mod driver_wire;
+pub mod eval;
 pub mod friends;
 pub mod git;
 pub mod i18n;
@@ -44,6 +49,7 @@ pub mod persistence;
 pub mod pid;
 pub mod projectless;
 pub mod provider_session;
+pub mod routing;
 pub mod settings;
 pub mod skills;
 pub mod theme;
@@ -61,6 +67,7 @@ pub use protocol::{
     ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireComputerToolRequest,
     WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
+pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;
 pub use workspace::{
     BranchDeleteFailure, GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary,

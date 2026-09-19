@@ -440,6 +440,7 @@ mod tests {
             &DriverEvent::TurnFinished {
                 success: true,
                 summary: None,
+                summary_i18n: None,
             },
         );
         assert!(!state.has_open_turn(session));

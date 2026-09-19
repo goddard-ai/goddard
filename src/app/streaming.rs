@@ -243,7 +243,16 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         runtime.last_active_at = Instant::now();
+        // Keyed errors render in the client's locale, then flow through the
+        // same handling as any opaque provider error.
+        let event = match event {
+            DriverEvent::LocalizedError { i18n, .. } => DriverEvent::Error(i18n.render()),
+            event => event,
+        };
         match event {
+            // Unreachable: normalized into `Error` above so it renders in the
+            // client's locale before any dispatch runs.
+            DriverEvent::LocalizedError { .. } => {}
             DriverEvent::RuntimeEventCursorAdvanced(cursor) => {
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.runtime_event_cursor = Some(cursor);
@@ -449,14 +458,18 @@ impl Waku {
             DriverEvent::Permission {
                 request_id,
                 title,
+                title_i18n,
                 detail,
+                detail_i18n,
                 options,
             } => {
                 if self.accepts_turn_output(session_id) {
                     runtime.pending_permission = Some(PendingPermission {
                         request_id,
                         title,
+                        title_i18n,
                         detail,
+                        detail_i18n,
                         options,
                     });
                     if let Some(session) = self.state.session_mut(session_id) {
@@ -488,6 +501,19 @@ impl Waku {
                 message,
                 sent_by_task,
             } => {
+                // An accepted steer folds into the running turn; one that
+                // lands after the turn ended — after Stop, say — would
+                // otherwise append a loose user message to the settled
+                // session.
+                let accepts = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(session_accepts_steer_result);
+                if !accepts {
+                    return true;
+                }
                 let submission = runtime
                     .pending_steers
                     .iter()
@@ -524,7 +550,12 @@ impl Waku {
                 }
                 runtime.stream_phase = None;
             }
-            DriverEvent::SteerRejected { message, reason } => {
+            DriverEvent::SteerRejected {
+                message,
+                reason,
+                reason_i18n,
+            } => {
+                let reason = reason_i18n.map(|i18n| i18n.render()).unwrap_or(reason);
                 let mut submission = runtime
                     .pending_steers
                     .iter()
@@ -629,7 +660,11 @@ impl Waku {
                     self.state.mark_session_dirty(session_id);
                 }
             }
-            DriverEvent::TurnFinished { success, summary } => {
+            DriverEvent::TurnFinished {
+                success,
+                summary,
+                summary_i18n,
+            } => {
                 self.settle_foreground_work(
                     session_id,
                     if success {
@@ -696,13 +731,16 @@ impl Waku {
                     if needs_fallback {
                         session.push_message(
                             MessageRole::Assistant,
-                            summary.unwrap_or_else(|| {
-                                if success {
-                                    tr!("session.turn_completed")
-                                } else {
-                                    tr!("session.stopped_before_response")
-                                }
-                            }),
+                            summary_i18n
+                                .map(|i18n| i18n.render())
+                                .or(summary)
+                                .unwrap_or_else(|| {
+                                    if success {
+                                        tr!("session.turn_completed")
+                                    } else {
+                                        tr!("session.stopped_before_response")
+                                    }
+                                }),
                         );
                     }
                 }
@@ -937,6 +975,13 @@ pub(super) fn session_accepts_turn_output(session: &mut AgentSession) -> bool {
         session.status = SessionStatus::Working;
     }
     true
+}
+
+/// A steer can only fold into a turn that is still running; after it ends —
+/// completed, interrupted, or stopped — a late acceptance is a straggler
+/// that must not inject a message into the settled session.
+pub(super) fn session_accepts_steer_result(session: &AgentSession) -> bool {
+    session.active_turn_id().is_some()
 }
 
 /// A completed edit or shell command is the earliest provider-neutral point at

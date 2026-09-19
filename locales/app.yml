@@ -58,6 +58,8 @@ menu.toggle_branch_picker:
   en: Toggle Branch Picker
 menu.toggle_runtime_mode_picker:
   en: Toggle Mode Picker
+menu.toggle_environment:
+  en: Toggle Environment
 menu.toggle_workspace:
   en: Toggle Workspace
 menu.toggle_usage_panel:
@@ -154,10 +156,38 @@ command_palette.no_scripts:
   en: No scripts found
 command_palette.no_scripts_hint:
   en: No package.json, makefile, or justfile at the project root
+command_palette.templates:
+  en: Templates
+command_palette.new_github_issue:
+  en: New GitHub issue
+command_palette.issue_project_placeholder:
+  en: Select a project for the issue…
+command_palette.issue_template_placeholder:
+  en: Select an issue template…
+command_palette.loading_issue_templates:
+  en: Loading issue templates…
+command_palette.blank_issue:
+  en: Blank issue
+command_palette.blank_issue_search:
+  en: blank issue new no template
+command_palette.opens_on_web:
+  en: Opens on GitHub
+command_palette.no_issue_projects_hint:
+  en: Open a project to file an issue
+command_palette.no_issue_templates:
+  en: No issue templates
+command_palette.no_issue_templates_hint:
+  en: File a blank issue instead
 command_palette.open_on_github:
   en: Open on GitHub
 command_palette.land_changes:
   en: Land changes
+command_palette.create_draft:
+  en: Create draft
+command_palette.view_drafts:
+  en: View drafts
+command_palette.sync_branch:
+  en: Sync branch…
 command_palette.new_custom_command:
   en: New custom command…
 command_palette.choose_model:
@@ -210,6 +240,60 @@ command_palette.agent:
   en: Agent
 command_palette.no_results:
   en: No matching tasks or commands
+drafts.title:
+  en: Drafts
+drafts.search:
+  en: Search drafts
+drafts.view_drafts:
+  en: Drafts
+drafts.view_hidden:
+  en: Hidden
+drafts.view_tooltip:
+  en: View drafts
+drafts.new_task_in:
+  en: New task in %{project}
+drafts.missing_task:
+  en: Deleted task
+drafts.missing_project:
+  en: Deleted project
+drafts.missing_target:
+  en: The task this draft was written in no longer exists
+drafts.no_composer:
+  en: No composer to save a draft from
+drafts.nothing_to_save:
+  en: The composer is empty — nothing to save
+drafts.saved_toast:
+  en: Saved to drafts
+drafts.attachments:
+  en: "%{count} attachments"
+drafts.edit_placeholder:
+  en: Edit draft
+drafts.edit_cancel:
+  en: Cancel
+drafts.edit_save:
+  en: Save
+drafts.menu.edit:
+  en: Edit
+drafts.menu.hide:
+  en: Hide
+drafts.menu.unhide:
+  en: Unhide
+drafts.menu.use:
+  en: Use
+drafts.menu.delete:
+  en: Delete
+drafts.empty_title:
+  en: No drafts
+drafts.empty_hint:
+  en: Use “Create draft” to park the composer’s contents here
+drafts.empty_hidden:
+  en: No hidden drafts
+drafts.empty_hidden_hint:
+  en: Hidden drafts stay parked here until you unhide or delete them
+drafts.no_match:
+  en: No matching drafts
+drafts.no_match_hint:
+  en: Try a different search
 command_palette.no_results_hint:
   en: Try a task title, message, project, setting, or command
 command_palette.no_matching_providers:
@@ -302,7 +386,7 @@ settings.commands_keywords:
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:
-  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page
+  en: experiments experimental beta preview unfinished opt in early big picture git panel github subagents projects page computer use auto model routing router evaluation jev
 settings.experiments_description:
   en: Unfinished features you can try early. Each is off by default, may change or disappear, and can be turned off at any time.
 settings.archived:
@@ -325,10 +409,14 @@ settings.archived_all_projects:
   en: All projects
 settings.archived_no_match:
   en: No archived chats match the current filters.
+settings.archived_landed:
+  en: Landed
 settings.back:
   en: Back
 settings.search:
   en: Search Settings
+settings.search_empty:
+  en: No settings match your search.
 
 commands.title:
   en: Custom commands
@@ -475,6 +563,90 @@ experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:
   en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Applies to sessions started after turning it on.
+experiments.computer_use_title:
+  en: Computer Use
+experiments.computer_use_description:
+  en: Reveal the Computer Use settings page and let sessions drive Cua Driver capture and input through the bundled helper. Turning it off also turns Computer Use itself off.
+experiments.friends_title:
+  en: Friends
+experiments.friends_description:
+  en: A Settings → Friends page for friend-to-friend file transfers — share your friend code, accept incoming requests, and watch live transfer progress from a sidebar footer ring.
+experiments.model_router_title:
+  en: Auto model routing
+experiments.model_router_description:
+  en: Add Auto to the model picker. A task's first prompt is classified by the evaluation model, then routed to a provider and model from your routing policy.
+routing.backend:
+  en: Evaluation backend
+routing.backend_description:
+  en: The service that classifies each task's first prompt. All three answer the same typed evaluation questions; only credentials differ.
+routing.typesafe_key:
+  en: TypeSafe API key
+routing.typesafe_key_description:
+  en: Calls api.typesafe.ai directly. Leave empty to keep the stored key.
+routing.typesafe_key_placeholder:
+  en: ts_…
+routing.vercel_key:
+  en: AI Gateway key or OIDC token
+routing.vercel_key_description:
+  en: An AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN value, sent as the Bearer credential to the AI Gateway evaluation endpoint.
+routing.vercel_key_placeholder:
+  en: vck_… or OIDC token
+routing.vercel_team:
+  en: Team ID (optional)
+routing.vercel_team_description:
+  en: Sent as x-vercel-ai-gateway-team when your gateway is scoped to a Vercel team.
+routing.optional:
+  en: Optional
+routing.cloudflare_account:
+  en: Account ID
+routing.cloudflare_account_description:
+  en: The Cloudflare account owning the Workers AI evaluation binding.
+routing.cloudflare_account_placeholder:
+  en: Cloudflare account id
+routing.cloudflare_token:
+  en: API token
+routing.cloudflare_token_description:
+  en: A Workers AI–scoped token for the account above.
+routing.cloudflare_token_placeholder:
+  en: Cloudflare API token
+routing.class_routine:
+  en: Routine tasks
+routing.class_routine_description:
+  en: Mechanical, low-risk, or single-step work — routed cheap and fast.
+routing.class_general:
+  en: General tasks
+routing.class_general_description:
+  en: Ordinary tasks that benefit from a solid model — the default class.
+routing.class_demanding:
+  en: Demanding tasks
+routing.class_demanding_description:
+  en: Subtle, high-stakes, or long-horizon work — routed to the strongest tier.
+routing.tiers:
+  en: Tiers
+routing.tier_fast:
+  en: Fast tier
+routing.tier_default:
+  en: Default tier
+routing.tier_heavy:
+  en: Heavy tier
+routing.session_tier_fast:
+  en: Fast · your provider
+routing.session_tier_default:
+  en: Default · your provider
+routing.session_tier_heavy:
+  en: Heavy · your provider
+routing.providers:
+  en: Providers
+routing.provider_default:
+  en: default
+routing.last_used:
+  en: Last used
+routing.in_progress:
+  en: Routing task…
+routing.policy_valid:
+  en: In effect
+routing.policy_invalid:
+  en: Invalid — using defaults
 daemon.not_configured:
   en: Not configured
 daemon.status:
@@ -615,10 +787,20 @@ settings.dark_theme:
   en: Dark theme
 settings.dark_theme_description:
   en: Palette used while in dark appearance
+settings.preview:
+  en: Preview
+settings.preview_description:
+  en: Sample chat and code in the selected theme
+settings.preview_user_message:
+  en: Can you fix the greeting function?
+settings.preview_assistant_reply:
+  en: Done — the function now returns a greeting.
 settings.sidebar_transparency:
   en: Sidebar transparency
 settings.sidebar_transparency_description:
   en: Blend the desktop behind the sidebar. Turn off for a solid background.
+settings.sidebar_transparency_amount:
+  en: Amount
 settings.ui_font:
   en: UI font
 settings.ui_font_description:
@@ -649,6 +831,10 @@ settings.thick_borders:
   en: Thick borders
 settings.thick_borders_description:
   en: Draw borders and separators a full pixel thick instead of a half-pixel hairline
+settings.border_intensity:
+  en: Border intensity
+settings.border_intensity_description:
+  en: How strongly borders and separators read. 0% hides them; 100% is the original weight
 settings.high_contrast:
   en: High contrast borders
 settings.high_contrast_description:
@@ -669,10 +855,24 @@ settings.open_at_last_prompt:
   en: Open finished tasks at the last prompt
 settings.open_at_last_prompt_description:
   en: Start reading at your latest message instead of the end of the transcript
+settings.archive_navigation:
+  en: After archiving a task
+settings.archive_navigation_description:
+  en: Choose where to go when the task you are viewing is archived
+settings.archive_navigation_next_unread:
+  en: Go to next unread completion
+settings.archive_navigation_next_session:
+  en: Go to next session in the sidebar
+settings.archive_navigation_new_task:
+  en: Compose a new task
 settings.sync_with_merge:
   en: Merge when syncing changes
 settings.sync_with_merge_description:
   en: Use git merge instead of git pull --rebase when syncing a checkout from the new task area
+settings.auto_resolve_in_chat:
+  en: Resolve sync conflicts in a chat
+settings.auto_resolve_in_chat_description:
+  en: When a pull or land stops on conflicts, start a fresh chat on the checkout with the resolution steps already sent
 settings.new_worktree_default_branch:
   en: New worktrees use the default branch
 settings.new_worktree_default_branch_description:
@@ -739,6 +939,8 @@ a11y.command_palette:
   en: Command palette
 a11y.file_finder:
   en: File finder
+a11y.sync_branch:
+  en: Sync branch
 a11y.task_name:
   en: Task name
 a11y.task_description:
@@ -747,6 +949,8 @@ a11y.answer:
   en: Your answer
 a11y.comment:
   en: Comment
+a11y.draft_edit:
+  en: Draft text
 
 common.checking:
   en: Checking…
@@ -1147,6 +1351,41 @@ github.post_comment:
 github.loading_media:
   en: Loading media…
 
+issue.new:
+  en: New issue
+issue.title:
+  en: Title
+issue.title_placeholder:
+  en: Issue title
+issue.title_required:
+  en: Give the issue a title
+issue.body:
+  en: Body
+issue.body_placeholder:
+  en: Markdown body — template text is already filled in
+issue.labels:
+  en: Labels
+issue.labels_placeholder:
+  en: bug, help wanted
+issue.assignees:
+  en: Assignees
+issue.assignees_placeholder:
+  en: octocat, hubot
+issue.milestone:
+  en: Milestone
+issue.milestone_placeholder:
+  en: Milestone name or number
+issue.create:
+  en: Create issue
+issue.creating:
+  en: Creating issue…
+issue.created:
+  en: Issue created
+issue.created_numbered:
+  en: "Issue #%{number} created"
+issue.view:
+  en: View
+
 project.new_project:
   en: New project…
 project.no_project:
@@ -1275,6 +1514,7 @@ projects.col_last_commit:
 projects.col_updated:
   en: Updated
 
+
 onboarding.open_project_to_begin:
   en: Open a project to begin
 onboarding.description:
@@ -1308,6 +1548,8 @@ common.search_with_google:
   en: Search with Google
 common.cancel:
   en: Cancel
+common.save:
+  en: Save
 common.send:
   en: Send
 
@@ -1687,6 +1929,12 @@ composer.no_providers:
 
 models.none_found:
   en: No models found
+models.auto:
+  en: Auto
+models.auto_hint:
+  en: select the best provider
+models.auto_routed:
+  en: "Auto (Jev) · %{model}"
 models.favorite_hint:
   en: Star a model to keep it here
 models.loading:
@@ -2112,6 +2360,8 @@ errors.provider_not_installed:
   en: "%{provider} is not installed"
 errors.provider_not_found:
   en: "%{provider} is not installed or could not be found"
+errors.provider_terminal_sessions_local_only:
+  en: "%{provider} sessions need the local daemon — this workspace is on a remote host"
 errors.claude_fork_checkpoint_missing:
   en: Claude omitted the fork checkpoint
 errors.claude_turn_checkpoint_unavailable:
@@ -2279,6 +2529,10 @@ session.view_now:
   en: View now
 session.worktree_recreated:
   en: The worktree was missing, so it was recreated — uncommitted changes may be gone
+session.agy_ended:
+  en: The Antigravity session has ended
+session.agy_relaunch:
+  en: Relaunch session
 session.moved_to_worktree:
   en: "Moved to worktree %{name}"
 
@@ -2758,6 +3012,8 @@ git_panel.landing_onto:
   en: "Landing onto %{base}…"
 git_panel.landed:
   en: Landed on %{base}
+git_panel.land_local_checkout:
+  en: This task works directly in the project checkout — there's nothing to land
 git_panel.already_landed:
   en: "%{base} already contains every commit here"
 git_panel.land_conflict_description:
@@ -2766,6 +3022,21 @@ git_panel.resolve_land_rebase_prompt:
   en: "The rebase of this worktree onto `%{base}` stopped on conflicts. Resolve the conflicts in the working tree and run `git rebase --continue` until the rebase completes. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
 git_panel.resolve_land_merge_prompt:
   en: "The merge of `%{base}` into this worktree stopped on conflicts. Resolve the conflicts in the working tree and complete the merge. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
+
+sync_branch.current:
+  en: Current branch
+sync_branch.loading:
+  en: Loading branches…
+sync_branch.no_results:
+  en: No branches with a tracking branch
+sync_branch.no_results_hint:
+  en: Only branches checked out in a working tree can be synced
+sync_branch.syncing:
+  en: "Syncing %{branch}…"
+sync_branch.synced:
+  en: Synced %{branch}
+sync_branch.busy:
+  en: Another Git operation is still running
 
 terminal.transport_failed:
   en: Terminal transport failed
@@ -2876,6 +3147,10 @@ transcript.edit_message:
   en: Edit message
 transcript.sent_by_agent:
   en: Sent by agent
+transcript.landed:
+  en: Landed on %{base}
+transcript.landed_more:
+  en: "…and %{count} more"
 
 duration.second:
   en: "%{count} second"
@@ -3208,6 +3483,10 @@ shortcuts.open_localhost:
   en: Open Localhost URL
 shortcuts.open_localhost_tab:
   en: Open Localhost URL in Tab
+shortcuts.open_created_issue:
+  en: Open Created GitHub Issue
+shortcuts.view_unarchived_task:
+  en: View Unarchived Task
 shortcuts.open_settings:
   en: Open Settings
 shortcuts.fps_counter:
@@ -3439,6 +3718,16 @@ settings.friends:
   en: Friends
 settings.friends_keywords:
   en: friends friend share send receive file transfer peer online presence
+friends.display_name:
+  en: Your display name
+friends.display_name_hint:
+  en: Friends see this name on your requests and file offers.
+friends.display_name_placeholder:
+  en: Name shown to friends
+friends.nickname:
+  en: Nickname
+friends.nickname_placeholder:
+  en: Only you see this name
 friends.your_code:
   en: Your friend code
 friends.code_hint:
@@ -3457,6 +3746,8 @@ friends.wants_to_add:
   en: wants to add you as a friend
 friends.pending:
   en: pending
+friends.withdraw:
+  en: Withdraw
 friends.accept:
   en: Accept
 friends.decline:
@@ -3494,7 +3785,7 @@ friends.open_chat:
 friends.show_in_finder:
   en: Show in Finder
 friends.transfers_active:
-  en: "{count} transfer(s) in progress — open Friends"
+  en: "%{count} transfer(s) in progress — open Friends"
 friends.quarantined_title:
   en: Quarantined files
 friends.quarantined_hint:
@@ -3502,7 +3793,7 @@ friends.quarantined_hint:
 friends.trust:
   en: Trust files
 friends.command_failed:
-  en: "Friend command failed: {error}"
+  en: "Friend command failed: %{error}"
 keybind.category.projects:
   en: Projects
 keybind.category.git:
@@ -3515,6 +3806,12 @@ keybind.command.sidebar_task:
   en: Select Sidebar Task %{n}
 keybind.command.projects_tab:
   en: Select Projects Tab %{n}
+keybind.command.favorite_model:
+  en: Select Favorite Model %{n}
+keybind.command.cycle_effort:
+  en: Cycle Reasoning Effort
+keybind.command.cycle_effort_backward:
+  en: Cycle Reasoning Effort Backward
 keybind.command.bigpicture_card:
   en: Select Big Picture Card %{n}
 keybind.command.run_command:
@@ -3555,6 +3852,16 @@ keybind.conflict.banner:
   en: Conflicts with %{other}
 keybind.conflict.confirm:
   en: Enter to save anyway
+keybind.conflicts.cycle:
+  en: Show each conflict
+keybind.column.command:
+  en: Command
+keybind.column.keybinding:
+  en: Keybinding
+keybind.column.when:
+  en: When
+keybind.column.category:
+  en: Category
 keybind.keywords:
   en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:

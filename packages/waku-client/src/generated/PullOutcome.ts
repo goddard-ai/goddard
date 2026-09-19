@@ -3,6 +3,7 @@ import type { SyncInProgress } from "./SyncInProgress";
 
 export type PullOutcome = "clean" | { "conflict": { in_progress: SyncInProgress,
 /**
- * Working-tree paths still carrying conflict markers.
+ * Working-tree paths still carrying conflict markers. `[]` matches
+ * older writers that did not send the field.
  */
 files: Array<string>, } };

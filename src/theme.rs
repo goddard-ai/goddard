@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use gpui::{
     App, Global, Hsla, Pixels, Rems, Rgba, Window, WindowAppearance, hsla, px, rems, rgb,
@@ -56,6 +56,24 @@ fn high_contrast() -> bool {
     HIGH_CONTRAST.load(Ordering::Relaxed)
 }
 
+/// The "Border intensity" preference, stored as f32 bits for the same reason
+/// as [`THICK_BORDERS`]: [`border_floors`] runs inside `from_spec` with no
+/// `cx`, so the setting reaches it through a static. Themes are built once
+/// and republished on changes, so a process-level flag is enough.
+static BORDER_INTENSITY: AtomicU32 =
+    AtomicU32::new(crate::persistence::DEFAULT_BORDER_INTENSITY.to_bits());
+
+/// Store the "Border intensity" preference [`border_floors`] reads: 1.0 is
+/// the palettes' solved contrast, 0.0 erases the lines.
+pub fn set_border_intensity(intensity: f32) {
+    let intensity = crate::persistence::sanitized_border_intensity(intensity);
+    BORDER_INTENSITY.store(intensity.to_bits(), Ordering::Relaxed);
+}
+
+fn border_intensity() -> f32 {
+    f32::from_bits(BORDER_INTENSITY.load(Ordering::Relaxed))
+}
+
 /// A translucent color wash — selection, etc. `rgb()` yields `Rgba`; this
 /// hops through `Hsla` so the alpha can be set.
 fn wash(color: u32, alpha: f32) -> Hsla {
@@ -78,21 +96,28 @@ const HIGH_CONTRAST_SUBTLE: f32 = 2.2;
 const HIGH_CONTRAST_BORDER: f32 = 2.6;
 const HIGH_CONTRAST_STRONG: f32 = 3.0;
 
-/// The active mode's floors: (separator, subtle, border, strong).
+/// The active mode's floors: (separator, subtle, border, strong). The
+/// "Border intensity" slider scales each floor's distance above 1:1 — the
+/// ratio at which a line is indistinguishable from its surface — so 100%
+/// lands on the authored floors and 0% erases every tier.
 fn border_floors() -> (f32, f32, f32, f32) {
+    let intensity = border_intensity();
+    let scale = |floor: f32| 1.0 + (floor - 1.0) * intensity;
     if high_contrast() {
+        // High contrast keeps its guarantee: the slider can relax the
+        // widened floors toward the standard ones but never below them.
         (
-            HIGH_CONTRAST_SEPARATOR,
-            HIGH_CONTRAST_SUBTLE,
-            HIGH_CONTRAST_BORDER,
-            HIGH_CONTRAST_STRONG,
+            scale(HIGH_CONTRAST_SEPARATOR).max(SEPARATOR_CONTRAST),
+            scale(HIGH_CONTRAST_SUBTLE).max(BORDER_SUBTLE_CONTRAST),
+            scale(HIGH_CONTRAST_BORDER).max(BORDER_CONTRAST),
+            scale(HIGH_CONTRAST_STRONG).max(BORDER_STRONG_CONTRAST),
         )
     } else {
         (
-            SEPARATOR_CONTRAST,
-            BORDER_SUBTLE_CONTRAST,
-            BORDER_CONTRAST,
-            BORDER_STRONG_CONTRAST,
+            scale(SEPARATOR_CONTRAST),
+            scale(BORDER_SUBTLE_CONTRAST),
+            scale(BORDER_CONTRAST),
+            scale(BORDER_STRONG_CONTRAST),
         )
     }
 }
@@ -1427,6 +1452,7 @@ pub fn init(cx: &mut App) {
 pub fn apply_theme_preference(
     settings: ThemeSettings,
     sidebar_transparent: bool,
+    sidebar_transparency_amount: f32,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -1451,13 +1477,56 @@ pub fn apply_theme_preference(
         theme.sidebar_drag_background,
         is_dark,
         sidebar_transparent,
+        sidebar_transparency_amount,
     );
     window.refresh();
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+
+    /// Serializes tests that drive the process-level border statics — a
+    /// concurrent flip between a palette build and a floor read would flake.
+    static BORDER_STATICS: Mutex<()> = Mutex::new(());
+
+    /// The intensity slider trades each floor's distance above 1:1: 0%
+    /// erases normal-mode lines, high contrast never drops below the
+    /// standard floors, and 100% restores the authored values.
+    #[test]
+    fn border_intensity_scales_the_floors() {
+        let _guard = BORDER_STATICS.lock().unwrap();
+        BORDER_INTENSITY.store(0.0f32.to_bits(), Ordering::Relaxed);
+        HIGH_CONTRAST.store(false, Ordering::Relaxed);
+        assert_eq!(border_floors(), (1.0, 1.0, 1.0, 1.0));
+        HIGH_CONTRAST.store(true, Ordering::Relaxed);
+        assert_eq!(
+            border_floors(),
+            (
+                SEPARATOR_CONTRAST,
+                BORDER_SUBTLE_CONTRAST,
+                BORDER_CONTRAST,
+                BORDER_STRONG_CONTRAST
+            )
+        );
+        BORDER_INTENSITY.store(1.0f32.to_bits(), Ordering::Relaxed);
+        assert_eq!(
+            border_floors(),
+            (
+                HIGH_CONTRAST_SEPARATOR,
+                HIGH_CONTRAST_SUBTLE,
+                HIGH_CONTRAST_BORDER,
+                HIGH_CONTRAST_STRONG
+            )
+        );
+        BORDER_INTENSITY.store(
+            crate::persistence::DEFAULT_BORDER_INTENSITY.to_bits(),
+            Ordering::Relaxed,
+        );
+        HIGH_CONTRAST.store(false, Ordering::Relaxed);
+    }
 
     /// Every palette's line tokens must hit their solved floors in both
     /// contrast modes — on every surface they can be painted on. This is the
@@ -1465,6 +1534,7 @@ mod tests {
     /// scheme can't regress it.
     #[test]
     fn borders_clear_the_contrast_floor() {
+        let _guard = BORDER_STATICS.lock().unwrap();
         for hc in [false, true] {
             // The flag is process state; store it directly rather than via
             // `set_high_contrast`, which ORs in the host OS's own setting and

@@ -220,11 +220,14 @@ pub fn init_command_bar_keys(cx: &mut App) {
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
 /// `CustomCommand` sources the command's materialized script inside an
-/// interactive shell of the command's choosing.
+/// interactive shell of the command's choosing. `Program` execs a binary
+/// directly — no shell beneath it — for a program that owns the whole
+/// surface, like a terminal-backed agent's TUI.
 #[derive(Clone)]
 pub enum TerminalLaunch {
     Shell,
     CustomCommand(crate::persistence::CustomCommand),
+    Program { program: PathBuf, args: Vec<String> },
 }
 
 #[derive(Clone)]
@@ -377,11 +380,11 @@ impl TerminalSession {
             proxy.clone(),
         )));
 
-        let (shell, startup_line, shell_integration) = match launch {
+        let (shell, startup_line, shell_integration, program_args) = match launch {
             TerminalLaunch::Shell => {
                 let shell = crate::command_env::default_terminal_shell();
                 let installed = crate::shell_integration::install(&shell);
-                (shell, None, installed)
+                (shell, None, installed, None)
             }
             TerminalLaunch::CustomCommand(command) => {
                 let shell = crate::custom_commands::command_shell(command);
@@ -392,10 +395,14 @@ impl TerminalSession {
                     &script_path,
                     command.close_on_success,
                 );
-                (shell, Some(line), false)
+                (shell, Some(line), false, None)
+            }
+            TerminalLaunch::Program { program, args } => {
+                (program.clone(), None, false, Some(args.clone()))
             }
         };
-        let shell_args = crate::command_env::default_terminal_shell_args(&shell);
+        let shell_args = program_args
+            .unwrap_or_else(|| crate::command_env::default_terminal_shell_args(&shell));
         let mut options = tty::Options {
             shell: Some(Shell::new(shell.to_string_lossy().into_owned(), shell_args)),
             working_directory: Some(working_directory.to_path_buf()),
@@ -857,6 +864,10 @@ pub struct TerminalView {
     error: Option<String>,
     focus_handle: FocusHandle,
     working_directory: PathBuf,
+    /// The directory the PTY launched in — `working_directory` drifts
+    /// from it as soon as the shell reports a `cd`, so "where this
+    /// terminal was spawned" reads here instead.
+    spawn_directory: PathBuf,
     /// Basename of the PTY's shell — "zsh", "bash" — what a sidebar row
     /// reports when the terminal sits outside any repository.
     shell_name: String,
@@ -909,12 +920,18 @@ impl TerminalView {
         let default_title = match &launch {
             TerminalLaunch::Shell => tr!("right_panel.terminal"),
             TerminalLaunch::CustomCommand(command) => command.display_name().to_owned(),
+            TerminalLaunch::Program { program, .. } => program
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned(),
         };
         let shell = match &launch {
             TerminalLaunch::Shell => crate::command_env::default_terminal_shell(),
             TerminalLaunch::CustomCommand(command) => {
                 crate::custom_commands::command_shell(command)
             }
+            TerminalLaunch::Program { program, .. } => program.clone(),
         };
         let shell_name = shell
             .file_name()
@@ -976,6 +993,7 @@ impl TerminalView {
             title: default_title.clone(),
             default_title,
             custom_title: None,
+            spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
             // A custom command's launch line is the terminal's first
@@ -1015,6 +1033,12 @@ impl TerminalView {
 
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
+    }
+
+    /// The directory the PTY spawned in — unlike `working_directory`,
+    /// which follows the shell's cwd reports, this never moves.
+    pub fn spawn_directory(&self) -> &Path {
+        &self.spawn_directory
     }
 
     /// Basename of the shell the PTY runs — the row label for a terminal

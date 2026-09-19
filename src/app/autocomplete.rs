@@ -1,4 +1,5 @@
-//! The composer's autocompletion popup: slash commands and `@` file mentions.
+//! The composer's autocompletion popup: slash commands, `@` file mentions,
+//! and `#` GitHub issue/pull-request references.
 //!
 //! The popup is a pure view over prefetched data. Command and file indexes are
 //! discovered on the background executor into `QueryCache`s and mirrored into
@@ -21,9 +22,11 @@ use gpui::{
 };
 use nucleo_matcher::Matcher;
 
+use waku_client::{GitHubAvailability, GitHubRepoRef, WorkItemKind, WorkItemQueryState};
+
 use crate::composer_complete::{
-    self, FILE_INDEX_CAP, FileEntry, Scored, SlashCommand, Trigger, TriggerKind,
-    highlight_byte_ranges,
+    self, ComposerWorkItem, ComposerWorkItemState, FILE_INDEX_CAP, FileEntry, Scored, SlashCommand,
+    Trigger, TriggerKind, highlight_byte_ranges,
 };
 use crate::ui::menu::{ConfirmEntry, DismissMenu, SelectNextEntry, SelectPreviousEntry};
 
@@ -55,6 +58,34 @@ pub fn init(cx: &mut App) {
 pub(super) enum AutocompleteRow {
     Command(Scored<SlashCommand>),
     File(Scored<FileEntry>),
+    WorkItem(Scored<ComposerWorkItem>),
+}
+
+/// Keystroke pause before a `#` query goes to the daemon — each search is two
+/// `gh` subprocesses, so typing waits for a settle the way the transcript
+/// search does.
+const WORK_ITEM_SEARCH_DEBOUNCE: Duration = Duration::from_millis(220);
+
+/// One workspace's `#` mention state: the resolved repo, the newest landed
+/// search, and every item ever seen (the `known` map feeds both the
+/// provider-prompt expansion and the transcript's `#N` chips, which must keep
+/// working after the query that found them is gone).
+#[derive(Default)]
+pub(super) struct WorkItemMentions {
+    /// `None` until `ResolveGitHubRepo` answers; `Some((None, availability))`
+    /// explains why `#` cannot be answered here.
+    pub repo: Option<(Option<GitHubRepoRef>, GitHubAvailability)>,
+    /// Merged issue/PR rows for `items_query`.
+    pub items: Rc<Vec<ComposerWorkItem>>,
+    pub items_query: String,
+    /// Number → item for every landed row.
+    pub known: HashMap<u64, ComposerWorkItem>,
+    /// A remote search is in flight.
+    pub loading: bool,
+    /// The query the in-flight (or last) fetch was started for.
+    pub requested_query: Option<String>,
+    /// Bumped per fetch; replies from older generations drop.
+    pub generation: u64,
 }
 
 /// Filter results for one (kind, query, source index) — the popup's rows are
@@ -84,6 +115,10 @@ pub(super) struct AutocompleteUi {
     card_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     results: RefCell<Option<ResultsMemo>>,
     matcher: RefCell<Matcher>,
+    /// The `#` query waiting out the debounce, and the generation of the
+    /// newest scheduled fetch — a stale timer must not fire it.
+    work_item_scheduled: RefCell<Option<(PathBuf, String)>>,
+    work_item_debounce: Cell<u64>,
 }
 
 impl AutocompleteUi {
@@ -96,6 +131,8 @@ impl AutocompleteUi {
             card_bounds: Rc::new(Cell::new(None)),
             results: RefCell::new(None),
             matcher: RefCell::new(composer_complete::matcher()),
+            work_item_scheduled: RefCell::new(None),
+            work_item_debounce: Cell::new(0),
         }
     }
 
@@ -281,6 +318,9 @@ impl Waku {
         } else {
             None
         };
+        let trigger = trigger.filter(|trigger| {
+            !matches!(trigger.kind, TriggerKind::WorkItem) || self.state.github_enabled
+        });
         let ui = &self.composer_autocomplete;
         if *ui.token.borrow() != trigger {
             *ui.token.borrow_mut() = trigger.clone();
@@ -299,9 +339,22 @@ impl Waku {
     /// The filtered rows for `trigger`, shared by the popup body, the keyboard
     /// cursor and `enter` so an index always means the same row everywhere.
     fn autocomplete_rows(&self, trigger: &Trigger) -> Rc<Vec<AutocompleteRow>> {
+        let work_item_items = match trigger.kind {
+            TriggerKind::WorkItem => self
+                .selected_workspace_path()
+                .and_then(|path| self.work_item_mentions.get(path))
+                .map(|state| state.items.clone()),
+            _ => None,
+        };
         let source = match trigger.kind {
             TriggerKind::Command => Rc::as_ptr(&self.slash_command_index) as usize,
             TriggerKind::File => Rc::as_ptr(&self.mention_file_index) as usize,
+            // `0` while no fetch has landed — a fresh `Rc` per call would
+            // defeat the memo.
+            TriggerKind::WorkItem => work_item_items
+                .as_ref()
+                .map(|items| Rc::as_ptr(items) as usize)
+                .unwrap_or(0),
         };
         {
             let memo = self.composer_autocomplete.results.borrow();
@@ -328,6 +381,18 @@ impl Waku {
             )
             .into_iter()
             .map(AutocompleteRow::File)
+            .collect(),
+            // The remote search already narrowed `items` to the query; the
+            // local pass only re-ranks so digits hit the number and text hits
+            // the title, and so a still-in-flight query keeps the stale list
+            // useful while it types ahead of `gh`.
+            TriggerKind::WorkItem => composer_complete::filter_work_items(
+                work_item_items.as_deref().map_or(&[][..], Vec::as_slice),
+                &trigger.query,
+                &mut matcher,
+            )
+            .into_iter()
+            .map(AutocompleteRow::WorkItem)
             .collect(),
         };
         let rows = Rc::new(rows);
@@ -388,6 +453,10 @@ impl Waku {
                 format!("{composer_text} ")
             }
             AutocompleteRow::File(scored) => format!("@{} ", scored.item.path),
+            // The plain-text token is the durable mention — expansion to a
+            // titled link happens at the transport boundary, like a command
+            // template.
+            AutocompleteRow::WorkItem(scored) => format!("#{} ", scored.item.number),
         };
         if matches!(row, AutocompleteRow::Command(_)) {
             let mut submission = self.composer.read(cx).content(cx).to_owned();
@@ -407,6 +476,213 @@ impl Waku {
         cx.notify();
     }
 
+    /// Schedule the remote `gh` search behind a `#` trigger, debounced so a
+    /// keystroke burst is one search rather than one per character. Safe to
+    /// call from the render path: the timer only arms work that lands through
+    /// `start_work_item_search` on the background executor.
+    fn schedule_work_item_search(&self, trigger: &Trigger, cx: &mut Context<Self>) {
+        if trigger.kind != TriggerKind::WorkItem {
+            return;
+        }
+        let Some(path) = self
+            .selected_workspace_path()
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        if self.work_item_mentions.get(&path).is_some_and(|state| {
+            state.items_query == trigger.query
+                || state.requested_query.as_deref() == Some(trigger.query.as_str())
+        }) {
+            return;
+        }
+        let ui = &self.composer_autocomplete;
+        let pending = (path.clone(), trigger.query.clone());
+        if ui.work_item_scheduled.borrow().as_ref() == Some(&pending) {
+            return;
+        }
+        *ui.work_item_scheduled.borrow_mut() = Some(pending);
+        let debounce = ui.work_item_debounce.get().wrapping_add(1);
+        ui.work_item_debounce.set(debounce);
+        let query = trigger.query.clone();
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor()
+                .timer(WORK_ITEM_SEARCH_DEBOUNCE)
+                .await;
+            waku.update(cx, |waku, cx| {
+                if waku.composer_autocomplete.work_item_debounce.get() != debounce {
+                    return;
+                }
+                *waku.composer_autocomplete.work_item_scheduled.borrow_mut() = None;
+                waku.start_work_item_search(path, query, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Fire one `#` search: resolve the repo when unknown, query issues and
+    /// pull requests in parallel, and — for an all-digit query — fill in the
+    /// exact item `list --search` can miss. Everything runs on the background
+    /// executor through the daemon; only the landing touches `self`.
+    fn start_work_item_search(&mut self, path: PathBuf, query: String, cx: &mut Context<Self>) {
+        let state = self.work_item_mentions.entry(path.clone()).or_default();
+        let need_repo = state.repo.is_none();
+        state.generation = state.generation.wrapping_add(1);
+        let generation = state.generation;
+        state.requested_query = Some(query.clone());
+        state.loading = true;
+        cx.notify();
+        let search = Some(query.trim().to_owned()).filter(|query| !query.is_empty());
+        let number = query.trim().parse::<u64>().ok();
+        let issues_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let pulls_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let repo_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let issue_detail_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let pr_detail_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let cwd = path.clone();
+        cx.spawn(async move |waku, cx| {
+            let issues = {
+                let cwd = cwd.clone();
+                let search = search.clone();
+                cx.background_executor().spawn(async move {
+                    match issues_client.request(waku_client::WorkspaceOperation::ListIssues {
+                        cwd,
+                        state: WorkItemQueryState::All,
+                        query: search,
+                    }) {
+                        Ok(waku_client::WorkspaceResult::Issues { entries }) => entries,
+                        _ => None,
+                    }
+                })
+            };
+            let pull_requests = {
+                let cwd = cwd.clone();
+                let search = search.clone();
+                cx.background_executor().spawn(async move {
+                    match pulls_client.request(
+                        waku_client::WorkspaceOperation::ListRepoPullRequests {
+                            cwd,
+                            state: WorkItemQueryState::All,
+                            query: search,
+                        },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::PullRequests { entries }) => entries,
+                        _ => None,
+                    }
+                })
+            };
+            let repo = need_repo.then(|| {
+                let cwd = cwd.clone();
+                cx.background_executor().spawn(async move {
+                    match repo_client
+                        .request(waku_client::WorkspaceOperation::ResolveGitHubRepo { cwd })
+                    {
+                        Ok(waku_client::WorkspaceResult::GitHubRepo { repo, availability }) => {
+                            (repo, availability)
+                        }
+                        _ => (None, GitHubAvailability::Ready),
+                    }
+                })
+            });
+            let issues = issues.await;
+            let pull_requests = pull_requests.await;
+            let repo = match repo {
+                Some(task) => Some(task.await),
+                None => None,
+            };
+            // A digit query names a number, not a search term: `gh list
+            // --search` does not promise a number match, so read the item
+            // directly when neither list surfaced it.
+            let mut exact = Vec::new();
+            if let Some(number) = number {
+                let listed = issues.iter().flatten().any(|issue| issue.number == number)
+                    || pull_requests.iter().flatten().any(|pr| pr.number == number);
+                if !listed {
+                    let issue_task = {
+                        let cwd = cwd.clone();
+                        cx.background_executor().spawn(async move {
+                            match issue_detail_client
+                                .request(waku_client::WorkspaceOperation::GetIssue { cwd, number })
+                            {
+                                Ok(waku_client::WorkspaceResult::Issue {
+                                    detail: Some(detail),
+                                }) => Some(ComposerWorkItem::from_issue(detail.summary)),
+                                _ => None,
+                            }
+                        })
+                    };
+                    let pr_task = {
+                        let cwd = cwd.clone();
+                        cx.background_executor().spawn(async move {
+                            match pr_detail_client.request(
+                                waku_client::WorkspaceOperation::GetPullRequest { cwd, number },
+                            ) {
+                                Ok(waku_client::WorkspaceResult::PullRequest {
+                                    detail: Some(detail),
+                                }) => Some(ComposerWorkItem::from_pull_request(detail.summary)),
+                                _ => None,
+                            }
+                        })
+                    };
+                    exact.extend(issue_task.await);
+                    exact.extend(pr_task.await);
+                }
+            }
+            let merged = composer_complete::merge_work_items(
+                issues.unwrap_or_default(),
+                pull_requests.unwrap_or_default(),
+                exact,
+            );
+            waku.update(cx, |waku, cx| {
+                let Some(state) = waku.work_item_mentions.get_mut(&path) else {
+                    return;
+                };
+                if state.generation != generation {
+                    return;
+                }
+                if let Some(repo) = repo {
+                    state.repo = Some(repo);
+                }
+                // A resolved non-GitHub repo keeps nothing — the rows would
+                // be another host's items.
+                let merged = match &state.repo {
+                    Some((None, _)) => Vec::new(),
+                    _ => merged,
+                };
+                for item in &merged {
+                    state.known.insert(item.number, item.clone());
+                }
+                state.items = Rc::new(merged);
+                state.items_query = query;
+                state.loading = false;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The `#N` mentions in `content` resolved against the workspace's store —
+    /// the chips a sent user bubble draws. Numbers the store never saw stay
+    /// plain text; a chip promises a title and URL it cannot invent.
+    pub(super) fn work_item_refs_for_content(
+        &self,
+        workspace: Option<&Path>,
+        content: &str,
+    ) -> Vec<ComposerWorkItem> {
+        if !self.state.github_enabled || !content.contains('#') {
+            return Vec::new();
+        }
+        let Some(state) = workspace.and_then(|path| self.work_item_mentions.get(path)) else {
+            return Vec::new();
+        };
+        composer_complete::work_item_reference_numbers(content)
+            .into_iter()
+            .filter_map(|number| state.known.get(&number).cloned())
+            .collect()
+    }
+
     /// The popup, anchored above the composer card, or `None` when idle.
     ///
     /// Reads only the prefetched indexes — discovery never runs on a frame.
@@ -416,12 +692,36 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<(AnyElement, bool)> {
         let trigger = self.composer_trigger(window, cx)?;
+        self.schedule_work_item_search(&trigger, cx);
         let rows = self.autocomplete_rows(&trigger);
-        let loading = match trigger.kind {
-            TriggerKind::Command => self.slash_command_index_loading,
-            TriggerKind::File => self.mention_file_index_loading,
+        let (loading, hint) = match trigger.kind {
+            TriggerKind::Command => (self.slash_command_index_loading, None),
+            TriggerKind::File => (self.mention_file_index_loading, None),
+            TriggerKind::WorkItem => {
+                let workspace = self.selected_workspace_path();
+                let state = workspace.and_then(|path| self.work_item_mentions.get(path));
+                let hint = if workspace.is_none() {
+                    // A projectless session has no remote to search.
+                    Some(tr!("github.not_a_repo"))
+                } else {
+                    state.and_then(|state| match &state.repo {
+                        Some((None, availability)) => Some(match availability {
+                            GitHubAvailability::MissingCli => tr!("github.install_gh"),
+                            GitHubAvailability::Unauthenticated => tr!("github.auth_gh"),
+                            GitHubAvailability::Ready => tr!("github.not_a_repo"),
+                        }),
+                        _ => None,
+                    })
+                };
+                // No state yet means the first search has not landed; the
+                // popup reads as loading until it (or the hint) does.
+                (
+                    hint.is_none() && state.map_or(true, |state| state.loading),
+                    hint,
+                )
+            }
         };
-        if rows.is_empty() && !loading {
+        if rows.is_empty() && !loading && hint.is_none() {
             return None;
         }
         // The probe records during paint, so the first frame a composer ever
@@ -442,22 +742,28 @@ impl Waku {
             .track_scroll(&self.composer_autocomplete.scroll)
             .p(px(4.0));
         if rows.is_empty() {
-            list = list.child(
-                div()
-                    .h(px(30.0))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_size(sp(12.5))
-                    .text_color(theme.text_tertiary)
+            let row = div()
+                .h(px(30.0))
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary);
+            list = list.child(match hint {
+                // Not a GitHub repo (or no working `gh`): say why instead of
+                // spinning forever.
+                Some(hint) => row
+                    .child(icon("icons/github.svg", 12.0, theme.text_tertiary))
+                    .child(hint),
+                None => row
                     .child(crate::ui::motion::spin(icon(
                         "icons/loader-circle.svg",
                         12.0,
                         theme.text_tertiary,
                     )))
                     .child(tr!("composer.loading_suggestions")),
-            );
+            });
         } else {
             for (index, row) in rows.iter().enumerate() {
                 list = list
@@ -643,6 +949,81 @@ impl Waku {
                                 )),
                         )
                     })
+                    .into_any_element()
+            }
+            AutocompleteRow::WorkItem(scored) => {
+                let item = &scored.item;
+                // The glyph pair distinguishes issue from pull request and
+                // state — color only reinforces it, matching the sidebar
+                // badge's accessibility rule.
+                let (icon_path, icon_color, state_label) = match item.kind {
+                    WorkItemKind::Issue => match item.state {
+                        ComposerWorkItemState::Open => {
+                            ("icons/info.svg", theme.success, tr!("github.issue_open"))
+                        }
+                        _ => ("icons/check.svg", theme.info, tr!("github.issue_closed")),
+                    },
+                    WorkItemKind::PullRequest => {
+                        let state = match item.state {
+                            ComposerWorkItemState::Open => sidebar::SidebarPullRequestState::Open,
+                            ComposerWorkItemState::Draft => sidebar::SidebarPullRequestState::Draft,
+                            ComposerWorkItemState::Merged => {
+                                sidebar::SidebarPullRequestState::Merged
+                            }
+                            ComposerWorkItemState::Closed => {
+                                sidebar::SidebarPullRequestState::Closed
+                            }
+                        };
+                        (
+                            sidebar::sidebar_pull_request_icon(state),
+                            sidebar::sidebar_pull_request_color(theme, state),
+                            sidebar::sidebar_pull_request_state_label(state),
+                        )
+                    }
+                };
+                let number_text = format!("#{}", item.number);
+                let title_char_offset = item.candidate_title_offset();
+                let mut number_font = font.clone();
+                number_font.weight = FontWeight::MEDIUM;
+                base.child(icon(icon_path, 12.0, icon_color))
+                    .child(
+                        div().flex_none().text_size(sp(12.5)).child(matched_text(
+                            number_text,
+                            highlight_byte_ranges(&item.candidate(), &scored.positions, 0)
+                                .into_iter()
+                                .filter(|range| range.start <= item.candidate_title_offset())
+                                .collect(),
+                            theme.text,
+                            theme.accent,
+                            number_font,
+                        )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(matched_text(
+                                item.title.clone(),
+                                highlight_byte_ranges(
+                                    &item.title,
+                                    &scored.positions,
+                                    title_char_offset,
+                                ),
+                                theme.text_secondary,
+                                theme.accent,
+                                font.clone(),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_ghost)
+                            .child(item.author.clone().unwrap_or_else(|| state_label)),
+                    )
                     .into_any_element()
             }
         }

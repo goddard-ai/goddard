@@ -198,8 +198,9 @@ fn flatten_branch_rows(
 }
 
 /// macOS list selection applied to `selection`: plain clicks isolate the row
-/// and move the anchor, ⌘ toggles in place, ⇧ ranges from the anchor through
-/// `ordered` — the tab's filtered row order.
+/// and move the anchor — or empty the selection when the row is all of it —
+/// ⌘ toggles in place, ⇧ ranges from the anchor through `ordered`, the
+/// tab's filtered row order.
 fn apply_row_select(
     selection: &mut HashSet<ProjectsRowKey>,
     anchor: &mut Option<ProjectsRowKey>,
@@ -230,8 +231,11 @@ fn apply_row_select(
         }
         *anchor = Some(key);
     } else {
+        let deselect_only = selection.len() == 1 && selection.contains(&key);
         selection.clear();
-        selection.insert(key.clone());
+        if !deselect_only {
+            selection.insert(key.clone());
+        }
         *anchor = Some(key);
     }
 }
@@ -249,6 +253,9 @@ const PROJECTS_PR_COL: f32 = 56.0;
 const PROJECTS_DIVERGENCE_COL: f32 = 96.0;
 const PROJECTS_COUNT_COL: f32 = 64.0;
 const PROJECTS_UPDATED_COL: f32 = 76.0;
+/// Scrollable padding below the last table row, so the list can scroll up
+/// off the bottom edge of the window.
+const PROJECTS_LIST_BOTTOM_PADDING: f32 = 78.0;
 
 /// Per-project page state: tabs, per-tab filters, fetched tables,
 /// selection, and the Projects page's docked composer. Kept in
@@ -282,6 +289,12 @@ pub(super) struct ProjectsPageState {
     row_focuses: RefCell<HashMap<ProjectsRowKey, FocusHandle>>,
     selector_menu: ContextMenuHandle,
     work_item_state_menu: ContextMenuHandle,
+    /// Drag-resized widths for the Worktrees table's fixed columns
+    /// (branch, changes, tasks, updated); the name column stays flexible.
+    worktree_col_widths: [f32; 4],
+    /// Same for the Branches table (PR, divergence, updated).
+    branch_col_widths: [f32; 3],
+    col_resize: Rc<column_resize::ColumnResize>,
     /// Sessions bound per worktree path, folded once per frame so row
     /// builders read a map instead of re-scanning the session list.
     session_counts: RefCell<Rc<HashMap<PathBuf, usize>>>,
@@ -325,6 +338,18 @@ impl ProjectsPageState {
             row_focuses: RefCell::new(HashMap::new()),
             selector_menu: ContextMenuHandle::new(cx),
             work_item_state_menu: ContextMenuHandle::new(cx),
+            worktree_col_widths: [
+                PROJECTS_BRANCH_COL,
+                PROJECTS_COUNT_COL,
+                PROJECTS_COUNT_COL,
+                PROJECTS_UPDATED_COL,
+            ],
+            branch_col_widths: [
+                PROJECTS_PR_COL,
+                PROJECTS_DIVERGENCE_COL,
+                PROJECTS_UPDATED_COL,
+            ],
+            col_resize: column_resize::ColumnResize::new(),
             session_counts: RefCell::new(Rc::new(HashMap::new())),
             prs_by_head: RefCell::new(Rc::new(HashMap::new())),
             generation: 0,
@@ -452,9 +477,21 @@ impl Waku {
             self.store_selected_right_panel_state();
             self.store_transcript_scroll_position();
             self.state.selected_session = None;
+            // The session's strip is parked; the no-task context's own panel
+            // state comes back rather than inheriting the session's. Its
+            // focus requests are dropped — the page's filter takes the
+            // keyboard below.
+            let detached = std::mem::replace(
+                &mut self.right_panel_detached_state,
+                RightPanelSessionState::empty(false),
+            );
+            self.restore_right_panel_state(detached, cx);
+            self.right_panel_pending_terminal_focus = None;
+            self.right_panel_pending_browser_focus = None;
             self.save();
         }
         self.pending_session_activation = None;
+        self.drafts_page = false;
         if self
             .sidebar_collapsed_groups
             .insert(SidebarGroup::Terminals)
@@ -1957,7 +1994,15 @@ impl Waku {
             let filter_empty = self
                 .projects_page_states
                 .get(&project_id)
-                .is_none_or(|state| state.filter_text(tab, cx).trim().is_empty());
+                .map(|state| {
+                    // Drop the stale extent so the page-level scrollbar
+                    // can't phantom over the empty state.
+                    state
+                        .list_state
+                        .reset_with_uniform_height(0, px(PROJECTS_ROW_HEIGHT));
+                    state.filter_text(tab, cx).trim().is_empty()
+                })
+                .unwrap_or(true);
             return github::github_centered(
                 icon("icons/git-branch.svg", 16.0, theme.text_tertiary).into_any_element(),
                 if filter_empty {
@@ -1976,7 +2021,6 @@ impl Waku {
             return div().into_any_element();
         };
         let list_state = state.list_state.clone();
-        let scrollbar = state.list_scrollbar.clone();
         if list_state.item_count() != rows.len() {
             list_state.reset_with_uniform_height(rows.len(), px(PROJECTS_ROW_HEIGHT));
         }
@@ -1987,12 +2031,11 @@ impl Waku {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(projects_column_header(tab, &theme))
+            .child(projects_column_header(project_id, tab, state, &theme, cx))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
-                    .relative()
                     .child(
                         list(list_state.clone(), move |index, _window, cx| {
                             let Some(row) = rows.get(index) else {
@@ -2024,9 +2067,9 @@ impl Waku {
                                 })
                                 .unwrap_or_else(|| div().into_any_element())
                         })
+                        .pb(px(PROJECTS_LIST_BOTTOM_PADDING))
                         .size_full(),
-                    )
-                    .child(scrollbar::vertical(&list_state, &scrollbar)),
+                    ),
             )
             .into_any_element()
     }
@@ -2262,7 +2305,7 @@ impl Waku {
 
         let branch_cell = div()
             .flex_none()
-            .w(px(PROJECTS_BRANCH_COL))
+            .w(px(state.worktree_col_widths[0]))
             .min_w_0()
             .flex()
             .items_center()
@@ -2283,7 +2326,7 @@ impl Waku {
         let dirty = entry.dirty_files.unwrap_or(0);
         let mut changes_cell = div()
             .flex_none()
-            .w(px(PROJECTS_COUNT_COL))
+            .w(px(state.worktree_col_widths[1]))
             .flex()
             .items_center()
             .gap(px(4.0));
@@ -2300,7 +2343,7 @@ impl Waku {
 
         let mut sessions_cell = div()
             .flex_none()
-            .w(px(PROJECTS_COUNT_COL))
+            .w(px(state.worktree_col_widths[2]))
             .flex()
             .items_center()
             .gap(px(4.0));
@@ -2317,7 +2360,7 @@ impl Waku {
 
         let updated_cell = div()
             .flex_none()
-            .w(px(PROJECTS_UPDATED_COL))
+            .w(px(state.worktree_col_widths[3]))
             .min_w_0()
             .truncate()
             .text_size(sp(14.0))
@@ -2410,7 +2453,7 @@ impl Waku {
 
         let mut pr_cell = div()
             .flex_none()
-            .w(px(PROJECTS_PR_COL))
+            .w(px(state.branch_col_widths[0]))
             .min_w_0()
             .flex()
             .items_center();
@@ -2437,7 +2480,7 @@ impl Waku {
 
         let mut divergence_cell = div()
             .flex_none()
-            .w(px(PROJECTS_DIVERGENCE_COL))
+            .w(px(state.branch_col_widths[1]))
             .min_w_0()
             .flex()
             .items_center();
@@ -2460,7 +2503,7 @@ impl Waku {
 
         let updated_cell = div()
             .flex_none()
-            .w(px(PROJECTS_UPDATED_COL))
+            .w(px(state.branch_col_widths[2]))
             .min_w_0()
             .truncate()
             .text_size(sp(14.0))
@@ -3085,7 +3128,6 @@ impl Waku {
             .flex_1()
             .min_h_0()
             .w_full()
-            .pb(px(32.0))
             .flex()
             .flex_col()
             .on_action(cx.listener(Self::select_all_git_rows_action))
@@ -3179,12 +3221,67 @@ impl Waku {
             )
             .into_any_element()
     }
+
+    /// The Settings → Git page's overlay scrollbar, rendered by the
+    /// settings column at the window's right edge — the table itself is
+    /// width-capped and centered, so mounting the bar inside it would pull
+    /// it off the edge. `None` while the page shows anything but the row
+    /// list, so a stale extent can't phantom over a centered state.
+    pub(super) fn render_git_settings_scrollbar(&mut self) -> Option<AnyElement> {
+        let project_id = self.resolve_git_settings_project()?;
+        if self.missing_projects.contains(&project_id) {
+            return None;
+        }
+        let state = self.projects_page_states.get(&project_id)?;
+        let rows_ready = match state.git_tab {
+            ProjectsTab::Worktrees => {
+                matches!(state.worktrees, github::GitHubFetch::Loaded(Some(_)))
+            }
+            ProjectsTab::Branches => {
+                matches!(state.branches, github::GitHubFetch::Loaded(Some(_)))
+            }
+            _ => false,
+        };
+        if !rows_ready || state.list_state.item_count() == 0 {
+            return None;
+        }
+        Some(
+            scrollbar::vertical(
+                &PaddedListScroll {
+                    state: state.list_state.clone(),
+                    bottom: px(PROJECTS_LIST_BOTTOM_PADDING),
+                },
+                &state.list_scrollbar,
+            )
+            .into_any_element(),
+        )
+    }
 }
 
 /// The pinned column header above a Worktrees/Branches table. Its cells use
 /// the same padding, gaps, and widths as the rows so each label sits over
-/// its column.
-fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
+/// its column. Fixed columns carry a drag handle on their trailing edge.
+fn projects_column_header(
+    project_id: Uuid,
+    tab: ProjectsTab,
+    state: &ProjectsPageState,
+    theme: &Theme,
+    cx: &mut Context<Waku>,
+) -> Div {
+    let set_width =
+        move |this: &mut Waku, column: usize, width: f32, cx: &mut Context<Waku>| {
+            if let Some(state) = this.projects_page_states.get_mut(&project_id) {
+                let widths = match tab {
+                    ProjectsTab::Worktrees => Some(&mut state.worktree_col_widths[..]),
+                    ProjectsTab::Branches => Some(&mut state.branch_col_widths[..]),
+                    _ => None,
+                };
+                if let Some(slot) = widths.and_then(|widths| widths.get_mut(column)) {
+                    *slot = width;
+                    cx.notify();
+                }
+            }
+        };
     let label = |text: String| {
         div()
             .min_w_0()
@@ -3193,14 +3290,24 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
             .text_color(theme.text_tertiary)
             .child(text)
     };
-    let cell = |width: f32, text: String| {
+    let cell = |index: usize, width: f32, text: String, cx: &mut Context<Waku>| {
         div()
             .flex_none()
             .w(px(width))
             .min_w_0()
+            .relative()
             .flex()
             .items_center()
             .child(label(text))
+            .child(column_resize::column_resize_handle(
+                SharedString::from(format!("projects-col-{tab:?}-{index}")),
+                &state.col_resize,
+                index,
+                width,
+                theme,
+                cx,
+                set_width,
+            ))
     };
     let row = div()
         .flex_none()
@@ -3214,9 +3321,10 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
         .border_color(theme.separator)
         // Covers the rows' leading icon so labels align with cell text.
         .child(div().flex_none().w(px(13.0)));
-    match tab {
-        ProjectsTab::Worktrees => row
-            .child(
+    let row = match tab {
+        ProjectsTab::Worktrees => {
+            let widths = state.worktree_col_widths;
+            row.child(
                 div()
                     .flex_1()
                     .min_w_0()
@@ -3224,12 +3332,14 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
                     .items_center()
                     .child(label(tr!("projects.col_name"))),
             )
-            .child(cell(PROJECTS_BRANCH_COL, tr!("projects.col_branch")))
-            .child(cell(PROJECTS_COUNT_COL, tr!("projects.col_changes")))
-            .child(cell(PROJECTS_COUNT_COL, tr!("projects.col_tasks")))
-            .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
-        ProjectsTab::Branches => row
-            .child(
+            .child(cell(0, widths[0], tr!("projects.col_branch"), cx))
+            .child(cell(1, widths[1], tr!("projects.col_changes"), cx))
+            .child(cell(2, widths[2], tr!("projects.col_tasks"), cx))
+            .child(cell(3, widths[3], tr!("projects.col_updated"), cx))
+        }
+        ProjectsTab::Branches => {
+            let widths = state.branch_col_widths;
+            row.child(
                 div()
                     .flex_1()
                     .min_w_0()
@@ -3237,11 +3347,8 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
                     .items_center()
                     .child(label(tr!("projects.col_branch"))),
             )
-            .child(cell(PROJECTS_PR_COL, tr!("projects.col_pull_request")))
-            .child(cell(
-                PROJECTS_DIVERGENCE_COL,
-                tr!("projects.col_divergence"),
-            ))
+            .child(cell(0, widths[0], tr!("projects.col_pull_request"), cx))
+            .child(cell(1, widths[1], tr!("projects.col_divergence"), cx))
             .child(
                 div()
                     .flex_1()
@@ -3250,8 +3357,48 @@ fn projects_column_header(tab: ProjectsTab, theme: &Theme) -> Div {
                     .items_center()
                     .child(label(tr!("projects.col_last_commit"))),
             )
-            .child(cell(PROJECTS_UPDATED_COL, tr!("projects.col_updated"))),
+            .child(cell(2, widths[2], tr!("projects.col_updated"), cx))
+        }
         _ => row,
+    };
+    div()
+        .relative()
+        .child(row)
+        .child(column_resize::column_resize_listeners(
+            &state.col_resize,
+            cx,
+            set_width,
+        ))
+}
+
+/// A `list()`'s own padding joins its scroll extent, but
+/// `ListState::max_offset_for_scrollbar` reports only the measured items —
+/// and clamps before padding can be added back — so a padded list bottoms
+/// out its thumb early. This wraps the state so the scrollbar's travel
+/// covers the padded extent exactly.
+#[derive(Clone)]
+struct PaddedListScroll {
+    state: ListState,
+    bottom: Pixels,
+}
+
+impl scrollbar::Scrollable for PaddedListScroll {
+    fn viewport_height(&self) -> Pixels {
+        self.state.viewport_bounds().size.height
+    }
+
+    fn max_offset(&self) -> Pixels {
+        let items = px(PROJECTS_ROW_HEIGHT * self.state.item_count() as f32);
+        (items + self.bottom - self.viewport_height()).max(Pixels::ZERO)
+    }
+
+    fn scrolled(&self) -> Pixels {
+        -self.state.scroll_px_offset_for_scrollbar().y
+    }
+
+    fn scroll_to(&self, offset: Pixels) {
+        self.state
+            .set_offset_from_scrollbar(point(Pixels::ZERO, -offset));
     }
 }
 
@@ -3433,5 +3580,59 @@ mod tests {
             modifiers(true, false),
         );
         assert_eq!(selection, HashSet::from([ordered[4].clone()]));
+    }
+
+    #[test]
+    fn row_select_deselects_the_only_selected_row() {
+        let ordered: Vec<ProjectsRowKey> = (0..3)
+            .map(|index| ProjectsRowKey::branch(None, &format!("b{index}")))
+            .collect();
+        let mut selection = HashSet::new();
+        let mut anchor = None;
+
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, false),
+        );
+        assert_eq!(selection, HashSet::from([ordered[1].clone()]));
+
+        // Clicking the only selected row again clears the selection but
+        // keeps the anchor — ⇧ from it still ranges through the list.
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, false),
+        );
+        assert!(selection.is_empty());
+        assert_eq!(anchor, Some(ordered[1].clone()));
+
+        // With a multi-row selection, a plain click still isolates.
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[0].clone(),
+            modifiers(false, false),
+        );
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, true),
+        );
+        apply_row_select(
+            &mut selection,
+            &mut anchor,
+            &ordered,
+            ordered[1].clone(),
+            modifiers(false, false),
+        );
+        assert_eq!(selection, HashSet::from([ordered[1].clone()]));
     }
 }

@@ -269,16 +269,17 @@ pub struct SessionOptions {
 
 pub(crate) fn start_local(
     provider: ProviderKind,
-    mut options: DriverStartOptions,
+    options: DriverStartOptions,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
-    // Computer Use is experimental, so release builds never start its helper
-    // whatever a client, a migrated state file, or an environment variable
-    // asks for. Every driver reads the clamped flag, which also means only
-    // debug builds register the REPL server's Cua bridge or attach the skill.
-    options.computer_use_enabled =
-        crate::computer_use::resolve_enabled(options.computer_use_enabled);
     let inner: Arc<dyn DriverControl> = match provider {
+        // Antigravity has no driver: its sessions are the CLI's own TUI
+        // running in a client-owned terminal, so there is nothing for the
+        // daemon to supervise. Reaching this arm means a client asked the
+        // daemon to start one anyway.
+        ProviderKind::Antigravity => {
+            anyhow::bail!("Antigravity sessions are terminal-backed and have no daemon driver")
+        }
         ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
         ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),
         ProviderKind::OhMyPi => {

@@ -7,7 +7,9 @@ import {
   type ResponsePayload,
   type SequencedEvent,
   type ServerMessage,
+  type WireTranslation,
 } from "./generated";
+import type { Translator } from "./transcript-presentation";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const OPEN = 1;
@@ -46,9 +48,19 @@ export interface RequestOptions {
 }
 
 export class WakuRpcError extends Error {
-  constructor(message: string) {
+  /** The i18n semantic the daemon shipped beside `message`, when it knew it. */
+  readonly i18n?: WireTranslation;
+
+  constructor(message: string, i18n?: WireTranslation) {
     super(message);
     this.name = "WakuRpcError";
+    this.i18n = i18n;
+  }
+
+  /** The message rendered in the caller's locale when a translator and a
+   * semantic are both present; the daemon's fallback text otherwise. */
+  localizedMessage(t?: Translator): string {
+    return this.i18n && t ? t(this.i18n.key, this.i18n.args) : this.message;
   }
 }
 
@@ -423,7 +435,13 @@ export class WakuClient {
       this.pending.delete(message.requestId);
       clearTimeout(pending.timeout);
       if (message.outcome.status === "ok") pending.resolve(message.outcome.payload);
-      else pending.reject(new WakuRpcError(message.outcome.error.message));
+      else
+        pending.reject(
+          new WakuRpcError(
+            message.outcome.error.message,
+            message.outcome.error.i18n ?? undefined,
+          ),
+        );
       return;
     }
     if (message.type === "event") {

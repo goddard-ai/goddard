@@ -7,8 +7,9 @@ pub(super) struct TerminalRecord {
     pub session: Option<Uuid>,
     /// Pinned terminals keep a sidebar row while the group is collapsed.
     pub pinned: bool,
-    /// Where the PTY starts — resolved at creation from the owning
-    /// session's workspace or the requested directory for global ones.
+    /// Where the PTY starts — `None` resolves to the owning session's
+    /// workspace at spawn time, so the terminal follows the workspace
+    /// when it moves; `Some` pins the terminal to a chosen directory.
     pub working_directory: Option<PathBuf>,
     /// When the terminal opened (unix seconds) — the row's "…ago" label
     /// until the view reports a command's start.
@@ -27,7 +28,7 @@ pub(super) const SIDEBAR_TERMINAL_ROW_HEIGHT: f32 =
 
 /// The nearest enclosing repository's root — `.git` may be a file in a
 /// linked worktree, so existence rather than `is_dir` is the test.
-fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
+pub(super) fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
     directory
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
@@ -84,16 +85,33 @@ impl Waku {
             .filter(|id| self.terminal_records.contains_key(id))
     }
 
+    /// The directory a terminal spawns into — the record's own directory,
+    /// or the owning session's workspace when the record tracks it.
+    pub(super) fn terminal_spawn_directory(&self, record: &TerminalRecord) -> Option<PathBuf> {
+        record.working_directory.clone().or_else(|| {
+            record
+                .session
+                .and_then(|session_id| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                })
+                .and_then(|session| self.workspace_path_for_session(session))
+                .map(Path::to_path_buf)
+        })
+    }
+
     /// The directory a row reports — the live PTY cwd once the view is up,
     /// the recorded spawn directory otherwise.
-    fn terminal_cwd(&self, terminal_id: Uuid, cx: &App) -> Option<PathBuf> {
+    pub(super) fn terminal_cwd(&self, terminal_id: Uuid, cx: &App) -> Option<PathBuf> {
         self.right_panel_terminals
             .get(&terminal_id)
             .map(|terminal| terminal.read(cx).working_directory().to_path_buf())
             .or_else(|| {
                 self.terminal_records
                     .get(&terminal_id)
-                    .and_then(|record| record.working_directory.clone())
+                    .and_then(|record| self.terminal_spawn_directory(record))
             })
     }
 
@@ -201,6 +219,20 @@ impl Waku {
     /// Drop every trace of a terminal: the view entity, its launch state,
     /// the group record, and any selection pointing at it.
     pub(super) fn drop_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        // A terminal filling the main area hands the view to a neighbor —
+        // the row listed before it, else the one after — found before the
+        // order entry disappears. No neighbor means the new task page.
+        let successor = (self.selected_terminal == Some(terminal_id))
+            .then(|| {
+                let index = self.terminal_order.iter().position(|id| *id == terminal_id)?;
+                self.terminal_order[..index]
+                    .iter()
+                    .rev()
+                    .chain(self.terminal_order[index + 1..].iter())
+                    .copied()
+                    .find(|id| self.terminal_records.contains_key(id))
+            })
+            .flatten();
         self.right_panel_terminals.remove(&terminal_id);
         self.right_panel_terminal_commands.remove(&terminal_id);
         self.custom_command_runs.remove(&terminal_id);
@@ -224,6 +256,14 @@ impl Waku {
             self.set_sidebar_group_collapsed(SidebarGroup::Terminals, true, cx);
         }
         self.sidebar_rows_fingerprint.set(None);
+        if let Some(successor) = successor
+            && let Some(focus) = self.activate_terminal_state(successor, true, cx)
+        {
+            // Close paths reach here without a `Window`; focus goes
+            // through the stored handle like `commit_go_to_line`.
+            let window_handle = self.window_handle;
+            let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
+        }
     }
 
     /// Spawn the PTY-backed view for a terminal id. Shared by the right
@@ -421,8 +461,24 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == *session_id)
         });
+        // A terminal created at its owning session's workspace tracks the
+        // workspace (`None` resolves to it at spawn); any other directory
+        // is the caller's deliberate choice and the record keeps it.
+        let workspace_bound = session
+            .and_then(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+            })
+            .and_then(|session| self.workspace_path_for_session(session))
+            .is_some_and(|workspace| workspace == working_directory.as_path());
         let terminal_id = Uuid::new_v4();
-        self.register_terminal(terminal_id, session, Some(working_directory.clone()));
+        self.register_terminal(
+            terminal_id,
+            session,
+            (!workspace_bound).then(|| working_directory.clone()),
+        );
         if let Some(command) = command {
             self.right_panel_terminal_commands
                 .insert(terminal_id, command);
@@ -450,7 +506,7 @@ impl Waku {
     /// selection, or the visible right panel's active tab. An inactive tab
     /// or a background session's surface counts as unseen even when its
     /// stored strip still points at it.
-    fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
+    pub(super) fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
         self.selected_terminal == Some(terminal_id)
             || (self.right_panel_visible
                 && self
@@ -546,26 +602,27 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(record) = self.terminal_records.get(&terminal_id) else {
-            return;
-        };
+        if let Some(focus) = self.activate_terminal_state(terminal_id, record_visit, cx) {
+            window.focus(&focus, cx);
+        }
+    }
+
+    /// The state half of activation — spawn the view if needed, record the
+    /// visit, move selection — returning the terminal's focus handle so a
+    /// caller with or without a `Window` can aim it.
+    fn activate_terminal_state(
+        &mut self,
+        terminal_id: Uuid,
+        record_visit: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<FocusHandle> {
+        let record = self.terminal_records.get(&terminal_id)?;
         if !self.right_panel_terminals.contains_key(&terminal_id) {
-            let working_directory = record.working_directory.clone().or_else(|| {
-                record
-                    .session
-                    .and_then(|session_id| {
-                        self.state
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                    })
-                    .and_then(|session| self.workspace_path_for_session(session))
-                    .map(Path::to_path_buf)
-            });
+            let working_directory = self.terminal_spawn_directory(record);
             let Some(working_directory) =
                 working_directory.filter(|directory| !self.is_remote_path(directory))
             else {
-                return;
+                return None;
             };
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
         }
@@ -580,20 +637,30 @@ impl Waku {
             self.store_selected_right_panel_state();
             self.store_transcript_scroll_position();
             self.state.selected_session = None;
+            // The session's strip is parked; the terminal context's own
+            // panel state — its tabs and visibility — comes back rather
+            // than inheriting what the session had open.
+            let detached = std::mem::replace(
+                &mut self.right_panel_detached_state,
+                RightPanelSessionState::empty(false),
+            );
+            self.restore_right_panel_state(detached, cx);
         }
         self.pending_session_activation = None;
-        // A terminal claims the main area too: an open Projects page folds,
-        // keeping its state for the next visit.
+        // A terminal claims the main area too: open pages fold, keeping
+        // their state for the next visit.
         self.projects_page = None;
+        self.drafts_page = false;
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
-        if let Some(terminal) = self.right_panel_terminals.get(&terminal_id) {
-            let focus = terminal.read(cx).focus_handle(cx);
-            window.focus(&focus, cx);
-        }
+        let focus = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .map(|terminal| terminal.read(cx).focus_handle(cx));
         self.save();
         cx.notify();
+        focus
     }
 
     /// Fold the group open and land on the last terminal that was on
@@ -680,15 +747,7 @@ impl Waku {
     ) {
         self.settings_page = None;
         if let Some(terminal_id) = self.selected_terminal {
-            let working_directory = self
-                .right_panel_terminals
-                .get(&terminal_id)
-                .map(|terminal| terminal.read(cx).working_directory().to_path_buf())
-                .or_else(|| {
-                    self.terminal_records
-                        .get(&terminal_id)
-                        .and_then(|record| record.working_directory.clone())
-                });
+            let working_directory = self.terminal_cwd(terminal_id, cx);
             let session = self
                 .terminal_records
                 .get(&terminal_id)
@@ -727,7 +786,11 @@ impl Waku {
             self.close_right_panel_surface(index, cx);
             return;
         }
-        for state in self.right_panel_session_states.values_mut() {
+        for state in self
+            .right_panel_session_states
+            .values_mut()
+            .chain(std::iter::once(&mut self.right_panel_detached_state))
+        {
             let Some(index) = state
                 .surfaces
                 .iter()
@@ -902,6 +965,66 @@ impl Waku {
             .entry(terminal_id)
             .or_insert_with(|| cx.focus_handle())
             .clone();
+        let pin_focus = self
+            .sidebar_terminal_pin_focuses
+            .borrow_mut()
+            .entry(terminal_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // The pin control shares the close control's reveal: zero-width
+        // until the row is hovered or the button takes keyboard focus.
+        let pin_button = div()
+            .id(SharedString::from(format!("terminal-pin-{terminal_id}")))
+            .track_focus(&pin_focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .border(hairline())
+                    .border_color(theme.accent)
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
+                if pinned {
+                    tr!("session.unpin")
+                } else {
+                    tr!("session.pin")
+                },
+                &ToggleSessionPin,
+            ))
+            .child(icon(
+                if pinned {
+                    "icons/pin-filled.svg"
+                } else {
+                    "icons/pin.svg"
+                },
+                12.0,
+                theme.text_secondary,
+            ))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.toggle_terminal_pin(terminal_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_terminal_pin(terminal_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
         // The close control borrows the status slot: it stays zero-width
         // until the row is hovered or the button takes keyboard focus.
         let close_button = div()
@@ -961,7 +1084,7 @@ impl Waku {
                 element.bg(theme.sidebar_item_background)
             })
             .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.overlay_strong))
+            .active(|element| element.bg(theme.sidebar_item_background))
             .child(
                 div()
                     .flex()
@@ -990,7 +1113,7 @@ impl Waku {
                             .bg(theme.inset)
                             .flex()
                             .items_center()
-                            .text_size(sp(13.0))
+                            .text_size(sp(13.5))
                             .text_color(theme.text)
                             .child(self.session_rename_input.clone())
                     } else {
@@ -1001,7 +1124,7 @@ impl Waku {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .text_size(sp(13.0))
+                            .text_size(sp(13.5))
                             .text_color(theme.text)
                             .on_click(cx.listener(
                                 move |this, event: &gpui::ClickEvent, window, cx| {
@@ -1018,6 +1141,11 @@ impl Waku {
                             div()
                                 .flex_none()
                                 .size(px(12.0))
+                                // The zero-width pin/close pair still
+                                // claims its two flex gaps; pulling the slot
+                                // right by that amount keeps the indicator's
+                                // right edge flush with the timestamp below.
+                                .mr(px(-12.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -1025,6 +1153,7 @@ impl Waku {
                                 .child(status_icon),
                         )
                     })
+                    .child(pin_button)
                     .child(close_button),
             )
             .child(
@@ -1032,7 +1161,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(5.0))
-                    .text_size(sp(12.5))
+                    .text_size(sp(13.0))
                     .line_height(sp(15.0))
                     .child(icon(detail_icon, 12.5, theme.text_tertiary))
                     // The char budget folds ancestors first; this clip is
@@ -1045,13 +1174,11 @@ impl Waku {
                             .child(SharedString::from(detail)),
                     )
                     .child(div().flex_1())
-                    .when(pinned, |element| {
-                        element.child(icon("icons/pin-filled.svg", 12.0, theme.text_ghost))
-                    })
                     .child(
                         div()
                             .flex_none()
-                            .text_color(theme.text_secondary)
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
                             .child(SharedString::from(time_label)),
                     ),
             )

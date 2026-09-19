@@ -31,7 +31,7 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, FavoriteModel, Message, MessageAttachment, MessageRole, Project, ProviderKind,
-    RuntimeMode, SessionWorkspace,
+    RuntimeMode, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -106,6 +106,27 @@ pub struct RememberedModelTraits {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     context_window: Option<String>,
 }
+
+/// A model+effort selection a session was actually started with, most recent
+/// first. The model picker reads list position as the recency rank.
+///
+/// `fast` is a remembered flag, not part of the entry's identity: starting a
+/// session with `model-effort` and later `model-effort-fast` updates the same
+/// slot rather than occupying two, so only the most recently used variant of
+/// an effort ever carries the rank.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RecentModelUse {
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
+    pub used_at: u64,
+}
+
+/// How many selections the picker keeps in its recent section.
+const RECENT_MODEL_USES_LIMIT: usize = 32;
 
 /// Small, independently persisted composer state.
 ///
@@ -239,6 +260,8 @@ struct AppState {
     last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_model_uses: Vec<RecentModelUse>,
     #[serde(default = "default_sidebar_visibility")]
     sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
@@ -273,6 +296,8 @@ pub struct PersistedState {
     pub last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_model_uses: Vec<RecentModelUse>,
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
@@ -289,6 +314,10 @@ pub struct PersistedState {
     pub right_panel_width: f32,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
+    /// Experimental opt-in gating Computer Use entirely, mirrored from the
+    /// settings document. Off in release builds unless the user turns it on.
+    #[serde(default = "default_experiment_enabled")]
+    pub computer_use_experiment_enabled: bool,
     #[serde(default)]
     pub computer_use_allowed_apps: Vec<ComputerAppGrant>,
     /// Providers switched off for new sessions in the Providers settings.
@@ -317,6 +346,12 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default)]
     pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
+    /// Hosted evaluation-model settings mirrored from the settings document.
+    /// Kept out of the on-disk state deliberately: the credential-bearing
+    /// document is the daemon's `settings.json`, and this copy exists so the
+    /// settings surface can read and edit it without duplicating secrets.
+    #[serde(skip)]
+    pub eval: Option<waku_protocol::eval::EvalSettings>,
     /// Unknown daemon settings survive edits made by this desktop version.
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
@@ -410,6 +445,7 @@ impl PersistedState {
             last_service_tier: None,
             last_context_window: None,
             remembered_model_traits: Vec::new(),
+            recent_model_uses: Vec::new(),
             favorite_models: Vec::new(),
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
@@ -418,6 +454,7 @@ impl PersistedState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             computer_use_enabled: false,
+            computer_use_experiment_enabled: default_experiment_enabled(),
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
@@ -426,6 +463,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
+            eval: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -508,6 +546,52 @@ impl PersistedState {
             .unwrap_or_default()
     }
 
+    /// Moves `provider`/`model`/`effort` to the front of the recent list. The
+    /// fast flag keys nothing — a rerun of the same selection on the other
+    /// tier replaces the entry in place, so one effort slot ever holds rank.
+    pub fn record_model_use(
+        &mut self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<String>,
+        fast: bool,
+    ) {
+        if let Some(index) = self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider && use_.model == model && use_.effort == effort
+        }) {
+            self.recent_model_uses.remove(index);
+        }
+        self.recent_model_uses.insert(
+            0,
+            RecentModelUse {
+                provider,
+                model: model.to_owned(),
+                effort,
+                fast,
+                used_at: crate::model::unix_time(),
+            },
+        );
+        self.recent_model_uses.truncate(RECENT_MODEL_USES_LIMIT);
+    }
+
+    /// The row's recency rank, when this exact selection — fast flag included —
+    /// is the variant last started. The sibling tier carries no rank, so only
+    /// one of `effort` and `effort-fast` ever sorts into the recent section.
+    pub fn recent_model_rank(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<&str>,
+        fast: bool,
+    ) -> Option<usize> {
+        self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider
+                && use_.model == model
+                && use_.effort.as_deref() == effort
+                && use_.fast == fast
+        })
+    }
+
     fn app_settings(&self) -> AppSettings {
         AppSettings {
             analytics_enabled: self.analytics_enabled,
@@ -520,6 +604,7 @@ impl PersistedState {
     pub fn daemon_settings(&self) -> crate::DaemonSettings {
         crate::DaemonSettings {
             computer_use_enabled: self.computer_use_enabled,
+            computer_use_experiment_enabled: self.computer_use_experiment_enabled,
             computer_use_allowed_apps: self.computer_use_allowed_apps.clone(),
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
@@ -528,6 +613,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
+            eval: self.eval.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -544,6 +630,7 @@ impl PersistedState {
             last_service_tier: self.last_service_tier.clone(),
             last_context_window: self.last_context_window.clone(),
             remembered_model_traits: self.remembered_model_traits.clone(),
+            recent_model_uses: self.recent_model_uses.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
             sidebar_width: self.sidebar_width,
@@ -560,6 +647,7 @@ impl PersistedState {
 
     pub fn apply_daemon_settings(&mut self, settings: crate::DaemonSettings) {
         self.computer_use_enabled = settings.computer_use_enabled;
+        self.computer_use_experiment_enabled = settings.computer_use_experiment_enabled;
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;
@@ -568,6 +656,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
+        self.eval = settings.eval;
         self.daemon_settings_extra = settings.extra;
     }
 
@@ -581,6 +670,7 @@ impl PersistedState {
         self.last_service_tier = app_state.last_service_tier;
         self.last_context_window = app_state.last_context_window;
         self.remembered_model_traits = app_state.remembered_model_traits;
+        self.recent_model_uses = app_state.recent_model_uses;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
         self.sidebar_width = app_state.sidebar_width;
@@ -962,9 +1052,7 @@ impl StateStore {
             // `GODDARD_DATA_DIR` lets a second debug instance run beside the
             // first (friend-sharing smoke tests, isolated experiments)
             // without colliding on `temp/`.
-            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR")
-                .filter(|dir| !dir.is_empty())
-            {
+            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty()) {
                 return PathBuf::from(dir).join("app.db");
             }
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1208,7 +1296,7 @@ impl StateStore {
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
-                        workspace
+                        landed_at, workspace
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1228,7 +1316,8 @@ impl StateStore {
                     row.get::<_, Option<i64>>(9)?,
                     row.get::<_, Option<i64>>(10)?,
                     row.get::<_, Option<i64>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<i64>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1332,11 +1421,12 @@ impl StateStore {
         // Quarantine is detail, not a list column — the skeleton's flag is a
         // placeholder and the stored blob carries the real value.
         session.quarantined = stored.quarantined;
+        session.sandboxed = stored.sandboxed;
 
         let mut statement = connection
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments,
-                        created_at, streaming, sent_by_task, hidden
+                        created_at, streaming, sent_by_task, hidden, notice
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1353,6 +1443,7 @@ impl StateStore {
                     row.get::<_, i64>(7)?,
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, i64>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1586,6 +1677,7 @@ type SessionColumns = (
     Option<i64>,
     Option<i64>,
     Option<i64>,
+    Option<i64>,
     Option<String>,
 );
 
@@ -1608,6 +1700,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         last_reply_at,
         archived_at,
         pinned_at,
+        landed_at,
         workspace,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
@@ -1633,6 +1726,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         service_tier: None,
         context_window: None,
         agent_preset: None,
+        auto_route: false,
+        route_decision: None,
         status: serde_json::from_value(serde_json::Value::String(status)).ok()?,
         created_at: created_at as u64,
         updated_at: updated_at as u64,
@@ -1644,6 +1739,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // sessions. The daemon gate reads full task_state; the UI card
         // requires detail_loaded.
         quarantined: false,
+        landed_at: landed_at.map(|at| at as u64),
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,
@@ -1669,6 +1765,7 @@ type MessageColumns = (
     i64,
     Option<String>,
     i64,
+    Option<String>,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
@@ -1683,12 +1780,14 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         streaming,
         sent_by_task,
         hidden,
+        notice,
     ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
         turn_id: turn_id.as_deref().and_then(|id| Uuid::parse_str(id).ok()),
         role: serde_json::from_value(serde_json::Value::String(role)).ok()?,
         content,
+        notice: notice.and_then(|json| serde_json::from_str::<TranscriptNotice>(&json).ok()),
         display_content,
         attachments: serde_json::from_str::<Vec<MessageAttachment>>(&attachments)
             .unwrap_or_default(),
@@ -1715,8 +1814,8 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, created_at, streaming, sent_by_task, hidden
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         attachments, created_at, streaming, sent_by_task, hidden, notice
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -1728,7 +1827,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          created_at = excluded.created_at,
          streaming  = excluded.streaming,
          sent_by_task = excluded.sent_by_task,
-         hidden     = excluded.hidden";
+         hidden     = excluded.hidden,
+         notice     = excluded.notice";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -1765,6 +1865,12 @@ fn write_messages(
         } else {
             serde_json::to_string(&message.attachments).map_err(to_io_error)?
         };
+        let notice = message
+            .notice
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(to_io_error)?;
         transaction
             .execute(
                 UPSERT_MESSAGE,
@@ -1788,6 +1894,7 @@ fn write_messages(
                         .sent_by_task
                         .map_or(Value::Null, |id| Value::Text(id.to_string())),
                     Value::Integer(i64::from(message.hidden)),
+                    notice.map_or(Value::Null, Value::Text),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -1863,6 +1970,16 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     } else {
         fold(0);
     }
+    // Notices are rare enough that serializing one to compare beats hashing
+    // every message's empty case differently.
+    if let Some(notice) = &message.notice {
+        fold(1);
+        if let Ok(json) = serde_json::to_string(notice) {
+            fold(fingerprint(&json));
+        }
+    } else {
+        fold(0);
+    }
     fold(message.attachments.len() as u64);
     for attachment in &message.attachments {
         fold(fingerprint(&attachment.path.to_string_lossy()));
@@ -1885,8 +2002,8 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
-         workspace
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         landed_at, workspace
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -1899,6 +2016,7 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          last_reply_at = excluded.last_reply_at,
          archived_at   = excluded.archived_at,
          pinned_at     = excluded.pinned_at,
+         landed_at     = excluded.landed_at,
          workspace     = excluded.workspace";
 
 const INSERT_PROJECT: &str =
@@ -1946,6 +2064,9 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
         session
             .pinned_at
+            .map_or(Value::Null, |at| Value::Integer(at as i64)),
+        session
+            .landed_at
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
         // Local stays NULL the way the detail blob omits it, so the column is
         // only ever populated for sessions that live in a worktree.
@@ -2784,6 +2905,8 @@ mod tests {
         state.favorite_models.push(FavoriteModel {
             provider: ProviderKind::Codex,
             model: "gpt-5.6-luna".into(),
+            effort: None,
+            fast: false,
         });
         state.theme = ThemeSettings {
             mode: crate::theme::ThemeMode::Light,
@@ -3029,6 +3152,7 @@ mod tests {
         assert_eq!(value["language"], "simplified-chinese");
         for daemon_key in [
             "computer_use_enabled",
+            "computer_use_experiment_enabled",
             "computer_use_allowed_apps",
             "disabled_providers",
             "provider_binary_overrides",
@@ -3071,6 +3195,7 @@ mod tests {
             "theme",
             "language",
             "computer_use_enabled",
+            "computer_use_experiment_enabled",
             "computer_use_allowed_apps",
             "disabled_providers",
             "provider_binary_overrides",

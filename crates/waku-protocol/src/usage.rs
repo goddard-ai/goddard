@@ -13,6 +13,10 @@ pub struct PlanUsage {
 #[serde(rename_all = "camelCase")]
 pub struct PlanWindow {
     pub label: String,
+    /// The i18n semantic behind `label`, when the daemon composed it from a
+    /// known key rather than provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_i18n: Option<crate::protocol::WireTranslation>,
     pub percent: f64,
     pub resets_at: Option<i64>,
 }

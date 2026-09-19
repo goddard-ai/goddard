@@ -133,6 +133,7 @@ export function toggledFastServiceTier(
   serviceTiers: ProviderModelOption[],
 ): string | null {
   const fast = serviceTiers.find((tier) => ['fast', 'priority'].includes(tier.id)
+    || tier.label_i18n?.key === 'model_option.fast'
     || tier.label.toLocaleLowerCase() === 'fast')
   if (!fast) return null
   return current === fast.id ? 'default' : fast.id

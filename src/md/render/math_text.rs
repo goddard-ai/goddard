@@ -336,6 +336,7 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
         });
     }
     let body = MathText {
+        copy: ctx.copy_spec(&flat),
         flat,
         key: key.clone(),
         geometry,
@@ -377,6 +378,7 @@ fn copy_expression_item(latex: Arc<str>, label: String) -> MenuItem {
 }
 
 struct MathText {
+    copy: Rc<CopySpec>,
     flat: Rc<FlatText>,
     key: TextKey,
     geometry: Geometry,
@@ -622,6 +624,7 @@ impl Element for MathText {
             block_break: self.block_break,
             annotation_refs: Vec::new(),
             commit_refs: self.flat.commit_refs.clone(),
+            copy: self.copy.clone(),
             geometry: TextGeometry::Math(self.geometry.clone()),
         });
     }

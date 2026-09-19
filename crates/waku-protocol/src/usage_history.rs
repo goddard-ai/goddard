@@ -23,11 +23,18 @@ pub enum UsageWindow {
     LastMonth,
 }
 
+/// `TrailingDays` arrives over the wire unvalidated; cap it well past any
+/// plausible picker value so a hostile or corrupt window cannot overflow the
+/// `NaiveDate` subtraction or enumerate an unbounded day axis.
+const MAX_TRAILING_DAYS: u32 = 36_500;
+
 impl UsageWindow {
     pub fn bounds(self, today: NaiveDate) -> (NaiveDate, NaiveDate) {
         match self {
             UsageWindow::TrailingDays(days) => (
-                today - chrono::Days::new(u64::from(days.saturating_sub(1))),
+                today - chrono::Days::new(u64::from(
+                    days.min(MAX_TRAILING_DAYS).saturating_sub(1),
+                )),
                 today,
             ),
             UsageWindow::Months(months) => (

@@ -1,4 +1,4 @@
-import type { ActivityItem, AgentSession, MessageAttachment } from './generated'
+import type { ActivityItem, AgentSession, MessageAttachment, WireTranslation } from './generated'
 
 export type AssistantResponseFooter = {
   content: string
@@ -6,6 +6,19 @@ export type AssistantResponseFooter = {
 }
 
 export type Translator = (key: string, params?: Record<string, string | number>) => string
+
+/**
+ * A `WireTranslation` the daemon shipped beside its English fallback renders
+ * through the client's translator when one is available; the fallback text is
+ * what older clients and translator-free callers keep showing.
+ */
+export function wireTranslationText(
+  i18n: WireTranslation | null | undefined,
+  fallback: string,
+  t?: Translator,
+): string {
+  return i18n && t ? t(i18n.key, i18n.args) : fallback
+}
 
 export function userMessageRewindTurnCount(
   session: AgentSession,
@@ -67,6 +80,8 @@ export function reasoningTitle(activity: ActivityItem, t?: Translator) {
 }
 
 export function activityDisplayTitle(activity: ActivityItem, t?: Translator) {
+  // A daemon-composed keyed label outranks every kind-label heuristic.
+  if (activity.title_i18n) return wireTranslationText(activity.title_i18n, activity.title, t)
   const target = activity.display_target?.trim() || null
   switch (activity.kind) {
     case 'fileChange': {
@@ -250,6 +265,12 @@ export type ActivityDisclosureSection = {
   content: string
 }
 
+// The daemon clips bounded text fields at a source cap and marks the item;
+// the marker is rendered here so stored output stays locale-neutral.
+function truncatedMarker(activity: ActivityItem, t?: Translator): string {
+  return activity.output_truncated ? (t ? t('activity.output_truncated') : '\n\n… output truncated') : ''
+}
+
 export function activityDisclosureSections(activity: ActivityItem, t?: Translator): ActivityDisclosureSection[] {
   const sections: ActivityDisclosureSection[] = []
   const server = activity.mcp_server?.trim()
@@ -261,14 +282,14 @@ export function activityDisclosureSections(activity: ActivityItem, t?: Translato
     const command = activity.arguments?.trim() || activity.display_target?.trim()
     const output = activity.output?.trim()
     if (command) sections.push({ kind: 'command', label: t ? t('activity.command_detail') : 'Command', content: command })
-    if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
+    if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output + truncatedMarker(activity, t) })
     else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
     return sections
   }
   const argumentsText = activity.arguments?.trim()
   const output = activity.output?.trim()
   if (argumentsText) sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
-  if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
+  if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output + truncatedMarker(activity, t) })
   else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
   const detail = activity.detail?.trim()
   if (sections.length === metadataCount && detail) sections.push({ kind: 'detail', label: null, content: detail })
@@ -619,6 +640,7 @@ function activityToolDisplayName(activity: ActivityItem, t?: Translator) {
   }
   const target = activity.display_target?.trim()
   if (target) return target
+  if (activity.title_i18n) return wireTranslationText(activity.title_i18n, activity.title, t)
   if (!isGenericActivityTitle(activity)) return humanizeToolName(activity.title)
   return t ? t('activity.tool') : 'Tool'
 }

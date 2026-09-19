@@ -2,6 +2,7 @@ use super::*;
 
 use chrono::{Datelike, Days};
 use std::path::Path;
+use waku_client::git::CommitEntry;
 
 const USER_MESSAGE_MAX_HEIGHT: f32 = 400.0;
 const USER_MESSAGE_VIEWPORT_MAX_HEIGHT: f32 = USER_MESSAGE_MAX_HEIGHT - 16.0;
@@ -366,6 +367,9 @@ pub(super) struct MessageRender<'a> {
     pub(super) attachments_can_reveal: bool,
     /// The parsed human or assistant body. System messages remain verbatim.
     pub(super) markdown: Option<&'a MarkdownView>,
+    /// `#N` mentions in a user message resolved against the workspace's
+    /// work-item store — the chips under the bubble. Empty when none.
+    pub(super) work_item_refs: Vec<ComposerWorkItem>,
     pub(super) ctx: &'a MarkdownCtx<'a>,
     pub(super) menu: ContextMenuHandle,
     pub(super) waku: gpui::WeakEntity<Waku>,
@@ -619,6 +623,80 @@ fn render_sent_message_attachments(
     Some(row.into_any_element())
 }
 
+/// The GitHub references under a sent user message: one chip per `#N` the
+/// composer resolved — mark, number, and title — each opening the item's URL.
+fn render_work_item_ref_chips(
+    message_id: Uuid,
+    refs: &[ComposerWorkItem],
+    theme: &Theme,
+) -> AnyElement {
+    let mut row = div()
+        .max_w(px(540.0))
+        .flex()
+        .flex_wrap()
+        .justify_end()
+        .gap(px(6.0));
+    for item in refs {
+        let url = item.url.clone();
+        let key_url = item.url.clone();
+        let kind_icon = match item.kind {
+            waku_client::WorkItemKind::Issue => "icons/info.svg",
+            waku_client::WorkItemKind::PullRequest => "icons/git-pull-request-arrow.svg",
+        };
+        let chip = div()
+            .id(SharedString::from(format!(
+                "message-{message_id}-ref-{}",
+                item.number
+            )))
+            .h(px(22.0))
+            .max_w(px(280.0))
+            .pl(px(5.0))
+            .pr(px(8.0))
+            .rounded(px(7.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .tooltip(Tooltip::text(format!("#{} — {}", item.number, item.title)))
+            .child(icon("icons/github.svg", 11.0, theme.text_tertiary))
+            .child(icon(kind_icon, 10.0, theme.text_ghost))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(format!("#{}", item.number)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(item.title.clone()),
+            )
+            .on_click(move |_, _, cx| {
+                cx.open_url(&url);
+                cx.stop_propagation();
+            })
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.open_url(&key_url);
+                    cx.stop_propagation();
+                }
+            });
+        row = row.child(chip);
+    }
+    row.into_any_element()
+}
+
 fn render_markdown_message_body<'a>(
     content: &str,
     markdown: Option<&'a MarkdownView>,
@@ -657,6 +735,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         attachment_images,
         attachments_can_reveal,
         markdown,
+        work_item_refs,
         ctx,
         menu,
         waku,
@@ -980,6 +1059,13 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     waku.clone(),
                 ));
             }
+            if !work_item_refs.is_empty() {
+                column = column.child(render_work_item_ref_chips(
+                    message_id,
+                    &work_item_refs,
+                    theme,
+                ));
+            }
             column
         }
         MessageRole::Assistant => {
@@ -1017,22 +1103,29 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             }
             column
         }
-        MessageRole::System => div().w_full().flex().justify_center().child(
-            div()
-                .px(px(10.0))
-                .py(px(4.0))
-                .rounded_full()
-                .bg(theme.overlay)
-                .text_size(sp(12.5))
-                .line_height(sp(16.0))
-                .child(md::render::plain_text(
-                    content.clone(),
-                    ctx.families().ui.clone(),
-                    FontWeight::NORMAL,
-                    theme.text_tertiary,
-                    ctx,
-                )),
-        ),
+        MessageRole::System => match &message.notice {
+            Some(TranscriptNotice::Landed {
+                base,
+                commits,
+                ahead,
+            }) => landed_notice_row(theme, base, commits, *ahead, ctx),
+            _ => div().w_full().flex().justify_center().child(
+                div()
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .rounded_full()
+                    .bg(theme.overlay)
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .child(md::render::plain_text(
+                        content.clone(),
+                        ctx.families().ui.clone(),
+                        FontWeight::NORMAL,
+                        theme.text_tertiary,
+                        ctx,
+                    )),
+            ),
+        },
     };
 
     let selection = ctx.selection().clone();
@@ -1052,6 +1145,83 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 cx,
             )
         },
+    )
+}
+
+/// How many commits the landed notice lists before folding the rest behind
+/// an "and N more" line.
+const LANDED_NOTICE_SHOWN_COMMITS: usize = 5;
+
+/// The "Landed on `base`" card a [`TranscriptNotice::Landed`] renders as:
+/// merge icon and title over the commit list. The SHAs ride the ctx's
+/// commit-ref detection — enabled for notice messages — so each one
+/// underlines and opens the commit diff on click.
+fn landed_notice_row(
+    theme: &Theme,
+    base: &str,
+    commits: &[CommitEntry],
+    ahead: u64,
+    ctx: &MarkdownCtx,
+) -> Div {
+    let title = div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(icon("icons/git-merge.svg", 12.0, theme.text_tertiary))
+        .child(md::render::plain_text(
+            tr!("transcript.landed", base = base),
+            ctx.families().ui.clone(),
+            FontWeight::MEDIUM,
+            theme.text_secondary,
+            ctx,
+        ));
+    let mut lines = commits
+        .iter()
+        .take(LANDED_NOTICE_SHOWN_COMMITS)
+        .map(|commit| {
+            div()
+                .flex()
+                .items_baseline()
+                .gap(px(8.0))
+                .child(md::render::plain_text(
+                    commit.short_sha.clone(),
+                    ctx.families().code.clone(),
+                    FontWeight::NORMAL,
+                    theme.text_tertiary,
+                    ctx,
+                ))
+                .child(md::render::plain_text(
+                    commit.subject.clone(),
+                    ctx.families().ui.clone(),
+                    FontWeight::NORMAL,
+                    theme.text_tertiary,
+                    ctx,
+                ))
+        })
+        .collect::<Vec<_>>();
+    let hidden = ahead.saturating_sub(lines.len() as u64);
+    if hidden > 0 {
+        lines.push(div().child(md::render::plain_text(
+            tr!("transcript.landed_more", count = hidden),
+            ctx.families().ui.clone(),
+            FontWeight::NORMAL,
+            theme.text_ghost,
+            ctx,
+        )));
+    }
+    div().w_full().flex().justify_center().child(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .rounded(px(10.0))
+            .bg(theme.overlay)
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .child(title)
+            .children(lines),
     )
 }
 
@@ -1302,6 +1472,11 @@ fn activity_tool_display_name(activity: &ActivityItem) -> String {
 pub(super) fn activity_display_title(activity: &ActivityItem) -> String {
     use crate::model::ActivityKind;
 
+    // A daemon-composed keyed label (e.g. "Searching for %{query}") renders in
+    // this client's locale before any kind-label heuristic runs.
+    if let Some(i18n) = &activity.title_i18n {
+        return i18n.render();
+    }
     match activity.kind {
         ActivityKind::FileChange => {
             let subject = match activity.file_changes.as_slice() {
@@ -1652,9 +1827,14 @@ pub(super) fn activity_disclosure_sections(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
+            let truncated = if activity.output_truncated {
+                tr!("activity.output_truncated")
+            } else {
+                String::new()
+            };
             sections.push(ActivityDisclosureSection {
                 kind: ActivityDisclosureSectionKind::Output,
-                content: output.to_owned(),
+                content: format!("{output}{truncated}"),
             });
         } else if !activity.image_urls.is_empty() {
             sections.push(ActivityDisclosureSection {
@@ -1686,9 +1866,14 @@ pub(super) fn activity_disclosure_sections(
         .filter(|value| !value.is_empty())
         .filter(|_| !shows_diff || activity.failed)
     {
+        let truncated = if activity.output_truncated {
+            tr!("activity.output_truncated")
+        } else {
+            String::new()
+        };
         sections.push(ActivityDisclosureSection {
             kind: ActivityDisclosureSectionKind::Output,
-            content: output.to_owned(),
+            content: format!("{output}{truncated}"),
         });
     } else if !activity.image_urls.is_empty() {
         sections.push(ActivityDisclosureSection {

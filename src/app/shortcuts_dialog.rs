@@ -16,8 +16,9 @@ use super::*;
 use crate::{
     AdjustFontSize, BrowserAddressCancel, BrowserBack, BrowserDevtools, BrowserForward,
     BrowserHardReload, BrowserReload, BrowserStop, FocusBrowserAddress, FontSizeDirection,
-    FontSizeTarget, OpenLocalhostUrl, OpenLocalhostUrlInTab, Quit, WebviewCopy, WebviewCut,
-    WebviewPaste, WebviewSelectAll,
+    FontSizeTarget, OpenCreatedIssueInGitHub, OpenLocalhostUrl, OpenLocalhostUrlInTab,
+    OpenToastSession, Quit,
+    WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
 };
 #[cfg(target_os = "macos")]
 use crate::{Hide, HideOthers};
@@ -116,6 +117,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
             ToggleRuntimeModePicker,
             None,
         ),
+        bound(tr!("menu.toggle_environment"), ToggleEnvironment, None),
         bound(tr!("menu.toggle_workspace"), ToggleWorkspace, None),
         bound(tr!("shortcuts.usage_panel"), ToggleUsagePanel, None),
         bound(tr!("menu.run_project_script"), RunProjectScript, None),
@@ -124,6 +126,16 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         bound(
             tr!("shortcuts.open_localhost_tab"),
             OpenLocalhostUrlInTab,
+            None,
+        ),
+        bound(
+            tr!("shortcuts.open_created_issue"),
+            OpenCreatedIssueInGitHub,
+            None,
+        ),
+        bound(
+            tr!("shortcuts.view_unarchived_task"),
+            OpenToastSession,
             None,
         ),
         bound(tr!("shortcuts.open_settings"), OpenSettings, None),
@@ -1127,6 +1139,7 @@ mod tests {
             crate::app::init_settings_keys(cx);
             crate::app::init_command_palette(cx);
             crate::app::init_file_finder(cx);
+            crate::app::init_sync_branch(cx);
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);

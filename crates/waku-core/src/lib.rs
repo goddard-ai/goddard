@@ -17,6 +17,32 @@ macro_rules! tr {
     };
 }
 
+/// Pair a translated fallback string with its `WireTranslation` so wire
+/// emitters ship the semantic and each client renders its own locale.
+/// Args are recorded by name so the client can substitute `%{name}` itself.
+/// A `KeyedError` whose message is the `tr!` fallback and whose key+args ride
+/// to the RPC boundary so clients can render their own locale.
+macro_rules! keyed {
+    ($($t:tt)*) => {
+        waku_protocol::KeyedError::localized(localized!($($t)*))
+    };
+}
+
+macro_rules! localized {
+    ($key:expr) => {
+        (tr!($key), waku_protocol::WireTranslation::new($key, []))
+    };
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
+        (
+            tr!($key, $($name = $value),+),
+            waku_protocol::WireTranslation::new(
+                $key,
+                [$( (stringify!($name), $value.to_string()) ),+],
+            ),
+        )
+    };
+}
+
 pub mod acp_session;
 pub mod agent;
 pub mod amp_session;
@@ -36,6 +62,7 @@ pub mod deepseek_pool;
 pub mod deepseek_session;
 pub mod devin_session;
 pub mod driver;
+pub mod eval;
 mod frontmatter;
 pub mod git_branch;
 pub mod git_commit;
@@ -45,6 +72,7 @@ pub mod grok_session;
 mod http_wire;
 pub mod i18n;
 pub mod identity;
+pub mod issue_templates;
 pub mod issues;
 pub mod kimi_session;
 pub mod migration;
@@ -63,6 +91,8 @@ pub mod pi_session;
 pub mod projectless;
 pub mod pull_requests;
 pub mod repo;
+pub mod route_policy;
+pub mod routing;
 pub mod settings;
 pub mod share;
 pub mod shell_command;

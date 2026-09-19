@@ -16,13 +16,13 @@ use std::io::BufRead as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use chrono::{Datelike as _, Local, NaiveDate, TimeZone as _, Utc};
+use chrono::{Local, NaiveDate, TimeZone as _, Utc};
 use serde_json::Value;
 
 pub use waku_protocol::usage_history::{
     CostQuality, DaySlice, MONTHLY_WINDOW, ModelSlice, MonthSlice, PricingStatus, ProjectSlice,
     ProviderDay, ProviderSlice, TokenTotals, UsageHistory, UsageProvider, UsageWindow,
-    WINDOW_CHOICES,
+    WINDOW_CHOICES, days_in_month, enumerate_days, enumerate_months, first_of_month,
 };
 
 /// Files whose mtime predates the window start by more than this are skipped
@@ -1122,48 +1122,6 @@ fn derive_history(
         errors,
         scan_duration,
     }
-}
-
-/// Inclusive day list between the window bounds, oldest first — the chart's
-/// x-axis, including days with no activity.
-pub fn enumerate_days(since_day: NaiveDate, until_day: NaiveDate) -> Vec<NaiveDate> {
-    let mut days = Vec::new();
-    let mut cursor = since_day;
-    while cursor <= until_day {
-        days.push(cursor);
-        cursor = cursor + chrono::Days::new(1);
-    }
-    days
-}
-
-/// The first day of `day`'s calendar month.
-pub fn first_of_month(day: NaiveDate) -> NaiveDate {
-    day.with_day(1).unwrap_or(day)
-}
-
-/// Inclusive first-of-month list between the bounds' months, oldest first —
-/// the statement view's rows, including months with no activity.
-pub fn enumerate_months(since_day: NaiveDate, until_day: NaiveDate) -> Vec<NaiveDate> {
-    let mut months = Vec::new();
-    let mut cursor = first_of_month(since_day);
-    let last = first_of_month(until_day);
-    while cursor <= last {
-        months.push(cursor);
-        let Some(next) = cursor.checked_add_months(chrono::Months::new(1)) else {
-            break;
-        };
-        cursor = next;
-    }
-    months
-}
-
-/// Number of days in `first_day`'s month.
-pub fn days_in_month(first_day: NaiveDate) -> u32 {
-    first_day
-        .checked_add_months(chrono::Months::new(1))
-        .and_then(|next| next.pred_opt())
-        .map(|last| last.day())
-        .unwrap_or(31)
 }
 
 #[cfg(test)]

@@ -215,20 +215,43 @@ fn keystroke_label(keystroke: &KeybindingKeystroke) -> String {
     label
 }
 
-fn key_label(key: &str) -> String {
-    #[cfg(target_os = "macos")]
-    if let Some(glyph) = match key {
-        "backspace" => Some("⌫"),
-        "delete" => Some("⌦"),
+/// The conventional glyph for a logical key name, or `None` when this
+/// platform spells the key out. Shared by the shortcut chips and the
+/// keybinding manager's on-screen keyboard so both use one vocabulary;
+/// modifier names are included for the keyboard's cap legends.
+pub fn key_glyph(key: &str) -> Option<&'static str> {
+    match key {
         "up" => Some("↑"),
         "down" => Some("↓"),
         "left" => Some("←"),
         "right" => Some("→"),
-        "tab" => Some("⇥"),
-        "escape" => Some("⎋"),
-        "enter" | "return" => Some("↵"),
-        _ => None,
-    } {
+        _ => {
+            #[cfg(target_os = "macos")]
+            {
+                match key {
+                    "backspace" => Some("⌫"),
+                    "delete" => Some("⌦"),
+                    "tab" => Some("⇥"),
+                    "escape" => Some("⎋"),
+                    "enter" | "return" => Some("↵"),
+                    "shift" => Some("⇧"),
+                    "ctrl" | "control" => Some("⌃"),
+                    "alt" | "option" => Some("⌥"),
+                    "cmd" | "command" => Some("⌘"),
+                    "capslock" => Some("⇪"),
+                    _ => None,
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                None
+            }
+        }
+    }
+}
+
+fn key_label(key: &str) -> String {
+    if let Some(glyph) = key_glyph(key) {
         return glyph.to_owned();
     }
     let mut chars = key.chars();

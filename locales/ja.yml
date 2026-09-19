@@ -28,6 +28,7 @@ menu.focus_terminal: ターミナルにフォーカスを移動
 menu.toggle_model_picker: モデル選択の表示を切り替える
 menu.toggle_branch_picker: ブランチ選択の表示を切り替える
 menu.toggle_runtime_mode_picker: モード選択の表示を切り替える
+menu.toggle_environment: 環境を切り替える
 menu.toggle_workspace: 作業場所を切り替える
 menu.toggle_usage_panel: 使用状況パネルの表示を切り替える
 menu.window: ウインドウ
@@ -69,6 +70,17 @@ command_palette.no_projects: プロジェクトがありません
 command_palette.no_projects_hint: プロジェクトを開くとそのスクリプトを実行できます
 command_palette.no_scripts: スクリプトが見つかりません
 command_palette.no_scripts_hint: プロジェクトのルートに package.json、makefile、justfile がありません
+command_palette.templates: テンプレート
+command_palette.new_github_issue: 新規 GitHub Issue
+command_palette.issue_project_placeholder: Issue を作成するプロジェクトを選択…
+command_palette.issue_template_placeholder: Issue テンプレートを選択…
+command_palette.loading_issue_templates: Issue テンプレートを読み込み中…
+command_palette.blank_issue: 空の Issue
+command_palette.blank_issue_search: blank issue new no template 空の Issue
+command_palette.opens_on_web: GitHub で開く
+command_palette.no_issue_projects_hint: プロジェクトを開くと Issue を作成できます
+command_palette.no_issue_templates: Issue テンプレートがありません
+command_palette.no_issue_templates_hint: 代わりに空の Issue を作成してください
 command_palette.open_on_github: GitHub で開く
 command_palette.land_changes: 変更を取り込む
 command_palette.new_custom_command: 新規カスタムコマンド…
@@ -151,6 +163,7 @@ settings.archived_empty: アーカイブ済みのチャットはありません�
 settings.archived_search: アーカイブ済みチャットを検索
 settings.archived_all_projects: すべてのプロジェクト
 settings.archived_no_match: 現在の条件に一致するアーカイブ済みチャットはありません。
+settings.archived_landed: 取り込み済み
 settings.back: 戻る
 settings.search: 設定を検索
 
@@ -262,8 +275,13 @@ settings.light_theme: ライトテーマ
 settings.light_theme_description: ライトの外観で使うテーマ
 settings.dark_theme: ダークテーマ
 settings.dark_theme_description: ダークの外観で使うテーマ
+settings.preview: プレビュー
+settings.preview_description: 選択したテーマでのチャットとコードの表示例
+settings.preview_user_message: 挨拶する関数を修正してもらえますか？
+settings.preview_assistant_reply: 完了です — 関数が挨拶を返すようになりました。
 settings.sidebar_transparency: サイドバーの透明化
 settings.sidebar_transparency_description: サイドバーの背後にデスクトップを透かして表示します。オフにすると単色の背景になります。
+settings.sidebar_transparency_amount: 透過量
 settings.ui_font: UI のフォント
 settings.ui_font_description: インターフェース全体とメッセージで使うフォント
 settings.code_font: コードのフォント
@@ -279,6 +297,8 @@ settings.terminal_font_size: ターミナルのフォントサイズ
 settings.terminal_font_size_description: 内蔵ターミナルの文字サイズ。コードのフォントサイズと同じ間は連動します
 settings.thick_borders: 太い境界線
 settings.thick_borders_description: 境界線と区切り線を0.5ピクセルのヘアラインではなく1ピクセルで描画します
+settings.border_intensity: 境界線の強さ
+settings.border_intensity_description: 境界線と区切り線の見え方を調整します。0% で非表示、100% で元の強さです
 settings.render_math: 数式を描画
 settings.render_math_description: Markdown の数式を整形して表示します。オフにすると LaTeX ソースを表示します。
 settings.show_response_token_speed: 応答のトークン速度を表示
@@ -287,6 +307,11 @@ settings.markdown_preview: Markdown ファイルをプレビュー
 settings.markdown_preview_description: Markdown ファイルをソースではなくレンダリング済みのプレビューで開きます
 settings.open_at_last_prompt: 終了したタスクを最後のプロンプトから開く
 settings.open_at_last_prompt_description: トランスクリプトの末尾ではなく、最後のメッセージから読み始めます
+settings.archive_navigation: タスクをアーカイブした後
+settings.archive_navigation_description: 表示中のタスクをアーカイブしたときの移動先を選びます
+settings.archive_navigation_next_unread: 次の未読の完了へ移動
+settings.archive_navigation_next_session: サイドバーの次のセッションへ移動
+settings.archive_navigation_new_task: 新しいタスクを作成
 settings.sync_with_merge: 変更の同期にマージを使用
 settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
 settings.new_worktree_default_branch: 新しいワークツリーはデフォルトブランチから作成
@@ -489,6 +514,24 @@ github.comment_placeholder: コメントを書く
 github.post_comment: コメントを送信
 github.loading_media: メディアを読み込み中…
 
+issue.new: 新規 Issue
+issue.title: タイトル
+issue.title_placeholder: Issue のタイトル
+issue.title_required: Issue のタイトルを入力してください
+issue.body: 本文
+issue.body_placeholder: Markdown 本文 — テンプレートの内容は入力済みです
+issue.labels: ラベル
+issue.labels_placeholder: bug, help wanted
+issue.assignees: アサイン
+issue.assignees_placeholder: octocat, hubot
+issue.milestone: マイルストーン
+issue.milestone_placeholder: マイルストーン名または番号
+issue.create: Issue を作成
+issue.creating: Issue を作成中…
+issue.created: Issue を作成しました
+issue.created_numbered: "Issue #%{number} を作成しました"
+issue.view: 表示
+
 project.new_project: 新規プロジェクト…
 project.no_project: プロジェクトを使用しない
 project.no_project_name: プロジェクトなし
@@ -545,6 +588,7 @@ projects.chip_filter: "フィルター：%{filter}"
 projects.chip_selected: "%{count} 件選択中"
 projects.composer_placeholder: タスクを入力…
 projects.send: 送信
+
 
 onboarding.open_project_to_begin: プロジェクトを開いて始めましょう
 onboarding.description: Goddard は選択したフォルダでコーディングエージェントを実行します。コード、タスク、履歴はこのコンピュータに保存されます
@@ -1312,6 +1356,8 @@ transcript.conversation_turns: 会話ターン
 transcript.turn_label: "ターン %{number}：%{prompt}"
 transcript.edit_message: メッセージを編集
 transcript.sent_by_agent: エージェントから送信
+transcript.landed: "%{base} に取り込みました"
+transcript.landed_more: "…その他 %{count} 件のコミット"
 
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
@@ -1494,6 +1540,7 @@ git_panel.land_onto: "%{base} に取り込む"
 git_panel.landing: 取り込み中…
 git_panel.landing_onto: "%{base} に取り込み中…"
 git_panel.landed: "%{base} に取り込みました"
+git_panel.land_local_checkout: このタスクはプロジェクトのチェックアウトで直接作業しています — 取り込むものはありません
 git_panel.already_landed: "%{base} にはすでにすべてのコミットが含まれています"
 git_panel.land_conflict_description: "%{base} への取り込みが途中で停止しました — 競合は作業ツリーに残っています。"
 git_panel.resolve_land_rebase_prompt: "このワークツリーの `%{base}` へのリベースが競合で停止しました。作業ツリーの競合を解決し、リベースが完了するまで `git rebase --continue` を実行してください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"

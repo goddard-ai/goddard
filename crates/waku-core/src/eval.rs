@@ -1,0 +1,447 @@
+//! Hosted evaluation-model client (TypeSafe's Jev): one `evaluate` call posts
+//! a shared `state` plus typed questions to the configured backend and returns
+//! calibrated answers — choices, scores, and boolean probabilities rather than
+//! generated text. TypeSafe's own API, the Vercel AI Gateway, and Cloudflare
+//! Workers AI all answer the same envelope; only the request envelope and
+//! credentials differ.
+//!
+//! Every call also appends to a daemon-owned JSONL decision log. The log is
+//! the calibration dataset for every eval-driven feature — routing decisions,
+//! their confidences, and what happened next.
+//!
+//! Everything here blocks on a subprocess and the network; callers must
+//! already be off the request thread's latency budget. Credentials travel in
+//! a 0600 curl config file rather than argv, so they are not visible to
+//! `ps` — the same posture `usage.rs` takes for provider tokens.
+
+use std::collections::BTreeMap;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Instant;
+
+use anyhow::{Context as _, anyhow, bail};
+use serde::Serialize;
+use serde_json::{Value, json};
+use waku_protocol::eval::{EvalAnswer, EvalBackend, EvalQuestion, EvalSettings, Evaluation};
+
+const TYPESAFE_URL: &str = "https://api.typesafe.ai/v1/systemone";
+const VERCEL_EVALUATION_URL: &str = "https://ai-gateway.vercel.sh/v4/ai/evaluation-model";
+const CLOUDFLARE_RUN_URL: &str = "https://api.cloudflare.com/client/v4/accounts";
+const GATEWAY_MODEL_ID: &str = "typesafe-ai/jev";
+const JEV_MODEL_ALIAS: &str = "jev-latest";
+
+/// The eval call's share of a user action's latency budget; callers degrade to
+/// their default route when it elapses.
+const EVAL_TIMEOUT_SECS: u64 = 5;
+/// Answer envelopes are a few hundred bytes; far past that the response is
+/// not an answer worth parsing.
+const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+/// Delimiter `curl -w` appends after the body so the status code rides the
+/// same stdout stream without multi-block header parsing.
+const STATUS_MARKER: &str = "GODDARD_EVAL_STATUS:";
+
+/// The absolute path keeps a shadowed `curl` on `PATH` out of the credential
+/// exchange. Windows 10 build 17063 and later ship the same tool in System32.
+#[cfg(not(windows))]
+const CURL_PATH: &str = "/usr/bin/curl";
+#[cfg(windows)]
+const CURL_PATH: &str = r"C:\Windows\System32\curl.exe";
+
+/// One line in the daemon's eval decision log. Eval-call fields and
+/// routing-outcome fields are both optional so one record type covers
+/// `evaluate`, `route`, and `route-override` events.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvalDecisionRecord {
+    /// Unix seconds when the call was made.
+    pub ts: u64,
+    /// Which eval-driven feature made the call.
+    pub feature: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<EvalBackend>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    /// The versioned model id the backend reported, when it answered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub questions: Option<BTreeMap<String, EvalQuestion>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answers: Option<BTreeMap<String, EvalAnswer>>,
+    /// The failure summary when the call did not produce answers. Backend
+    /// error bodies are never recorded — they can echo prompts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The session a routing outcome belongs to, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<uuid::Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_provider: Option<waku_protocol::model::ProviderKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
+    /// The deterministic reason chain that produced the route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Hash of the policy document the decision was made under.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+}
+
+impl EvalDecisionRecord {
+    /// A record with every optional field unset; callers fill in what their
+    /// feature produced.
+    pub fn empty(feature: &'static str) -> Self {
+        Self {
+            ts: crate::model::unix_time(),
+            feature,
+            backend: None,
+            latency_ms: None,
+            model: None,
+            state: None,
+            questions: None,
+            answers: None,
+            error: None,
+            session_id: None,
+            resolved_provider: None,
+            resolved_model: None,
+            reason: None,
+            policy_hash: None,
+            family: None,
+            class: None,
+        }
+    }
+
+    /// Fold a routing decision's outcome into the record.
+    pub fn complete(&mut self, decision: &waku_protocol::routing::RouteDecision) {
+        self.resolved_provider = Some(decision.target.provider);
+        self.resolved_model = decision.target.model.clone();
+        self.reason = Some(decision.reason.clone());
+        self.family = decision.family.map(|family| family.id().to_owned());
+        self.class = decision.class.map(|class| class.id().to_owned());
+        if self.policy_hash.is_none() {
+            self.policy_hash = Some(decision.policy_hash.clone());
+        }
+        if self.latency_ms.is_none() {
+            self.latency_ms = decision.eval_latency_ms;
+        }
+    }
+}
+
+/// Where the decision log lives: beside the daemon's `settings.json`.
+pub fn default_log_path() -> PathBuf {
+    waku_protocol::settings::DaemonSettings::default_path()
+        .parent()
+        .map(|dir| dir.join("eval-decisions.jsonl"))
+        .unwrap_or_else(|| PathBuf::from("eval-decisions.jsonl"))
+}
+
+/// Append one record as a JSON line. Logging is best-effort: a write failure
+/// must never fail the feature that produced the decision.
+pub fn append_decision_log(path: &Path, record: &EvalDecisionRecord) {
+    let _ = (|| -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut line = serde_json::to_vec(record)?;
+        line.push(b'\n');
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        file.write_all(&line)?;
+        Ok(())
+    })();
+}
+
+/// Run one evaluation against the configured backend. Blocking.
+pub fn evaluate(
+    settings: &EvalSettings,
+    state: &Value,
+    questions: &BTreeMap<String, EvalQuestion>,
+) -> anyhow::Result<Evaluation> {
+    let (url, headers, body) = backend_request(settings, state, questions)?;
+    let started = Instant::now();
+    let (status, raw) = curl_post_json(&url, &headers, &body, EVAL_TIMEOUT_SECS)?;
+    let latency_ms = started.elapsed().as_millis() as u64;
+    if !(200..300).contains(&status) {
+        // Provider error bodies can echo the request — including the prompt —
+        // so the failure carries the status and nothing else.
+        bail!("evaluation backend answered HTTP {status}");
+    }
+    if raw.len() > MAX_RESPONSE_BYTES {
+        bail!("evaluation response exceeded {} bytes", MAX_RESPONSE_BYTES);
+    }
+    let parsed: Value =
+        serde_json::from_slice(&raw).context("evaluation backend returned invalid JSON")?;
+    // Cloudflare wraps the model output in `result`; the other backends answer
+    // the envelope directly.
+    let envelope = parsed.get("result").unwrap_or(&parsed);
+    let mut evaluation: Evaluation =
+        serde_json::from_value(envelope.clone()).context("invalid evaluation answer envelope")?;
+    evaluation.latency_ms = latency_ms;
+    Ok(evaluation)
+}
+
+fn backend_request(
+    settings: &EvalSettings,
+    state: &Value,
+    questions: &BTreeMap<String, EvalQuestion>,
+) -> anyhow::Result<(String, Vec<String>, Vec<u8>)> {
+    match settings.backend {
+        EvalBackend::TypeSafe => {
+            let key = required(&settings.typesafe_api_key, "TypeSafe API key")?;
+            let body = json!({
+                "model": JEV_MODEL_ALIAS,
+                "state": state,
+                "questions": questions,
+            });
+            Ok((
+                TYPESAFE_URL.to_owned(),
+                bearer_headers(key),
+                serde_json::to_vec(&body)?,
+            ))
+        }
+        EvalBackend::VercelGateway => {
+            let key = required(&settings.vercel_api_key, "Vercel AI Gateway credential")?;
+            let mut headers = bearer_headers(key);
+            // The evaluation endpoint's wire contract is versioned separately
+            // from the rest of the Gateway — the AI SDK sends these exact
+            // headers for evaluation models.
+            headers.push("ai-gateway-protocol-version: 0.0.1".to_owned());
+            headers.push("ai-evaluation-model-specification-version: 4".to_owned());
+            headers.push(format!("ai-model-id: {GATEWAY_MODEL_ID}"));
+            if let Some(team) = settings
+                .vercel_team_id
+                .as_deref()
+                .filter(|team| !team.is_empty())
+            {
+                headers.push(format!("x-vercel-ai-gateway-team: {team}"));
+            }
+            let body = json!({
+                "state": state,
+                "questions": questions,
+                "providerOptions": { "gateway": { "zeroDataRetention": true } },
+            });
+            Ok((
+                VERCEL_EVALUATION_URL.to_owned(),
+                headers,
+                serde_json::to_vec(&body)?,
+            ))
+        }
+        EvalBackend::Cloudflare => {
+            let account = required(&settings.cloudflare_account_id, "Cloudflare account id")?;
+            let token = required(&settings.cloudflare_api_token, "Cloudflare API token")?;
+            let body = json!({
+                "model": GATEWAY_MODEL_ID.replace("-ai/", "/"),
+                "input": {
+                    "state": state,
+                    "questions": questions,
+                },
+            });
+            Ok((
+                format!("{CLOUDFLARE_RUN_URL}/{account}/ai/run"),
+                bearer_headers(token),
+                serde_json::to_vec(&body)?,
+            ))
+        }
+    }
+}
+
+fn required<'a>(value: &'a Option<String>, what: &str) -> anyhow::Result<&'a str> {
+    value
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("{what} is not configured"))
+}
+
+fn bearer_headers(credential: &str) -> Vec<String> {
+    vec![
+        format!("Authorization: Bearer {credential}"),
+        "Content-Type: application/json".to_owned(),
+        "Accept: application/json".to_owned(),
+    ]
+}
+
+/// POST a JSON body through the system curl and return the HTTP status and
+/// raw body. Headers ride a 0600 config file so credentials never appear in
+/// argv; the body travels stdin unchanged (curl config files would interpret
+/// JSON's `\t`/`\n` escapes literally).
+fn curl_post_json(
+    url: &str,
+    headers: &[String],
+    body: &[u8],
+    timeout_secs: u64,
+) -> anyhow::Result<(u16, Vec<u8>)> {
+    let config = write_curl_config(url, headers)?;
+    let mut child = crate::command_env::plain_command(CURL_PATH)
+        .args([
+            "-sS",
+            "--max-time",
+            &timeout_secs.to_string(),
+            "-K",
+            &config.path,
+            "--data-binary",
+            "@-",
+            "-w",
+            &format!("\n{STATUS_MARKER}%{{http_code}}"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("could not run curl")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(body);
+    }
+    let output = child
+        .wait_with_output()
+        .context("curl did not finish the evaluation request")?;
+    let _ = std::fs::remove_file(&config.path);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let error = stderr
+            .lines()
+            .last()
+            .map(str::trim)
+            .filter(|error| !error.is_empty())
+            .unwrap_or("unknown curl error");
+        bail!("evaluation request failed: {error}");
+    }
+    split_status_and_body(&output.stdout)
+}
+
+struct CurlConfig {
+    path: String,
+}
+
+/// One temp file per request, written 0600 and deleted once curl exits.
+fn write_curl_config(url: &str, headers: &[String]) -> anyhow::Result<CurlConfig> {
+    let mut contents = String::new();
+    for header in headers {
+        contents.push_str(&format!("header = \"{}\"\n", escape_config_value(header)));
+    }
+    contents.push_str(&format!("url = \"{}\"\n", escape_config_value(url)));
+    let path = std::env::temp_dir().join(format!("goddard-eval-{}.cfg", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .context("could not create the curl config file")?;
+    file.write_all(contents.as_bytes())?;
+    drop(file);
+    Ok(CurlConfig {
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+/// Inside a double-quoted curl config value, `\` and `"` are the only
+/// characters that change meaning.
+fn escape_config_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// stdout is the response body followed by the `-w` status marker.
+fn split_status_and_body(raw: &[u8]) -> anyhow::Result<(u16, Vec<u8>)> {
+    let marker = raw
+        .windows(STATUS_MARKER.len())
+        .rposition(|window| window == STATUS_MARKER.as_bytes())
+        .context("evaluation response carried no status marker")?;
+    let status = std::str::from_utf8(&raw[marker + STATUS_MARKER.len()..])
+        .context("evaluation response carried an invalid status")?
+        .trim()
+        .parse::<u16>()
+        .context("evaluation response carried an invalid status")?;
+    // The marker is preceded by the newline the `-w` format prepends.
+    Ok((status, raw[..marker.saturating_sub(1)].to_vec()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_reads_status_marker_after_body() {
+        let (status, body) = split_status_and_body(b"{\"a\":1}\nGODDARD_EVAL_STATUS:200").unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(body, b"{\"a\":1}");
+    }
+
+    #[test]
+    fn split_handles_body_that_ends_without_newline() {
+        let (status, _) = split_status_and_body(b"[]\nGODDARD_EVAL_STATUS:429").unwrap();
+        assert_eq!(status, 429);
+    }
+
+    #[test]
+    fn config_escaping_protects_quoted_values() {
+        assert_eq!(escape_config_value("a\"b\\c"), "a\\\"b\\\\c");
+    }
+
+    #[test]
+    fn missing_credential_names_the_field() {
+        let settings = EvalSettings {
+            backend: EvalBackend::TypeSafe,
+            ..Default::default()
+        };
+        let error = backend_request(&settings, &json!({"task": "x"}), &BTreeMap::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("TypeSafe API key"));
+    }
+
+    #[test]
+    fn vercel_request_carries_evaluation_spec_headers() {
+        let settings = EvalSettings {
+            backend: EvalBackend::VercelGateway,
+            vercel_api_key: Some("key".into()),
+            vercel_team_id: Some("team_1".into()),
+            ..Default::default()
+        };
+        let (url, headers, body) =
+            backend_request(&settings, &json!({"task": "x"}), &BTreeMap::new()).unwrap();
+        assert_eq!(url, VERCEL_EVALUATION_URL);
+        assert!(
+            headers
+                .iter()
+                .any(|h| h == "ai-evaluation-model-specification-version: 4")
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|h| h == "x-vercel-ai-gateway-team: team_1")
+        );
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body["providerOptions"]["gateway"]["zeroDataRetention"],
+            true
+        );
+    }
+
+    #[test]
+    fn cloudflare_request_scopes_the_url_and_wraps_input() {
+        let settings = EvalSettings {
+            backend: EvalBackend::Cloudflare,
+            cloudflare_account_id: Some("acct".into()),
+            cloudflare_api_token: Some("tok".into()),
+            ..Default::default()
+        };
+        let (url, _, body) =
+            backend_request(&settings, &json!({"task": "x"}), &BTreeMap::new()).unwrap();
+        assert!(url.ends_with("/accounts/acct/ai/run"));
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["model"], "typesafe/jev");
+        assert!(body["input"]["questions"].is_object());
+    }
+}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { reduceRuntimeEvent } from './event-reducer'
-import { activityDisclosureSections } from './transcript-presentation'
+import { activityDisclosureSections, activityDisplayTitle, wireTranslationText } from './transcript-presentation'
 import type { AgentSession, SequencedEvent } from './generated'
 
 const clock = {
@@ -235,3 +235,88 @@ function runningSession(): AgentSession {
     ],
   }
 }
+
+describe('localized events', () => {
+  test('localizedError carries its i18n semantic beside the fallback message', () => {
+    const session = runningSession()
+    const result = reduceRuntimeEvent(
+      session,
+      event('localizedError', {
+        message: 'Claude has no active turn',
+        i18n: { key: 'errors.provider_no_active_turn', args: { provider: 'Claude' } },
+      }),
+      clock,
+    )
+    expect(result.error).toBe('Claude has no active turn')
+    expect(result.errorI18n).toMatchObject({
+      key: 'errors.provider_no_active_turn',
+      args: { provider: 'Claude' },
+    })
+    // The turn failure behaves exactly like an opaque provider error.
+    expect(result.session.status).toBe('failed')
+    expect(result.session.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Claude has no active turn',
+    })
+  })
+
+  test('permission keeps title/detail fallbacks and their i18n semantics', () => {
+    const result = reduceRuntimeEvent(
+      runningSession(),
+      event('permission', {
+        requestId: 'per_1',
+        title: 'npm test',
+        titleI18n: { key: 'permission.run_tool', args: { tool: 'npm' } },
+        detail: 'The agent wants to run npm',
+        detailI18n: { key: 'permission.agent_wants_to_run', args: { tool: 'npm' } },
+        options: [{ id: 'allow', label: 'Allow once', allow: true }],
+      }),
+      clock,
+    )
+    expect(result.permission).toMatchObject({
+      title: 'npm test',
+      detail: 'The agent wants to run npm',
+      titleI18n: { key: 'permission.run_tool' },
+      detailI18n: { key: 'permission.agent_wants_to_run' },
+    })
+  })
+
+  test('permission without i18n fields decodes with undefined semantics', () => {
+    const result = reduceRuntimeEvent(
+      runningSession(),
+      event('permission', {
+        requestId: 'per_1',
+        title: 'rm -rf *',
+        detail: 'provider text',
+        options: [],
+      }),
+      clock,
+    )
+    expect(result.permission?.titleI18n).toBeUndefined()
+    expect(result.permission?.detailI18n).toBeUndefined()
+  })
+})
+
+test('wireTranslationText renders through the client translator or keeps the fallback', () => {
+  const t = (key: string, params?: Record<string, string | number>) =>
+    `${key}(${Object.entries(params ?? {}).map(([k, v]) => `${k}=${v}`).join(',')})`
+  const i18n = { key: 'activity.search_for', args: { query: 'cats' } }
+  expect(wireTranslationText(i18n, 'Searching for cats', t)).toBe('activity.search_for(query=cats)')
+  expect(wireTranslationText(i18n, 'Searching for cats')).toBe('Searching for cats')
+  expect(wireTranslationText(undefined, 'provider text', t)).toBe('provider text')
+})
+
+test('a keyed activity title renders in the client locale before heuristics', () => {
+  const activity = {
+    id: 'a1',
+    kind: 'search',
+    title: 'Searching for cats',
+    title_i18n: { key: 'activity.search_for', args: { query: 'cats' } },
+    complete: true,
+    failed: false,
+  } as unknown as Parameters<typeof activityDisplayTitle>[0]
+  const t = (key: string, params?: Record<string, string | number>) =>
+    `${key}(${params?.query ?? ''})`
+  expect(activityDisplayTitle(activity, t)).toBe('activity.search_for(cats)')
+  expect(activityDisplayTitle(activity)).toBe('Searching for cats')
+})

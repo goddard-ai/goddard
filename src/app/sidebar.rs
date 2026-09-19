@@ -220,7 +220,11 @@ fn updater_button_available_content(
 const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
 const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
-const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
+const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 30.0;
+/// Separation above each action button in the sidebar stack. Kept inside the
+/// list row — like the session row gap — so measured and estimated heights
+/// stay identical.
+const SIDEBAR_ACTION_ROW_GAP: f32 = 2.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 /// The session column's top bar. The empty-state hero drops by this much so
 /// it sits clear of the header instead of optically centering under it.
@@ -677,9 +681,11 @@ fn sidebar_shortcut_chip_label(index: usize) -> String {
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox => {
+            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP
+        }
         SidebarRow::Header(SidebarGroup::Terminals) => {
-            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+            SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
@@ -1215,7 +1221,8 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
+            .pt(px(SIDEBAR_ACTION_ROW_GAP))
             .flex_none()
             .child(search)
     }
@@ -1254,7 +1261,8 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
+            .pt(px(SIDEBAR_ACTION_ROW_GAP))
             .flex_none()
             .child(row)
     }
@@ -1311,7 +1319,8 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
+            .pt(px(SIDEBAR_ACTION_ROW_GAP))
             .flex_none()
             .child(row)
     }
@@ -1530,6 +1539,9 @@ impl Waku {
     /// offers declared a size; until then a spinning loader carries the
     /// state. Activating it lands on Settings → Friends.
     fn render_transfer_indicator(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.state.friends_enabled {
+            return None;
+        }
         let active = self
             .friends_state
             .transfers
@@ -2218,6 +2230,7 @@ impl Waku {
             },
         );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
+        fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
         for session in &self.state.sessions {
             if !session.has_started() || session.archived_at.is_some() {
                 continue;
@@ -2268,15 +2281,22 @@ impl Waku {
             );
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today));
+            let (rows, collapsed_members) = self.sidebar_rows(today);
+            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
+            *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
         }
         self.sidebar_rows_snapshot.borrow().clone()
     }
 
     /// Snapshot the session history as a flat list of lightweight rows under
-    /// the current grouping and ordering preferences.
-    fn sidebar_rows(&self, today: NaiveDate) -> Vec<SidebarRow> {
+    /// the current grouping and ordering preferences. Collapsed groups also
+    /// report their member session ids so a folded header can aggregate the
+    /// unread state of rows it hides.
+    fn sidebar_rows(
+        &self,
+        today: NaiveDate,
+    ) -> (Vec<SidebarRow>, HashMap<SidebarGroup, Vec<Uuid>>) {
         let mut sorted_sessions = self
             .state
             .sessions
@@ -2291,7 +2311,10 @@ impl Waku {
         if self.state.projects_page_enabled {
             rows.push(SidebarRow::Projects);
         }
-        rows.push(SidebarRow::Inbox);
+        // The Inbox row rides the GitHub integration opt-in.
+        if self.state.github_enabled {
+            rows.push(SidebarRow::Inbox);
+        }
 
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an
@@ -2323,14 +2346,20 @@ impl Waku {
             .collect::<Vec<_>>();
         pinned.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)));
         let pinned_ids = pinned.iter().map(|session| session.id).collect::<Vec<_>>();
+        let mut collapsed_members = HashMap::new();
+        let pinned_collapsed = self
+            .sidebar_collapsed_groups
+            .contains(&SidebarGroup::Pinned);
         append_sidebar_group_rows(
             &mut rows,
             SidebarGroup::Pinned,
             &pinned_ids,
-            self.sidebar_collapsed_groups
-                .contains(&SidebarGroup::Pinned),
+            pinned_collapsed,
             false,
         );
+        if pinned_collapsed {
+            collapsed_members.insert(SidebarGroup::Pinned, pinned_ids);
+        }
         sorted_sessions.retain(|session| session.pinned_at.is_none());
 
         match self.state.sidebar_grouping {
@@ -2338,13 +2367,18 @@ impl Waku {
                 let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
+                    let collapsed = self.sidebar_collapsed_groups.contains(&group);
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
                         &grouped_sessions[date_group.index()],
-                        self.sidebar_collapsed_groups.contains(&group),
+                        collapsed,
                         false,
                     );
+                    if collapsed {
+                        collapsed_members
+                            .insert(group, grouped_sessions[date_group.index()].clone());
+                    }
                 }
             }
             SidebarGrouping::Project => {
@@ -2361,6 +2395,10 @@ impl Waku {
                 for (group, sessions) in
                     project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
                 {
+                    let collapsed = self.sidebar_collapsed_groups.contains(&group);
+                    if collapsed {
+                        collapsed_members.insert(group, sessions.clone());
+                    }
                     let revealed_extra_sessions = self
                         .sidebar_project_reveal_counts
                         .get(&group)
@@ -2372,7 +2410,7 @@ impl Waku {
                         &mut rows,
                         group,
                         &visible_sessions,
-                        self.sidebar_collapsed_groups.contains(&group),
+                        collapsed,
                         show_more,
                     );
                 }
@@ -2409,7 +2447,7 @@ impl Waku {
             };
             rows.push(SidebarRow::Header(group));
         }
-        rows
+        (rows, collapsed_members)
     }
 
     /// Keep the virtualized list in sync with the current row snapshot.
@@ -2446,24 +2484,6 @@ impl Waku {
         }
     }
 
-    /// Archives a session from its sidebar row — the hover button or the row
-    /// context menu — remembering the row's position so an archived active
-    /// surface hands selection to the next not-busy session below it.
-    fn archive_session_from_sidebar(
-        &mut self,
-        session_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.hold_sidebar_peek();
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
-        let landing = match sidebar_session_row_index(&rows, session_id) {
-            Some(position) => sessions::ArchiveLanding::Neighbor(position),
-            None => sessions::ArchiveLanding::NextUnread,
-        };
-        self.archive_session(session_id, landing, window, cx);
-    }
-
     /// The first not-busy session at or below `position` in the current
     /// sidebar order, wrapping to the top. `position` is the row index the
     /// just-archived session occupied, so the row that followed it now sits
@@ -2477,6 +2497,97 @@ impl Waku {
                 .find(|session| session.id == session_id)
                 .is_some_and(|session| !session.is_busy())
         })
+    }
+
+    /// ⌘-click: toggle `session_id` in the multi-selection without making it
+    /// the active surface. The clicked row becomes the range anchor either
+    /// way — even when the toggle removed it — matching Finder's pivot.
+    fn toggle_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self.sidebar_multi_selection.remove(&session_id) {
+            self.sidebar_multi_selection.insert(session_id);
+        }
+        self.sidebar_multi_selection_anchor = Some(session_id);
+        cx.notify();
+    }
+
+    /// ⌘⇧-click: grow the multi-selection to cover every session row between
+    /// the anchor and `session_id` in the current sidebar order. The anchor
+    /// is the last row a modified click touched, then the active session,
+    /// and finally the clicked row itself.
+    fn extend_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let Some(target) = sidebar_session_row_index(&rows, session_id) else {
+            return;
+        };
+        let anchor = self
+            .sidebar_multi_selection_anchor
+            .or(self.state.selected_session)
+            .and_then(|session_id| sidebar_session_row_index(&rows, session_id))
+            .unwrap_or(target);
+        let (lo, hi) = (anchor.min(target), anchor.max(target));
+        for row in &rows[lo..=hi] {
+            if let SidebarRow::Session(id) = row {
+                self.sidebar_multi_selection.insert(*id);
+            }
+        }
+        self.sidebar_multi_selection_anchor = Some(session_id);
+        cx.notify();
+    }
+
+    /// Any unmodified left click and bare Escape land here; an empty set
+    /// clears for free.
+    pub(super) fn clear_sidebar_multi_selection(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_multi_selection.is_empty() {
+            return;
+        }
+        self.sidebar_multi_selection.clear();
+        self.sidebar_multi_selection_anchor = None;
+        cx.notify();
+    }
+
+    /// The multi-selection's members in sidebar row order — the batch a row
+    /// menu or session shortcut acts on. Members hidden by a folded group or
+    /// an unrevealed "show more" window follow in session order: the set's
+    /// contract is whole-set, not visible-rows-only.
+    pub(super) fn sidebar_multi_selection_targets(&self) -> Vec<Uuid> {
+        if self.sidebar_multi_selection.is_empty() {
+            return Vec::new();
+        }
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let mut targets: Vec<Uuid> = rows
+            .iter()
+            .filter_map(|row| match row {
+                SidebarRow::Session(session_id)
+                    if self.sidebar_multi_selection.contains(session_id) =>
+                {
+                    Some(*session_id)
+                }
+                _ => None,
+            })
+            .collect();
+        for session in &self.state.sessions {
+            if self.sidebar_multi_selection.contains(&session.id)
+                && !targets.contains(&session.id)
+            {
+                targets.push(session.id);
+            }
+        }
+        targets
+    }
+
+    /// The root's capture phase: a left mouse-down without the primary
+    /// modifier ends the multi-selection before the click lands — including
+    /// one inside an open row menu, whose item callbacks already captured
+    /// their target set when the menu opened.
+    pub(super) fn sidebar_multi_selection_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button == MouseButton::Left && !event.modifiers.secondary() {
+            self.clear_sidebar_multi_selection(cx);
+        }
     }
 
     fn sidebar_row(
@@ -2543,6 +2654,41 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let collapsed = self.sidebar_collapsed_groups.contains(&group);
+        // A folded group keeps its hidden rows' unread signal: the same dot a
+        // session or terminal row earns for an unseen completion surfaces on
+        // the header. Pinned terminals stay visible through the fold, so they
+        // report for themselves and are left out of the count.
+        let has_unread = collapsed
+            && match group {
+                SidebarGroup::Terminals => {
+                    self.unseen_terminal_completions.iter().any(|terminal_id| {
+                        self.terminal_records
+                            .get(terminal_id)
+                            .is_some_and(|record| !record.pinned)
+                            && !self.terminal_is_active_surface(*terminal_id)
+                            && self.right_panel_terminals.get(terminal_id).is_some_and(
+                                |terminal| {
+                                    let terminal = terminal.read(cx);
+                                    !terminal.command_running()
+                                        && terminal.last_command_exit() == Some(0)
+                                },
+                            )
+                    })
+                }
+                _ => self
+                    .sidebar_collapsed_group_members
+                    .borrow()
+                    .get(&group)
+                    .is_some_and(|members| {
+                        members.iter().any(|session_id| {
+                            self.state.unseen_completions.contains_key(session_id)
+                                && self.state.sessions.iter().any(|session| {
+                                    session.id == *session_id
+                                        && session.status == SessionStatus::Idle
+                                })
+                        })
+                    }),
+            };
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -2769,7 +2915,18 @@ impl Waku {
                                     .child(badge),
                             )
                         })
-                        .when_some(updated_chevron, |element, chevron| element.child(chevron)),
+                        .when_some(updated_chevron, |element, chevron| element.child(chevron))
+                        .when(has_unread, |element| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .size(px(12.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+                            )
+                        }),
                 )
                 .child(div().flex_1()),
         )
@@ -2814,6 +2971,9 @@ impl Waku {
 
         div()
             .w_full()
+            .when(action_row, |element| {
+                element.pt(px(SIDEBAR_ACTION_ROW_GAP))
+            })
             .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
             .child(header)
     }
@@ -3078,6 +3238,7 @@ impl Waku {
                 .map(|pending| pending.session_id),
             session_id,
         );
+        let multi_selected = self.sidebar_multi_selection.contains(&session_id);
         let pinned = session.pinned_at.is_some();
         // While a ⌘n chip overlays the row, its trailing elements hide so
         // nothing competes with the chip; the gradient fades the rest.
@@ -3104,11 +3265,29 @@ impl Waku {
             .py(px(7.0))
             .rounded(px(9.0))
             .cursor_default()
-            .when(selected, |element| {
+            // The multi-selection wears an accent wash so it never reads as
+            // the active row's neutral highlight; hover and press deepen it
+            // instead of dropping back to the single-selection tint.
+            .when(multi_selected, |element| {
+                element.bg(theme.accent.opacity(0.14))
+            })
+            .when(!multi_selected && selected, |element| {
                 element.bg(theme.sidebar_item_background)
             })
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.sidebar_item_background))
+            .hover(|element| {
+                element.bg(if multi_selected {
+                    theme.accent.opacity(0.2)
+                } else {
+                    theme.sidebar_item_background
+                })
+            })
+            .active(|element| {
+                element.bg(if multi_selected {
+                    theme.accent.opacity(0.26)
+                } else {
+                    theme.sidebar_item_background
+                })
+            })
             .child(self.render_session_row_body(session_id, grouped_by_project, shortcut_hint, cx))
             .when(!renaming, |element| {
                 let drag_title = SharedString::from(localized_session_title(session));
@@ -3141,7 +3320,12 @@ impl Waku {
                         }
                     }))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                        if event.modifiers().shift {
+                        let modifiers = event.modifiers();
+                        if modifiers.secondary() && modifiers.shift {
+                            this.extend_sidebar_multi_selection(session_id, cx);
+                        } else if modifiers.secondary() {
+                            this.toggle_sidebar_multi_selection(session_id, cx);
+                        } else if modifiers.shift {
                             this.toggle_session_pin(session_id, cx);
                         } else {
                             this.select_session(session_id, cx);
@@ -3171,22 +3355,49 @@ impl Waku {
                     let move_waku = waku.clone();
                     let archive_waku = waku.clone();
                     let remove_waku = waku.clone();
-                    // A worktree task has nowhere to move to, so the row
-                    // disappears; a local-but-busy task keeps it disabled as
-                    // an explanation that the action exists.
-                    let (local_workspace, can_move) = waku
-                        .update(cx, |waku, _| {
-                            (
+                    // The batch settles at open: a menu on a member of the
+                    // multi-selection acts on the whole set, while a menu on
+                    // an outsider drops the set and acts on that row alone.
+                    // Item callbacks run after the root's plain-click capture
+                    // has cleared the set, so they close over the resolved
+                    // list instead of re-reading it.
+                    let (targets, local_workspace, any_movable, all_pinned) = waku
+                        .update(cx, |waku, cx| {
+                            let targets = if waku.sidebar_multi_selection.contains(&session_id) {
+                                waku.sidebar_multi_selection_targets()
+                            } else {
+                                waku.clear_sidebar_multi_selection(cx);
+                                vec![session_id]
+                            };
+                            let local_workspace = targets.iter().any(|target| {
                                 waku.state
                                     .sessions
                                     .iter()
-                                    .find(|session| session.id == session_id)
-                                    .is_some_and(|session| session.workspace.is_local()),
-                                waku.can_move_session_to_worktree(session_id),
-                            )
+                                    .find(|session| session.id == *target)
+                                    .is_some_and(|session| session.workspace.is_local())
+                            });
+                            let any_movable = targets
+                                .iter()
+                                .any(|target| waku.can_move_session_to_worktree(*target));
+                            let all_pinned = targets.iter().all(|target| {
+                                waku.state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == *target)
+                                    .is_some_and(|session| session.pinned_at.is_some())
+                            });
+                            (targets, local_workspace, any_movable, all_pinned)
                         })
-                        .unwrap_or((false, false));
+                        .unwrap_or((vec![session_id], false, false, pinned));
+                    let pin_targets = targets.clone();
+                    let unread_targets = targets.clone();
+                    let copy_targets = targets.clone();
+                    let move_targets = targets.clone();
+                    let archive_targets = targets.clone();
+                    let remove_targets = targets;
                     let mut items = vec![
+                        // Rename stays single-target: the inline field it
+                        // opens can only hold one title.
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_waku.update(cx, |waku, cx| {
                                 waku.begin_session_rename(session_id, window, cx);
@@ -3194,31 +3405,35 @@ impl Waku {
                         })
                         .icon("icons/pencil.svg"),
                         MenuItem::new(
-                            if pinned {
+                            if all_pinned {
                                 tr!("session.unpin")
                             } else {
                                 tr!("session.pin")
                             },
                             move |_, cx| {
-                                let _ = pin_waku
-                                    .update(cx, |waku, cx| waku.toggle_session_pin(session_id, cx));
+                                let _ = pin_waku.update(cx, |waku, cx| {
+                                    waku.set_sessions_pinned(&pin_targets, !all_pinned, cx)
+                                });
                             },
                         )
                         .shortcut_action(&ToggleSessionPin)
-                        .icon(if pinned {
+                        .icon(if all_pinned {
                             "icons/pin-off.svg"
                         } else {
                             "icons/pin.svg"
                         }),
                         MenuItem::new(tr!("session.mark_unread"), move |_, cx| {
                             let _ = unread_waku.update(cx, |waku, cx| {
-                                waku.mark_session_unread(session_id, cx);
+                                for target in &unread_targets {
+                                    waku.mark_session_unread(*target, cx);
+                                }
                             });
                         })
+                        .shortcut_action(&MarkSessionUnread)
                         .icon("icons/eye-off.svg"),
                         MenuItem::new(tr!("session.copy_working_directory"), move |_, cx| {
                             let _ = copy_waku.update(cx, |waku, cx| {
-                                waku.copy_session_working_directory(session_id, cx);
+                                waku.copy_sessions_working_directory(&copy_targets, cx);
                             });
                         })
                         .shortcut_action(&CopyWorkingDirectory)
@@ -3228,25 +3443,32 @@ impl Waku {
                         items.push(
                             MenuItem::new(tr!("session.move_to_worktree"), move |_, cx| {
                                 let _ = move_waku.update(cx, |waku, cx| {
-                                    waku.move_session_to_worktree(session_id, None, cx);
+                                    for target in &move_targets {
+                                        waku.move_session_to_worktree(*target, None, cx);
+                                    }
                                 });
                             })
                             .icon("icons/fork.svg")
-                            .disabled(!can_move),
+                            .disabled(!any_movable),
                         );
                     }
                     items.extend([
                         MenuItem::new(tr!("session.archive"), move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
-                                waku.archive_session_from_sidebar(session_id, window, cx)
+                                for target in &archive_targets {
+                                    waku.archive_session(*target, window, cx)
+                                }
                             });
                         })
                         .shortcut_action(&ArchiveSession)
                         .icon("icons/archive.svg"),
                         MenuItem::Separator,
                         MenuItem::new(tr!("common.remove"), move |window, cx| {
-                            let _ = remove_waku
-                                .update(cx, |waku, cx| waku.remove_session(session_id, window, cx));
+                            let _ = remove_waku.update(cx, |waku, cx| {
+                                for target in &remove_targets {
+                                    waku.remove_session(*target, window, cx)
+                                }
+                            });
                         })
                         .icon("icons/trash.svg"),
                     ]);
@@ -3563,11 +3785,11 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
-                this.archive_session_from_sidebar(session_id, window, cx);
+                this.archive_session(session_id, window, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.archive_session_from_sidebar(session_id, window, cx);
+                    this.archive_session(session_id, window, cx);
                     cx.stop_propagation();
                 }
             }));

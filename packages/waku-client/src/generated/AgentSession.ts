@@ -6,6 +6,7 @@ import type { ProviderKind } from "./ProviderKind";
 import type { ProviderResumeCursor } from "./ProviderResumeCursor";
 import type { QueuedMessage } from "./QueuedMessage";
 import type { ReportedCommand } from "./ReportedCommand";
+import type { RouteDecision } from "./RouteDecision";
 import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionStatus } from "./SessionStatus";
@@ -50,7 +51,19 @@ context_window?: string | null,
  * Currently populated by DeepSeek Harness, which locks this value once
  * conversation history exists.
  */
-agent_preset?: string | null, status: SessionStatus, created_at: number,
+agent_preset?: string | null,
+/**
+ * The draft's model selection is Auto: the first submission routes the
+ * task through the evaluation router instead of starting `provider`
+ * directly. Meaningless once the session has started — `route_decision`
+ * is the record of what routing chose.
+ */
+auto_route?: boolean,
+/**
+ * The routing decision that produced this session's provider and model.
+ * Present only on sessions that started through Auto.
+ */
+route_decision?: RouteDecision | null, status: SessionStatus, created_at: number,
 /**
  * Any mutation, including title edits and truncation. Use
  * [`Self::last_reply_at`] for conversation recency.
@@ -78,7 +91,12 @@ pinned_at?: number | null,
  * the workspace untouched until the user explicitly trusts them, and
  * the daemon refuses prompts while this is set.
  */
-quarantined?: boolean, provider_cursor: ProviderResumeCursor | null,
+quarantined?: boolean,
+/**
+ * When the session's workspace landed on its base branch, unix seconds.
+ * `None` while the session's work has not been landed through the app.
+ */
+landed_at?: number | null, provider_cursor: ProviderResumeCursor | null,
 /**
  * Slash commands the provider reported for this session's live process,
  * kept so a resumed session still completes them before its next

@@ -1,0 +1,1 @@
+- Archived chats now show a green checkmark and "Landed" label when their work was landed onto the base branch with `/land`

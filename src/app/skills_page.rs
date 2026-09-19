@@ -39,7 +39,10 @@ fn skill_icon(skill: &SkillEntry) -> &'static str {
     if skill.installs.len() > 1 {
         "icons/package.svg"
     } else {
-        skill_source_icon(skill.primary().source)
+        skill
+            .primary()
+            .map(|install| skill_source_icon(install.source))
+            .unwrap_or("icons/package.svg")
     }
 }
 
@@ -171,7 +174,9 @@ impl Waku {
         let mut hosts = HashMap::new();
         for key in keys {
             for skill in &self.skills_catalogs[&key].skills {
-                hosts.insert(skill.primary().dir.clone(), key);
+                if let Some(primary) = skill.primary() {
+                    hosts.insert(primary.dir.clone(), key);
+                }
                 skills.push(skill.clone());
             }
         }
@@ -231,7 +236,11 @@ impl Waku {
                 catalog
                     .skills
                     .iter()
-                    .find(|skill| skill.primary().dir == primary_dir)
+                    .find(|skill| {
+                        skill
+                            .primary()
+                            .is_some_and(|primary| primary.dir == primary_dir)
+                    })
             })
             .map(|skill| {
                 skill
@@ -253,7 +262,10 @@ impl Waku {
         if let Some(catalog) = self.skills_catalogs.get(&owner) {
             let mut updated = catalog.as_ref().clone();
             for skill in &mut updated.skills {
-                if skill.primary().dir == primary_dir {
+                if skill
+                    .primary()
+                    .is_some_and(|primary| primary.dir == primary_dir)
+                {
                     skill.enabled = enabled;
                     skill.row_key = skill.row_key.wrapping_add(1);
                     for install in &mut skill.installs {
@@ -300,7 +312,11 @@ impl Waku {
             catalog
                 .skills
                 .iter()
-                .find(|skill| skill.primary().dir == primary_dir)
+                .find(|skill| {
+                    skill
+                        .primary()
+                        .is_some_and(|primary| primary.dir == primary_dir)
+                })
                 .cloned()
         });
         let name = entry
@@ -337,7 +353,12 @@ impl Waku {
             let mut updated = catalog.as_ref().clone();
             updated
                 .skills
-                .retain(|skill| skill.primary().dir != primary_dir);
+                .retain(|skill| {
+                    skill
+                        .primary()
+                        .map(|primary| primary.dir != primary_dir)
+                        .unwrap_or(true)
+                });
             self.skills_catalogs.insert(owner, Rc::new(updated));
             self.rebuild_skills_catalog();
         }
@@ -403,7 +424,11 @@ impl Waku {
                 catalog
                     .skills
                     .get(*index)
-                    .is_some_and(|skill| &skill.primary().dir == selected)
+                    .is_some_and(|skill| {
+                        skill
+                            .primary()
+                            .is_some_and(|primary| &primary.dir == selected)
+                    })
             })
         });
         let Some(next) = next_picker_highlight(current, entries.len(), key) else {
@@ -413,7 +438,7 @@ impl Waku {
         let Some(skill) = catalog.skills.get(catalog_index) else {
             return;
         };
-        self.skills_selected = Some(skill.primary().dir.clone());
+        self.skills_selected = skill.primary().map(|primary| primary.dir.clone());
         self.skills_delete_arming = None;
         self.skills_detail_scroll.set_offset(gpui::Point::default());
         self.skills_list_state.scroll_to_reveal_item(row_index);
@@ -450,7 +475,11 @@ impl Waku {
                     catalog
                         .skills
                         .get(*index)
-                        .is_some_and(|skill| &&skill.primary().dir == selected)
+                        .is_some_and(|skill| {
+                            skill
+                                .primary()
+                                .is_some_and(|primary| &&primary.dir == selected)
+                        })
                 })
             })
             .cloned()
@@ -458,7 +487,9 @@ impl Waku {
                 indices
                     .first()
                     .and_then(|index| catalog.skills.get(*index))
-                    .map(|skill| skill.primary().dir.clone())
+                    .and_then(|skill| {
+                        skill.primary().map(|primary| primary.dir.clone())
+                    })
             });
         let rows = self.skills_rows_from(&catalog, &indices, effective.as_deref());
         self.sync_skills_rows(&rows);
@@ -467,7 +498,11 @@ impl Waku {
             catalog
                 .skills
                 .iter()
-                .find(|skill| &skill.primary().dir == dir)
+                .find(|skill| {
+                    skill
+                        .primary()
+                        .is_some_and(|primary| &primary.dir == dir)
+                })
         }) {
             self.render_skill_detail_pane(skill, &theme, cx)
                 .into_any_element()
@@ -747,7 +782,7 @@ impl Waku {
             rows.push(SkillsRow::Skill {
                 index,
                 row_key: skill.row_key,
-                selected: selected == Some(skill.primary().dir.as_path()),
+                selected: selected == skill.primary().map(|primary| primary.dir.as_path()),
             });
         }
         if let Some(start) = section_start {
@@ -849,7 +884,10 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let dir = skill.primary().dir.clone();
+        let Some(primary) = skill.primary() else {
+            return div().into_any_element();
+        };
+        let dir = primary.dir.clone();
         let enabled = skill.enabled;
         div()
             .w_full()
@@ -961,8 +999,11 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let dir = skill.primary().dir.clone();
-        let skill_file = skill.primary().skill_file.clone();
+        let Some(primary) = skill.primary() else {
+            return div();
+        };
+        let dir = primary.dir.clone();
+        let skill_file = primary.skill_file.clone();
         let enabled = skill.enabled;
         let armed = self.skills_delete_arming.as_ref() == Some(&dir);
 
@@ -1213,7 +1254,9 @@ impl Waku {
         let palette = MarkdownPalette::from_theme(theme);
         let document: Option<AnyElement> = (!skill.body.is_empty()).then(|| {
             let mut cache = self.skills_detail_markdown.borrow_mut();
-            let primary_dir = skill.primary().dir.clone();
+            let Some(primary_dir) = skill.primary().map(|primary| primary.dir.clone()) else {
+                return div().into_any_element();
+            };
             if !matches!(cache.as_ref(), Some((cached, _)) if cached == &primary_dir) {
                 *cache = Some((primary_dir, MarkdownView::new()));
             }

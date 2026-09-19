@@ -37,6 +37,7 @@ const APP_STATE_VERSION: u32 = 1;
 
 pub const DEFAULT_SIDEBAR_WIDTH: f32 = 252.0;
 pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
+pub const DEFAULT_GIT_PANEL_TOP_HEIGHT: f32 = 280.0;
 
 /// How the desktop groups task history in the sidebar.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -60,6 +61,35 @@ pub enum SidebarOrdering {
     /// The task's creation.
     #[serde(alias = "oldest")]
     LastCreated,
+}
+
+/// Where selection moves after the viewed task is archived.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveNavigation {
+    /// The topmost unread completion, then the idle rotation, then a fresh
+    /// task — the same landing GoToNextUnreadCompletion drains to.
+    #[default]
+    NextUnread,
+    /// The next non-busy session at-or-below the departed row's slot in
+    /// sidebar order, wrapping to the top.
+    NextSession,
+    /// The project's New task composer.
+    NewTask,
+}
+
+impl ArchiveNavigation {
+    pub const ALL: [Self; 3] = [Self::NextUnread, Self::NextSession, Self::NewTask];
+
+    /// The option names are sentences, so they localize like the setting's
+    /// own label.
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::NextUnread => "settings.archive_navigation_next_unread",
+            Self::NextSession => "settings.archive_navigation_next_session",
+            Self::NewTask => "settings.archive_navigation_new_task",
+        }
+    }
 }
 
 /// One of the bundled sounds the desktop can play when a task the user is
@@ -136,6 +166,14 @@ fn default_sidebar_transparency() -> bool {
     cfg!(target_os = "macos")
 }
 
+fn default_sidebar_transparency_amount() -> f32 {
+    DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
+}
+
+fn default_border_intensity() -> f32 {
+    DEFAULT_BORDER_INTENSITY
+}
+
 fn default_sidebar_shortcut_tags() -> bool {
     true
 }
@@ -162,6 +200,10 @@ fn default_sidebar_width() -> f32 {
 
 fn default_right_panel_width() -> f32 {
     DEFAULT_RIGHT_PANEL_WIDTH
+}
+
+fn default_git_panel_top_height() -> f32 {
+    DEFAULT_GIT_PANEL_TOP_HEIGHT
 }
 
 /// A daemon reachable over the network, shown in the same window as the
@@ -208,6 +250,48 @@ pub struct RememberedModelTraits {
     service_tier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     context_window: Option<String>,
+}
+
+/// A model+effort selection a session was actually started with, most recent
+/// first. The model picker reads list position as the recency rank.
+///
+/// `fast` is a remembered flag, not part of the entry's identity: starting a
+/// session with `model-effort` and later `model-effort-fast` updates the same
+/// slot rather than occupying two, so only the most recently used variant of
+/// an effort ever carries the rank.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RecentModelUse {
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
+    pub used_at: u64,
+}
+
+/// How many selections the picker keeps in its recent section.
+const RECENT_MODEL_USES_LIMIT: usize = 32;
+
+/// The remembered (effort, tier, window) triple for a provider/model, from a
+/// snapshot — the same lookup [`PersistedState::model_traits_for`] performs,
+/// usable where the whole state is not at hand.
+pub fn remembered_model_traits_for(
+    traits: &[RememberedModelTraits],
+    provider: ProviderKind,
+    model: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
+    traits
+        .iter()
+        .find(|traits| traits.provider == provider && traits.model == model)
+        .map(|traits| {
+            (
+                traits.reasoning_effort.clone(),
+                traits.service_tier.clone(),
+                traits.context_window.clone(),
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// Remote composer-draft proxy. Draft bytes and attachments remain owned by
@@ -384,6 +468,28 @@ fn collect_composer_draft_changes(
     }
 }
 
+/// A draft the user explicitly parked out of a composer, listed on the
+/// Drafts page until it is used or deleted. Unlike the automatic
+/// per-composer draft — which belongs to a session's slot and silently
+/// reappears there — a saved draft is named user data with its own
+/// lifetime, so it is app-local like the rest of `AppState`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SavedDraft {
+    pub id: Uuid,
+    /// The composer slot the text was written in: a started task, or a
+    /// project's new-task draft.
+    pub target: ComposerDraftTarget,
+    /// The owning task's project — the card's context label and the
+    /// fallback landing spot when `target`'s task no longer exists.
+    pub project_id: Uuid,
+    pub draft: ComposerDraft,
+    pub created_at: u64,
+    /// Hidden drafts leave the default list and the composer's count badge;
+    /// the page's Hidden view is the only way back to them.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub hidden: bool,
+}
+
 /// Last observed main-window frame in logical pixels. GPUI window bounds are
 /// relative to the display the window sits on, so the frame only means
 /// something together with `display` — the stable display UUID (Zed persists
@@ -410,6 +516,7 @@ pub struct PersistedWindowState {
 pub enum PersistedNavigationLocation {
     Task(Uuid),
     ProjectsPage(Uuid),
+    DraftsPage,
 }
 
 /// A virtualized list's logical scroll position — row index plus the pixel
@@ -546,6 +653,10 @@ pub struct AppSettings {
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
     pub sync_with_merge: bool,
+    /// A sync that stops on conflicts skips the Resolve-in-chat button and
+    /// starts a fresh chat on the checkout with the resolution prompt
+    /// already sent.
+    pub auto_resolve_in_chat: bool,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     pub new_worktree_default_branch: bool,
@@ -559,9 +670,18 @@ pub struct AppSettings {
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
+    /// How much of the vibrancy shows through the sidebar's tint when
+    /// `sidebar_transparency` is on: 0.0 is a solid fill, higher values let
+    /// more of the desktop blur through. Hand-edited values are clamped to
+    /// `MAX_SIDEBAR_TRANSPARENCY` when applied.
+    pub sidebar_transparency_amount: f32,
     /// Draw borders and separators a full pixel thick instead of the default
     /// half-pixel hairline.
     pub thick_borders: bool,
+    /// How strongly borders and separators read: 1.0 is the solved contrast
+    /// the palettes ship with, 0.0 erases the lines entirely. Hand-edited
+    /// values are clamped to `MAX_BORDER_INTENSITY` when applied.
+    pub border_intensity: f32,
     /// Solve border tiers against wider contrast floors, putting component
     /// outlines on WCAG's 3:1 non-text floor.
     pub high_contrast: bool,
@@ -571,6 +691,8 @@ pub struct AppSettings {
     /// Tag the sidebar's first tasks with their ⌘n chords while the shortcut
     /// modifier is held. The chords keep working with the tags off.
     pub sidebar_shortcut_tags: bool,
+    /// Where selection lands after the viewed task is archived.
+    pub archive_navigation: ArchiveNavigation,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -600,6 +722,13 @@ pub struct AppSettings {
     /// branches, issues, and pull requests in one place. Defaults on in
     /// debug builds.
     pub projects_page_enabled: bool,
+    /// Experimental: the Settings → Friends page and friend-to-friend file
+    /// transfers. Defaults on in debug builds.
+    pub friends_enabled: bool,
+    /// Experimental: Auto in the model picker routes a task's first prompt
+    /// through the daemon's evaluation model and starts on the resolved
+    /// provider/model. Defaults on in debug builds.
+    pub model_router_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -621,14 +750,18 @@ impl Default for AppSettings {
             show_response_token_speed: false,
             open_at_last_prompt: true,
             sync_with_merge: false,
+            auto_resolve_in_chat: false,
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
             sidebar_transparency: default_sidebar_transparency(),
+            sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
+            border_intensity: DEFAULT_BORDER_INTENSITY,
             high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
+            archive_navigation: ArchiveNavigation::default(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -639,6 +772,8 @@ impl Default for AppSettings {
             git_panel_enabled: default_experiment_enabled(),
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
+            friends_enabled: default_experiment_enabled(),
+            model_router_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -649,6 +784,17 @@ pub const DEFAULT_CODE_FONT_SIZE: f32 = 13.0;
 pub const DEFAULT_COMPLETION_SOUND_VOLUME: f32 = 1.0;
 /// The completion sound's relative volume tops out at twice its recorded level.
 pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
+/// Fraction of the Sidebar vibrancy let through the sidebar's tint by
+/// default — visible without competing with row text.
+pub const DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT: f32 = 0.25;
+/// The vibrancy past ~60% of the mix starts losing text legibility on busy
+/// backdrops, so the slider stops there.
+pub const MAX_SIDEBAR_TRANSPARENCY: f32 = 0.6;
+/// Border weight out of the box: visibly fainter than the solved floors the
+/// slider's 100% restores — chrome stays quiet by default.
+pub const DEFAULT_BORDER_INTENSITY: f32 = 0.6;
+/// The slider tops out at the palettes' authored border contrast.
+pub const MAX_BORDER_INTENSITY: f32 = 1.0;
 
 /// Bounds a possibly hand-edited font size to something the layout survives.
 fn sanitized_font_size(size: f32, fallback: f32) -> f32 {
@@ -682,6 +828,24 @@ pub fn sanitized_completion_sound_volume(volume: f32) -> f32 {
     }
 }
 
+/// Bounds a possibly hand-edited amount to the slider's range.
+pub fn sanitized_sidebar_transparency_amount(amount: f32) -> f32 {
+    if amount.is_finite() {
+        amount.clamp(0.0, MAX_SIDEBAR_TRANSPARENCY)
+    } else {
+        DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
+    }
+}
+
+/// Bounds a possibly hand-edited intensity to the slider's range.
+pub fn sanitized_border_intensity(intensity: f32) -> f32 {
+    if intensity.is_finite() {
+        intensity.clamp(0.0, MAX_BORDER_INTENSITY)
+    } else {
+        DEFAULT_BORDER_INTENSITY
+    }
+}
+
 /// A blank family name is no choice at all — treat it as unset so a
 /// whitespace-only `app.json` value still resolves to the default face.
 /// An unknown name is kept: font resolution falls back per glyph anyway.
@@ -705,6 +869,10 @@ struct AppState {
     unseen_completions: HashMap<Uuid, u64>,
     #[serde(default = "default_provider")]
     last_provider: ProviderKind,
+    /// The last model pick was the router's Auto row — the next draft keeps
+    /// Auto selected instead of inheriting the routed provider/model.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    last_auto_route: bool,
     #[serde(default)]
     last_runtime_mode: RuntimeMode,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
@@ -719,6 +887,8 @@ struct AppState {
     last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_model_uses: Vec<RecentModelUse>,
     /// The workspace mode last chosen for a draft in each project, applied
     /// to that project's next fresh task.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -764,6 +934,9 @@ struct AppState {
     right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fullscreen_surface: Option<PersistedFullscreenSurface>,
+    /// Drafts parked from a composer via "Create draft", newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    saved_drafts: Vec<SavedDraft>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -783,6 +956,10 @@ pub struct PersistedState {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub unseen_completions: HashMap<Uuid, u64>,
     pub last_provider: ProviderKind,
+    /// The last model pick was the router's Auto row — the next draft keeps
+    /// Auto selected instead of inheriting the routed provider/model.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub last_auto_route: bool,
     #[serde(default)]
     pub last_runtime_mode: RuntimeMode,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
@@ -797,6 +974,8 @@ pub struct PersistedState {
     pub last_context_window: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remembered_model_traits: Vec<RememberedModelTraits>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_model_uses: Vec<RecentModelUse>,
     /// The workspace mode last chosen for a draft in each project, applied
     /// to that project's next fresh task. Only `Local` and `NewWorktree`
     /// are stored; a materialized worktree is a result, not a choice.
@@ -835,6 +1014,11 @@ pub struct PersistedState {
     /// task area.
     #[serde(default)]
     pub sync_with_merge: bool,
+    /// A sync that stops on conflicts skips the Resolve-in-chat button and
+    /// starts a fresh chat on the checkout with the resolution prompt
+    /// already sent.
+    #[serde(default)]
+    pub auto_resolve_in_chat: bool,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     #[serde(default)]
@@ -851,10 +1035,18 @@ pub struct PersistedState {
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
     pub sidebar_transparency: bool,
+    /// How much of the vibrancy shows through the sidebar's tint when
+    /// `sidebar_transparency` is on.
+    #[serde(default = "default_sidebar_transparency_amount")]
+    pub sidebar_transparency_amount: f32,
     /// Draw borders and separators a full pixel thick instead of the default
     /// half-pixel hairline.
     #[serde(default)]
     pub thick_borders: bool,
+    /// How strongly borders and separators read: 1.0 is the solved contrast
+    /// the palettes ship with, 0.0 erases the lines entirely.
+    #[serde(default = "default_border_intensity")]
+    pub border_intensity: f32,
     /// Solve border tiers against wider contrast floors, putting component
     /// outlines on WCAG's 3:1 non-text floor.
     #[serde(default)]
@@ -867,6 +1059,9 @@ pub struct PersistedState {
     /// with their ⌘n chords. The chords keep working with the tags off.
     #[serde(default = "default_sidebar_shortcut_tags")]
     pub sidebar_shortcut_tags: bool,
+    /// Where selection lands after the viewed task is archived.
+    #[serde(default)]
+    pub archive_navigation: ArchiveNavigation,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -889,6 +1084,10 @@ pub struct PersistedState {
     pub github_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub projects_page_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub friends_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub model_router_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -908,6 +1107,10 @@ pub struct PersistedState {
     pub sidebar_ordering: SidebarOrdering,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
+    /// Height of the Git panel's top region — the commit box, or an open
+    /// commit's file tree — split from the commit log by a drag handle.
+    #[serde(default = "default_git_panel_top_height")]
+    pub git_panel_top_height: f32,
     /// Whether markdown files in the right panel open as a rendered preview
     /// instead of source. One global mode, not per file.
     #[serde(default)]
@@ -934,8 +1137,16 @@ pub struct PersistedState {
     pub right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fullscreen_surface: Option<PersistedFullscreenSurface>,
+    /// Drafts parked from a composer via "Create draft", newest first.
+    /// App-local — they persist through `AppState`, not the daemon.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_drafts: Vec<SavedDraft>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
+    /// Experimental opt-in gating Computer Use entirely. Daemon-owned;
+    /// mirrored here so clients can render the toggle and the gated page.
+    #[serde(default = "default_experiment_enabled")]
+    pub computer_use_experiment_enabled: bool,
     #[serde(default)]
     pub computer_use_allowed_apps: Vec<ComputerAppGrant>,
     #[serde(default)]
@@ -954,6 +1165,12 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render what will be injected.
     #[serde(default)]
     pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
+    /// Hosted evaluation-model settings. Daemon-owned; mirrored in memory so
+    /// the settings surface can read and edit it. Never written into the
+    /// client's own state — the credential-bearing document is the daemon's
+    /// `settings.json`.
+    #[serde(skip)]
+    pub eval: Option<waku_protocol::eval::EvalSettings>,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -993,6 +1210,7 @@ impl PersistedState {
             selected_session: None,
             unseen_completions: HashMap::new(),
             last_provider: ProviderKind::Codex,
+            last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
             last_sandboxed: false,
             last_model: None,
@@ -1000,6 +1218,7 @@ impl PersistedState {
             last_service_tier: None,
             last_context_window: None,
             remembered_model_traits: Vec::new(),
+            recent_model_uses: Vec::new(),
             project_workspaces: HashMap::new(),
             favorite_models: Vec::new(),
             theme: ThemeSettings::default(),
@@ -1013,14 +1232,18 @@ impl PersistedState {
             show_response_token_speed: false,
             open_at_last_prompt: true,
             sync_with_merge: false,
+            auto_resolve_in_chat: false,
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
             sidebar_transparency: default_sidebar_transparency(),
+            sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
+            border_intensity: DEFAULT_BORDER_INTENSITY,
             high_contrast: false,
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
+            archive_navigation: ArchiveNavigation::default(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1031,6 +1254,8 @@ impl PersistedState {
             git_panel_enabled: default_experiment_enabled(),
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
+            friends_enabled: default_experiment_enabled(),
+            model_router_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1039,6 +1264,7 @@ impl PersistedState {
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            git_panel_top_height: DEFAULT_GIT_PANEL_TOP_HEIGHT,
             markdown_preview: false,
             window_state: None,
             navigation_back: Vec::new(),
@@ -1049,7 +1275,9 @@ impl PersistedState {
             settings_page: None,
             right_panel_sessions: HashMap::new(),
             fullscreen_surface: None,
+            saved_drafts: Vec::new(),
             computer_use_enabled: false,
+            computer_use_experiment_enabled: default_experiment_enabled(),
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
@@ -1057,6 +1285,7 @@ impl PersistedState {
             agent_settings_enabled: true,
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
+            eval: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -1078,6 +1307,9 @@ impl PersistedState {
         let mut session = AgentSession::new(project_id, provider);
         session.runtime_mode = self.last_runtime_mode;
         session.sandboxed = self.last_sandboxed;
+        // An Auto pick carries to the next draft like the provider/model do;
+        // the seeded provider/model stay as the route's last-used hint.
+        session.auto_route = self.last_auto_route && self.model_router_enabled;
         if provider == self.last_provider {
             session.model.clone_from(&self.last_model);
             session
@@ -1183,22 +1415,65 @@ impl PersistedState {
         provider: ProviderKind,
         model: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        self.remembered_model_traits
-            .iter()
-            .find(|traits| traits.provider == provider && traits.model == model)
-            .map(|traits| {
-                (
-                    traits.reasoning_effort.clone(),
-                    traits.service_tier.clone(),
-                    traits.context_window.clone(),
-                )
-            })
-            .unwrap_or_default()
+        remembered_model_traits_for(&self.remembered_model_traits, provider, model)
+    }
+
+    /// Every remembered triple, for callers that must look up a model they
+    /// do not know yet — a routed start resolves its target off-thread.
+    pub fn remembered_model_traits(&self) -> &[RememberedModelTraits] {
+        &self.remembered_model_traits
+    }
+
+    /// Moves `provider`/`model`/`effort` to the front of the recent list. The
+    /// fast flag keys nothing — a rerun of the same selection on the other
+    /// tier replaces the entry in place, so one effort slot ever holds rank.
+    pub fn record_model_use(
+        &mut self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<String>,
+        fast: bool,
+    ) {
+        if let Some(index) = self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider && use_.model == model && use_.effort == effort
+        }) {
+            self.recent_model_uses.remove(index);
+        }
+        self.recent_model_uses.insert(
+            0,
+            RecentModelUse {
+                provider,
+                model: model.to_owned(),
+                effort,
+                fast,
+                used_at: waku_protocol::model::unix_time(),
+            },
+        );
+        self.recent_model_uses.truncate(RECENT_MODEL_USES_LIMIT);
+    }
+
+    /// The row's recency rank, when this exact selection — fast flag included —
+    /// is the variant last started. The sibling tier carries no rank, so only
+    /// one of `effort` and `effort-fast` ever sorts into the recent section.
+    pub fn recent_model_rank(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+        effort: Option<&str>,
+        fast: bool,
+    ) -> Option<usize> {
+        self.recent_model_uses.iter().position(|use_| {
+            use_.provider == provider
+                && use_.model == model
+                && use_.effort.as_deref() == effort
+                && use_.fast == fast
+        })
     }
 
     pub fn daemon_settings(&self) -> DaemonSettings {
         DaemonSettings {
             computer_use_enabled: self.computer_use_enabled,
+            computer_use_experiment_enabled: self.computer_use_experiment_enabled,
             computer_use_allowed_apps: self.computer_use_allowed_apps.clone(),
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
@@ -1207,6 +1482,7 @@ impl PersistedState {
             subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
             custom_commands: self.custom_commands.clone(),
+            eval: self.eval.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -1216,11 +1492,8 @@ impl PersistedState {
     /// replaces the local mirror — including an empty list after another
     /// client or an agent removed the last one.
     pub fn apply_daemon_settings(&mut self, settings: DaemonSettings) {
-        // Computer Use is experimental, so a release build must not let a
-        // setting written by a development build leave this client believing
-        // it is on.
-        self.computer_use_enabled =
-            crate::computer_use::resolve_enabled(settings.computer_use_enabled);
+        self.computer_use_enabled = settings.computer_use_enabled;
+        self.computer_use_experiment_enabled = settings.computer_use_experiment_enabled;
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;
@@ -1229,6 +1502,7 @@ impl PersistedState {
         self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
         self.custom_commands = settings.custom_commands;
+        self.eval = settings.eval;
         self.daemon_settings_extra = settings.extra;
     }
 
@@ -1247,14 +1521,18 @@ impl PersistedState {
             show_response_token_speed: self.show_response_token_speed,
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
+            auto_resolve_in_chat: self.auto_resolve_in_chat,
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
             new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
             sidebar_transparency: self.sidebar_transparency,
+            sidebar_transparency_amount: self.sidebar_transparency_amount,
             thick_borders: self.thick_borders,
+            border_intensity: self.border_intensity,
             high_contrast: self.high_contrast,
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
+            archive_navigation: self.archive_navigation,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1265,6 +1543,8 @@ impl PersistedState {
             git_panel_enabled: self.git_panel_enabled,
             github_enabled: self.github_enabled,
             projects_page_enabled: self.projects_page_enabled,
+            friends_enabled: self.friends_enabled,
+            model_router_enabled: self.model_router_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1277,6 +1557,7 @@ impl PersistedState {
             selected_session: self.persistable_selected_session(),
             unseen_completions: self.unseen_completions.clone(),
             last_provider: self.last_provider,
+            last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
             last_sandboxed: self.last_sandboxed,
             last_model: self.last_model.clone(),
@@ -1284,6 +1565,7 @@ impl PersistedState {
             last_service_tier: self.last_service_tier.clone(),
             last_context_window: self.last_context_window.clone(),
             remembered_model_traits: self.remembered_model_traits.clone(),
+            recent_model_uses: self.recent_model_uses.clone(),
             project_workspaces: self.project_workspaces.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
@@ -1302,6 +1584,7 @@ impl PersistedState {
             settings_page: self.settings_page,
             right_panel_sessions: self.right_panel_sessions.clone(),
             fullscreen_surface: self.fullscreen_surface.clone(),
+            saved_drafts: self.saved_drafts.clone(),
         }
     }
 
@@ -1324,14 +1607,19 @@ impl PersistedState {
         self.show_response_token_speed = settings.show_response_token_speed;
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
+        self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
         self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
         self.sidebar_transparency = settings.sidebar_transparency;
+        self.sidebar_transparency_amount =
+            sanitized_sidebar_transparency_amount(settings.sidebar_transparency_amount);
         self.thick_borders = settings.thick_borders;
+        self.border_intensity = sanitized_border_intensity(settings.border_intensity);
         self.high_contrast = settings.high_contrast;
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
+        self.archive_navigation = settings.archive_navigation;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -1343,6 +1631,8 @@ impl PersistedState {
         self.git_panel_enabled = settings.git_panel_enabled;
         self.github_enabled = settings.github_enabled;
         self.projects_page_enabled = settings.projects_page_enabled;
+        self.friends_enabled = settings.friends_enabled;
+        self.model_router_enabled = settings.model_router_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 
@@ -1352,6 +1642,7 @@ impl PersistedState {
         self.selected_session = app_state.selected_session;
         self.unseen_completions = app_state.unseen_completions;
         self.last_provider = app_state.last_provider;
+        self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
         self.last_sandboxed = app_state.last_sandboxed;
         self.last_model = app_state.last_model;
@@ -1359,6 +1650,7 @@ impl PersistedState {
         self.last_service_tier = app_state.last_service_tier;
         self.last_context_window = app_state.last_context_window;
         self.remembered_model_traits = app_state.remembered_model_traits;
+        self.recent_model_uses = app_state.recent_model_uses;
         self.project_workspaces = app_state.project_workspaces;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
@@ -1377,6 +1669,7 @@ impl PersistedState {
         self.settings_page = app_state.settings_page;
         self.right_panel_sessions = app_state.right_panel_sessions;
         self.fullscreen_surface = app_state.fullscreen_surface;
+        self.saved_drafts = app_state.saved_drafts;
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {
@@ -1595,9 +1888,7 @@ impl StateStore {
             // `GODDARD_DATA_DIR` lets a second debug instance run beside the
             // first (friend-sharing smoke tests, isolated experiments)
             // without colliding on `temp/`.
-            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR")
-                .filter(|dir| !dir.is_empty())
-            {
+            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty()) {
                 return PathBuf::from(dir).join("app.db");
             }
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2068,6 +2359,69 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_transparency_amount_defaults_persists_and_clamps() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            defaults.sidebar_transparency_amount,
+            DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT
+        );
+        let mut state = PersistedState::empty();
+        state.sidebar_transparency_amount = 0.4;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(
+            settings["sidebar_transparency_amount"].as_f64().unwrap() as f32,
+            0.4
+        );
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_transparency_amount")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.sidebar_transparency_amount, 0.4);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(AppSettings {
+            sidebar_transparency_amount: 9.0,
+            ..Default::default()
+        });
+        assert_eq!(
+            restored.sidebar_transparency_amount,
+            MAX_SIDEBAR_TRANSPARENCY
+        );
+    }
+
+    #[test]
+    fn border_intensity_defaults_persists_and_clamps() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.border_intensity, DEFAULT_BORDER_INTENSITY);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.border_intensity, DEFAULT_BORDER_INTENSITY);
+        state.border_intensity = 0.25;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(
+            settings["border_intensity"].as_f64().unwrap() as f32,
+            0.25
+        );
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("border_intensity")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.border_intensity, 0.25);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(AppSettings {
+            border_intensity: 9.0,
+            ..Default::default()
+        });
+        assert_eq!(restored.border_intensity, MAX_BORDER_INTENSITY);
+    }
+
+    #[test]
     fn math_rendering_defaults_on_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(defaults.render_math);
@@ -2516,6 +2870,30 @@ mod tests {
         restore_task_state_skeletons(&mut sessions);
         assert!(!sessions[0].detail_loaded);
         assert!(sessions[0].has_started());
+    }
+
+    #[test]
+    fn auto_route_pick_seeds_the_next_draft() {
+        let mut state = PersistedState::empty();
+        state.model_router_enabled = true;
+        state.last_auto_route = true;
+
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.model_router_enabled = true;
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        assert!(restored.last_auto_route);
+
+        // The routed provider/model stay the draft's carryover hint; the
+        // Auto flag is what the picker selection restores.
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(session.auto_route);
+        assert_eq!(session.provider, ProviderKind::Claude);
+
+        // Without the experiment the remembered flag cannot arm a draft.
+        restored.model_router_enabled = false;
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(!session.auto_route);
     }
 }
 

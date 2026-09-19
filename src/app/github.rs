@@ -699,6 +699,32 @@ impl Waku {
         }
     }
 
+    /// Deep-link an issue's right-panel surface — the destination of the
+    /// issue-created toast's "View" and ⌘⌥I. Returns `false` when the
+    /// GitHub surface is off or the project is gone, so the caller can
+    /// fall back to the external URL.
+    pub(super) fn open_github_issue(
+        &mut self,
+        project_id: Uuid,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.state.github_enabled || !self.github_ensure_browser(project_id, window, cx) {
+            return false;
+        }
+        self.github_open_detail(
+            project_id,
+            GitHubDetailRef {
+                kind: GitHubItemKind::Issue,
+                number,
+            },
+            window,
+            cx,
+        );
+        true
+    }
+
     pub(super) fn github_close_detail(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         if let Some(browser) = self.github_browsers.get_mut(&project_id) {
             browser.detail = None;

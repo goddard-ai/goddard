@@ -218,6 +218,7 @@ struct StepState {
 struct TurnOutcome {
     success: bool,
     summary: Option<String>,
+    summary_i18n: Option<waku_protocol::WireTranslation>,
 }
 
 /// `session.execution.*` arms the outcome and then settles the turn. Settling
@@ -320,7 +321,11 @@ impl StreamState {
 
     fn arm(&mut self, success: bool, summary: Option<String>) {
         if let TurnState::Running { outcome } = &mut self.turn {
-            outcome.get_or_insert(TurnOutcome { success, summary });
+            outcome.get_or_insert(TurnOutcome {
+                success,
+                summary,
+                summary_i18n: None,
+            });
         }
     }
 
@@ -333,10 +338,12 @@ impl StreamState {
         let outcome = outcome.or(fallback).unwrap_or(TurnOutcome {
             success: true,
             summary: None,
+            summary_i18n: None,
         });
         let _ = events.send(DriverEvent::TurnFinished {
             success: outcome.success,
             summary: outcome.summary,
+            summary_i18n: outcome.summary_i18n,
         });
     }
 
@@ -1095,7 +1102,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                 }
                 Ok(None) => state.pending_input = None,
                 Err(error) => {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.provider_rejected_prompt_detail",
                         provider = "OpenCode 2",
                         error = error
@@ -1110,6 +1117,9 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                                 "errors.provider_start_turn",
                                 provider = "OpenCode 2"
                             )),
+                            summary_i18n: Some(
+                                localized!("errors.provider_start_turn", provider = "OpenCode 2").1,
+                            ),
                         }),
                     );
                 }
@@ -1117,9 +1127,12 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
         }
         DriverCommand::Steer(text) => {
             if matches!(state.turn, TurnState::Idle) {
+                let (reason, reason_i18n) =
+                    localized!("errors.provider_no_active_turn", provider = "OpenCode 2");
                 let _ = events.send(DriverEvent::SteerRejected {
                     message: text,
-                    reason: tr!("errors.provider_no_active_turn", provider = "OpenCode 2"),
+                    reason,
+                    reason_i18n: Some(reason_i18n),
                 });
                 return true;
             }
@@ -1150,14 +1163,14 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     });
                 }
                 Err(error) => {
-                    let _ = events.send(DriverEvent::SteerRejected {
-                        message: text,
-                        reason: tr!(
+                    let _ = events.send(DriverEvent::steer_rejected_keyed(
+                        text,
+                        localized!(
                             "errors.provider_rejected_steer",
                             provider = "OpenCode 2",
                             error = error
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -1166,7 +1179,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
             // inbox item landed, and `session.compaction.*` events carry the
             // rest — including a possible `failed` admission outcome.
             if let Err(error) = opencode2_api::compact(&endpoint, &worker.session_id) {
-                let _ = events.send(DriverEvent::Error(tr!(
+                let _ = events.send(DriverEvent::localized_error(localized!(
                     "errors.provider_rejected_compact",
                     provider = "OpenCode 2",
                     error = error
@@ -1175,7 +1188,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
         }
         DriverCommand::Cancel => {
             if let Err(error) = opencode2_api::interrupt(&endpoint, &worker.session_id) {
-                let _ = events.send(DriverEvent::Error(tr!(
+                let _ = events.send(DriverEvent::localized_error(localized!(
                     "errors.stop_provider",
                     provider = "OpenCode 2",
                     error = error
@@ -1200,7 +1213,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     &request_id,
                     reply,
                 ) {
-                    let _ = events.send(DriverEvent::Error(tr!(
+                    let _ = events.send(DriverEvent::localized_error(localized!(
                         "errors.answer_provider_permission",
                         provider = "OpenCode 2",
                         error = error
@@ -1219,7 +1232,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
             if let Err(error) =
                 opencode2_api::reply_form(&endpoint, &worker.session_id, &request_id, &answer)
             {
-                let _ = events.send(DriverEvent::Error(tr!(
+                let _ = events.send(DriverEvent::localized_error(localized!(
                     "errors.answer_provider_question",
                     provider = "OpenCode 2",
                     error = error
@@ -1333,7 +1346,7 @@ fn reconcile(worker: &Worker, state: &mut StreamState, generation: u64) {
         Ok(session) => Some(session),
         Err(error) if error.is_not_found() => {
             // A foreign client deleting this session is authoritative.
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.provider_reported_error",
                 provider = "OpenCode 2"
             )));
@@ -1413,6 +1426,7 @@ fn reconcile(worker: &Worker, state: &mut StreamState, generation: u64) {
             Some(TurnOutcome {
                 success: !failed,
                 summary: None,
+                summary_i18n: None,
             }),
         );
     }
@@ -1734,10 +1748,10 @@ fn handle_event(
             }
             // The app falls back to its own follow-up queue.
             if pending.steer {
-                let _ = events.send(DriverEvent::SteerRejected {
-                    message: pending.message.clone(),
-                    reason: tr!("errors.provider_rejected_prompt", provider = "OpenCode 2"),
-                });
+                let _ = events.send(DriverEvent::steer_rejected_keyed(
+                    pending.message.clone(),
+                    localized!("errors.provider_rejected_prompt", provider = "OpenCode 2"),
+                ));
             }
             state.pending_input = None;
         }
@@ -1837,13 +1851,19 @@ fn handle_event(
         // Activities, never user messages: a synthetic note is the harness
         // talking to the model, not the user.
         "session.synthetic" => {
-            let title = data
+            let (title, title_i18n) = match data
                 .get("description")
                 .or_else(|| data.get("text"))
                 .and_then(Value::as_str)
                 .map(str::to_owned)
-                .unwrap_or_else(|| tr!("activity.activity"));
-            let item = activity::tool_activity(
+            {
+                Some(title) => (title, None),
+                None => {
+                    let pair = localized!("activity.activity");
+                    (pair.0, Some(pair.1))
+                }
+            };
+            let mut item = activity::tool_activity(
                 data.get("id").and_then(Value::as_str).map(str::to_owned),
                 ActivityKind::Tool,
                 title,
@@ -1853,15 +1873,19 @@ fn handle_event(
                 false,
                 true,
             );
+            item.title_i18n = title_i18n;
             let _ = events.send(DriverEvent::RichActivity(item));
         }
         "session.skill.activated" => {
-            let title = data
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| tr!("activity.activity"));
-            let item = activity::tool_activity(
+            let (title, title_i18n) =
+                match data.get("name").and_then(Value::as_str).map(str::to_owned) {
+                    Some(title) => (title, None),
+                    None => {
+                        let pair = localized!("activity.activity");
+                        (pair.0, Some(pair.1))
+                    }
+                };
+            let mut item = activity::tool_activity(
                 data.get("id").and_then(Value::as_str).map(str::to_owned),
                 ActivityKind::Tool,
                 title,
@@ -1871,13 +1895,14 @@ fn handle_event(
                 false,
                 true,
             );
+            item.title_i18n = title_i18n;
             let _ = events.send(DriverEvent::RichActivity(item));
         }
         // Driver state only: the revert edge is what the rollback path reads,
         // and it is not transcript content.
         "session.revert.staged" | "session.revert.cleared" | "session.revert.committed" => {}
         "session.deleted" => {
-            let _ = events.send(DriverEvent::Error(tr!(
+            let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.provider_reported_error",
                 provider = "OpenCode 2"
             )));
@@ -2144,11 +2169,17 @@ fn retry_activity(kind: &str, data: &Value, state: &StreamState, events: &impl D
     if kind == "session.status" && data.get("type").and_then(Value::as_str) != Some("retry") {
         return;
     }
-    let title = data
+    let (title, title_i18n) = match data
         .pointer("/action/title")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .unwrap_or_else(|| tr!("activity.provider_retrying"));
+    {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("activity.provider_retrying");
+            (pair.0, Some(pair.1))
+        }
+    };
     // The reason travels as TEXT, never as colour alone.
     let detail = data
         .pointer("/action/message")
@@ -2156,7 +2187,7 @@ fn retry_activity(kind: &str, data: &Value, state: &StreamState, events: &impl D
         .and_then(Value::as_str)
         .map(str::to_owned);
     let detail = detail.map(Value::String);
-    let item = activity::tool_activity(
+    let mut item = activity::tool_activity(
         // One row, upserted: a retry that escalates must not stack rows.
         Some(format!("retry:{}", state.session_id)),
         ActivityKind::Tool,
@@ -2167,6 +2198,7 @@ fn retry_activity(kind: &str, data: &Value, state: &StreamState, events: &impl D
         false,
         false,
     );
+    item.title_i18n = title_i18n;
     let _ = events.send(DriverEvent::RichActivity(item));
 }
 
@@ -2177,15 +2209,15 @@ fn compaction_activity(
     complete: bool,
     failed: bool,
 ) {
-    let title = if failed {
-        tr!("activity.compaction_failed")
+    let (title, title_i18n) = if failed {
+        localized!("activity.compaction_failed")
     } else if complete {
-        tr!("activity.compacted_context")
+        localized!("activity.compacted_context")
     } else {
-        tr!("activity.compacting_context")
+        localized!("activity.compacting_context")
     };
     let delta = delta.map(|delta| Value::String(delta.to_owned()));
-    let item = activity::tool_activity(
+    let mut item = activity::tool_activity(
         Some(format!("compaction:{}", state.session_id)),
         ActivityKind::Tool,
         title,
@@ -2195,6 +2227,7 @@ fn compaction_activity(
         failed,
         complete,
     );
+    item.title_i18n = Some(title_i18n);
     let _ = events.send(DriverEvent::RichActivity(item));
 }
 
@@ -2218,14 +2251,15 @@ fn shell_work(data: &Value, events: &impl DriverEventSink, running: bool) {
         (false, Some("timeout")) => BackgroundWorkStatus::Failed,
         (false, _) => BackgroundWorkStatus::Completed,
     };
-    let mut item = BackgroundWorkItem::new(
-        BackgroundWorkKind::Process,
-        id,
-        command
-            .clone()
-            .unwrap_or_else(|| tr!("activity.background_shell")),
-        status,
-    );
+    let (title, title_i18n) = match command.clone() {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("activity.background_shell");
+            (pair.0, Some(pair.1))
+        }
+    };
+    let mut item = BackgroundWorkItem::new(BackgroundWorkKind::Process, id, title, status);
+    item.title_i18n = title_i18n;
     item.background = true;
     item.command = command;
     item.control_id = Some(id.to_owned());
@@ -2438,43 +2472,57 @@ fn request_permission(
         request.permission.clone()
     };
     let resources = (!request.patterns.is_empty()).then(|| request.patterns.join(", "));
-    let _ = events.send(DriverEvent::Permission {
-        request_id: request_id.to_owned(),
-        title: resources.clone().unwrap_or_else(|| {
-            tr!(
+    let (title, title_i18n) = match &resources {
+        Some(resources) => (resources.clone(), None),
+        None => {
+            let pair = localized!(
                 "permission.allow_named_permission",
                 permission = action.as_str()
-            )
-        }),
-        detail: data
-            .get("message")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|message| !message.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| match resources {
-                Some(_) => tr!(
+            );
+            (pair.0, Some(pair.1))
+        }
+    };
+    let (detail, detail_i18n) = match data
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(str::to_owned)
+    {
+        Some(message) => (message, None),
+        None => {
+            let pair = match &resources {
+                Some(_) => localized!(
                     "permission.agent_asks_for_named_permission",
                     permission = action.as_str()
                 ),
-                None => tr!("permission.agent_asks_for_permission"),
-            }),
+                None => localized!("permission.agent_asks_for_permission"),
+            };
+            (pair.0, Some(pair.1))
+        }
+    };
+    let _ = events.send(DriverEvent::Permission {
+        request_id: request_id.to_owned(),
+        title,
+        title_i18n,
+        detail,
+        detail_i18n,
         options: vec![
-            PermissionOption {
-                id: "once".into(),
-                label: tr!("permission.allow_once"),
-                allow: true,
-            },
-            PermissionOption {
-                id: "always".into(),
-                label: tr!("permission.always_allow"),
-                allow: true,
-            },
-            PermissionOption {
-                id: "reject".into(),
-                label: tr!("common.deny"),
-                allow: false,
-            },
+            PermissionOption::keyed(
+                "once",
+                localized!("permission.allow_once"),
+                true,
+            ),
+            PermissionOption::keyed(
+                "always",
+                localized!("permission.always_allow"),
+                true,
+            ),
+            PermissionOption::keyed(
+                "reject",
+                localized!("common.deny"),
+                false,
+            ),
         ],
     });
 }
@@ -2797,8 +2845,8 @@ mod tests {
             &seen[2],
             DriverEvent::TurnFinished {
                 success: false,
-                summary: Some(summary)
-            } if summary == "provider refused"
+                summary: Some(summary),
+                    summary_i18n: None,} if summary == "provider refused"
         ));
         assert_eq!(seen.len(), 3);
     }
@@ -2826,7 +2874,8 @@ mod tests {
         cancelled.feed(json!({"type": "session.idle", "data": {}}));
         assert!(matches!(
             &cancelled.drain()[1],
-            DriverEvent::TurnFinished { success: false, summary: Some(summary) } if summary == "user"
+            DriverEvent::TurnFinished { success: false, summary: Some(summary),
+                    summary_i18n: None,} if summary == "user"
         ));
     }
 
@@ -3173,7 +3222,7 @@ mod tests {
         harness.feed(json!({"type": "session.input.cancelled", "data": {"sessionID": "ses_1", "id": "msg_1"}}));
         assert!(matches!(
             harness.drain().as_slice(),
-            [DriverEvent::SteerRejected { message, .. }] if message == "keep going"
+            [DriverEvent::SteerRejected { message, ..}] if message == "keep going"
         ));
         assert!(harness.state.pending_input.is_none());
     }
@@ -3183,7 +3232,7 @@ mod tests {
         let mut harness = Harness::new(RuntimeMode::FullAccess);
         harness.feed(json!({"type": "session.deleted", "data": {"sessionID": "ses_1"}}));
         let seen = harness.drain();
-        assert!(matches!(&seen[0], DriverEvent::Error(_)));
+        assert!(matches!(&seen[0], DriverEvent::LocalizedError { .. }));
         assert!(matches!(&seen[1], DriverEvent::ProcessExited));
         assert_eq!(seen.len(), 2);
     }

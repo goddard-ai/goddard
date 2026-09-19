@@ -251,7 +251,7 @@ impl DaemonClient {
         }
         match response_rx.recv_timeout(REQUEST_TIMEOUT) {
             Ok(Ok(payload)) => Ok(payload),
-            Ok(Err(error)) => Err(anyhow!(error.message)),
+            Ok(Err(error)) => Err(anyhow!(error.localized_message())),
             Err(error) => {
                 self.inner.pending.lock().remove(&request_id);
                 Err(anyhow!("timed out waiting for Goddard daemon: {error}"))
@@ -428,6 +428,7 @@ fn fail_connection(inner: &ClientInner) {
     for (_, response) in pending {
         let _ = response.send(Err(RpcError {
             message: "Goddard daemon disconnected".into(),
+            i18n: None,
         }));
     }
     // Closing the desktop transport is not evidence that a daemon-owned

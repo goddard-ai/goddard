@@ -27,6 +27,7 @@ impl From<ComposerDraftAnnotationSpan> for Span {
             range: span.start..span.end,
             text: Rc::from(span.text),
             block_break: span.block_break,
+            copy: Rc::default(),
         }
     }
 }

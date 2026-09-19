@@ -6,6 +6,17 @@ use super::*;
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
 const REVIEW_DIFF_FILE_HEADER_HEIGHT: f32 = 36.0;
 
+/// Image-preview zoom is image-pixels → screen-pixels. The bounds mirror
+/// Zed's image viewer, widened downward so tall thumbnails can shrink to
+/// fit narrow panes.
+const FILE_IMAGE_MIN_ZOOM: f32 = 0.05;
+const FILE_IMAGE_MAX_ZOOM: f32 = 32.0;
+/// Wheel deltas arrive in pixels on macOS; line-based wheels (Windows,
+/// Linux) use the same 20px-per-line convention as Zed.
+const FILE_IMAGE_SCROLL_LINE_PX: f32 = 20.0;
+/// ⌘+scroll zoom sensitivity: a 100px wheel tick scales by ~2.7×.
+const FILE_IMAGE_ZOOM_PER_PIXEL: f32 = 0.01;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct WorkingTreeEntry {
     relative_path: String,
@@ -560,6 +571,7 @@ fn review_diff_flat_text(
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
         math: None,
+        copy: Rc::default(),
     }
 }
 
@@ -1938,18 +1950,22 @@ impl Waku {
     }
 
     pub(super) fn store_selected_right_panel_state(&mut self) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
         let state = self.take_active_right_panel_state();
-        self.right_panel_session_states.insert(session_id, state);
+        // A session parks under its id; with none selected the active strip
+        // belongs to the detached context — a full-width terminal or the
+        // Projects page — and parks in its own slot.
+        if let Some(session_id) = self.state.selected_session {
+            self.right_panel_session_states.insert(session_id, state);
+        } else {
+            self.right_panel_detached_state = state;
+        }
     }
 
-    pub(super) fn restore_right_panel_state(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let state = RightPanelSessionState::take_or_closed(
-            &mut self.right_panel_session_states,
-            session_id,
-        );
+    pub(super) fn restore_right_panel_state(
+        &mut self,
+        state: RightPanelSessionState,
+        cx: &mut Context<Self>,
+    ) {
         self.replace_active_right_panel_state(state);
         // The draft restored ahead of this swap holds the session's file
         // annotations. Hand each returning editor its share; an editor whose
@@ -2102,7 +2118,11 @@ impl Waku {
     /// another session's strip would show the same item. The active strip's
     /// copy — if any — is the caller's to handle.
     pub(super) fn remove_parked_github_surfaces(&mut self, project_id: Uuid) {
-        for state in self.right_panel_session_states.values_mut() {
+        for state in self
+            .right_panel_session_states
+            .values_mut()
+            .chain(std::iter::once(&mut self.right_panel_detached_state))
+        {
             let Some(index) = state.surfaces.iter().position(
                 |surface| matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id),
             ) else {
@@ -2284,12 +2304,10 @@ impl Waku {
         }
         if let Some(terminal_id) = surface.terminal_id() {
             self.ensure_right_panel_terminal(terminal_id, cx);
-            self.register_terminal(
-                terminal_id,
-                self.state.selected_session,
-                self.selected_workspace_path()
-                    .map(std::path::Path::to_path_buf),
-            );
+            // A strip terminal carries no directory of its own — `None`
+            // resolves to the owning session's workspace at spawn, and the
+            // terminal follows the workspace when it moves.
+            self.register_terminal(terminal_id, self.state.selected_session, None);
         }
         // Browser views are created on the surface's first render, which has
         // the `Window` their webview must attach to.
@@ -2637,6 +2655,12 @@ impl Waku {
                     .iter()
                     .filter_map(RightPanelSurface::browser_id)
             }))
+            .chain(
+                self.right_panel_detached_state
+                    .surfaces
+                    .iter()
+                    .filter_map(RightPanelSurface::browser_id),
+            )
             .collect::<HashSet<_>>();
         self.right_panel_browsers
             .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
@@ -2906,9 +2930,22 @@ impl Waku {
     }
 
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        // Where the terminal belongs: the directory its record carries — a
+        // cwd the caller chose — or the workspace it tracks. `None` falls
+        // through to the selected session's workspace, which also covers a
+        // surface not registered yet.
+        let workspace_bound = self
+            .terminal_records
+            .get(&terminal_id)
+            .is_some_and(|record| record.working_directory.is_none());
         let Some(working_directory) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
+            .terminal_records
+            .get(&terminal_id)
+            .and_then(|record| self.terminal_spawn_directory(record))
+            .or_else(|| {
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf)
+            })
         else {
             self.right_panel_terminals.remove(&terminal_id);
             return;
@@ -2921,20 +2958,29 @@ impl Waku {
             return;
         }
         if !working_directory.is_dir() {
-            // The workspace is gone — typically an archived session's
+            // The directory is gone — typically an archived session's
             // worktree awaiting restore. A PTY launched now would fall back
             // to the filesystem root and, once the directory returns, look
-            // current to `matches_project` while its shell sits in the
+            // current to the spawn check while its shell sits in the
             // wrong place. The restore's completion re-runs this ensure.
             self.right_panel_terminals.remove(&terminal_id);
             return;
         }
-        let matches_project = self
+        let spawned_at = self
             .right_panel_terminals
             .get(&terminal_id)
-            .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
-        if !matches_project {
-            self.spawn_terminal_entity(terminal_id, working_directory, cx);
+            .map(|terminal| terminal.read(cx).spawn_directory().to_path_buf());
+        match spawned_at {
+            None => self.spawn_terminal_entity(terminal_id, working_directory, cx),
+            // A workspace-tracking terminal follows the workspace when it
+            // moves — the spawn directory is the test, never the live cwd,
+            // so a `cd` inside the shell can't read as a move and kill the
+            // PTY. A terminal spawned at a recorded directory stays where
+            // it was put.
+            Some(spawned_at) if workspace_bound && spawned_at != working_directory => {
+                self.spawn_terminal_entity(terminal_id, working_directory, cx)
+            }
+            Some(_) => {}
         }
     }
 
@@ -3943,6 +3989,10 @@ impl Waku {
                 dirty: false,
                 text_loaded: false,
                 image: None,
+                image_zoom: 0.0,
+                image_pan_y: px(0.0),
+                image_viewport: None,
+                image_natural: None,
                 show_source: false,
                 reading: false,
                 read_epoch: 0,
@@ -4363,6 +4413,12 @@ impl Waku {
     /// `ReadBinaryFile` and wrapped as a `gpui::Image` off the UI thread. The
     /// frame path reads only the editor entry — `None` is "still loading"
     /// and a stored error is the fallback, never a reason to re-request.
+    ///
+    /// The viewport pans vertically and zooms on ⌘+scroll. It is a manual
+    /// pan, not a GPUI scroll region: panning is one-dimensional, so a
+    /// `ScrollHandle`'s clamp-and-offset bookkeeping would only add a second
+    /// axis to get wrong. Position is computed in `canvas` prepaint, where
+    /// the pane's bounds and the decoded pixel size are both known.
     fn render_file_image_preview(&mut self, relative_path: &str, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let image = self
@@ -4383,30 +4439,100 @@ impl Waku {
         };
 
         let body: AnyElement = match image {
-            Some(Ok(image)) => div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(16.0))
-                .child(
-                    img(image)
-                        .size_full()
-                        .object_fit(ObjectFit::Contain)
-                        .with_fallback(move || {
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .gap(px(8.0))
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_tertiary)
-                                .child(icon("icons/alert.svg", 18.0, theme.text_tertiary))
-                                .child(tr_cow!("attachments.preview_unavailable"))
-                                .into_any_element()
-                        }),
-                )
-                .into_any_element(),
+            Some(Ok(image)) => {
+                let path = relative_path.to_owned();
+                let entity = cx.entity();
+                let entity_id = entity.entity_id();
+                let weak = entity.downgrade();
+                div()
+                    .id("file-image-viewport")
+                    .size_full()
+                    .overflow_hidden()
+                    .cursor_default()
+                    .on_scroll_wheel({
+                        let path = path.clone();
+                        let weak = weak.clone();
+                        move |event: &gpui::ScrollWheelEvent, _, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.handle_file_image_scroll(entity_id, &path, event, cx)
+                            });
+                        }
+                    })
+                    .child(canvas(
+                        move |bounds, window, cx| {
+                            let natural = image
+                                .clone()
+                                .use_render_image(window, cx)
+                                .and_then(|render| {
+                                    let size = render.size(0);
+                                    (size.width.0 > 0 && size.height.0 > 0).then(|| {
+                                        (size.width.0 as f32, size.height.0 as f32)
+                                    })
+                                });
+                            weak.update(cx, |this, _| {
+                                let editor = this.right_panel_file_editors.get_mut(&path)?;
+                                editor.image_viewport = Some(bounds);
+                                editor.image_natural = natural;
+                                if editor.image_zoom == 0.0
+                                    && let Some((width, height)) = natural
+                                {
+                                    // First view fits the whole image, but
+                                    // never upscales past its pixel size.
+                                    editor.image_zoom = (f32::from(bounds.size.width) / width)
+                                        .min(f32::from(bounds.size.height) / height)
+                                        .min(1.0);
+                                }
+                                let (width, height) = natural?;
+                                let scaled_w = px(width * editor.image_zoom);
+                                let scaled_h = px(height * editor.image_zoom);
+                                let left = (bounds.size.width - scaled_w) / 2.0;
+                                let top = if scaled_h > bounds.size.height {
+                                    editor
+                                        .image_pan_y
+                                        .clamp(bounds.size.height - scaled_h, px(0.0))
+                                } else {
+                                    (bounds.size.height - scaled_h) / 2.0
+                                };
+                                Some((left, top, scaled_w, scaled_h))
+                            })
+                            .ok()
+                            .flatten()
+                            .map(|(left, top, width, height)| {
+                                let mut element = div()
+                                    .size_full()
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .left(left)
+                                            .top(top)
+                                            .w(width)
+                                            .h(height)
+                                            .child(
+                                                img(image.clone())
+                                                    .id(SharedString::from(format!(
+                                                        "file-image-{path}"
+                                                    )))
+                                                    .size_full(),
+                                            ),
+                                    )
+                                    .into_any_element();
+                                element.prepaint_as_root(
+                                    bounds.origin,
+                                    bounds.size.into(),
+                                    window,
+                                    cx,
+                                );
+                                element
+                            })
+                        },
+                        |_, element, window, cx| {
+                            if let Some(mut element) = element {
+                                element.paint(window, cx);
+                            }
+                        },
+                    ))
+                    .into_any_element()
+            }
             Some(Err(error)) => message(error).into_any_element(),
             None => message(tr!("files.loading_file")).into_any_element(),
         };
@@ -4417,6 +4543,62 @@ impl Waku {
             .min_h_0()
             .bg(theme.surface)
             .child(body)
+    }
+
+    /// Wheel handling for the image viewport: ⌘/Ctrl+scroll zooms around the
+    /// cursor, a bare scroll pans vertically. The event is always consumed —
+    /// a short image dead-zoning the transcript's scroll would feel broken.
+    fn handle_file_image_scroll(
+        &mut self,
+        entity_id: EntityId,
+        relative_path: &str,
+        event: &gpui::ScrollWheelEvent,
+        cx: &mut App,
+    ) {
+        cx.stop_propagation();
+        let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) else {
+            return;
+        };
+        let (Some(bounds), Some((_, natural_h))) = (editor.image_viewport, editor.image_natural)
+        else {
+            return;
+        };
+        let delta_y = match event.delta {
+            gpui::ScrollDelta::Pixels(delta) => f32::from(delta.y),
+            gpui::ScrollDelta::Lines(lines) => lines.y * FILE_IMAGE_SCROLL_LINE_PX,
+        };
+        let viewport_h = f32::from(bounds.size.height);
+        if event.modifiers.platform || event.modifiers.control {
+            let old_zoom = editor.image_zoom.max(0.001);
+            let zoom_factor = if delta_y > 0.0 {
+                1.0 + delta_y * FILE_IMAGE_ZOOM_PER_PIXEL
+            } else {
+                1.0 / (1.0 - delta_y * FILE_IMAGE_ZOOM_PER_PIXEL)
+            };
+            let new_zoom = (old_zoom * zoom_factor).clamp(FILE_IMAGE_MIN_ZOOM, FILE_IMAGE_MAX_ZOOM);
+            // Keep the image point under the cursor fixed: the content offset
+            // at the cursor scales by the zoom ratio.
+            let scaled_old = natural_h * old_zoom;
+            let top_old = if scaled_old > viewport_h {
+                f32::from(editor.image_pan_y)
+            } else {
+                (viewport_h - scaled_old) / 2.0
+            };
+            let cursor_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
+            let scaled_new = natural_h * new_zoom;
+            let top = cursor_y - (cursor_y - top_old) * (new_zoom / old_zoom);
+            editor.image_zoom = new_zoom;
+            editor.image_pan_y = px(top.clamp((viewport_h - scaled_new).min(0.0), 0.0));
+        } else {
+            let scaled_h = natural_h * editor.image_zoom.max(0.001);
+            if scaled_h <= viewport_h {
+                return;
+            }
+            editor.image_pan_y = px(
+                (f32::from(editor.image_pan_y) + delta_y).clamp(viewport_h - scaled_h, 0.0),
+            );
+        }
+        cx.notify(entity_id);
     }
 
     /// The maximized panel layer is on screen this frame — the mode is
@@ -4479,6 +4661,7 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
+        let fullscreen = self.panel_fullscreen_active();
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
             *cache = Some((relative_path.to_owned(), MarkdownView::new()));
@@ -4527,11 +4710,20 @@ impl Waku {
                     .child(md::render::frame_reset(self.file_preview_selection.clone()))
                     .child(
                         div()
-                            .px(px(16.0))
-                            .pt(px(14.0))
-                            .pb(px(24.0))
-                            .text_color(theme.text)
-                            .children(document),
+                            .when(fullscreen, |element| {
+                                element.w_full().flex().justify_center()
+                            })
+                            .child(
+                                div()
+                                    .when(fullscreen, |element| {
+                                        element.w_full().max_w(px(CONTENT_MAX_WIDTH)).min_w_0()
+                                    })
+                                    .px(px(16.0))
+                                    .pt(px(14.0))
+                                    .pb(px(24.0))
+                                    .text_color(theme.text)
+                                    .children(document),
+                            ),
                     ),
             )
             .child(selection_input)
@@ -4571,10 +4763,13 @@ impl Waku {
     pub(super) fn save_right_panel_file_action(
         &mut self,
         _: &SaveFile,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // ⌘S doubles as "Sync branch…" outside the file editor: with no file
+        // surface active the chord opens the branch picker instead.
         let Some(relative_path) = self.visible_right_panel_file_path() else {
+            self.open_sync_branch(window, cx);
             return;
         };
         let Some(project_path) = self

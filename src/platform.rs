@@ -292,7 +292,7 @@ fn completion_sound_data(sound: waku_client::persistence::CompletionSound) -> &'
 #[cfg(target_os = "macos")]
 fn completion_sound_gain(sound: waku_client::persistence::CompletionSound) -> f32 {
     match sound {
-        waku_client::persistence::CompletionSound::Retro => 0.8,
+        waku_client::persistence::CompletionSound::Retro => 0.5,
         _ => 1.0,
     }
 }
@@ -619,6 +619,23 @@ pub fn hide_window(window: &mut Window) {
 thread_local! {
     static SIDEBAR_TINT_VIEW: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSView>>> =
         const { std::cell::RefCell::new(None) };
+    static SIDEBAR_GLASS_VIEW: std::cell::RefCell<
+        Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
+    > = const { std::cell::RefCell::new(None) };
+    static COMPOSER_GLASS_VIEW: std::cell::RefCell<
+        Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
+    > = const { std::cell::RefCell::new(None) };
+    static COMPOSER_GLASS_BOUNDS: std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>> =
+        const { std::cell::Cell::new(None) };
+    static COMPOSER_GLASS_PROBE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static COMPOSER_GLASS_SYNCED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// NSGlassEffectView ships with macOS 26; the class lookup is the availability
+/// check, so older systems keep the vibrancy + tint path untouched.
+#[cfg(target_os = "macos")]
+fn glass_effect_supported() -> bool {
+    objc2::runtime::AnyClass::get(c"NSGlassEffectView").is_some()
 }
 
 #[cfg(target_os = "macos")]
@@ -651,15 +668,20 @@ pub fn titlebar_double_click(window: &Window) {
 /// Metal target to blend two translucent quads. The semantic tint is a native
 /// view above active Sidebar vibrancy, painted with the active theme's solid
 /// sidebar color; GPUI paints clear sidebar chrome and one translucent
-/// interaction layer above it. With `transparent` off the effect view stops
-/// rendering and the tint view hides; GPUI's sidebar fill is opaque by then
-/// and covers the strip itself.
+/// interaction layer above it. On macOS 26 an `NSGlassEffectView` fills the
+/// same strip instead — its `tintColor` carries the theme wash, so the tint
+/// view hides. `transparency_amount` is the fraction of the material the tint
+/// lets through — 0 repaints the sidebar's solid color at full strength.
+/// With `transparent` off the effect view stops rendering and the tint and
+/// glass views hide; GPUI's sidebar fill is opaque by then and covers the
+/// strip itself.
 #[cfg(target_os = "macos")]
 pub fn configure_sidebar_material(
     window: &Window,
     sidebar: gpui::Hsla,
     dark: bool,
     transparent: bool,
+    transparency_amount: f32,
 ) {
     use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
@@ -728,7 +750,52 @@ pub fn configure_sidebar_material(
             return;
         }
 
-        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 0.92);
+        // `transparency_amount` is the fraction of vibrancy let through the
+        // tint; the settings slider clamps it to MAX_SIDEBAR_TRANSPARENCY.
+        let tint_opacity = 1.0 - f64::from(transparency_amount.clamp(0.0, 1.0));
+        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, tint_opacity);
+
+        // macOS 26 swaps the tint layer for a real liquid-glass surface:
+        // `tintColor` carries the same theme wash, so the separate tint view
+        // stays hidden on that path. Allocation itself is gated — the class
+        // is absent on older systems and `class!` would panic.
+        let glass_ok = glass_effect_supported();
+        let glass_active = transparent && glass_ok;
+        if glass_ok {
+            SIDEBAR_GLASS_VIEW.with_borrow_mut(|slot| {
+            let needs_new_view = slot.as_ref().is_none_or(|glass_view| {
+                glass_view
+                    .window()
+                    .as_deref()
+                    .is_none_or(|window| !std::ptr::eq(window, native_window.as_ref()))
+            });
+            if needs_new_view {
+                let mut frame = content_view.bounds();
+                frame.size.width = SIDEBAR_WIDTH;
+                let glass_view = objc2_app_kit::NSGlassEffectView::initWithFrame(
+                    objc2_app_kit::NSGlassEffectView::alloc(main_thread),
+                    frame,
+                );
+                glass_view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewHeightSizable);
+                // The strip reaches the window edge; a capsule radius would
+                // round the wrong corners.
+                glass_view.setCornerRadius(0.0);
+                content_view.addSubview_positioned_relativeTo(
+                    &glass_view,
+                    NSWindowOrderingMode::Below,
+                    Some(view),
+                );
+                *slot = Some(glass_view);
+            }
+
+            if let Some(glass_view) = slot.as_ref() {
+                glass_view.setHidden(!glass_active);
+                if glass_active {
+                    glass_view.setTintColor(Some(&tint));
+                }
+            }
+            });
+        }
 
         SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
@@ -752,7 +819,7 @@ pub fn configure_sidebar_material(
             }
 
             if let Some(tint_view) = slot.as_ref() {
-                tint_view.setHidden(!transparent);
+                tint_view.setHidden(!transparent || glass_active);
                 if let Some(layer) = tint_view.layer() {
                     layer.setBackgroundColor(Some(&tint.CGColor()));
                 }
@@ -762,7 +829,7 @@ pub fn configure_sidebar_material(
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool) {}
+pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool, _: f32) {}
 
 #[cfg(target_os = "macos")]
 pub fn set_sidebar_material_width(window: &Window, width: f32) {
@@ -798,11 +865,206 @@ pub fn set_sidebar_material_width(window: &Window, width: f32) {
             frame.size.width = width.into();
             tint_view.setFrame(frame);
         });
+        SIDEBAR_GLASS_VIEW.with_borrow(|slot| {
+            let Some(glass_view) = slot.as_ref().filter(|glass_view| {
+                glass_view
+                    .window()
+                    .as_deref()
+                    .is_some_and(|window| std::ptr::eq(window, native_window.as_ref()))
+            }) else {
+                return;
+            };
+            let mut frame = glass_view.frame();
+            frame.size.width = width.into();
+            glass_view.setFrame(frame);
+        });
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn set_sidebar_material_width(_: &Window, _: f32) {}
+
+/// Whether the composer card should paint clear and let a native
+/// `NSGlassEffectView` behind it carry the fill. `transparent` is the
+/// sidebar-transparency preference — one "let the desktop through" opt-in
+/// covers both surfaces.
+#[cfg(target_os = "macos")]
+pub fn composer_glass_enabled(transparent: bool) -> bool {
+    transparent && !reduce_transparency() && glass_effect_supported()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn composer_glass_enabled(_: bool) -> bool {
+    false
+}
+
+/// The composer card's bounds probe reports here every frame it paints — the
+/// same geometry-to-native-view handoff the browser surface's page canvas
+/// does. GPUI bounds are top-left origin in points; the AppKit frame wants
+/// bottom-left, so y flips against the content view's height.
+#[cfg(target_os = "macos")]
+fn composer_glass_frame(
+    content_height: f64,
+    bounds: gpui::Bounds<gpui::Pixels>,
+) -> objc2_foundation::NSRect {
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    let (x, y, w, h) = (
+        f64::from(f32::from(bounds.origin.x)),
+        f64::from(f32::from(bounds.origin.y)),
+        f64::from(f32::from(bounds.size.width)),
+        f64::from(f32::from(bounds.size.height)),
+    );
+    NSRect::new(
+        NSPoint::new(x, (content_height - y - h).max(0.0)),
+        NSSize::new(w, h),
+    )
+}
+
+/// The composer card's bounds probe calls this each paint while mounted.
+/// Bumping the generation marks "a composer painted this frame" — the
+/// per-render [`sync_composer_glass`] consumes it, since nothing runs when
+/// the card unmounts. The frame itself moves right away so the glass tracks
+/// the card inside the same scene commit.
+#[cfg(target_os = "macos")]
+pub fn report_composer_glass_bounds(window: &Window, bounds: gpui::Bounds<gpui::Pixels>) {
+    use objc2_app_kit::NSView;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    COMPOSER_GLASS_BOUNDS.with(|cell| cell.set(Some(bounds)));
+    COMPOSER_GLASS_PROBE.with(|cell| cell.set(cell.get() + 1));
+
+    // Until a sync has created the view there's nothing to reposition.
+    if COMPOSER_GLASS_VIEW.with(|slot| slot.borrow().is_none()) {
+        return;
+    }
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe {
+        let view = handle.ns_view.cast::<NSView>().as_ref();
+        let Some(native_window) = view.window() else {
+            return;
+        };
+        let Some(content_view) = native_window.contentView() else {
+            return;
+        };
+        COMPOSER_GLASS_VIEW.with_borrow(|slot| {
+            let Some(glass_view) = slot.as_ref().filter(|glass_view| {
+                glass_view
+                    .window()
+                    .as_deref()
+                    .is_some_and(|window| std::ptr::eq(window, native_window.as_ref()))
+            }) else {
+                return;
+            };
+            glass_view.setFrame(composer_glass_frame(
+                content_view.bounds().size.height,
+                bounds,
+            ));
+        });
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn report_composer_glass_bounds(_: &Window, _: gpui::Bounds<gpui::Pixels>) {}
+
+/// Per-render counterpart of [`configure_sidebar_material`], called beside
+/// `sync_browser_webviews`. `enabled` is [`composer_glass_enabled`] at render
+/// time; the probe generation tells a mounted card from a stale one — a
+/// composer that stopped painting leaves its last frame behind and must not
+/// keep the glass.
+#[cfg(target_os = "macos")]
+pub fn sync_composer_glass(
+    window: &Window,
+    tint: gpui::Hsla,
+    transparency_amount: f32,
+    enabled: bool,
+) {
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_app_kit::{NSColor, NSView, NSWindowOrderingMode};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let probe_fresh = COMPOSER_GLASS_PROBE.with(|cell| cell.get())
+        != COMPOSER_GLASS_SYNCED.with(|cell| cell.get());
+    COMPOSER_GLASS_SYNCED.with(|cell| cell.set(COMPOSER_GLASS_PROBE.with(|p| p.get())));
+    let show = enabled && probe_fresh;
+
+    if !show && COMPOSER_GLASS_VIEW.with(|slot| slot.borrow().is_none()) {
+        return;
+    }
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return;
+    };
+
+    unsafe {
+        let view = handle.ns_view.cast::<NSView>().as_ref();
+        let Some(native_window) = view.window() else {
+            return;
+        };
+        let Some(content_view) = native_window.contentView() else {
+            return;
+        };
+
+        COMPOSER_GLASS_VIEW.with_borrow_mut(|slot| {
+            let needs_new_view = slot.as_ref().is_none_or(|glass_view| {
+                glass_view
+                    .window()
+                    .as_deref()
+                    .is_none_or(|window| !std::ptr::eq(window, native_window.as_ref()))
+            });
+            if needs_new_view && show {
+                let frame = COMPOSER_GLASS_BOUNDS
+                    .with(|cell| cell.get())
+                    .map(|bounds| composer_glass_frame(content_view.bounds().size.height, bounds))
+                    .unwrap_or_else(|| content_view.bounds());
+                let glass_view = objc2_app_kit::NSGlassEffectView::initWithFrame(
+                    objc2_app_kit::NSGlassEffectView::alloc(main_thread),
+                    frame,
+                );
+                glass_view.setCornerRadius(18.0);
+                content_view.addSubview_positioned_relativeTo(
+                    &glass_view,
+                    NSWindowOrderingMode::Below,
+                    Some(view),
+                );
+                *slot = Some(glass_view);
+            }
+
+            if let Some(glass_view) = slot.as_ref() {
+                glass_view.setHidden(!show);
+                if show {
+                    let rgb: gpui::Rgba = tint.into();
+                    let tint_opacity = 1.0 - f64::from(transparency_amount.clamp(0.0, 1.0));
+                    glass_view.setTintColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
+                        f64::from(rgb.r),
+                        f64::from(rgb.g),
+                        f64::from(rgb.b),
+                        tint_opacity,
+                    )));
+                    if let Some(bounds) = COMPOSER_GLASS_BOUNDS.with(|cell| cell.get()) {
+                        glass_view.setFrame(composer_glass_frame(
+                            content_view.bounds().size.height,
+                            bounds,
+                        ));
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn sync_composer_glass(_: &Window, _: gpui::Hsla, _: f32, _: bool) {}
 
 /// The window-server id (`-[NSWindow windowNumber]`) used to snapshot this
 /// window's own contents — Big Picture's blurred backdrop.

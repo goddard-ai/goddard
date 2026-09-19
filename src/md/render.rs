@@ -40,7 +40,8 @@ use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
 use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
 use super::selection::{
-    RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range, word_range,
+    CopySpec, RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range,
+    word_range,
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
@@ -307,6 +308,9 @@ pub struct FlatText {
     /// entry there whose "URL" is the mention's resolved absolute path.
     pub file_refs: Vec<Range<usize>>,
     pub math: Option<Rc<math_text::MathData>>,
+    /// How the flat text maps back to markdown for copy; default emits the
+    /// flat text unchanged.
+    pub copy: Rc<CopySpec>,
 }
 
 /// One literal find-in-page hit inside a shaped markdown text element.
@@ -343,6 +347,7 @@ pub fn flatten(
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
     let mut math = Vec::new();
+    let mut fragments = Vec::new();
 
     for run in runs {
         if run.text.is_empty() {
@@ -351,6 +356,9 @@ pub fn flatten(
         let start = text.len();
         text.push_str(&run.text);
         let end = text.len();
+        if let Some(fragment) = markdown_fragment(run) {
+            fragments.push((start..end, fragment));
+        }
         if run.style.math {
             math.push(math_text::MathSpan {
                 range: start..end,
@@ -425,7 +433,65 @@ pub fn flatten(
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
         math: (!math.is_empty()).then(|| Rc::new(math_text::MathData::new(math))),
+        copy: Rc::new(CopySpec {
+            prefix: Rc::default(),
+            suffix: Rc::default(),
+            fragments,
+        }),
     }
+}
+
+/// The markdown for one inline run, or `None` when it renders exactly as
+/// written. Styles compose inside-out: code is atomic (its contents carry no
+/// emphasis), then emphasis markers, then the link. Whitespace-only runs stay
+/// plain — `** **` would just decorate the gap.
+fn markdown_fragment(run: &InlineRun) -> Option<Rc<str>> {
+    let style = &run.style;
+    let linked = style.link.as_deref().is_some_and(|url| url != PENDING_LINK_URL);
+    let styled = style.bold
+        || style.italic
+        || style.code
+        || style.strikethrough
+        || style.math
+        || linked;
+    if !styled || run.text.trim().is_empty() {
+        return None;
+    }
+    let mut out = run.text.clone();
+    if style.code {
+        // One more backtick than the longest interior run keeps `a`b`
+        // pasteable; the pad spaces are required when the content touches a
+        // tick.
+        let interior = run
+            .text
+            .split(|ch| ch != '`')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let fence = "`".repeat(interior + 1);
+        out = if run.text.starts_with('`') || run.text.ends_with('`') {
+            format!("{fence} {out} {fence}")
+        } else {
+            format!("{fence}{out}{fence}")
+        };
+    } else {
+        if style.strikethrough {
+            out = format!("~~{out}~~");
+        }
+        if style.bold {
+            out = format!("**{out}**");
+        }
+        if style.italic {
+            out = format!("*{out}*");
+        }
+        if style.math {
+            out = format!("${out}$");
+        }
+    }
+    if let Some(url) = style.link.as_deref().filter(|url| *url != PENDING_LINK_URL) {
+        out = format!("[{out}]({url})");
+    }
+    Some(Rc::from(out))
 }
 
 /// `Annotation N` — the citation label the annotation prompt header teaches
@@ -559,6 +625,7 @@ pub fn flatten_plain(
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
         math: None,
+        copy: Rc::default(),
     }
 }
 
@@ -589,7 +656,55 @@ pub struct MarkdownView {
     /// outside the parsed/flattened caches so a three-second icon change never
     /// invalidates text shaping.
     copied_code_blocks: Rc<RefCell<HashMap<usize, u64>>>,
+    /// Drag-resized table column fractions and the in-flight drag. Shared
+    /// with the painted move/up listeners, which is why it lives behind `Rc`
+    /// like `copied_code_blocks`.
+    table_resize: Rc<RefCell<TableResize>>,
     streaming: Cell<bool>,
+}
+
+/// User-set column widths for one markdown body's tables, plus the drag that
+/// produces them. Widths are fractions of the table width keyed by the table
+/// block's base ordinal — stable across re-renders, same scheme as the
+/// flatten cache.
+#[derive(Default)]
+struct TableResize {
+    widths: HashMap<usize, Vec<f32>>,
+    drag: Option<TableDrag>,
+}
+
+/// An in-flight column-boundary drag. `original` holds the fractions at
+/// mouse-down so the gesture computes one delta from the press instead of
+/// accumulating error across repaints.
+struct TableDrag {
+    table: usize,
+    /// Left column of the resized pair; the boundary sits between it and
+    /// `column + 1`.
+    column: usize,
+    start_x: Pixels,
+    original: Vec<f32>,
+}
+
+/// Smallest share of the table a dragged column can take.
+const MIN_COLUMN_FRACTION: f32 = 0.06;
+
+/// Width of a resize handle's hit region, centered on the boundary.
+const RESIZE_HANDLE_WIDTH: f32 = 9.0;
+
+/// Arrow-key step for a focused resize handle, as a fraction of the table.
+const RESIZE_KEY_STEP: f32 = 0.04;
+
+/// The pair of fractions a boundary drag or key step produces: the left
+/// column takes `delta` from the right, both clamped to the floor while
+/// their sum stays constant.
+fn resized_pair(original: &[f32], column: usize, delta: f32) -> Option<(f32, f32)> {
+    let (left, right) = (*original.get(column)?, *original.get(column + 1)?);
+    let pair = left + right;
+    if pair < MIN_COLUMN_FRACTION * 2.0 {
+        return None;
+    }
+    let left = (left + delta).clamp(MIN_COLUMN_FRACTION, pair - MIN_COLUMN_FRACTION);
+    Some((left, pair - left))
 }
 
 impl Default for MarkdownView {
@@ -608,6 +723,7 @@ impl MarkdownView {
             style: RefCell::new(None),
             veil: RefCell::new(RowVeil::default()),
             copied_code_blocks: Rc::new(RefCell::new(HashMap::new())),
+            table_resize: Rc::new(RefCell::new(TableResize::default())),
             streaming: Cell::new(false),
         }
     }
@@ -749,6 +865,13 @@ pub struct Ctx<'a> {
     next_ordinal: Cell<usize>,
     /// Set while rendering the first element of a block, for copy spacing.
     starts_block: Cell<bool>,
+    /// Markdown prefix every element in the current container contributes to
+    /// copy: a blockquote pushes `> `, a list item pushes its continuation
+    /// indent. Scoped — renderers restore it when the container ends.
+    copy_margin: Cell<Option<Rc<str>>>,
+    /// One-shot markdown prefix for the next registered element — a list
+    /// marker like `- ` or `3. ` — replacing the margin for that element.
+    copy_lead: Cell<Option<Rc<str>>>,
     animate_streaming: bool,
     math_enabled: bool,
     math_menu: Option<ContextMenuHandle>,
@@ -779,6 +902,8 @@ impl<'a> Ctx<'a> {
             cache: None,
             next_ordinal: Cell::new(0),
             starts_block: Cell::new(true),
+            copy_margin: Cell::new(None),
+            copy_lead: Cell::new(None),
             animate_streaming: true,
             math_enabled: true,
             math_menu: None,
@@ -887,6 +1012,8 @@ impl<'a> Ctx<'a> {
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
             starts_block: Cell::new(self.starts_block.get()),
+            copy_margin: Cell::new(self.copy_margin()),
+            copy_lead: Cell::new(None),
             animate_streaming: self.animate_streaming,
             math_enabled: self.math_enabled,
             math_menu: self.math_menu.clone(),
@@ -903,6 +1030,39 @@ impl<'a> Ctx<'a> {
 
     fn take_block_break(&self) -> bool {
         self.starts_block.replace(false)
+    }
+
+    /// The current copy margin — `Cell<Option<Rc>>` can't be read in place,
+    /// so this swaps it out and back.
+    fn copy_margin(&self) -> Option<Rc<str>> {
+        let margin = self.copy_margin.take();
+        self.copy_margin.set(margin.clone());
+        margin
+    }
+
+    /// Extend the copy margin for a nested container, returning the previous
+    /// value for the caller to restore when the container's blocks are done.
+    fn push_copy_margin(&self, add: &str) -> Option<Rc<str>> {
+        let previous = self.copy_margin.take();
+        let margin = format!("{}{add}", previous.as_deref().unwrap_or(""));
+        self.copy_margin.set(Some(Rc::from(margin)));
+        previous
+    }
+
+    /// The element's copy spec: its own fragments and wrap, preceded by the
+    /// container's markdown prefix — the one-shot `copy_lead` a list marker
+    /// left, else the `copy_margin` — so a heading inside a quote copies as
+    /// `> ## Title`.
+    fn copy_spec(&self, flat: &Rc<FlatText>) -> Rc<CopySpec> {
+        let container = self.copy_lead.take().or_else(|| self.copy_margin());
+        match container {
+            None => flat.copy.clone(),
+            Some(prefix) => {
+                let mut spec = (*flat.copy).clone();
+                spec.prefix = Rc::from(format!("{prefix}{}", spec.prefix));
+                Rc::new(spec)
+            }
+        }
     }
 
     /// Flatten through the cache when one is wired: a settled block reuses its
@@ -972,6 +1132,7 @@ fn text_element_with_selection(
     ref_underline: Hsla,
     ref_underline_hovered: Hsla,
     block_break: bool,
+    copy: Rc<CopySpec>,
 ) -> AnyElement {
     let styled = StyledText::new(flat.text.clone()).with_runs(runs);
     let layout = styled.layout().clone();
@@ -1142,6 +1303,7 @@ fn text_element_with_selection(
                 block_break,
                 annotation_refs: annotation_refs.clone(),
                 commit_refs: commit_refs.clone(),
+                copy: copy.clone(),
                 geometry: TextGeometry::Text(layout.clone()),
             });
         }
@@ -1191,6 +1353,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.palette.tertiary,
         ctx.palette.secondary,
         ctx.take_block_break(),
+        ctx.copy_spec(flat),
     )
 }
 
@@ -1223,6 +1386,7 @@ pub fn selectable_flat_text(
         gpui::transparent_black(),
         gpui::transparent_black(),
         block_break,
+        flat.copy.clone(),
     )
 }
 
@@ -1465,6 +1629,7 @@ pub fn install_selection_input(
                                 range: line_range(&entry.text, offset),
                                 text: entry.text.clone(),
                                 block_break: false,
+                                copy: entry.copy.clone(),
                             },
                         );
                         drop(selection);
@@ -1483,11 +1648,13 @@ pub fn install_selection_input(
                                 entry.key.clone(),
                                 entry.text.clone(),
                                 word_range(&entry.text, offset),
+                                entry.copy.clone(),
                             ),
                             count if count >= 3 => selection.begin_with_span(
                                 entry.key.clone(),
                                 entry.text.clone(),
                                 line_range(&entry.text, offset),
+                                entry.copy.clone(),
                             ),
                             _ => selection.begin(entry.key.clone(), offset),
                         }
@@ -1788,7 +1955,13 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
-                flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text)
+                let mut flat =
+                    flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text);
+                flat.copy = Rc::new(CopySpec {
+                    prefix: Rc::from(format!("{} ", "#".repeat(*level as usize))),
+                    ..(*flat.copy).clone()
+                });
+                flat
             });
             div()
                 .w_full()
@@ -1816,6 +1989,11 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                         display: true,
                     },
                 ])));
+                flat.copy = Rc::new(CopySpec {
+                    prefix: Rc::from("$$"),
+                    suffix: Rc::from("$$"),
+                    fragments: Vec::new(),
+                });
                 flat
             });
             div()
@@ -1828,10 +2006,12 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
         }
         Block::CodeBlock { language, code } => render_code_block(language.as_deref(), code, ctx),
         Block::BlockQuote { children } => {
+            let margin = ctx.push_copy_margin("> ");
             let rendered = children
                 .iter()
                 .map(|child| render_block(child, ctx))
                 .collect::<Vec<_>>();
+            ctx.copy_margin.set(margin);
             div()
                 .w_full()
                 .min_w_0()
@@ -1867,12 +2047,15 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             rows,
             align,
         } => render_table(header, rows, align, ctx),
-        Block::Rule => div()
+        Block::Rule => {
+            ctx.copy_lead.take();
+            div()
             .w_full()
             .h(hairline())
             .my(px(4.0))
             .bg(ctx.palette.separator)
-            .into_any_element(),
+            .into_any_element()
+        }
     }
 }
 
@@ -1895,11 +2078,26 @@ fn render_list(ordered_start: Option<u64>, items: &[ListItem], ctx: &Ctx) -> Any
                 }
                 (None, None) => marker_text("•".to_owned(), marker_width, ctx),
             };
+            // Markdown copy: the item's first element gets the marker as a
+            // one-shot lead; every element in the item carries the
+            // continuation indent as margin.
+            let lead = match (ordered_start, item.task) {
+                (_, Some(checked)) => {
+                    format!("- [{}] ", if checked { "x" } else { " " })
+                }
+                (Some(start), None) => format!("{}. ", start + index as u64),
+                (None, None) => "- ".to_owned(),
+            };
+            let base = ctx.copy_margin();
+            let margin = ctx.push_copy_margin(&" ".repeat(lead.len()));
+            ctx.copy_lead
+                .set(Some(Rc::from(format!("{}{lead}", base.as_deref().unwrap_or("")))));
             let blocks = item
                 .blocks
                 .iter()
                 .map(|block| render_block(block, ctx))
                 .collect::<Vec<_>>();
+            ctx.copy_margin.set(margin);
             div()
                 .w_full()
                 .min_w_0()
@@ -1995,6 +2193,9 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
     // The key is consumed before branching so a placeholder → image swap does
     // not shift later blocks' ordinals.
     let key = ctx.next_key();
+    // An image registers no selectable text; a list marker must not leak past
+    // it into the next element's copy.
+    ctx.copy_lead.take();
     let id = SharedString::from(format!("image-{}-{}", key.row, key.index));
 
     let decoded = decode_data_url(url);
@@ -2101,6 +2302,13 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             commit_refs: Vec::new(),
             file_refs: Vec::new(),
             math: None,
+            // The fence wraps only a whole-block grab; a partial selection
+            // copies raw code.
+            copy: Rc::new(CopySpec {
+                prefix: Rc::from(format!("```{}\n", language.unwrap_or(""))),
+                suffix: Rc::from("\n```"),
+                fragments: Vec::new(),
+            }),
         }
     });
     let label = language
@@ -2283,11 +2491,20 @@ fn render_table(
     if columns == 0 {
         return div().into_any_element();
     }
-    let widths = column_widths(header, rows, columns);
+    // The table's base ordinal doubles as its resize-state key: stable across
+    // re-renders, unique within the row.
+    let table_id = ctx.next_ordinal.get();
+    let resize = ctx.cache.map(|view| view.table_resize.clone());
+    let widths = resize
+        .as_ref()
+        .and_then(|state| state.borrow().widths.get(&table_id).cloned())
+        .filter(|stored| stored.len() == columns)
+        .unwrap_or_else(|| column_widths(header, rows, columns));
 
     let mut table = div()
         .w_full()
         .min_w_0()
+        .relative()
         .rounded(px(10.0))
         .border(hairline())
         .border_color(ctx.palette.border_subtle)
@@ -2316,7 +2533,167 @@ fn render_table(
             index + 1 < rows.len(),
         ));
     }
+    if let Some(state) = resize
+        && columns > 1
+    {
+        let mut boundary = 0.0;
+        for column in 0..columns - 1 {
+            boundary += widths[column];
+            table = table.child(table_resize_handle(
+                table_id, column, boundary, &widths, &state, ctx,
+            ));
+        }
+        table = table.child(table_resize_listeners(table_id, state));
+    }
     table.into_any_element()
+}
+
+/// The pointer target over one column boundary: a 9px strip centered on the
+/// edge, full table height, with a grip line that appears on hover, focus, and
+/// while its boundary is being dragged. `boundary` is the cumulative fraction
+/// of the table left of the edge.
+fn table_resize_handle(
+    table_id: usize,
+    column: usize,
+    boundary: f32,
+    widths: &[f32],
+    state: &Rc<RefCell<TableResize>>,
+    ctx: &Ctx,
+) -> impl IntoElement {
+    let group = SharedString::from(format!("table-resize-grip-{table_id}-{column}"));
+    let active = state.borrow().drag.as_ref().is_some_and(|drag| {
+        drag.table == table_id && drag.column == column
+    });
+    let pressed = widths.to_vec();
+    let drag_state = state.clone();
+    let key_state = state.clone();
+    let key_widths = widths.to_vec();
+    div()
+        .id(SharedString::from(format!(
+            "table-resize-{}-{table_id}-{column}",
+            ctx.row
+        )))
+        .tab_index(0)
+        .tab_stop(true)
+        .group(group.clone())
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(relative(boundary))
+        .w(px(RESIZE_HANDLE_WIDTH))
+        .ml(-px(RESIZE_HANDLE_WIDTH / 2.0))
+        .cursor_col_resize()
+        .flex()
+        .justify_center()
+        .focus_visible(|element| element.bg(ctx.palette.accent.opacity(0.12)))
+        .child(
+            div()
+                .w(px(1.5))
+                .h_full()
+                .rounded_full()
+                .when(active, |element| element.bg(ctx.palette.accent))
+                .group_hover(group, |element| element.bg(ctx.palette.accent)),
+        )
+        .on_mouse_down(MouseButton::Left, {
+            move |event: &MouseDownEvent, window, cx| {
+                drag_state.borrow_mut().drag = Some(TableDrag {
+                    table: table_id,
+                    column,
+                    start_x: event.position.x,
+                    original: pressed.clone(),
+                });
+                // Armed before the transcript's window-level selection
+                // listeners see the press, so it must not begin a text
+                // selection.
+                cx.stop_propagation();
+                window.refresh();
+            }
+        })
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if event.keystroke.modifiers.modified() {
+                return;
+            }
+            let delta = match event.keystroke.key.as_str() {
+                "left" => -RESIZE_KEY_STEP,
+                "right" => RESIZE_KEY_STEP,
+                _ => return,
+            };
+            let mut state = key_state.borrow_mut();
+            let stored = state
+                .widths
+                .entry(table_id)
+                .or_insert_with(|| key_widths.clone());
+            if stored.len() != key_widths.len() {
+                *stored = key_widths.clone();
+            }
+            if let Some((left, right)) = resized_pair(stored, column, delta) {
+                stored[column] = left;
+                stored[column + 1] = right;
+            }
+            drop(state);
+            cx.stop_propagation();
+            window.refresh();
+        })
+}
+
+/// An invisible canvas covering the table that installs the drag's window-level
+/// move/up listeners each paint — the same pattern as [`crate::ui::slider`].
+/// Element-level move handlers would stop receiving events once the pointer
+/// leaves the handle; these run for as long as a drag is armed.
+fn table_resize_listeners(
+    table_id: usize,
+    state: Rc<RefCell<TableResize>>,
+) -> impl IntoElement {
+    canvas(|_, _, _| (), {
+        move |bounds, _, window: &mut Window, _| {
+            window.on_mouse_event({
+                let state = state.clone();
+                move |event: &MouseMoveEvent, phase, window, _| {
+                    if phase != DispatchPhase::Bubble || !event.dragging() {
+                        return;
+                    }
+                    let mut state = state.borrow_mut();
+                    let Some(drag) = &state.drag else {
+                        return;
+                    };
+                    if drag.table != table_id {
+                        return;
+                    }
+                    let column = drag.column;
+                    let original = drag.original.clone();
+                    let delta = f32::from(event.position.x - drag.start_x)
+                        / f32::from(bounds.size.width).max(1.0);
+                    let stored = state
+                        .widths
+                        .entry(table_id)
+                        .or_insert_with(|| original.clone());
+                    if stored.len() != original.len() {
+                        *stored = original.clone();
+                    }
+                    if resized_pair(&original, column, delta).is_some_and(|(left, right)| {
+                        stored[column] = left;
+                        stored[column + 1] = right;
+                        true
+                    }) {
+                        drop(state);
+                        window.refresh();
+                    }
+                }
+            });
+            window.on_mouse_event({
+                move |_: &MouseUpEvent, phase, window, _| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    if state.borrow_mut().drag.take().is_some() {
+                        window.refresh();
+                    }
+                }
+            });
+        }
+    })
+    .absolute()
+    .inset_0()
 }
 
 fn table_row(
@@ -2500,6 +2877,34 @@ mod tests {
                 .any(|run| run.strikethrough.is_some() && run.len == 4)
         );
         assert!(flat.runs.iter().any(|run| run.underline.is_some()));
+    }
+
+    #[test]
+    fn flatten_records_copy_fragments_for_styled_runs() {
+        let flat = flatten(
+            &runs_of("plain **bold** `code` [link](https://example.com) ~~gone~~"),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        let fragments = flat
+            .copy
+            .fragments
+            .iter()
+            .map(|(range, markdown)| {
+                (flat.text[range.clone()].to_owned(), markdown.to_string())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fragments,
+            vec![
+                ("bold".to_owned(), "**bold**".to_owned()),
+                ("code".to_owned(), "`code`".to_owned()),
+                ("link".to_owned(), "[link](https://example.com)".to_owned()),
+                ("gone".to_owned(), "~~gone~~".to_owned()),
+            ]
+        );
     }
 
     #[test]
@@ -2796,6 +3201,26 @@ mod tests {
         // An empty table falls back to even columns.
         let even = column_widths(&[], &[], 3);
         assert!(even.iter().all(|width| (width - 1.0 / 3.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn resized_pair_shifts_the_boundary_and_keeps_the_sum() {
+        let widths = [0.5, 0.3, 0.2];
+        let (left, right) = resized_pair(&widths, 0, 0.1).unwrap();
+        assert!((left - 0.6).abs() < 1e-6);
+        assert!((right - 0.2).abs() < 1e-6);
+        assert!(((left + right) - 0.8).abs() < 1e-6);
+
+        // The floor clamps both directions instead of passing the pair sum.
+        let (left, right) = resized_pair(&widths, 1, 1.0).unwrap();
+        assert!((right - MIN_COLUMN_FRACTION).abs() < 1e-6);
+        assert!(((left + right) - 0.5).abs() < 1e-6);
+        let (left, _) = resized_pair(&widths, 1, -1.0).unwrap();
+        assert!((left - MIN_COLUMN_FRACTION).abs() < 1e-6);
+
+        // Out-of-range boundaries and starved pairs are refused.
+        assert!(resized_pair(&widths, 2, 0.1).is_none());
+        assert!(resized_pair(&[0.05, 0.05], 0, 0.1).is_none());
     }
 
     fn refs(text: &str, limit: usize) -> Vec<(Range<usize>, usize)> {

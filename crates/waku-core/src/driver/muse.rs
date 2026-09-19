@@ -478,19 +478,19 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     let _ = worker.events.send(DriverEvent::Error(
                         muse_error("Muse Code rejected the prompt", &error).to_string(),
                     ));
-                    let _ = worker.events.send(DriverEvent::TurnFinished {
-                        success: false,
-                        summary: Some(tr!("errors.provider_start_turn", provider = "Muse Code")),
-                    });
+                    let _ = worker.events.send(DriverEvent::turn_finished_keyed(
+                        false,
+                        localized!("errors.provider_start_turn", provider = "Muse Code"),
+                    ));
                 }
             }
         }
         DriverCommand::Steer(text) => {
             let Some(turn_id) = state.active_turn.clone() else {
-                let _ = worker.events.send(DriverEvent::SteerRejected {
-                    message: text,
-                    reason: tr!("errors.provider_no_active_turn", provider = "Muse Code"),
-                });
+                let _ = worker.events.send(DriverEvent::steer_rejected_keyed(
+                    text,
+                    localized!("errors.provider_no_active_turn", provider = "Muse Code"),
+                ));
                 return true;
             };
             let mut params = json!({
@@ -513,6 +513,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     let _ = worker.events.send(DriverEvent::SteerRejected {
                         message: text,
                         reason: error.message(),
+                        reason_i18n: None,
                     });
                 }
             }
@@ -529,7 +530,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
             // defines for "the user pressed stop"; no retract pairing —
             // Goddard keeps the submission in the transcript.
             if let Err(error) = worker.service.call("turn/interrupt", params) {
-                let _ = worker.events.send(DriverEvent::Error(tr!(
+                let _ = worker.events.send(DriverEvent::localized_error(localized!(
                     "errors.stop_provider",
                     provider = "Muse Code",
                     error = error.message()
@@ -553,13 +554,14 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                         let _ = worker.events.send(DriverEvent::TurnFinished {
                             success: false,
                             summary: None,
+                            summary_i18n: None,
                         });
                     }
                     Err(error) => {
                         // Keep the id tracked so a later stop retries; a
                         // `turn/started` or `turn/unqueued` event drops it.
                         state.queued_turns.push(turn_id);
-                        let _ = worker.events.send(DriverEvent::Error(tr!(
+                        let _ = worker.events.send(DriverEvent::localized_error(localized!(
                             "errors.stop_provider",
                             provider = "Muse Code",
                             error = error.message()
@@ -585,7 +587,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     "requirementId": pending.requirement_id,
                 }),
             ) {
-                let _ = worker.events.send(DriverEvent::Error(tr!(
+                let _ = worker.events.send(DriverEvent::localized_error(localized!(
                     "errors.answer_provider_permission",
                     provider = "Muse Code",
                     error = error.message()
@@ -609,7 +611,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     "answers": answers,
                 }),
             ) {
-                let _ = worker.events.send(DriverEvent::Error(tr!(
+                let _ = worker.events.send(DriverEvent::localized_error(localized!(
                     "errors.answer_provider_question",
                     provider = "Muse Code",
                     error = error.message()
@@ -638,7 +640,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     },
                 }),
             ) {
-                let _ = worker.events.send(DriverEvent::Error(tr!(
+                let _ = worker.events.send(DriverEvent::localized_error(localized!(
                     "errors.answer_provider_question",
                     provider = "Muse Code",
                     error = error.message()
@@ -657,7 +659,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     "userInputId": request_id,
                 }),
             ) {
-                let _ = worker.events.send(DriverEvent::Error(tr!(
+                let _ = worker.events.send(DriverEvent::localized_error(localized!(
                     "errors.answer_provider_question",
                     provider = "Muse Code",
                     error = error.message()
@@ -881,7 +883,11 @@ fn handle_event(
                 }
             }
             let (success, summary) = turn_outcome(params);
-            let _ = events.send(DriverEvent::TurnFinished { success, summary });
+            let _ = events.send(DriverEvent::TurnFinished {
+                success,
+                summary,
+                summary_i18n: None,
+            });
         }
         // A retracted turn ran, then its output was withdrawn — it still
         // counts toward the provider-turn index but can never be a fork
@@ -910,6 +916,7 @@ fn handle_event(
             let _ = events.send(DriverEvent::TurnFinished {
                 success: false,
                 summary: None,
+                summary_i18n: None,
             });
         }
         "session/branchChanged" => {}
@@ -1336,6 +1343,7 @@ fn emit_permission(events: &DriverEventSender, params: &Value, approval_id: &str
                     Some(PermissionOption {
                         id: choice_id.to_owned(),
                         label: label.to_owned(),
+                        label_i18n: None,
                         allow: decision.starts_with("approved"),
                     })
                 })
@@ -1355,6 +1363,8 @@ fn emit_permission(events: &DriverEventSender, params: &Value, approval_id: &str
         title,
         detail,
         options,
+        title_i18n: None,
+        detail_i18n: None,
     });
 }
 
@@ -1447,12 +1457,14 @@ fn user_input_answers(questions: &[Value], answers: &[UserInputAnswer]) -> Value
             }
         } else if !answer.answers.is_empty() {
             // The wire caps freeText at 500 chars.
-            entry["freeText"] = json!(answer
-                .answers
-                .join("\n")
-                .chars()
-                .take(500)
-                .collect::<String>());
+            entry["freeText"] = json!(
+                answer
+                    .answers
+                    .join("\n")
+                    .chars()
+                    .take(500)
+                    .collect::<String>()
+            );
         }
         out.push(entry);
     }
@@ -2049,10 +2061,7 @@ mod tests {
 
         let (events, rx) = test_event_channel();
         let driver = MuseDriver::start(start, events).unwrap();
-        driver.prompt_with_attachments(
-            "look".to_owned(),
-            vec![attachment(&png, true)],
-        );
+        driver.prompt_with_attachments("look".to_owned(), vec![attachment(&png, true)]);
         collect_until(&rx, Instant::now() + Duration::from_secs(10), |event| {
             matches!(event, DriverEvent::TurnFinished { .. })
         });
@@ -2211,9 +2220,6 @@ mod tests {
             .iter()
             .map(|turn| (turn.turn_id.as_str(), turn.completed))
             .collect();
-        assert_eq!(
-            finished,
-            [("018f6a1e-9b3c-7c21-a54a-2f30bd3c9f10", true)]
-        );
+        assert_eq!(finished, [("018f6a1e-9b3c-7c21-a54a-2f30bd3c9f10", true)]);
     }
 }

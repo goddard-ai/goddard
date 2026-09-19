@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -8,12 +9,14 @@ use uuid::Uuid;
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
+use crate::eval::{EvalQuestion, Evaluation};
 use crate::model::{
     AgentSession, GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe,
     ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
+use crate::routing::{RouteCandidate, RouteDecision, RoutePolicyView, RouteTarget, TaskClass};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
 use crate::usage::PlanUsage;
@@ -258,6 +261,44 @@ pub enum Command {
         cursor: ProviderResumeCursor,
         cwd: PathBuf,
     },
+    /// Run one hosted evaluation: `state` is the data under judgment and
+    /// `questions` are the typed decisions the model answers about it. The
+    /// daemon owns the backend call and the decision log; every eval-driven
+    /// feature (model routing today, agent tools later) shares this surface.
+    Evaluate {
+        #[ts(type = "unknown")]
+        state: Value,
+        questions: BTreeMap<String, EvalQuestion>,
+    },
+    /// Route a new session's first prompt: evaluate the task, resolve the
+    /// routing policy against `candidates`, and answer with the provider and
+    /// model to start on. `last_used` backs the policy's `last_used` default.
+    RouteTask {
+        prompt: String,
+        /// Lightweight project context for the classifier — the project
+        /// name only; filesystem drilling is deliberately out of scope.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        candidates: Vec<RouteCandidate>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_used: Option<RouteTarget>,
+    },
+    /// Append a route-override record to the decision log: the user changed
+    /// the model on a session that started through routing.
+    RecordRouteOverride {
+        session_id: Uuid,
+        target: RouteTarget,
+    },
+    /// Read the effective routing policy for the settings surface.
+    GetRoutePolicy,
+    /// Update one class-level target in the user's routing policy document,
+    /// preserving every other key. The JSON file stays the source of truth.
+    SetRouteClassTarget {
+        class: TaskClass,
+        /// "tier:fast" | "tier:default" | "tier:heavy" | "provider:model" |
+        /// "provider".
+        target: String,
+    },
     LoadComposerDrafts,
     SaveComposerDrafts {
         drafts: ComposerDrafts,
@@ -377,10 +418,21 @@ pub enum Command {
     GetFriends,
     /// Send a friend request to a `gfr-` code. `name` is our display name
     /// as the peer will see it.
-    SendFriendRequest { code: String, name: String },
+    SendFriendRequest {
+        code: String,
+        name: String,
+    },
     /// Accept or decline an incoming friend request.
-    RespondFriendRequest { node_id: String, accept: bool },
-    RemoveFriend { node_id: String },
+    RespondFriendRequest {
+        node_id: String,
+        accept: bool,
+    },
+    /// Withdraw a pending outgoing friend request. Local removal only —
+    /// the peer's incoming card lingers until they decline it.
+    WithdrawFriendRequest { node_id: String },
+    RemoveFriend {
+        node_id: String,
+    },
     /// Offer a file or directory to a friend. Spawns a transfer; progress
     /// arrives through `FriendsChanged` broadcasts.
     SendFileToFriend {
@@ -389,11 +441,27 @@ pub enum Command {
         path: PathBuf,
         note: Option<String>,
     },
-    CancelTransfer { transfer_id: Uuid },
+    CancelTransfer {
+        transfer_id: Uuid,
+    },
     /// On-demand presence check — dial the friend and report the outcome via
     /// `FriendsChanged` (updates `last_seen`/`online`). No-op if a fresher
     /// cached probe exists.
-    ProbeFriend { node_id: String },
+    ProbeFriend {
+        node_id: String,
+    },
+    /// Set the display name friends see on our requests and offers. Blank
+    /// resets to the default (account name).
+    SetFriendDisplayName {
+        name: String,
+    },
+    /// Set a local-only nickname for a friend — overrides their
+    /// self-reported name in this install's UI and transfer links.
+    /// `None` or blank clears the override.
+    SetFriendNickname {
+        node_id: String,
+        nickname: Option<String>,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -617,6 +685,15 @@ pub enum ResponsePayload {
     ComposerDrafts {
         drafts: ComposerDrafts,
     },
+    Evaluation {
+        evaluation: Evaluation,
+    },
+    RouteDecision {
+        decision: RouteDecision,
+    },
+    RoutePolicy {
+        view: RoutePolicyView,
+    },
     BlobStored {
         reference: String,
         path: PathBuf,
@@ -649,15 +726,103 @@ pub enum ResponsePayload {
     },
 }
 
+/// The i18n key and `%{name}` substitution values behind a user-facing
+/// string, shipped alongside the English fallback so each client can render
+/// the text in its own locale. Emitters build the pair with `localized!`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WireTranslation {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, String>,
+}
+
+impl WireTranslation {
+    pub fn new(
+        key: impl Into<String>,
+        args: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            args: args.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+        }
+    }
+
+    /// Render in the calling process's locale — the client-side counterpart
+    /// of the `tr!` fallback the daemon already shipped.
+    pub fn render(&self) -> String {
+        let mut text = crate::i18n::translate(&self.key);
+        for (name, value) in &self.args {
+            text = text.replace(&format!("%{{{name}}}"), value);
+        }
+        text
+    }
+}
+
+/// An error whose display text is a known i18n key. It travels through
+/// `anyhow` like any other error but keeps its key and args so the RPC
+/// boundary can ship the semantic beside the fallback message.
+pub struct KeyedError {
+    pub message: String,
+    pub i18n: WireTranslation,
+}
+
+impl KeyedError {
+    /// Wrap the `(fallback, translation)` pair produced by `localized!`.
+    pub fn localized(pair: (String, WireTranslation)) -> Self {
+        Self {
+            message: pair.0,
+            i18n: pair.1,
+        }
+    }
+}
+
+impl std::fmt::Display for KeyedError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::fmt::Debug for KeyedError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("KeyedError")
+            .field("key", &self.i18n.key)
+            .field("message", &self.message)
+            .finish()
+    }
+}
+
+impl std::error::Error for KeyedError {}
+
+impl RpcError {
+    /// The message a client should show: the i18n semantic rendered in this
+    /// process's locale when present, the daemon's fallback text otherwise.
+    pub fn localized_message(&self) -> String {
+        self.i18n
+            .as_ref()
+            .map(WireTranslation::render)
+            .unwrap_or_else(|| self.message.clone())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct RpcError {
     pub message: String,
+    /// The i18n semantic behind `message`, when the failing side knew it.
+    /// `None` for provider text and opaque errors — render `message` as-is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<WireTranslation>,
 }
 
 impl From<anyhow::Error> for RpcError {
     fn from(error: anyhow::Error) -> Self {
         Self {
             message: error.to_string(),
+            i18n: error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<KeyedError>())
+                .map(|keyed| keyed.i18n.clone()),
         }
     }
 }

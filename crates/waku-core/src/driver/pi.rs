@@ -353,31 +353,35 @@ impl PiDriver {
                                             ),
                                             Ok(None) => {}
                                             Err(error) => {
-                                                let _ =
-                                                    reader_events.send(DriverEvent::Error(tr!(
+                                                let _ = reader_events.send(
+                                                    DriverEvent::localized_error(localized!(
                                                         "errors.provider_transport_read",
                                                         provider = flavor.display_name(),
                                                         error = error
-                                                    )));
+                                                    )),
+                                                );
                                             }
                                         }
                                     }
                                     Err(error) => {
-                                        let _ = reader_events.send(DriverEvent::Error(tr!(
-                                            "errors.provider_invalid_json",
-                                            provider = flavor.display_name(),
-                                            error = error
-                                        )));
+                                        let _ = reader_events.send(DriverEvent::localized_error(
+                                            localized!(
+                                                "errors.provider_invalid_json",
+                                                provider = flavor.display_name(),
+                                                error = error
+                                            ),
+                                        ));
                                     }
                                 }
                             }
                             Ok(_) => {}
                             Err(error) => {
-                                let _ = reader_events.send(DriverEvent::Error(tr!(
-                                    "errors.provider_transport_read",
-                                    provider = flavor.display_name(),
-                                    error = error
-                                )));
+                                let _ =
+                                    reader_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.provider_transport_read",
+                                        provider = flavor.display_name(),
+                                        error = error
+                                    )));
                                 break;
                             }
                         }
@@ -475,33 +479,33 @@ impl PiDriver {
                 let state = match initialize {
                     Ok(state) => state,
                     Err(error) => {
-                        let _ = writer_events.send(DriverEvent::Error(tr!(
+                        let _ = writer_events.send(DriverEvent::localized_error(localized!(
                             "errors.initialize_provider",
                             provider = flavor.display_name(),
                             error = error
                         )));
-                        let _ = writer_events.send(DriverEvent::TurnFinished {
-                            success: false,
-                            summary: Some(tr!(
+                        let _ = writer_events.send(DriverEvent::turn_finished_keyed(
+                            false,
+                            localized!(
                                 "errors.provider_initialize_session",
                                 provider = flavor.display_name()
-                            )),
-                        });
+                            ),
+                        ));
                         return;
                     }
                 };
                 let Some(mut cursor) = cursor_from_state(flavor, &state) else {
-                    let _ = writer_events.send(DriverEvent::Error(tr!(
+                    let _ = writer_events.send(DriverEvent::localized_error(localized!(
                         "errors.provider_no_session_id",
                         provider = flavor.display_name()
                     )));
-                    let _ = writer_events.send(DriverEvent::TurnFinished {
-                        success: false,
-                        summary: Some(tr!(
+                    let _ = writer_events.send(DriverEvent::turn_finished_keyed(
+                        false,
+                        localized!(
                             "errors.provider_initialize_session",
                             provider = flavor.display_name()
-                        )),
-                    });
+                        ),
+                    ));
                     return;
                 };
                 let initial_usage = send_request(
@@ -561,18 +565,19 @@ impl PiDriver {
                                 &prompt,
                             );
                             if let Err(error) = result {
-                                let _ = writer_events.send(DriverEvent::Error(tr!(
-                                    "errors.provider_rejected_prompt_detail",
-                                    provider = flavor.display_name(),
-                                    error = error
-                                )));
-                                let _ = writer_events.send(DriverEvent::TurnFinished {
-                                    success: false,
-                                    summary: Some(tr!(
+                                let _ =
+                                    writer_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.provider_rejected_prompt_detail",
+                                        provider = flavor.display_name(),
+                                        error = error
+                                    )));
+                                let _ = writer_events.send(DriverEvent::turn_finished_keyed(
+                                    false,
+                                    localized!(
                                         "errors.provider_rejected_prompt",
                                         provider = flavor.display_name()
-                                    )),
-                                });
+                                    ),
+                                ));
                             }
                         }
                         CommandMessage::Steer(prompt) => {
@@ -593,6 +598,7 @@ impl PiDriver {
                                     let _ = writer_events.send(DriverEvent::SteerRejected {
                                         message: prompt,
                                         reason: error,
+                                        reason_i18n: None,
                                     });
                                 }
                             }
@@ -604,11 +610,12 @@ impl PiDriver {
                                 &mut next_request_id,
                                 json!({"type": "abort"}),
                             ) {
-                                let _ = writer_events.send(DriverEvent::Error(tr!(
-                                    "errors.stop_provider",
-                                    provider = flavor.display_name(),
-                                    error = error
-                                )));
+                                let _ =
+                                    writer_events.send(DriverEvent::localized_error(localized!(
+                                        "errors.stop_provider",
+                                        provider = flavor.display_name(),
+                                        error = error
+                                    )));
                             }
                         }
                         CommandMessage::Options(options) => {
@@ -640,12 +647,13 @@ impl PiDriver {
                                                 }
                                             }
                                             Err(error) => {
-                                                let _ =
-                                                    writer_events.send(DriverEvent::Error(tr!(
+                                                let _ = writer_events.send(
+                                                    DriverEvent::localized_error(localized!(
                                                         "errors.switch_provider_model",
                                                         provider = flavor.display_name(),
                                                         error = error
-                                                    )));
+                                                    )),
+                                                );
                                             }
                                         }
                                     }
@@ -666,11 +674,13 @@ impl PiDriver {
                                         json!({"type": "set_thinking_level", "level": level}),
                                     )
                                 {
-                                    let _ = writer_events.send(DriverEvent::Error(tr!(
-                                        "errors.change_provider_thinking",
-                                        provider = flavor.display_name(),
-                                        error = error
-                                    )));
+                                    let _ = writer_events.send(DriverEvent::localized_error(
+                                        localized!(
+                                            "errors.change_provider_thinking",
+                                            provider = flavor.display_name(),
+                                            error = error
+                                        ),
+                                    ));
                                 }
                                 current_effort = options.reasoning_effort;
                             }
@@ -755,14 +765,14 @@ impl PiDriver {
                 let _ = stderr_thread.join();
                 match status {
                     Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                        let _ = events.send(DriverEvent::localized_error(localized!(
                             "errors.provider_rpc_exited",
                             provider = flavor.display_name(),
                             status = status
                         )));
                     }
                     Err(error) => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                        let _ = events.send(DriverEvent::localized_error(localized!(
                             "errors.read_provider_exit_status",
                             provider = format!("{} RPC", flavor.display_name()),
                             error = error
@@ -1351,6 +1361,7 @@ fn handle_pi_message(
             let _ = events.send(DriverEvent::TurnFinished {
                 success,
                 summary: error,
+                summary_i18n: None,
             });
             *state = PiStreamState::default();
             return;
@@ -1402,14 +1413,19 @@ fn handle_pi_message(
                 .lock()
                 .retain(|_, response| matches!(response, PendingResponse::Request(_)));
             let success = !state.failed;
+            let (summary, summary_i18n) = if success {
+                (None, None)
+            } else {
+                let pair = localized!(
+                    "errors.provider_complete_turn",
+                    provider = flavor.display_name()
+                );
+                (Some(pair.0), Some(pair.1))
+            };
             let _ = events.send(DriverEvent::TurnFinished {
                 success,
-                summary: (!success).then(|| {
-                    tr!(
-                        "errors.provider_complete_turn",
-                        provider = flavor.display_name()
-                    )
-                }),
+                summary,
+                summary_i18n,
             });
         }
         *state = PiStreamState::default();
@@ -1470,7 +1486,8 @@ fn handle_pi_message(
                 }
                 Some("error") => {
                     state.failed = true;
-                    let _ = events.send(DriverEvent::Error(pi_error_message(flavor, update)));
+                    let (message, i18n) = pi_error_message(flavor, update);
+                    let _ = events.send(DriverEvent::error_or_localized(message, i18n));
                 }
                 _ => {}
             }
@@ -1601,7 +1618,8 @@ fn handle_pi_message(
             }
         }
         "extension_error" => {
-            let _ = events.send(DriverEvent::Error(pi_error_message(flavor, &value)));
+            let (message, i18n) = pi_error_message(flavor, &value);
+            let _ = events.send(DriverEvent::error_or_localized(message, i18n));
         }
         _ => {}
     }
@@ -1659,19 +1677,26 @@ fn emit_completed_message_fallback(
     }
 }
 
-fn pi_error_message(flavor: PiFlavor, value: &Value) -> String {
-    value
+fn pi_error_message(
+    flavor: PiFlavor,
+    value: &Value,
+) -> (String, Option<waku_protocol::WireTranslation>) {
+    match value
         .get("error")
         .and_then(Value::as_str)
         .or_else(|| value.get("errorMessage").and_then(Value::as_str))
         .or_else(|| value.get("reason").and_then(Value::as_str))
         .map(str::to_owned)
-        .unwrap_or_else(|| {
-            tr!(
+    {
+        Some(message) => (message, None),
+        None => {
+            let pair = localized!(
                 "errors.provider_reported_error",
                 provider = flavor.display_name()
-            )
-        })
+            );
+            (pair.0, Some(pair.1))
+        }
+    }
 }
 
 fn classify_tool(name: &str) -> ActivityKind {

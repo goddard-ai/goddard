@@ -719,9 +719,11 @@ export function WakuApp() {
   async function landSessionWorkspace() {
     if (!client || !current || !currentProject) return
     const session = current
-    const base = session.workspace?.kind === 'worktree'
-      ? session.workspace.baseBranch ?? null
-      : null
+    if (session.workspace?.kind !== 'worktree') {
+      toast(t('git_panel.land_local_checkout'))
+      return
+    }
+    const base = session.workspace.baseBranch ?? null
     try {
       const outcome = await landWorkspace(client, sessionCwd(session, currentProject), base)
       if ('landed' in outcome) {

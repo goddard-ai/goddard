@@ -1,0 +1,1 @@
+- Collapsed sidebar groups now show the same unread dot sessions and terminals use when any hidden row has an unseen completion

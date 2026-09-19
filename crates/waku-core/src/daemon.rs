@@ -10,22 +10,25 @@ use crate::{
 };
 use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::attachments::AttachmentStore;
-use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
+    AgentSession, Checkpoint, CheckpointStatus, DriverEvent,
     Project, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
 use waku_protocol::custom_commands::CustomCommand;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
+use waku_protocol::routing::RoutePolicyView;
+use waku_protocol::{decode_enum, event_to_wire};
+#[cfg(test)]
+use serde_json::json;
+#[cfg(test)]
+use waku_protocol::event_from_wire;
 
 /// How many fully hydrated transcripts the daemon keeps resident.
 ///
@@ -77,7 +80,9 @@ pub struct WakuBackend {
     default_cwd: std::path::PathBuf,
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
     /// friends command so tests and headless runs pay nothing.
-    share: crate::share::ShareService,
+    share: Arc<crate::share::ShareService>,
+    /// The hot-reloading view of the user's `route-policy.json`.
+    route_policy: crate::route_policy::PolicyStore,
 }
 
 impl WakuBackend {
@@ -94,20 +99,19 @@ impl WakuBackend {
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("attachments"),
         );
-        let usage_rates_dir = task_store
+        let data_dir = task_store
             .path()
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_owned();
-        let share_dir = task_store
-            .path()
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("share");
+        let share_dir = data_dir.join("share");
         let our_name = std::env::var("USER")
             .ok()
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Goddard".to_owned());
+        let usage_rates_dir = data_dir.clone();
+        let route_policy =
+            crate::route_policy::PolicyStore::open(data_dir.join("route-policy.json"));
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             terminals: Mutex::new(HashMap::new()),
@@ -125,8 +129,9 @@ impl WakuBackend {
             runtime_start_locks: Mutex::new(HashMap::new()),
             daemon_address: Mutex::new(None),
             usage_rates_dir,
+            route_policy,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            share: crate::share::ShareService::new(share_dir.clone(), our_name),
+            share: Arc::new(crate::share::ShareService::new(share_dir.clone(), our_name)),
         };
         backend.purge_expired_archived_sessions();
         {
@@ -428,6 +433,9 @@ fn create_transfer_session(
     }
     session.status = SessionStatus::Idle;
     session.quarantined = true;
+    // Received files stay in the sandbox VM even once trusted — the agent
+    // never works on them with this Mac's filesystem in reach.
+    session.sandboxed = true;
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
@@ -474,15 +482,25 @@ impl Backend for WakuBackend {
             Command::GetSettings => Ok(ResponsePayload::Settings {
                 settings: self.settings.get(),
             }),
-            Command::GetFriends => Ok(ResponsePayload::Friends {
-                state: self.share.state(),
-            }),
+            Command::GetFriends => {
+                // Reading friends state means this install wants to be
+                // reachable — incoming requests and offers can only
+                // arrive while the endpoint is up.
+                self.share.kickstart();
+                Ok(ResponsePayload::Friends {
+                    state: self.share.state(),
+                })
+            }
             Command::SendFriendRequest { code, name } => {
                 self.share.send_friend_request(code, name)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::RespondFriendRequest { node_id, accept } => {
                 self.share.respond_friend_request(node_id, accept)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::WithdrawFriendRequest { node_id } => {
+                self.share.withdraw_friend_request(node_id)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::RemoveFriend { node_id } => {
@@ -503,6 +521,14 @@ impl Backend for WakuBackend {
             }
             Command::ProbeFriend { node_id } => {
                 self.share.probe_friend(node_id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SetFriendDisplayName { name } => {
+                self.share.set_display_name(name)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SetFriendNickname { node_id, nickname } => {
+                self.share.set_friend_nickname(node_id, nickname)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::UpdateSettings { settings } => {
@@ -584,9 +610,87 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::PlanUsage { usage })
             }
             Command::ProbeComputerPermissions { prompt } => {
+                // Probing installs and launches the helper app, so it obeys
+                // the same experiment opt-in as starting a runtime.
+                if !self.settings.get().computer_use_experiment_enabled {
+                    bail!("Goddard Computer Use is not enabled in this daemon's settings");
+                }
                 Ok(ResponsePayload::ComputerPermissions {
                     permissions: crate::computer_use::probe_permissions(prompt)?,
                 })
+            }
+            Command::Evaluate { state, questions } => {
+                let settings = self
+                    .settings
+                    .get()
+                    .eval
+                    .ok_or_else(|| anyhow!("no evaluation backend is configured"))?;
+                let started = std::time::Instant::now();
+                let result = crate::eval::evaluate(&settings, &state, &questions);
+                let mut record = crate::eval::EvalDecisionRecord::empty("evaluate");
+                record.backend = Some(settings.backend);
+                record.latency_ms = Some(started.elapsed().as_millis() as u64);
+                record.model = result
+                    .as_ref()
+                    .ok()
+                    .map(|evaluation| evaluation.model.clone());
+                record.state = Some(state);
+                record.questions = Some(questions);
+                record.answers = result
+                    .as_ref()
+                    .ok()
+                    .map(|evaluation| evaluation.answers.clone());
+                record.error = result.as_ref().err().map(|error| error.to_string());
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+                Ok(ResponsePayload::Evaluation {
+                    evaluation: result?,
+                })
+            }
+            Command::RouteTask {
+                prompt,
+                project,
+                candidates,
+                last_used,
+            } => {
+                let settings = self.settings.get();
+                let policy = self.route_policy.get();
+                let run = crate::routing::route_task(
+                    settings.eval.as_ref(),
+                    &policy,
+                    &prompt,
+                    project.as_deref(),
+                    &candidates,
+                    last_used.as_ref(),
+                );
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &run.record);
+                Ok(ResponsePayload::RouteDecision {
+                    decision: run.decision,
+                })
+            }
+            Command::RecordRouteOverride { session_id, target } => {
+                let mut record = crate::eval::EvalDecisionRecord::empty("route-override");
+                record.session_id = Some(session_id);
+                record.resolved_provider = Some(target.provider);
+                record.resolved_model = target.model;
+                record.reason = Some("user-override".to_owned());
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+                Ok(ResponsePayload::Ack)
+            }
+            Command::GetRoutePolicy => {
+                let policy = self.route_policy.get();
+                Ok(ResponsePayload::RoutePolicy {
+                    view: RoutePolicyView {
+                        path: self.route_policy.path().to_path_buf(),
+                        valid: !policy.is_default,
+                        hash: policy.hash.clone(),
+                        classes: policy.classes_raw.clone(),
+                        default: policy.default_raw.clone(),
+                    },
+                })
+            }
+            Command::SetRouteClassTarget { class, target } => {
+                self.route_policy.set_class_target(class, &target)?;
+                Ok(ResponsePayload::Ack)
             }
             Command::LoadUsageHistory {
                 window,
@@ -791,6 +895,9 @@ impl Backend for WakuBackend {
                 // must not start every installed agent CLI, and another
                 // provider is queried only after the user explicitly picks it.
                 let mut sessions = match provider {
+                    // Antigravity conversations live in its own TUI; there is
+                    // no Goddard transcript to import.
+                    ProviderKind::Antigravity => Vec::new(),
                     ProviderKind::Amp => {
                         crate::amp_session::list_provider_sessions(&binary, limit)?
                     }
@@ -944,6 +1051,9 @@ impl Backend for WakuBackend {
                             session_file,
                             VISIBLE_TURN_LIMIT,
                         )?
+                    }
+                    ProviderResumeCursor::Antigravity { .. } => {
+                        bail!("Antigravity conversations live in its own TUI; there is no transcript to import")
                     }
                 };
                 Ok(ResponsePayload::ProviderSessionHistory { history })
@@ -1287,6 +1397,7 @@ fn merge_session_list_columns(
     existing.last_reply_at = existing.last_reply_at.max(incoming.last_reply_at);
     existing.archived_at = incoming.archived_at;
     existing.pinned_at = incoming.pinned_at;
+    existing.landed_at = incoming.landed_at;
     true
 }
 
@@ -1305,6 +1416,7 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.last_reply_at = incoming.last_reply_at.or(existing.last_reply_at);
         existing.archived_at = incoming.archived_at;
         existing.pinned_at = incoming.pinned_at;
+        existing.landed_at = incoming.landed_at;
     }
     for queued in incoming.queued_messages {
         if !existing
@@ -1696,7 +1808,11 @@ impl WakuBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Antigravity
+            | ProviderKind::Devin
+            | ProviderKind::Droid
+            | ProviderKind::Fx
+            | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1979,7 +2095,11 @@ impl WakuBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Devin | ProviderKind::Droid | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Antigravity
+            | ProviderKind::Devin
+            | ProviderKind::Droid
+            | ProviderKind::Fx
+            | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()
@@ -2154,6 +2274,13 @@ impl WakuBackend {
         // daemon address disables injection for this launch only. Either
         // agent surface — task tools or settings writes — gets it injected.
         let daemon_settings = self.settings.get();
+        // Computer Use is experimental: the enable flag only counts while the
+        // experiment opt-in is on, whatever a client or a hand-edited settings
+        // document sent over the wire.
+        options.computer_use_enabled = crate::computer_use::resolve_enabled(
+            options.computer_use_enabled,
+            daemon_settings.computer_use_experiment_enabled,
+        );
         if daemon_settings.agent_tools_enabled || daemon_settings.agent_settings_enabled {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
@@ -2865,6 +2992,11 @@ fn handle_driver_command(
         | Command::ProbeProvider { .. }
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }
+        | Command::Evaluate { .. }
+        | Command::RouteTask { .. }
+        | Command::RecordRouteOverride { .. }
+        | Command::GetRoutePolicy
+        | Command::SetRouteClassTarget { .. }
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }
@@ -2902,10 +3034,13 @@ fn handle_driver_command(
         | Command::GetFriends
         | Command::SendFriendRequest { .. }
         | Command::RespondFriendRequest { .. }
+        | Command::WithdrawFriendRequest { .. }
         | Command::RemoveFriend { .. }
         | Command::SendFileToFriend { .. }
         | Command::CancelTransfer { .. }
-        | Command::ProbeFriend { .. } => {
+        | Command::ProbeFriend { .. }
+        | Command::SetFriendDisplayName { .. }
+        | Command::SetFriendNickname { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }
@@ -3147,306 +3282,6 @@ fn record_provider_cursor(
     }
 }
 
-fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
-    serde_json::from_value(Value::String(value.to_owned()))
-        .with_context(|| format!("invalid protocol enum value {value:?}"))
-}
-
-pub fn encode_enum<T: Serialize>(value: T) -> anyhow::Result<String> {
-    serde_json::to_value(value)?
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow!("protocol enum did not serialize as a string"))
-}
-
-fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
-    let (kind, payload) = match event {
-        DriverEvent::RuntimeEventCursorAdvanced(_) => {
-            bail!("client-only runtime cursors cannot be sent by the daemon")
-        }
-        DriverEvent::Connected { provider_cursor } => {
-            ("connected", serde_json::to_value(provider_cursor)?)
-        }
-        DriverEvent::AgentPresetSelected(preset) => {
-            ("agentPresetSelected", serde_json::to_value(preset)?)
-        }
-        DriverEvent::AutoTitleUpdated(title) => ("autoTitleUpdated", serde_json::to_value(title)?),
-        DriverEvent::AvailableCommands(commands) => {
-            ("availableCommands", serde_json::to_value(commands)?)
-        }
-        DriverEvent::TurnStarted => ("turnStarted", Value::Null),
-        DriverEvent::TurnParked => ("turnParked", Value::Null),
-        DriverEvent::TextDelta(text) => ("textDelta", Value::String(text)),
-        DriverEvent::ReasoningDelta(text) => ("reasoningDelta", Value::String(text)),
-        DriverEvent::Activity {
-            id,
-            kind,
-            title,
-            detail,
-            complete,
-        } => (
-            "activity",
-            json!({
-                "id": id,
-                "kind": kind,
-                "title": title,
-                "detail": detail,
-                "complete": complete,
-            }),
-        ),
-        DriverEvent::RichActivity(activity) => ("richActivity", serde_json::to_value(activity)?),
-        DriverEvent::BackgroundWork(work) => ("backgroundWork", serde_json::to_value(work)?),
-        DriverEvent::Permission {
-            request_id,
-            title,
-            detail,
-            options,
-        } => (
-            "permission",
-            json!({
-                "requestId": request_id,
-                "title": title,
-                "detail": detail,
-                "options": options,
-            }),
-        ),
-        DriverEvent::UserInputRequested {
-            request_id,
-            questions,
-        } => (
-            "userInputRequested",
-            json!({
-                "requestId": request_id,
-                "questions": questions,
-            }),
-        ),
-        DriverEvent::ComputerUseUpdated(state) => (
-            "computerUseUpdated",
-            serde_json::to_value(ComputerUseWire {
-                target: state.target,
-                phase: state.phase,
-                visible: state.visible,
-                image_url: state.image_url,
-            })?,
-        ),
-        DriverEvent::PromptSubmitted {
-            message,
-            turn_id,
-            message_id,
-            sent_by_task,
-            hidden,
-        } => (
-            "promptSubmitted",
-            json!({
-                "message": message,
-                "turnId": turn_id,
-                "messageId": message_id,
-                "sentByTask": sent_by_task,
-                "hidden": hidden,
-            }),
-        ),
-        DriverEvent::SteerAccepted {
-            message,
-            sent_by_task,
-        } => (
-            "steerAccepted",
-            json!({ "message": message, "sentByTask": sent_by_task }),
-        ),
-        DriverEvent::SteerRejected { message, reason } => (
-            "steerRejected",
-            json!({ "message": message, "reason": reason }),
-        ),
-        DriverEvent::UsageUpdated {
-            context_tokens,
-            context_window,
-        } => (
-            "usageUpdated",
-            json!({
-                "contextTokens": context_tokens,
-                "contextWindow": context_window,
-            }),
-        ),
-        DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
-        DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
-        DriverEvent::TurnFinished { success, summary } => (
-            "turnFinished",
-            json!({ "success": success, "summary": summary }),
-        ),
-        DriverEvent::Error(error) => ("error", Value::String(error)),
-        DriverEvent::ProcessExited => ("processExited", Value::Null),
-    };
-    Ok(WireDriverEvent::new(kind, payload))
-}
-
-pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
-    let payload = event.payload;
-    Ok(match event.kind.as_str() {
-        "connected" => DriverEvent::Connected {
-            provider_cursor: serde_json::from_value(payload)?,
-        },
-        "agentPresetSelected" => DriverEvent::AgentPresetSelected(serde_json::from_value(payload)?),
-        "autoTitleUpdated" => DriverEvent::AutoTitleUpdated(serde_json::from_value(payload)?),
-        "availableCommands" => DriverEvent::AvailableCommands(serde_json::from_value(payload)?),
-        "turnStarted" => DriverEvent::TurnStarted,
-        "turnParked" => DriverEvent::TurnParked,
-        "textDelta" => DriverEvent::TextDelta(serde_json::from_value(payload)?),
-        "reasoningDelta" => DriverEvent::ReasoningDelta(serde_json::from_value(payload)?),
-        "activity" => {
-            let activity: ActivityWire = serde_json::from_value(payload)?;
-            DriverEvent::Activity {
-                id: activity.id,
-                kind: activity.kind,
-                title: activity.title,
-                detail: activity.detail,
-                complete: activity.complete,
-            }
-        }
-        "richActivity" => DriverEvent::RichActivity(serde_json::from_value(payload)?),
-        "backgroundWork" => DriverEvent::BackgroundWork(serde_json::from_value(payload)?),
-        "permission" => {
-            let permission: PermissionWire = serde_json::from_value(payload)?;
-            DriverEvent::Permission {
-                request_id: permission.request_id,
-                title: permission.title,
-                detail: permission.detail,
-                options: permission.options,
-            }
-        }
-        "userInputRequested" => {
-            let request: UserInputWire = serde_json::from_value(payload)?;
-            DriverEvent::UserInputRequested {
-                request_id: request.request_id,
-                questions: request.questions,
-            }
-        }
-        "computerUseUpdated" => {
-            let state: ComputerUseWire = serde_json::from_value(payload)?;
-            DriverEvent::ComputerUseUpdated(ComputerUseState {
-                target: state.target,
-                phase: state.phase,
-                visible: state.visible,
-                image_url: state.image_url,
-            })
-        }
-        "promptSubmitted" => {
-            let submitted: SubmittedPromptWire = serde_json::from_value(payload)?;
-            DriverEvent::PromptSubmitted {
-                message: submitted.message,
-                turn_id: submitted.turn_id,
-                message_id: submitted.message_id,
-                sent_by_task: submitted.sent_by_task,
-                hidden: submitted.hidden,
-            }
-        }
-        "steerAccepted" => {
-            let steer: AcceptedSteerWire = serde_json::from_value(payload)?;
-            DriverEvent::SteerAccepted {
-                message: steer.message,
-                sent_by_task: steer.sent_by_task,
-            }
-        }
-        "steerRejected" => {
-            let steer: RejectedSteerWire = serde_json::from_value(payload)?;
-            DriverEvent::SteerRejected {
-                message: steer.message,
-                reason: steer.reason,
-            }
-        }
-        "usageUpdated" => {
-            let usage: UsageWire = serde_json::from_value(payload)?;
-            DriverEvent::UsageUpdated {
-                context_tokens: usage.context_tokens,
-                context_window: usage.context_window,
-            }
-        }
-        "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
-        "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
-        "turnFinished" => {
-            let finished: TurnFinishedWire = serde_json::from_value(payload)?;
-            DriverEvent::TurnFinished {
-                success: finished.success,
-                summary: finished.summary,
-            }
-        }
-        "error" => DriverEvent::Error(serde_json::from_value(payload)?),
-        "processExited" => DriverEvent::ProcessExited,
-        kind => bail!("daemon sent an unsupported driver event {kind:?}"),
-    })
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SubmittedPromptWire {
-    message: String,
-    turn_id: Uuid,
-    message_id: Uuid,
-    #[serde(default)]
-    sent_by_task: Option<Uuid>,
-    #[serde(default)]
-    hidden: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ActivityWire {
-    id: Option<String>,
-    kind: ActivityKind,
-    title: String,
-    detail: Option<String>,
-    complete: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PermissionWire {
-    request_id: String,
-    title: String,
-    detail: String,
-    options: Vec<PermissionOption>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UserInputWire {
-    request_id: String,
-    questions: Vec<crate::model::UserInputQuestion>,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ComputerUseWire {
-    target: Option<ComputerTarget>,
-    phase: ComputerUsePhase,
-    visible: bool,
-    image_url: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AcceptedSteerWire {
-    message: String,
-    #[serde(default)]
-    sent_by_task: Option<Uuid>,
-}
-
-#[derive(Deserialize)]
-struct RejectedSteerWire {
-    message: String,
-    reason: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UsageWire {
-    context_tokens: Option<u64>,
-    context_window: Option<u64>,
-}
-
-#[derive(Deserialize)]
-struct TurnFinishedWire {
-    success: bool,
-    summary: Option<String>,
-}
 
 #[cfg(test)]
 mod tests {
@@ -3604,6 +3439,10 @@ mod tests {
                 .find(|session| session.id == session_id)
                 .expect("the transfer's session");
             assert!(session.quarantined, "received files start untrusted");
+            assert!(
+                session.sandboxed,
+                "received files run in the sandbox VM once trusted"
+            );
             assert_eq!(session.status, SessionStatus::Idle);
             assert_eq!(session.project_id, project.id);
             assert_eq!(session.title, "design.pdf from maya");
@@ -3647,10 +3486,12 @@ mod tests {
             .position(|session| session.id == session_id)
             .unwrap();
         assert!(!reloaded.sessions[index].quarantined);
+        assert!(!reloaded.sessions[index].sandboxed);
         reload_store
             .hydrate(&mut reloaded.sessions[index])
             .unwrap();
         assert!(reloaded.sessions[index].quarantined);
+        assert!(reloaded.sessions[index].sandboxed);
 
         std::fs::remove_dir_all(root).ok();
     }

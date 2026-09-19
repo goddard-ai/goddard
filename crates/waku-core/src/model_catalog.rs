@@ -26,16 +26,16 @@ const DROID_ACP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(20);
 pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
     match provider {
         ProviderKind::Amp => [
-            ProviderModel::new("low", tr!("model_option.low")),
-            ProviderModel::new("medium", tr!("model_option.medium")).default(),
-            ProviderModel::new("high", tr!("model_option.high")),
-            ProviderModel::new("ultra", tr!("model_option.ultra")),
+            ProviderModel::keyed("low", localized!("model_option.low")),
+            ProviderModel::keyed("medium", localized!("model_option.medium")).default(),
+            ProviderModel::keyed("high", localized!("model_option.high")),
+            ProviderModel::keyed("ultra", localized!("model_option.ultra")),
         ]
         .into_iter()
         .map(|model| {
             model.service_tiers(
-                [ProviderModelOption::new("fast", tr!("model_option.fast"))
-                    .description(tr!("model_option.amp_fast_description"))],
+                [ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                    .keyed_description(localized!("model_option.amp_fast_description"))],
                 "default",
             )
         })
@@ -55,8 +55,8 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
                     "medium",
                 )
                 .service_tiers(
-                    [ProviderModelOption::new("fast", tr!("model_option.fast"))
-                        .description(tr!("model_option.fast_description"))],
+                    [ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                        .keyed_description(localized!("model_option.fast_description"))],
                     "default",
                 )
         })
@@ -80,13 +80,13 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // `models.list` is authoritative. `auto` names the runtime's own
         // routing and is valid on every account.
         ProviderKind::Copilot => {
-            vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
+            vec![ProviderModel::keyed("auto", localized!("model_option.auto")).default()]
         }
         // Cursor's full catalog is account-specific and comes from ACP
         // `cursor/list_available_models`. Auto remains the provider-owned
         // default and keeps older CLIs selectable if discovery is unavailable.
         ProviderKind::Cursor => {
-            vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
+            vec![ProviderModel::keyed("auto", localized!("model_option.auto")).default()]
         }
         // Devin's ACP session advertises the models it will accept. An invented
         // Adaptive fallback would be selectable and then rejected.
@@ -95,7 +95,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // come and go), so only the Factory-router default stands in before
         // discovery answers; `auto` is valid on every account.
         ProviderKind::Droid => {
-            vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
+            vec![ProviderModel::keyed("auto", localized!("model_option.auto")).default()]
         }
         // Harness reports its account/configuration-specific catalog from its
         // Host. An invented fallback would make unavailable routes selectable.
@@ -111,6 +111,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
         ProviderKind::Grok => Vec::new(),
+        // Antigravity's catalog is the account's quota, reported by `agy
+        // models`. An invented fallback would offer models the CLI rejects.
+        ProviderKind::Antigravity => Vec::new(),
         // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
@@ -147,6 +150,7 @@ pub fn discover_catalog(
     binary: &Path,
 ) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>) {
     let (discovered, discovered_presets) = match provider {
+        ProviderKind::Antigravity => (discover_antigravity_models(binary), None),
         // Amp exposes stable agent modes rather than a model inventory. Keep
         // the picker aligned with the modes advertised by the current CLI.
         ProviderKind::Amp => (Vec::new(), None),
@@ -277,7 +281,7 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
                     .filter_map(Value::as_str)
                     .map(str::trim)
                     .filter(|effort| !effort.is_empty())
-                    .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))
+                    .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
                     .collect();
                 // `ultracode` is Goddard's orchestration effort. Claude accepts
                 // it wherever the provider metadata says xhigh is supported.
@@ -286,10 +290,10 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
                     .iter()
                     .any(|option| option.id == "xhigh")
                 {
-                    model.reasoning_efforts.push(ProviderModelOption::new(
-                        "ultracode",
-                        reasoning_effort_label("ultracode"),
-                    ));
+                    let (label, i18n) = reasoning_effort_pair("ultracode");
+                    model.reasoning_efforts.push(
+                        ProviderModelOption::new("ultracode", label).with_label_i18n(i18n),
+                    );
                 }
                 model.default_reasoning_effort = ["high", "medium"]
                     .into_iter()
@@ -348,7 +352,7 @@ fn discover_copilot_models(binary: &Path) -> Vec<ProviderModel> {
                             .unwrap_or_else(|| efforts[0].clone());
                         entry = entry.reasoning(
                             efforts.iter().map(|effort| {
-                                ProviderModelOption::new(effort, reasoning_effort_label(effort))
+                                { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) }
                             }),
                             default,
                         );
@@ -371,7 +375,7 @@ fn discover_copilot_models(binary: &Path) -> Vec<ProviderModel> {
     if discovered.iter().any(|model| model.id == "auto") {
         return discovered;
     }
-    std::iter::once(ProviderModel::new("auto", tr!("model_option.auto")).default())
+    std::iter::once(ProviderModel::keyed("auto", localized!("model_option.auto")).default())
         .chain(discovered)
         .collect()
 }
@@ -484,8 +488,8 @@ fn with_cursor_config_options(mut model: ProviderModel, options: &[Value]) -> Pr
             {
                 continue;
             }
-            let label = cursor_select_label(&id, &name);
-            efforts.push(ProviderModelOption::new(id, label));
+            let (label, i18n) = cursor_select_pair(&id, &name);
+            efforts.push(ProviderModelOption::new(id, label).with_label_i18n(i18n));
         }
         if !efforts.is_empty() {
             let current =
@@ -511,8 +515,8 @@ fn with_cursor_config_options(mut model: ProviderModel, options: &[Value]) -> Pr
             "default"
         };
         model = model.service_tiers(
-            [ProviderModelOption::new("fast", tr!("model_option.fast"))
-                .description(tr!("model_option.fast_description"))],
+            [ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                .keyed_description(localized!("model_option.fast_description"))],
             default,
         );
     }
@@ -684,21 +688,21 @@ fn json_select_choices(option: &Value) -> Vec<(String, String)> {
     choices
 }
 
-fn cursor_select_label(id: &str, name: &str) -> String {
+fn cursor_select_pair(id: &str, name: &str) -> (String, Option<waku_protocol::WireTranslation>) {
     let name = name.trim();
     if name.is_empty() || name.contains(":icon-") {
         if id.is_empty() {
-            name.to_owned()
+            (name.to_owned(), None)
         } else {
-            reasoning_effort_label(id)
+            reasoning_effort_pair(id)
         }
     } else {
-        name.to_owned()
+        (name.to_owned(), None)
     }
 }
 
 fn parse_cursor_models(output: &str) -> Vec<ProviderModel> {
-    strip_ansi(output)
+    let listings: Vec<CursorListing> = strip_ansi(output)
         .lines()
         .filter_map(|line| {
             let mut line = line.trim();
@@ -742,10 +746,239 @@ fn parse_cursor_models(output: &str) -> Vec<ProviderModel> {
             } else {
                 label.to_owned()
             };
-            let model = ProviderModel::new(id, name);
-            Some(if is_default { model.default() } else { model })
+            Some(CursorListing {
+                id: id.to_owned(),
+                name,
+                is_default,
+            })
         })
-        .collect()
+        .collect();
+    group_cursor_listings(listings)
+}
+
+struct CursorListing {
+    id: String,
+    name: String,
+    is_default: bool,
+}
+
+/// Words `cursor-agent` folds into a model slug as reasoning effort —
+/// `extra` only ever appears glued to `high`.
+const CURSOR_EFFORT_WORDS: &[&str] = &[
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "extra",
+    "max",
+    "ultra",
+    "ultracode",
+];
+
+/// The traits an alias carries past its base slug, or `None` when the suffix
+/// is part of the model's name rather than a trait — `xhigh-fast` reads as
+/// effort `xhigh` plus the fast tier, `codex-low` as nothing when `codex` is
+/// not a listed base.
+fn cursor_listing_traits(suffix: &str) -> Option<(Option<String>, bool)> {
+    let mut effort = Vec::new();
+    let mut fast = false;
+    for token in suffix.split('-') {
+        match token {
+            "fast" => fast = true,
+            "thinking" => {}
+            word if CURSOR_EFFORT_WORDS.contains(&word) => effort.push(word),
+            _ => return None,
+        }
+    }
+    Some((
+        (!effort.is_empty()).then(|| normalize_cursor_reasoning_effort(&effort.join("-"))),
+        fast,
+    ))
+}
+
+/// Strip the trailing trait words off a slug that has no listed base —
+/// `swe-2-high-fast` gives base `swe-2` and suffix `high-fast`.
+fn cursor_self_strip(id: &str) -> Option<(&str, &str)> {
+    let mut cut = id.len();
+    while let Some(before) = id[..cut].rfind('-') {
+        let token = &id[before + 1..cut];
+        if !matches!(token, "fast" | "thinking") && !CURSOR_EFFORT_WORDS.contains(&token) {
+            break;
+        }
+        cut = before;
+    }
+    (cut < id.len()).then(|| (&id[..cut], &id[cut + 1..]))
+}
+
+/// A synthesized base needs its own name: the alias label minus the trait
+/// words its suffix names, so "SWE-2 High Fast" becomes "SWE-2".
+fn cursor_stripped_name(label: &str, suffix: &str) -> String {
+    let mut trait_words: Vec<String> = Vec::new();
+    for token in suffix.split('-') {
+        trait_words.push(token.to_ascii_lowercase());
+        let (label, _) = reasoning_effort_pair(&normalize_cursor_reasoning_effort(token));
+        trait_words.extend(label.split_whitespace().map(|word| word.to_ascii_lowercase()));
+    }
+    let mut words: Vec<&str> = label.split_whitespace().collect();
+    while let Some(word) = words.last() {
+        if !trait_words.iter().any(|word_| *word_ == word.to_ascii_lowercase()) {
+            break;
+        }
+        words.pop();
+    }
+    if words.is_empty() {
+        label.to_owned()
+    } else {
+        words.join(" ")
+    }
+}
+
+/// `cursor-agent models` still prints exploded CLI aliases — `grok-4.6-xhigh-fast`
+/// next to `grok-4.6` — while the ACP listing returns the base slug plus its
+/// config options. Fold each alias back into its base so the fallback offers
+/// the same plain name, effort ladder, and fast tier the picker draws for
+/// every other provider. An alias whose base is not itself listed folds only
+/// under a synthesized base its stripped slug shares with a sibling, or whose
+/// slug still looks like a model (a digit or a second word); anything else —
+/// a name part mistaken for a trait — stays its own row.
+fn group_cursor_listings(listings: Vec<CursorListing>) -> Vec<ProviderModel> {
+    let ids: Vec<String> = listings
+        .iter()
+        .map(|listing| listing.id.clone())
+        .collect();
+    // (base id, effort, fast) — `synthetic` when the base is inferred rather
+    // than listed.
+    let mut keyed: Vec<(String, CursorListing, Option<String>, bool, bool)> =
+        Vec::with_capacity(listings.len());
+    for listing in listings {
+        let resolved = ids
+            .iter()
+            .filter(|base| **base != listing.id)
+            .filter_map(|base| {
+                listing
+                    .id
+                    .strip_prefix(base.as_str())
+                    .and_then(|suffix| suffix.strip_prefix('-'))
+                    .and_then(|suffix| {
+                        cursor_listing_traits(suffix)
+                            .map(|(effort, fast)| (base.clone(), effort, fast, false))
+                    })
+            })
+            // The shortest listed prefix whose whole tail parses as traits is
+            // the base — `grok-4.6-xhigh-fast` folds into `grok-4.6`, not into
+            // the `grok-4.6-xhigh` alias listed beside it.
+            .min_by_key(|(base, _, _, _)| base.len())
+            .or_else(|| {
+                cursor_self_strip(&listing.id).and_then(|(base, suffix)| {
+                    cursor_listing_traits(suffix)
+                        .map(|(effort, fast)| (base.to_owned(), effort, fast, true))
+                })
+            });
+        match resolved {
+            Some((base, effort, fast, synthetic)) => {
+                keyed.push((base, listing, effort, fast, synthetic));
+            }
+            None => keyed.push((listing.id.clone(), listing, None, false, false)),
+        }
+    }
+    // A lone alias may keep its synthesized base only when the slug still
+    // reads like a model — `swe-2` qualifies, a bare `grok` does not.
+    let mut synthetic_members: std::collections::HashMap<String, usize> = Default::default();
+    for (base, _, _, _, synthetic) in &keyed {
+        if *synthetic {
+            *synthetic_members.entry(base.clone()).or_default() += 1;
+        }
+    }
+    let plausible_base = |base: &str| {
+        base.chars().any(|char| char.is_ascii_digit()) || base.split('-').count() > 1
+    };
+    let mut models: Vec<ProviderModel> = Vec::new();
+    let mut group_index: std::collections::HashMap<String, usize> = Default::default();
+    let mut seen: HashSet<String> = HashSet::new();
+    for (base, listing, effort, fast, synthetic) in keyed {
+        if synthetic
+            && synthetic_members.get(&base).copied().unwrap_or(0) < 2
+            && !plausible_base(&base)
+        {
+            if seen.insert(listing.id.clone()) {
+                let mut model = ProviderModel::new(listing.id, listing.name);
+                if listing.is_default {
+                    model.is_default = true;
+                }
+                models.push(model);
+            }
+            continue;
+        }
+        let index = match group_index.get(&base) {
+            Some(index) => *index,
+            None => {
+                // A base's own listing names it; an alias alone synthesizes
+                // the name by stripping the trait words its suffix carries.
+                let name = if listing.id == base {
+                    listing.name.clone()
+                } else {
+                    cursor_stripped_name(&listing.name, &listing.id[base.len() + 1..])
+                };
+                let index = models.len();
+                models.push(ProviderModel::new(base.clone(), name));
+                group_index.insert(base.clone(), index);
+                index
+            }
+        };
+        let model = &mut models[index];
+        if listing.id == base {
+            model.name = listing.name;
+            model.is_default = listing.is_default;
+        }
+        if let Some(effort) = effort
+            && !model
+                .reasoning_efforts
+                .iter()
+                .any(|option| option.id == effort)
+        {
+            let (label, i18n) = reasoning_effort_pair(&effort);
+            model
+                .reasoning_efforts
+                .push(ProviderModelOption::new(effort, label).with_label_i18n(i18n));
+        }
+        if fast && model.service_tiers.is_empty() {
+            model.service_tiers = vec![
+                ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                    .keyed_description(localized!("model_option.fast_description")),
+            ];
+            model.default_service_tier = Some("default".to_owned());
+        }
+    }
+    // Order each ladder by strength and default it the way the ACP path does:
+    // high, else medium, else the first offered.
+    const STRENGTH: [&str; 9] = [
+        "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode",
+    ];
+    for model in &mut models {
+        model.reasoning_efforts.sort_by_key(|option| {
+            STRENGTH
+                .iter()
+                .position(|rank| *rank == option.id)
+                .unwrap_or(STRENGTH.len())
+        });
+        if !model.reasoning_efforts.is_empty() && model.default_reasoning_effort.is_none() {
+            model.default_reasoning_effort = Some(
+                ["high", "medium"]
+                    .into_iter()
+                    .find(|preferred| {
+                        model
+                            .reasoning_efforts
+                            .iter()
+                            .any(|option| option.id == *preferred)
+                    })
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| model.reasoning_efforts[0].id.clone()),
+            );
+        }
+    }
+    models
 }
 
 fn discover_opencode_models(binary: &Path) -> Vec<ProviderModel> {
@@ -1389,7 +1622,7 @@ fn parse_devin_model(value: &Value) -> Option<ProviderModel> {
             .filter_map(Value::as_str)
             .map(str::trim)
             .filter(|effort| !effort.is_empty())
-            .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))
+            .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
             .collect();
         if !model.reasoning_efforts.is_empty() {
             model.default_reasoning_effort =
@@ -1429,6 +1662,32 @@ fn parse_opencode_models(output: &str) -> Vec<ProviderModel> {
                 ProviderModel::new(id.clone(), display_name_from_slug(model))
                     .sub_provider(display_name_from_slug(provider)),
             )
+        })
+        .collect()
+}
+
+/// `agy models` prints `id<TAB>name` rows on stdout — the account's actual
+/// quota — while a fetch spinner animates on stderr.
+fn discover_antigravity_models(binary: &Path) -> Vec<ProviderModel> {
+    let mut command = crate::command_env::command(binary);
+    let command = command.arg("models");
+    let Ok(output) = crate::command_env::output(command) else {
+        return Vec::new();
+    };
+    parse_antigravity_models(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_antigravity_models(output: &str) -> Vec<ProviderModel> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (id, name) = line.trim().split_once('\t')?;
+            let id = id.trim();
+            let name = name.trim();
+            if id.is_empty() {
+                return None;
+            }
+            Some(ProviderModel::new(id, if name.is_empty() { id } else { name }))
         })
         .collect()
 }
@@ -1564,7 +1823,7 @@ fn parse_kimi_models(catalog: &Value, default_model: Option<&str>) -> Vec<Provid
                 .filter_map(Value::as_str)
                 .map(str::trim)
                 .filter(|effort| !effort.is_empty())
-                .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))
+                .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
                 .collect();
             if !model.reasoning_efforts.is_empty() {
                 model.default_reasoning_effort = value
@@ -1759,7 +2018,7 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
                         .filter_map(Value::as_str)
                         .any(|effort| effort == *level)
             })
-            .map(|level| ProviderModelOption::new(level, reasoning_effort_label(level)))
+            .map(|level| { let (label, i18n) = reasoning_effort_pair(level); ProviderModelOption::new(level, label).with_label_i18n(i18n) })
             .collect();
     }
     let level_map = model.get("thinkingLevelMap").and_then(Value::as_object);
@@ -1773,7 +2032,7 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
                 mapped.is_none_or(|value| !value.is_null())
             }
         })
-        .map(|level| ProviderModelOption::new(level, reasoning_effort_label(level)))
+        .map(|level| { let (label, i18n) = reasoning_effort_pair(level); ProviderModelOption::new(level, label).with_label_i18n(i18n) })
         .collect()
 }
 
@@ -1888,7 +2147,7 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     Some(
-                        ProviderModelOption::new(id, reasoning_effort_label(id))
+                        { let (label, i18n) = reasoning_effort_pair(id); ProviderModelOption::new(id, label).with_label_i18n(i18n) }
                             .description(description),
                     )
                 })
@@ -1945,19 +2204,20 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
         .collect()
 }
 
-fn reasoning_effort_label(effort: &str) -> String {
-    match effort {
-        "none" => tr!("model_option.none"),
-        "minimal" => tr!("model_option.minimal"),
-        "low" => tr!("model_option.low"),
-        "medium" => tr!("model_option.medium"),
-        "high" => tr!("model_option.high"),
-        "xhigh" => tr!("model_option.extra_high"),
-        "max" => tr!("model_option.max"),
-        "ultra" => tr!("model_option.ultra"),
-        "ultracode" => tr!("model_option.ultracode"),
-        other => display_name_from_slug(other),
-    }
+fn reasoning_effort_pair(effort: &str) -> (String, Option<waku_protocol::WireTranslation>) {
+    let pair = match effort {
+        "none" => localized!("model_option.none"),
+        "minimal" => localized!("model_option.minimal"),
+        "low" => localized!("model_option.low"),
+        "medium" => localized!("model_option.medium"),
+        "high" => localized!("model_option.high"),
+        "xhigh" => localized!("model_option.extra_high"),
+        "max" => localized!("model_option.max"),
+        "ultra" => localized!("model_option.ultra"),
+        "ultracode" => localized!("model_option.ultracode"),
+        other => return (display_name_from_slug(other), None),
+    };
+    (pair.0, Some(pair.1))
 }
 
 /// Attaches a model's OpenCode "variants" as its reasoning-effort ladder.
@@ -1999,7 +2259,10 @@ pub(crate) fn with_variant_efforts<'a>(
         .cloned();
     let options = ids
         .iter()
-        .map(|id| ProviderModelOption::new(id.clone(), reasoning_effort_label(id)));
+        .map(|id| {
+            let (label, i18n) = reasoning_effort_pair(id);
+            ProviderModelOption::new(id.clone(), label).with_label_i18n(i18n)
+        });
     match default {
         Some(default) => model.reasoning(options, default),
         None => model,
@@ -2009,7 +2272,7 @@ pub(crate) fn with_variant_efforts<'a>(
 fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOption> {
     efforts
         .into_iter()
-        .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))
+        .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
         .collect()
 }
 
@@ -2022,7 +2285,7 @@ fn grok_reasoning_model(model: ProviderModel) -> ProviderModel {
             efforts
                 .iter()
                 .copied()
-                .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort))),
+                .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) }),
             "high",
         ),
         None => model,
@@ -2054,8 +2317,8 @@ fn claude_ultracode_model(id: &str, name: &str) -> ProviderModel {
 fn claude_long_context(model: ProviderModel) -> ProviderModel {
     model.context_windows(
         [
-            ProviderModelOption::new("200k", tr!("model_option.context_200k")),
-            ProviderModelOption::new("1m", tr!("model_option.context_1m")),
+            ProviderModelOption::keyed("200k", localized!("model_option.context_200k")),
+            ProviderModelOption::keyed("1m", localized!("model_option.context_1m")),
         ],
         "200k",
     )
@@ -2637,18 +2900,69 @@ opencode/big-pickle
                 .iter()
                 .map(|model| model.id.as_str())
                 .collect::<Vec<_>>(),
-            [
-                "auto",
-                "gpt-5.3-codex-low",
-                "composer-2.5",
-                "claude-opus-5-thinking-high"
-            ]
+            ["auto", "gpt-5.3-codex", "composer-2.5", "claude-opus-5"]
         );
         assert!(models[0].is_default);
         assert_eq!(models[0].name, "Auto");
-        assert_eq!(models[1].name, "Codex 5.3 Low");
+        // A packed alias folds into a base slug — the label drops the trait
+        // words and the suffix lands on the effort ladder.
+        assert_eq!(models[1].name, "Codex 5.3");
+        assert_eq!(
+            models[1]
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low"]
+        );
         assert_eq!(models[2].name, "Composer 2.5");
         assert!(!models[2].is_default);
+        assert_eq!(models[3].name, "Opus 5 1M");
+        assert_eq!(
+            models[3]
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["high"]
+        );
+    }
+
+    #[test]
+    fn folds_cursor_cli_aliases_into_effort_and_tier_options() {
+        let models = parse_cursor_models(
+            "Available models\ngrok-4.6\ngrok-4.6-medium\ngrok-4.6-xhigh\ngrok-4.6-xhigh-fast - Grok 4.6 XHigh Fast\n",
+        );
+        assert_eq!(models.len(), 1);
+        let grok = &models[0];
+        assert_eq!(grok.id, "grok-4.6");
+        assert_eq!(
+            grok.reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["medium", "xhigh"]
+        );
+        assert_eq!(grok.default_reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            grok.service_tiers
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["fast"]
+        );
+        assert_eq!(grok.default_service_tier.as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn keeps_cursor_cli_slugs_that_only_look_packed() {
+        // A lone alias whose stripped slug no longer reads like a model is a
+        // name part mistaken for a trait — it stays its own row rather than
+        // folding under a base nobody listed.
+        let models = parse_cursor_models("Available models\ngrok-max\n");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "grok-max");
+        assert!(models[0].reasoning_efforts.is_empty());
     }
 
     #[test]

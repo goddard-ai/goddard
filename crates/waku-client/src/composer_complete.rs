@@ -6,6 +6,9 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 pub use waku_protocol::composer::{CommandScope, FileEntry, SlashCommand};
 use waku_protocol::model::{ProviderKind, ProviderModelOption, ReportedCommand};
+use waku_protocol::workspace::{
+    IssueState, IssueSummary, PullRequestState, PullRequestSummary, WorkItemKind,
+};
 
 pub const FILTER_CAP: usize = 64;
 pub const FILE_INDEX_CAP: usize = 50_000;
@@ -14,6 +17,8 @@ pub const FILE_INDEX_CAP: usize = 50_000;
 pub enum TriggerKind {
     Command,
     File,
+    /// `#` — a GitHub issue or pull request on the workspace's origin remote.
+    WorkItem,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,9 +51,14 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
             index + text[index..].chars().next().unwrap().len_utf8()
         });
     let token = &text[token_start..cursor];
+    let (kind, query) = if let Some(query) = token.strip_prefix('@') {
+        (TriggerKind::File, query)
+    } else {
+        (TriggerKind::WorkItem, token.strip_prefix('#')?)
+    };
     Some(Trigger {
-        kind: TriggerKind::File,
-        query: token.strip_prefix('@')?.to_owned(),
+        kind,
+        query: query.to_owned(),
         range: token_start..cursor,
     })
 }
@@ -381,6 +391,206 @@ pub fn filter_files(
         .collect()
 }
 
+// ── Work-item mentions (`#`) ───────────────────────────────────────────────
+
+/// One issue or pull request as a `#` completion row, flattened from the
+/// daemon's separate `IssueSummary`/`PullRequestSummary` lists.
+#[derive(Clone, Debug)]
+pub struct ComposerWorkItem {
+    pub kind: WorkItemKind,
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: ComposerWorkItemState,
+    pub author: Option<String>,
+    /// Unix seconds; orders the empty-query "what's in flight" list.
+    pub updated_at: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComposerWorkItemState {
+    Open,
+    Closed,
+    Merged,
+    Draft,
+}
+
+impl ComposerWorkItem {
+    pub fn from_issue(issue: IssueSummary) -> Self {
+        Self {
+            kind: WorkItemKind::Issue,
+            number: issue.number,
+            title: issue.title,
+            url: issue.url,
+            state: match issue.state {
+                IssueState::Open => ComposerWorkItemState::Open,
+                IssueState::Closed => ComposerWorkItemState::Closed,
+            },
+            author: issue.author,
+            updated_at: issue.updated_at,
+        }
+    }
+
+    pub fn from_pull_request(pr: PullRequestSummary) -> Self {
+        Self {
+            kind: WorkItemKind::PullRequest,
+            number: pr.number,
+            title: pr.title,
+            url: pr.url,
+            state: match (pr.state, pr.is_draft) {
+                (PullRequestState::Merged, _) => ComposerWorkItemState::Merged,
+                (PullRequestState::Closed, _) => ComposerWorkItemState::Closed,
+                (PullRequestState::Open, true) => ComposerWorkItemState::Draft,
+                (PullRequestState::Open, false) => ComposerWorkItemState::Open,
+            },
+            author: pr.author,
+            updated_at: pr.updated_at,
+        }
+    }
+
+    /// The fuzzy candidate — `#<number> <title>` — so digits match the number
+    /// and text matches the title. Match positions index this string.
+    pub fn candidate(&self) -> String {
+        format!("#{} {}", self.number, self.title)
+    }
+
+    /// Byte offset of the title inside [`Self::candidate`]; `#` and the space
+    /// are single-byte, so it is the digit count plus two.
+    pub fn candidate_title_offset(&self) -> usize {
+        1 + self.number.to_string().len() + 1
+    }
+}
+
+/// Merge one remote search's issue and pull-request results into a single
+/// mention list: `exact` (a numeric query's direct `view` hits) first, then
+/// the rest newest-updated first, deduplicated by number — GitHub numbers
+/// issues and PRs from one sequence, so a number names at most one item.
+pub fn merge_work_items(
+    issues: Vec<IssueSummary>,
+    pull_requests: Vec<PullRequestSummary>,
+    exact: Vec<ComposerWorkItem>,
+) -> Vec<ComposerWorkItem> {
+    let mut seen = std::collections::HashSet::new();
+    let mut items: Vec<ComposerWorkItem> = Vec::new();
+    for item in exact {
+        if seen.insert(item.number) {
+            items.push(item);
+        }
+    }
+    let mut rest: Vec<ComposerWorkItem> = issues
+        .into_iter()
+        .map(ComposerWorkItem::from_issue)
+        .chain(
+            pull_requests
+                .into_iter()
+                .map(ComposerWorkItem::from_pull_request),
+        )
+        .collect();
+    rest.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    items.extend(rest.into_iter().filter(|item| seen.insert(item.number)));
+    items
+}
+
+pub fn filter_work_items(
+    items: &[ComposerWorkItem],
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<Scored<ComposerWorkItem>> {
+    let candidates = items
+        .iter()
+        .map(ComposerWorkItem::candidate)
+        .collect::<Vec<_>>();
+    let refs = candidates.iter().map(String::as_str).collect::<Vec<_>>();
+    filter_scored(&refs, query, matcher, FILTER_CAP)
+        .into_iter()
+        .map(|(index, positions)| Scored {
+            item: items[index].clone(),
+            positions,
+        })
+        .collect()
+}
+
+/// The `#<digits>` tokens in submitted text — start of string or whitespace
+/// before `#`, a non-digit after the number — deduplicated in first-use order.
+/// The boundary rule matches `detect_trigger` so a mention the popup would
+/// have completed is the same shape expansion recognizes.
+pub fn work_item_reference_numbers(text: &str) -> Vec<u64> {
+    let mut numbers = Vec::new();
+    let mut rest = text;
+    while let Some(index) = rest.find('#') {
+        let boundary = rest[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| ch.is_whitespace());
+        let digits = &rest[index + 1..];
+        let len = digits
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(digits.len());
+        let closed = digits[len..]
+            .chars()
+            .next()
+            .is_none_or(|ch| !ch.is_alphanumeric());
+        if boundary && len > 0 && closed {
+            let number: u64 = digits[..len].parse().unwrap_or(u64::MAX);
+            if !numbers.contains(&number) {
+                numbers.push(number);
+            }
+        }
+        rest = &digits[len..];
+    }
+    numbers
+}
+
+/// Rewrite each `#N` reference as `GitHub issue|pull request #N "title" (url)`
+/// so the provider prompt is self-contained; the transcript keeps the typed
+/// `#N`. References `resolve` does not know pass through untouched.
+pub fn expand_work_item_references(
+    prompt: &str,
+    resolve: impl Fn(u64) -> Option<ComposerWorkItem>,
+) -> String {
+    if !prompt.contains('#') {
+        return prompt.to_owned();
+    }
+    let mut expanded = String::with_capacity(prompt.len());
+    let mut rest = prompt;
+    while let Some(index) = rest.find('#') {
+        let boundary = rest[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| ch.is_whitespace());
+        let digits = &rest[index + 1..];
+        let len = digits
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(digits.len());
+        let closed = digits[len..]
+            .chars()
+            .next()
+            .is_none_or(|ch| !ch.is_alphanumeric());
+        let item = (boundary && len > 0 && closed)
+            .then(|| digits[..len].parse::<u64>().ok())
+            .flatten()
+            .and_then(&resolve);
+        match item {
+            Some(item) => {
+                expanded.push_str(&rest[..index]);
+                let noun = match item.kind {
+                    WorkItemKind::Issue => "GitHub issue",
+                    WorkItemKind::PullRequest => "GitHub pull request",
+                };
+                expanded.push_str(&format!(
+                    "{noun} #{} \"{}\" ({})",
+                    item.number, item.title, item.url
+                ));
+            }
+            // Not a reference, or one the store cannot name: verbatim.
+            None => expanded.push_str(&rest[..index + 1 + len]),
+        }
+        rest = &rest[index + 1 + len..];
+    }
+    expanded.push_str(rest);
+    expanded
+}
+
 pub fn highlight_byte_ranges(
     text: &str,
     positions: &[u32],
@@ -576,6 +786,114 @@ mod tests {
             argument_hint: None,
             template: None,
         }
+    }
+
+    #[test]
+    fn hash_triggers_on_token_start_only() {
+        let trigger = detect_trigger("fix #12", 7).expect("hash token triggers");
+        assert_eq!(trigger.kind, TriggerKind::WorkItem);
+        assert_eq!(trigger.query, "12");
+        assert_eq!(trigger.range, 4..7);
+
+        assert_eq!(detect_trigger("#", 1).unwrap().kind, TriggerKind::WorkItem);
+        assert_eq!(detect_trigger("#", 1).unwrap().query, "");
+        // Mid-token and heading text after a space are not mention sites.
+        assert!(detect_trigger("c#note", 6).is_none());
+        assert!(detect_trigger("# title", 7).is_none());
+        assert_eq!(detect_trigger("see #issue", 10).unwrap().query, "issue");
+    }
+
+    fn issue(number: u64, title: &str) -> IssueSummary {
+        IssueSummary {
+            number,
+            title: title.into(),
+            url: format!("https://github.com/o/r/issues/{number}"),
+            state: IssueState::Open,
+            author: None,
+            labels: Vec::new(),
+            assignees: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn work_item_filter_matches_number_and_title() {
+        let items = vec![
+            ComposerWorkItem::from_issue(issue(12, "login flake")),
+            ComposerWorkItem::from_issue(issue(34, "dark mode")),
+        ];
+        let mut matcher = matcher();
+        let rows = filter_work_items(&items, "12", &mut matcher);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].item.number, 12);
+        let rows = filter_work_items(&items, "flake", &mut matcher);
+        assert_eq!(rows[0].item.number, 12);
+    }
+
+    #[test]
+    fn merge_work_items_dedupes_by_number_with_exact_first() {
+        let mut pr = PullRequestSummary {
+            number: 12,
+            title: "fix flake".into(),
+            url: "https://github.com/o/r/pull/12".into(),
+            state: PullRequestState::Merged,
+            is_draft: false,
+            base_branch: "main".into(),
+            created_at: None,
+            updated_at: Some(10),
+            review_decision: None,
+            check_status: None,
+            additions: None,
+            deletions: None,
+            author: None,
+            head_branch: None,
+        };
+        let merged = merge_work_items(
+            vec![issue(12, "login flake")],
+            vec![pr.clone()],
+            vec![ComposerWorkItem::from_pull_request(pr.clone())],
+        );
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].kind, WorkItemKind::PullRequest);
+        assert_eq!(merged[0].state, ComposerWorkItemState::Merged);
+
+        pr.number = 30;
+        pr.updated_at = Some(20);
+        let merged = merge_work_items(vec![issue(12, "login flake")], vec![pr], Vec::new());
+        assert_eq!(
+            merged.iter().map(|item| item.number).collect::<Vec<_>>(),
+            [30, 12]
+        );
+    }
+
+    #[test]
+    fn work_item_references_scan_word_boundary_hashes() {
+        assert_eq!(work_item_reference_numbers("fix #12 and #34"), [12, 34]);
+        assert_eq!(work_item_reference_numbers("#7"), [7]);
+        assert_eq!(work_item_reference_numbers("c#5 or f#9"), Vec::<u64>::new());
+        assert_eq!(work_item_reference_numbers("#abc #12x"), Vec::<u64>::new());
+        assert_eq!(work_item_reference_numbers("#12 #12"), [12]);
+        assert_eq!(work_item_reference_numbers("# heading"), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn expansion_rewrites_known_references_and_keeps_unknown() {
+        let known = |number: u64| {
+            (number == 12).then(|| ComposerWorkItem::from_issue(issue(12, "login flake")))
+        };
+        assert_eq!(
+            expand_work_item_references("fix #12 like #99", known),
+            "fix GitHub issue #12 \"login flake\" (https://github.com/o/r/issues/12) like #99"
+        );
+        assert_eq!(
+            expand_work_item_references("no refs here", known),
+            "no refs here"
+        );
+        assert_eq!(
+            expand_work_item_references("c#12 stays", known),
+            "c#12 stays"
+        );
     }
 
     #[test]

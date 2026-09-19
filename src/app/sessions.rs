@@ -56,15 +56,6 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
     "FileEditorPane",
 ];
 
-/// How selection moves once an archived session's row departs. A sidebar-row
-/// archive tries the not-busy neighbor that slid into the row's slot before
-/// the unread fallback; ⌘⇧A goes straight to the shared next-unread scan.
-#[derive(Clone, Copy)]
-pub(super) enum ArchiveLanding {
-    Neighbor(usize),
-    NextUnread,
-}
-
 /// The topmost unread target in the sidebar — shared by
 /// GoToNextUnreadCompletion (⌘D / ctrl-backtick), the unseen-completion
 /// bell, and the session-departure fallbacks. "Unread" is the
@@ -352,11 +343,13 @@ impl Waku {
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
-        // Projects page keeps its per-project state for the next visit.
+        // Projects and Drafts pages keep their state for the next visit.
         self.projects_page = None;
+        self.drafts_page = false;
         if let Some((
             project_id,
             provider,
+            auto_route,
             runtime_mode,
             sandboxed,
             model,
@@ -367,6 +360,7 @@ impl Waku {
             (
                 session.project_id,
                 session.provider,
+                session.auto_route,
                 session.runtime_mode,
                 session.sandboxed,
                 session.model.clone(),
@@ -377,6 +371,7 @@ impl Waku {
         }) {
             self.state.selected_project = Some(project_id);
             self.state.last_provider = provider;
+            self.state.last_auto_route = auto_route;
             self.state.last_runtime_mode = runtime_mode;
             self.state.last_sandboxed = sandboxed;
             self.state.last_model = model;
@@ -393,7 +388,11 @@ impl Waku {
         if session_changed {
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
-            self.restore_right_panel_state(session_id, cx);
+            let panel_state = RightPanelSessionState::take_or_closed(
+                &mut self.right_panel_session_states,
+                session_id,
+            );
+            self.restore_right_panel_state(panel_state, cx);
             self.restore_missing_worktree(session_id, cx);
             // An open Git panel follows the newly selected session's checkout.
             self.sync_git_panel_workspace(cx);
@@ -411,11 +410,24 @@ impl Waku {
         self.reset_transcript_rows(self.transcript_row_count());
         self.apply_transcript_landing(transition, cx);
         self.save();
-        if self
-            .selected_session()
-            .is_some_and(AgentSession::has_started)
+        if let Some(session) = self.selected_session()
+            && session.has_started()
         {
-            self.start_runtime_attachment(session_id, cx);
+            // Antigravity has no daemon runtime to attach to — its surface
+            // is the TUI terminal, ensured and focused instead.
+            if session.provider == ProviderKind::Antigravity {
+                self.agy_last_visible.insert(session_id, Instant::now());
+                self.ensure_agy_terminal(session_id, cx);
+                if let Some(terminal) = self.agy_terminal(session_id) {
+                    let focus = terminal.read(cx).focus_handle(cx);
+                    let window_handle = self.window_handle;
+                    let _ = window_handle.update(cx, move |_, window, cx| {
+                        window.focus(&focus, cx);
+                    });
+                }
+            } else {
+                self.start_runtime_attachment(session_id, cx);
+            }
         }
         cx.notify();
     }
@@ -518,6 +530,7 @@ impl Waku {
             PersistedNavigationLocation::ProjectsPage(id) => {
                 project_exists(&id).then_some(NavigationLocation::ProjectsPage(id))
             }
+            PersistedNavigationLocation::DraftsPage => Some(NavigationLocation::DraftsPage),
         };
         self.session_navigation.back = self
             .state
@@ -552,7 +565,11 @@ impl Waku {
             .map(|(id, state)| (*id, right_panel_state_from_persisted(state)))
             .collect();
         if let Some(session_id) = self.state.selected_session {
-            self.restore_right_panel_state(session_id, cx);
+            let panel_state = RightPanelSessionState::take_or_closed(
+                &mut self.right_panel_session_states,
+                session_id,
+            );
+            self.restore_right_panel_state(panel_state, cx);
             if let Some(offset) = self.transcript_scroll_positions.get(&session_id).copied() {
                 let landing = TranscriptLanding::Position(offset);
                 // The runtime attach that lands after this resets the rows
@@ -908,6 +925,10 @@ impl Waku {
         self.pending_workspace_cleanups.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
+        self.agy_terminals.remove(&session_id);
+        self.agy_last_visible.remove(&session_id);
+        self.agy_spawned_at.remove(&session_id);
+        self.agy_pending_spawns.remove(&session_id);
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         self.state.sessions.remove(index);
@@ -923,6 +944,10 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
+        self.sidebar_multi_selection.remove(&session_id);
+        if self.sidebar_multi_selection_anchor == Some(session_id) {
+            self.sidebar_multi_selection_anchor = None;
+        }
         self.transcript_scroll_positions.remove(&session_id);
         if self
             .transcript_landing
@@ -1008,14 +1033,26 @@ impl Waku {
         {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
-            if projectless {
-                self.create_projectless_session(cx);
-            } else {
-                self.create_session_for(project_id, self.state.last_provider, cx);
-            }
-            let focus_handle = self.composer_focus(cx);
-            window.focus(&focus_handle, cx);
+            self.compose_new_task(project_id, projectless, window, cx);
         }
+    }
+
+    /// Opens the project's New task composer — the drained-queue landing for
+    /// departures with nowhere left to navigate.
+    fn compose_new_task(
+        &mut self,
+        project_id: Uuid,
+        projectless: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if projectless {
+            self.create_projectless_session(cx);
+        } else {
+            self.create_session_for(project_id, self.state.last_provider, cx);
+        }
+        let focus_handle = self.composer_focus(cx);
+        window.focus(&focus_handle, cx);
     }
 
     /// Hides a task from the sidebar and search without deleting it.
@@ -1036,16 +1073,16 @@ impl Waku {
     /// daemon purges archives once they outlive the retention window.
     /// Terminals that ran inside the directory are closed once the removal
     /// lands.
-    /// `landing` describes where selection moves once the row departs — a
-    /// positional neighbor for sidebar-initiated archives, the shared
-    /// next-unread scan for ⌘⇧A. See [`ArchiveLanding`].
+    /// `landing_row` is the sidebar position the session's row occupied, so a
+    /// [`ArchiveNavigation::NextSession`] landing can hand selection to the
+    /// neighbor that slid into its slot. `None` when the row is not on screen.
     pub(super) fn archive_session(
         &mut self,
         session_id: Uuid,
-        landing: ArchiveLanding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.hold_sidebar_peek();
         let Some(session) = self
             .state
             .sessions
@@ -1055,6 +1092,10 @@ impl Waku {
         else {
             return;
         };
+        let landing_row = sidebar::sidebar_session_row_index(
+            &self.sidebar_rows_cached(Local::now().date_naive()),
+            session_id,
+        );
         let busy = session.is_busy();
         // Only a worktree gets a preview: archiving snapshots its checkout
         // into the archive ref and removes the directory. A local checkout
@@ -1070,7 +1111,7 @@ impl Waku {
                     session_id,
                     crate::git_commit::ArchivePreview::default(),
                     true,
-                    landing,
+                    landing_row,
                     cx,
                 );
                 // Like the other deferred surfaces, focus lands two frames
@@ -1079,7 +1120,7 @@ impl Waku {
                     window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                 });
             } else if !busy {
-                self.finish_archive_session(session_id, landing, window, cx);
+                self.finish_archive_session(session_id, landing_row, window, cx);
             }
             return;
         };
@@ -1088,7 +1129,7 @@ impl Waku {
         }
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
             self.archive_preview_pending.remove(&session_id);
-            self.finish_archive_session(session_id, landing, window, cx);
+            self.finish_archive_session(session_id, landing_row, window, cx);
             return;
         };
         let window_handle = window.window_handle();
@@ -1121,7 +1162,7 @@ impl Waku {
                             session_id,
                             preview,
                             busy,
-                            landing,
+                            landing_row,
                             cx,
                         );
                         Some(focus)
@@ -1141,7 +1182,7 @@ impl Waku {
                     }
                     None => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_archive_session(session_id, landing, window, cx)
+                            waku.finish_archive_session(session_id, landing_row, window, cx)
                         });
                     }
                 }
@@ -1153,13 +1194,14 @@ impl Waku {
     /// Hides the task outright — the point every archive path reaches once
     /// the checkout proved clean or the user confirmed.
     ///
-    /// `landing` is [`ArchiveLanding::Neighbor`] only for archives initiated
-    /// from a sidebar row; it selects the next not-busy session at-or-below
-    /// the departed row's slot before falling back to the unread-based path.
+    /// Where selection moves is the `archive_navigation` setting's call;
+    /// `landing_row` is the sidebar position the departed row occupied, so a
+    /// [`ArchiveNavigation::NextSession`] landing can pick the neighbor that
+    /// slid into its slot.
     pub(super) fn finish_archive_session(
         &mut self,
         session_id: Uuid,
-        landing: ArchiveLanding,
+        landing_row: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1192,6 +1234,10 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
+        self.sidebar_multi_selection.remove(&session_id);
+        if self.sidebar_multi_selection_anchor == Some(session_id) {
+            self.sidebar_multi_selection_anchor = None;
+        }
         self.transcript_scroll_positions.remove(&session_id);
         if self
             .transcript_landing
@@ -1209,16 +1255,29 @@ impl Waku {
         }
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
-            let neighbor = match landing {
-                ArchiveLanding::Neighbor(row) => self.next_sidebar_session_from_row(row),
-                ArchiveLanding::NextUnread => None,
-            };
-            if let Some(next_id) = neighbor {
-                self.state.selected_session = None;
-                self.settings_page = None;
-                self.request_session_activation(next_id, SessionActivationTransition::Visit, cx);
-            } else {
-                self.select_session_fallback(project_id, projectless, window, cx);
+            self.state.selected_session = None;
+            self.settings_page = None;
+            match self.state.archive_navigation {
+                ArchiveNavigation::NextSession => {
+                    // The row that followed the departed one now sits at its
+                    // index; without a position the scan enters at the top.
+                    let next = self.next_sidebar_session_from_row(landing_row.unwrap_or(0));
+                    if let Some(next_id) = next {
+                        self.request_session_activation(
+                            next_id,
+                            SessionActivationTransition::Visit,
+                            cx,
+                        );
+                    } else {
+                        self.compose_new_task(project_id, projectless, window, cx);
+                    }
+                }
+                ArchiveNavigation::NewTask => {
+                    self.compose_new_task(project_id, projectless, window, cx);
+                }
+                ArchiveNavigation::NextUnread => {
+                    self.select_session_fallback(project_id, projectless, window, cx);
+                }
             }
         } else {
             self.save();
@@ -1275,8 +1334,17 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A sidebar multi-selection archives as a batch; each member keeps
+        // its own row position for the neighbor-selection fallback.
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            for session_id in targets {
+                self.archive_session(session_id, window, cx);
+            }
+            return;
+        }
         if let Some(session_id) = self.composer_session_id() {
-            self.archive_session(session_id, ArchiveLanding::NextUnread, window, cx);
+            self.archive_session(session_id, window, cx);
         }
     }
 
@@ -1322,6 +1390,43 @@ impl Waku {
         cx.notify();
     }
 
+    /// Pin or unpin a batch outright — the multi-selection's uniform result,
+    /// where a per-row toggle would leave a mixed set still mixed.
+    pub(super) fn set_sessions_pinned(
+        &mut self,
+        session_ids: &[Uuid],
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.hold_sidebar_peek();
+        let now = unix_time();
+        let mut changed = false;
+        for session_id in session_ids {
+            let Some(current) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id)
+                .filter(|session| session.has_started() && session.archived_at.is_none())
+                .map(|session| session.pinned_at.is_some())
+            else {
+                continue;
+            };
+            if current == pinned {
+                continue;
+            }
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.pinned_at = pinned.then_some(now);
+                session.updated_at = now;
+            }
+            changed = true;
+        }
+        if changed {
+            self.save();
+            cx.notify();
+        }
+    }
+
     pub(super) fn toggle_session_pin_action(
         &mut self,
         _: &ToggleSessionPin,
@@ -1351,6 +1456,20 @@ impl Waku {
             });
         if let Some(terminal_id) = focused_terminal {
             self.toggle_terminal_pin(terminal_id, cx);
+            return;
+        }
+        // A sidebar multi-selection pins as a batch: pin every member unless
+        // all are already pinned, in which case the chord unpins the set.
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            let pin = targets.iter().any(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *session_id)
+                    .is_some_and(|session| session.pinned_at.is_none())
+            });
+            self.set_sessions_pinned(&targets, pin, cx);
             return;
         }
         if let Some(session_id) = self.state.selected_session {
@@ -1428,6 +1547,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.create_task_in_directory_unfocused(path, cx);
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+    }
+
+    /// `create_task_in_directory` minus the composer focus — background
+    /// completion handlers have no window to focus through.
+    pub(super) fn create_task_in_directory_unfocused(
+        &mut self,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
         self.settings_page = None;
         let project_id = match self
             .state
@@ -1446,8 +1577,6 @@ impl Waku {
             }
         };
         self.create_session_for(project_id, self.state.last_provider, cx);
-        let focus = self.composer_focus(cx);
-        window.focus(&focus, cx);
     }
 
     /// The project's new-task draft — an unstarted one it already had, or a
@@ -1576,6 +1705,7 @@ impl Waku {
         self.state.git_panel_visible = self.git_panel_visible;
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;
+        self.state.git_panel_top_height = self.git_panel_top_height;
         self.save();
     }
 
@@ -1632,7 +1762,7 @@ impl Waku {
         let (sidebar_width, right_panel_width) = self.effective_panel_widths(window);
         // A drag tracks the pointer directly; whatever slide was still
         // finishing would fight it for the same edge.
-        let start_width = match target {
+        let start_size = match target {
             PanelResizeTarget::Sidebar => {
                 self.sidebar_slide = None;
                 self.sidebar_width = sidebar_width;
@@ -1650,11 +1780,20 @@ impl Waku {
                 self.right_panel_file_tree_width = width;
                 width
             }
+            PanelResizeTarget::GitPanelTop => {
+                let height = fitted_git_panel_top_height(
+                    f32::from(window.viewport_size().height),
+                    self.git_panel_top_height,
+                );
+                self.git_panel_top_height = height;
+                height
+            }
         };
         self.panel_resize_drag = Some(PanelResizeDrag {
             target,
             start_mouse_x: f32::from(event.position.x),
-            start_width,
+            start_mouse_y: f32::from(event.position.y),
+            start_size,
         });
         cx.stop_propagation();
         cx.notify();
@@ -1677,7 +1816,7 @@ impl Waku {
                 let maximum = SIDEBAR_MAX_WIDTH
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - right_panel_width)
                     .max(SIDEBAR_MIN_WIDTH);
-                let width = (drag.start_width + delta).clamp(SIDEBAR_MIN_WIDTH, maximum);
+                let width = (drag.start_size + delta).clamp(SIDEBAR_MIN_WIDTH, maximum);
                 if (self.sidebar_width - width).abs() < 0.5 {
                     return;
                 }
@@ -1688,7 +1827,7 @@ impl Waku {
                 let maximum = RIGHT_PANEL_MAX_WIDTH
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - sidebar_width)
                     .max(RIGHT_PANEL_MIN_WIDTH);
-                let width = (drag.start_width - delta).clamp(RIGHT_PANEL_MIN_WIDTH, maximum);
+                let width = (drag.start_size - delta).clamp(RIGHT_PANEL_MIN_WIDTH, maximum);
                 if (self.right_panel_width - width).abs() < 0.5 {
                     return;
                 }
@@ -1698,11 +1837,22 @@ impl Waku {
                 let maximum = FILE_TREE_MAX_WIDTH
                     .min(right_panel_width - FILE_EDITOR_MIN_WIDTH)
                     .max(FILE_TREE_MIN_WIDTH);
-                let width = (drag.start_width - delta).clamp(FILE_TREE_MIN_WIDTH, maximum);
+                let width = (drag.start_size - delta).clamp(FILE_TREE_MIN_WIDTH, maximum);
                 if (self.right_panel_file_tree_width - width).abs() < 0.5 {
                     return;
                 }
                 self.right_panel_file_tree_width = width;
+            }
+            PanelResizeTarget::GitPanelTop => {
+                let delta = f32::from(event.position.y) - drag.start_mouse_y;
+                let height = fitted_git_panel_top_height(
+                    f32::from(window.viewport_size().height),
+                    drag.start_size + delta,
+                );
+                if (self.git_panel_top_height - height).abs() < 0.5 {
+                    return;
+                }
+                self.git_panel_top_height = height;
             }
         }
         cx.notify();
@@ -1725,10 +1875,13 @@ impl Waku {
     }
 
     /// Where the main column's back/forward history currently sits — the
-    /// Projects page while it claims the column, then the selected task's
-    /// transcript, then the full-width terminal that parked it.
+    /// Projects and Drafts pages while one claims the column, then the
+    /// selected task's transcript, then the full-width terminal that
+    /// parked it.
     pub(super) fn navigation_location(&self) -> Option<NavigationLocation> {
-        if let Some(project_id) = self.projects_page {
+        if self.drafts_page {
+            Some(NavigationLocation::DraftsPage)
+        } else if let Some(project_id) = self.projects_page {
             Some(NavigationLocation::ProjectsPage(project_id))
         } else if let Some(session_id) = self.state.selected_session {
             Some(NavigationLocation::Task(session_id))
@@ -1796,6 +1949,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_projects_page(project_id, window, cx);
             }
+            Some(NavigationLocation::DraftsPage) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_drafts_page(window, cx);
+            }
             None => {}
         }
     }
@@ -1836,6 +1993,10 @@ impl Waku {
             Some(NavigationLocation::ProjectsPage(project_id)) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_projects_page(project_id, window, cx);
+            }
+            Some(NavigationLocation::DraftsPage) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_drafts_page(window, cx);
             }
             None => {}
         }
@@ -1931,8 +2092,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_id) = self.composer_session_id() {
-            self.mark_session_unread(session_id, cx);
+        let targets = self.sidebar_multi_selection_targets();
+        if targets.is_empty() {
+            if let Some(session_id) = self.composer_session_id() {
+                self.mark_session_unread(session_id, cx);
+            }
+        } else {
+            for session_id in targets {
+                self.mark_session_unread(session_id, cx);
+            }
         }
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
@@ -1956,6 +2124,13 @@ impl Waku {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            for session_id in targets {
+                self.mark_session_unread(session_id, cx);
+            }
+            return;
+        }
         if let Some(session_id) = self.composer_session_id() {
             self.mark_session_unread(session_id, cx);
         }
@@ -2017,6 +2192,11 @@ impl Waku {
             || self.settings_page.is_some()
             || self.selected_terminal.is_some()
             || self.projects_page.is_some()
+            // A started Antigravity session has no composer — keystrokes
+            // belong to its TUI terminal or nowhere.
+            || self.selected_session().is_some_and(|session| {
+                session.provider == ProviderKind::Antigravity && session.has_started()
+            })
         {
             return;
         }
@@ -2140,12 +2320,41 @@ impl Waku {
         ));
     }
 
+    /// Every batch member's agent directory, one path per line — the same
+    /// payload [`Self::copy_session_working_directory`] writes for one task.
+    pub(super) fn copy_sessions_working_directory(
+        &self,
+        session_ids: &[Uuid],
+        cx: &mut App,
+    ) {
+        let paths = session_ids
+            .iter()
+            .filter_map(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *session_id)
+            })
+            .filter_map(|session| self.workspace_path_for_session(session))
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !paths.is_empty() {
+            cx.write_to_clipboard(ClipboardItem::new_string(paths));
+        }
+    }
+
     pub(super) fn copy_working_directory_action(
         &mut self,
         _: &CopyWorkingDirectory,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let targets = self.sidebar_multi_selection_targets();
+        if !targets.is_empty() {
+            self.copy_sessions_working_directory(&targets, cx);
+            return;
+        }
         if let Some(session_id) = self.composer_session_id() {
             self.copy_session_working_directory(session_id, cx);
         }
@@ -2183,6 +2392,12 @@ impl Waku {
         }
         if self.message_edit.is_some() {
             self.cancel_message_edit(window, cx);
+            return;
+        }
+        // Bare Escape drops the sidebar's multi-selection before it arms the
+        // stop confirmation; ⌥Escape remains a deliberate one-press stop.
+        if !action.immediate && !self.sidebar_multi_selection.is_empty() {
+            self.clear_sidebar_multi_selection(cx);
             return;
         }
         // ⌥Escape is a deliberate chord, so it stops on a single press
@@ -2365,42 +2580,140 @@ impl Waku {
         );
     }
 
+    /// The session's effective model+effort+fast selection, in picker-row
+    /// terms: the catalog model id (a suffix-encoded Cursor id resolves to
+    /// its base), the effort a turn would run at, and whether the fast tier
+    /// is on. `None` when no model can be named at all.
+    pub(super) fn session_model_combo(
+        &self,
+        session: &AgentSession,
+    ) -> Option<(String, Option<String>, bool)> {
+        let model_id = self.catalog_model_id_for_session(session)?.to_owned();
+        let metadata = self.model_metadata_for_session(session);
+        // Mirror the traits chip's suffix decode: Cursor packs the choice
+        // into the model id, so the suffix fills what the session fields
+        // leave unset.
+        let (suffix_effort, suffix_tier) = (session.provider == ProviderKind::Cursor)
+            .then(|| self.model_for_session(session))
+            .flatten()
+            .and_then(|requested| {
+                self.provider_probe(session.provider).and_then(|probe| {
+                    crate::model_catalog::cursor_catalog_model(&probe.models, requested)
+                })
+            })
+            .map(|matched| {
+                (
+                    crate::model_catalog::cursor_suffix_reasoning_effort(
+                        &matched.suffix,
+                        &matched.model.reasoning_efforts,
+                    ),
+                    crate::model_catalog::cursor_suffix_service_tier(
+                        &matched.suffix,
+                        &matched.model.service_tiers,
+                    ),
+                )
+            })
+            .unwrap_or_default();
+        let effort = session
+            .reasoning_effort
+            .as_deref()
+            .filter(|selected| {
+                metadata.is_some_and(|model| {
+                    model
+                        .reasoning_efforts
+                        .iter()
+                        .any(|option| option.id == *selected)
+                })
+            })
+            .or(suffix_effort.as_deref())
+            .map(str::to_owned)
+            .or_else(|| {
+                if super::composer::supports_reasoning_default_reset(session.provider) {
+                    None
+                } else {
+                    metadata.and_then(|model| {
+                        model.default_reasoning_effort.clone().or_else(|| {
+                            model
+                                .reasoning_efforts
+                                .first()
+                                .map(|option| option.id.clone())
+                        })
+                    })
+                }
+            });
+        let tier = session
+            .service_tier
+            .as_deref()
+            .filter(|selected| {
+                *selected == "default"
+                    || metadata.is_some_and(|model| {
+                        model
+                            .service_tiers
+                            .iter()
+                            .any(|option| option.id == *selected)
+                    })
+            })
+            .or(suffix_tier.as_deref())
+            .or_else(|| metadata.and_then(|model| model.default_service_tier.as_deref()))
+            .unwrap_or("default");
+        Some((model_id, effort, tier == "fast"))
+    }
+
+    /// Applies a picker row: the model plus the exact effort and fast-tier
+    /// choice the row names, rather than the model's remembered traits.
     pub(super) fn choose_model(
         &mut self,
         provider: ProviderKind,
         model: String,
+        effort: Option<String>,
+        fast: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some((session_id, provider_changed)) = self
+        let service_tier = fast.then(|| "fast".to_owned());
+        // Picking a concrete model exits an Auto draft even when provider and
+        // model happen to match the draft's last-used carryover.
+        let Some((session_id, provider_changed, was_routed)) = self
             .composer_session()
             .filter(|session| {
                 session.can_choose_model(provider)
-                    && (session.provider != provider
-                        || session.model.as_deref() != Some(model.as_str()))
+                    && (session.auto_route
+                        || session.provider != provider
+                        || session.model.as_deref() != Some(model.as_str())
+                        || session.reasoning_effort != effort
+                        || session.service_tier != service_tier)
             })
-            .map(|session| (session.id, session.provider != provider))
+            .map(|session| {
+                (
+                    session.id,
+                    session.provider != provider,
+                    session.route_decision.is_some(),
+                )
+            })
         else {
             return;
         };
 
         self.remember_selected_model_traits();
-        let (reasoning_effort, service_tier, context_window) =
-            self.state.model_traits_for(provider, &model);
+        // Effort and tier come from the row; the context window stays a
+        // per-model memory like before.
+        let (_, _, context_window) = self.state.model_traits_for(provider, &model);
         if let Some(session) = self.composer_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
+            session.auto_route = false;
+            session.route_decision = None;
             if provider_changed {
                 session.agent_preset = None;
             }
-            session.reasoning_effort.clone_from(&reasoning_effort);
+            session.reasoning_effort.clone_from(&effort);
             session.service_tier.clone_from(&service_tier);
             session.context_window.clone_from(&context_window);
             self.state.last_provider = provider;
-            self.state.last_model = Some(model);
-            self.state.last_reasoning_effort = reasoning_effort;
+            self.state.last_auto_route = false;
+            self.state.last_model = Some(model.clone());
+            self.state.last_reasoning_effort.clone_from(&effort);
             self.state.last_service_tier = service_tier;
             self.state.last_context_window = context_window;
-            self.model_picker_tab = ModelPickerTab::Provider(provider);
             // A different provider is a different binary and protocol; only a
             // model change within one provider can be applied in session.
             if provider_changed {
@@ -2410,9 +2723,36 @@ impl Waku {
             } else {
                 self.apply_session_options(session_id, cx);
             }
+            // The picked combo becomes the model's remembered traits, so a
+            // later plain pick of the same model lands back on it.
+            self.remember_selected_model_traits();
+            if was_routed {
+                self.record_route_override(session_id, provider, Some(model), cx);
+            }
             self.save();
             cx.notify();
         }
+    }
+
+    /// Pick the Auto row: the draft's provider/model stay as the last-used
+    /// hint, and the first submission's route call resolves what actually
+    /// runs. Only drafts reach here — a started session's picker does not
+    /// offer the row.
+    pub(super) fn choose_auto_route(&mut self, cx: &mut Context<Self>) {
+        if !self.auto_route_available() {
+            return;
+        }
+        let Some(session) = self.composer_session_mut() else {
+            return;
+        };
+        if session.auto_route {
+            return;
+        }
+        session.auto_route = true;
+        session.updated_at = unix_time();
+        self.state.last_auto_route = true;
+        self.save();
+        cx.notify();
     }
 
     /// Primary modifier + /: toggle the composer's model picker as if its chip were clicked.
@@ -2504,6 +2844,25 @@ impl Waku {
         );
     }
 
+    /// Primary modifier + Shift + .: flip the draft between this Mac and
+    /// the sandbox VM — the two rows the mode menu's Environment section
+    /// offers. `set_sandboxed` carries the guards: no session to retarget,
+    /// or a task already started, leaves the flag untouched.
+    pub(super) fn toggle_environment_action(
+        &mut self,
+        _: &ToggleEnvironment,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(sandboxed) = self.composer_session().map(|session| session.sandboxed) else {
+            return;
+        };
+        self.set_sandboxed(!sandboxed, cx);
+    }
+
     /// A keyboard toggle produces no mouse-down for another open menu's
     /// dismiss-on-down-out to see, so close the rest here. The pickers' toggle
     /// observers update this entity, so the toggle itself has to run after
@@ -2533,60 +2892,155 @@ impl Waku {
         });
     }
 
-    /// Discovery is not requested here: launch already requested it for every
-    /// installed provider, so tabs only ever switch between loaded lists.
-    pub(super) fn select_model_picker_tab(&mut self, tab: ModelPickerTab, cx: &mut Context<Self>) {
-        if self.model_picker_tab != tab {
-            self.model_picker_tab = tab;
-            if let ModelPickerTab::Provider(provider) = tab {
-                // Selecting a rail re-runs that provider's catalog discovery,
-                // so each tab is fresh when viewed without probing every
-                // provider on open.
-                self.refresh_provider_model_discovery(provider);
-            }
-            // A different tab renumbers the rows under the keyboard cursor,
-            // and would otherwise inherit the old tab's scroll offset.
-            self.model_picker_highlight = None;
-            self.reveal_selected_picker_model();
-            cx.notify();
-        }
-    }
-
-    /// A sidebar rail click is an explicit "show me this tab": it exits search
-    /// mode even when the clicked tab is already selected. A live query spans
-    /// every provider and hides which tab is selected, so a click that left
-    /// the query in place would visibly do nothing — `select_model_picker_tab`
-    /// also bails when the tab is unchanged, which is exactly the state that
-    /// query leaves it in. Clearing the field first emits an edit, which
-    /// resets the keyboard highlight and re-reveals the current model under
-    /// the now-unfiltered list.
-    pub(super) fn select_model_picker_tab_from_rail(
+    /// ⌘⌥1–⌘⌥9 applies the nth starred selection to the composer session —
+    /// a draft or an idle session, and only while its provider is one the
+    /// session may still run.
+    pub(super) fn select_favorite_model_action(
         &mut self,
-        tab: ModelPickerTab,
+        action: &SelectFavoriteModel,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.model_search.update(cx, |input, cx| input.clear(cx));
-        self.select_model_picker_tab(tab, cx);
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(favorite) = self.state.favorite_models.get(action.index).cloned() else {
+            return;
+        };
+        let Some(session) = self.composer_session() else {
+            return;
+        };
+        if !session.can_choose_model(favorite.provider) {
+            return;
+        }
+        // A switched-off provider's favorite stays reachable only for the
+        // session already locked to it — same rule the picker's rows follow.
+        let locked = !session.messages.is_empty() && session.provider == favorite.provider;
+        if !locked && !self.provider_enabled(favorite.provider) {
+            return;
+        }
+        // A favorite stored before rows were combos carries no effort; it
+        // claims the model's default-effort row in the list, so the chord
+        // applies that same effort rather than leaving the field unset.
+        let effort = favorite.effort.clone().or_else(|| {
+            self.provider_probe(favorite.provider)
+                .and_then(|probe| probe.model(&favorite.model))
+                .and_then(|model| {
+                    model.default_reasoning_effort.clone().or_else(|| {
+                        model
+                            .reasoning_efforts
+                            .first()
+                            .map(|option| option.id.clone())
+                    })
+                })
+        });
+        self.choose_model(favorite.provider, favorite.model, effort, favorite.fast, cx);
+    }
+
+    /// ⌘E steps the composer session's reasoning effort through the current
+    /// model's ladder, ⌘⇧E the other way — both wrap at the ends. Providers
+    /// that can return to a base `default` variant include the unset step in
+    /// the cycle.
+    pub(super) fn cycle_reasoning_effort_action(
+        &mut self,
+        action: &CycleReasoningEffort,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some((steps, current)) = self.composer_session().and_then(|session| {
+            let model = self.model_metadata_for_session(session)?;
+            if model.reasoning_efforts.is_empty() {
+                return None;
+            }
+            let current = self
+                .session_model_combo(session)
+                .and_then(|(_, effort, _)| effort);
+            let mut steps: Vec<Option<String>> = Vec::new();
+            if super::composer::supports_reasoning_default_reset(session.provider) {
+                steps.push(None);
+            }
+            steps.extend(
+                model
+                    .reasoning_efforts
+                    .iter()
+                    .map(|option| Some(option.id.clone())),
+            );
+            Some((steps, current))
+        }) else {
+            return;
+        };
+        let position = steps.iter().position(|step| *step == current);
+        let next = match action.direction {
+            // An unset or unlisted effort takes the ladder's first step
+            // going forward, its last going backward.
+            EffortCycleDirection::Forward => {
+                (position.unwrap_or_else(|| steps.len().saturating_sub(1)) + 1) % steps.len()
+            }
+            EffortCycleDirection::Backward => {
+                (position.unwrap_or(0) + steps.len() - 1) % steps.len()
+            }
+        };
+        match steps[next].clone() {
+            Some(effort) => self.set_reasoning_effort(effort, cx),
+            None => self.clear_reasoning_effort(cx),
+        }
     }
 
     pub(super) fn toggle_favorite_model(
         &mut self,
         provider: ProviderKind,
         model: String,
+        effort: Option<String>,
+        fast: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(index) = self
-            .state
-            .favorite_models
-            .iter()
-            .position(|favorite| favorite.provider == provider && favorite.model == model)
-        {
+        let default_effort = self
+            .provider_probe(provider)
+            .and_then(|probe| probe.model(&model))
+            .and_then(|model| {
+                model.default_reasoning_effort.clone().or_else(|| {
+                    model
+                        .reasoning_efforts
+                        .first()
+                        .map(|option| option.id.clone())
+                })
+            });
+        if let Some(index) = self.state.favorite_models.iter().position(|favorite| {
+            super::composer::favorite_matches_row(
+                favorite,
+                provider,
+                &model,
+                effort.as_deref(),
+                fast,
+                default_effort.as_deref(),
+            )
+        }) {
             self.state.favorite_models.remove(index);
         } else {
-            self.state
-                .favorite_models
-                .push(FavoriteModel { provider, model });
+            self.state.favorite_models.push(FavoriteModel {
+                provider,
+                model,
+                effort,
+                fast,
+            });
         }
+        self.save();
+        cx.notify();
+    }
+
+    /// Drag-reorder inside the picker's favorites section: the dropped entry
+    /// takes the target row's slot.
+    pub(super) fn move_favorite_model(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from == to || from >= self.state.favorite_models.len() {
+            return;
+        }
+        let favorite = self.state.favorite_models.remove(from);
+        self.state
+            .favorite_models
+            .insert(to.min(self.state.favorite_models.len()), favorite);
         self.save();
         cx.notify();
     }
@@ -2751,6 +3205,20 @@ impl Waku {
         // objective after this stop and begin pursuing it; the user asked to
         // stop, so they leave with the turn.
         self.pending_goal_operations.remove(&session_id);
+        // The registry marks this turn's work Stopped below, but a retained
+        // runtime keeps provider-side work running unless it is told. Stop
+        // each stoppable foreground item while the driver is still attached;
+        // detached work survives Stop by design.
+        if self.runtimes.contains_key(&session_id) {
+            let keys = self
+                .background_work
+                .get(&session_id)
+                .map(|registry| registry.live_stoppable_foreground_keys())
+                .unwrap_or_default();
+            for key in keys {
+                self.stop_background_work(session_id, key, cx);
+            }
+        }
         let mut runtime = self.runtimes.remove(&session_id);
         if let Some(runtime) = runtime.as_ref() {
             runtime.driver.cancel();
@@ -2794,6 +3262,10 @@ impl Waku {
             runtime.pending_permission = None;
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
+            // A steer still awaiting its provider echo must not acknowledge
+            // into the settled session; the user asked to stop, not to
+            // continue.
+            runtime.pending_steers.clear();
             runtime.computer_use_previews.clear();
         }
         if has_active_turn {

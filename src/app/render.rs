@@ -25,46 +25,64 @@ impl Waku {
         let active = self
             .panel_resize_drag
             .is_some_and(|drag| drag.target == target);
+        let bar = |element: Div| {
+            element
+                .bg(if active {
+                    theme.resize_handle
+                } else {
+                    gpui::transparent_black()
+                })
+                .group_hover("panel-resize-handle", |element| {
+                    element.bg(theme.resize_handle)
+                })
+        };
+        let mut strip = div().id(id).absolute().group("panel-resize-handle");
         // The right panel's left edge abuts the browser webview, a native view
         // that composites above every base-scene pixel at or beyond the edge.
         // Its bar and hover strip therefore sit entirely left of the edge,
         // where GPUI still owns rendering and input; the other edges keep the
-        // conventional straddle.
-        let (strip_left, strip_width) = match target {
-            PanelResizeTarget::RightPanel => (-7.0, 8.0),
-            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => (-5.0, 10.0),
+        // conventional straddle. The Git panel's top divider is horizontal and
+        // pinned inside the region's bottom edge.
+        strip = match target {
+            PanelResizeTarget::RightPanel => strip
+                .top_0()
+                .left(px(-7.0))
+                .w(px(8.0))
+                .h_full()
+                .cursor_col_resize()
+                .child(bar(
+                    div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full(),
+                )),
+            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => strip
+                .top_0()
+                .left(px(-5.0))
+                .w(px(10.0))
+                .h_full()
+                .cursor_col_resize()
+                .child(bar(
+                    div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full(),
+                )),
+            PanelResizeTarget::GitPanelTop => strip
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(px(8.0))
+                .cursor_row_resize()
+                .child(bar(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(px(3.0))
+                        .h(px(2.0)),
+                )),
         };
-        div()
-            .id(id)
-            .absolute()
-            .top_0()
-            .left(px(strip_left))
-            .w(px(strip_width))
-            .h_full()
-            .group("panel-resize-handle")
-            .cursor_col_resize()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(px(5.0))
-                    .w(px(2.0))
-                    .h_full()
-                    .bg(if active {
-                        theme.resize_handle
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .group_hover("panel-resize-handle", |element| {
-                        element.bg(theme.resize_handle)
-                    }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event, window, cx| {
-                    this.begin_panel_resize(target, event, window, cx);
-                }),
-            )
+        strip.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event, window, cx| {
+                this.begin_panel_resize(target, event, window, cx);
+            }),
+        )
     }
 }
 
@@ -464,6 +482,9 @@ impl Render for Waku {
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
         self.sync_browser_webviews(cx);
+        // Same per-render handoff for the composer card's liquid-glass
+        // surface, which sits *behind* the Metal layer.
+        self.sync_composer_glass(window, cx);
         if self.fps_counter_visible {
             self.tick_fps(window);
         }
@@ -475,6 +496,7 @@ impl Render for Waku {
             let command_palette = self.render_command_palette(window, cx);
             let file_finder = self.render_file_finder(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
+            let issue_dialog = self.render_issue_dialog(cx);
             let archive_dialog = self.render_archive_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
@@ -505,6 +527,8 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::open_localhost_url_action))
                 .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
                 .on_action(cx.listener(Self::new_terminal_action))
+                .on_action(cx.listener(Self::open_created_issue_in_github_action))
+                .on_action(cx.listener(Self::open_toast_session_action))
                 .on_action(cx.listener(Self::toggle_terminals_action))
                 .on_action(cx.listener(Self::toggle_projects_page_action))
                 .on_action(cx.listener(Self::toggle_inbox_page_action))
@@ -518,6 +542,7 @@ impl Render for Waku {
                 .children(command_palette)
                 .children(file_finder)
                 .children(commit_dialog)
+                .children(issue_dialog)
                 .children(archive_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
@@ -537,14 +562,21 @@ impl Render for Waku {
         let empty = should_render_empty_state(self.selected_session());
         let projects_page = self.projects_page;
         let permission = self.render_permission(cx);
+        // A started Antigravity session shows its TUI terminal as the whole
+        // surface — no transcript, no composer.
+        let agy_surface = self.selected_session().is_some_and(|session| {
+            session.provider == ProviderKind::Antigravity && session.has_started()
+        });
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
+        let issue_dialog = self.render_issue_dialog(cx);
         let archive_dialog = self.render_archive_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let ssh_prompt = self.render_ssh_prompt(window, cx);
+        let sync_branch_modal = self.render_sync_branch(window, cx);
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
@@ -565,6 +597,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_fps_counter_action))
             .on_action(cx.listener(Self::navigate_back_action))
             .on_action(cx.listener(Self::navigate_forward_action))
+            .on_action(cx.listener(Self::undo_draft_use_action))
             .on_action(cx.listener(Self::go_to_next_unread_completion_action))
             .on_action(cx.listener(Self::mark_session_unread_action))
             .on_action(cx.listener(Self::mark_unread_and_go_to_next_idle_action))
@@ -585,11 +618,15 @@ impl Render for Waku {
             .on_action(cx.listener(Self::focus_composer_action))
             .on_action(cx.listener(Self::focus_terminal_action))
             .on_action(cx.listener(Self::toggle_model_picker_action))
+            .on_action(cx.listener(Self::select_favorite_model_action))
+            .on_action(cx.listener(Self::cycle_reasoning_effort_action))
             .on_action(cx.listener(Self::toggle_branch_picker_action))
             .on_action(cx.listener(Self::toggle_runtime_mode_picker_action))
+            .on_action(cx.listener(Self::toggle_environment_action))
             .on_action(cx.listener(Self::toggle_workspace_action))
             .on_action(cx.listener(Self::toggle_usage_panel_action))
             .on_action(cx.listener(Self::save_right_panel_file_action))
+            .on_action(cx.listener(Self::sync_branch_action))
             .on_action(cx.listener(Self::cancel_turn_action))
             .on_action(cx.listener(Self::archive_session_action))
             .on_action(cx.listener(Self::toggle_session_pin_action))
@@ -611,6 +648,8 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_localhost_url_action))
             .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
             .on_action(cx.listener(Self::new_terminal_action))
+            .on_action(cx.listener(Self::open_created_issue_in_github_action))
+            .on_action(cx.listener(Self::open_toast_session_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
             .on_action(cx.listener(Self::toggle_projects_page_action))
             .on_action(cx.listener(Self::toggle_inbox_page_action))
@@ -627,6 +666,7 @@ impl Render for Waku {
             .on_key_down(cx.listener(Self::enter_to_continue))
             .on_key_down(cx.listener(Self::type_to_focus_composer))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
+            .capture_any_mouse_down(cx.listener(Self::sidebar_multi_selection_mouse_down))
             .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
             .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
             .size_full()
@@ -676,7 +716,9 @@ impl Render for Waku {
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
                             && self.projects_page.is_none()
-                            && !self.notifications.open,
+                            && !self.notifications.open
+                            && !self.drafts_page
+                            && !agy_surface,
                         |element| {
                             element
                                 .group(composer::SESSION_DROP_GROUP)
@@ -708,10 +750,14 @@ impl Render for Waku {
                                 self.chat_viewport_width(window),
                                 cx,
                             )
+                        } else if self.drafts_page {
+                            self.render_drafts_page(cx)
                         } else if projects_page.is_some() {
                             self.render_projects_page(window, cx)
                         } else if self.notifications.open {
                             self.render_inbox_page(window, cx)
+                        } else if agy_surface {
+                            self.render_agy_surface(self.chat_viewport_width(window), cx)
                         } else if empty {
                             self.render_empty_state(cx).into_any_element()
                         } else {
@@ -732,7 +778,9 @@ impl Render for Waku {
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
                             && self.projects_page.is_none()
-                            && !self.notifications.open,
+                            && !self.notifications.open
+                            && !self.drafts_page
+                            && !agy_surface,
                         |element| {
                             if self.big_picture.is_open() {
                                 element
@@ -884,10 +932,12 @@ impl Render for Waku {
             .children(command_palette)
             .children(file_finder)
             .children(commit_dialog)
+            .children(issue_dialog)
             .children(archive_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(ssh_prompt)
+            .children(sync_branch_modal)
             .children(git_panel_overlays)
             .children(image_preview)
             .children(task_switcher)
@@ -1031,9 +1081,20 @@ impl Waku {
             let kind = action.kind.clone();
             let mut label = action.label.to_string();
             let mut tooltip = None;
+            if matches!(kind, ToastActionKind::Session(_)) {
+                if let Some(open) =
+                    crate::ui::shortcut::ShortcutHint::action(&crate::OpenToastSession)
+                        .resolve(window, cx)
+                {
+                    label = format!("{label} {open}");
+                }
+            }
             if matches!(kind, ToastActionKind::LocalhostUrl) {
+                // The unarchive toast's binding wins the shared ⌘⌥O but
+                // propagates back here when its session is not the offer.
                 if let Some(open) =
                     crate::ui::shortcut::ShortcutHint::action(&crate::OpenLocalhostUrl)
+                        .shadowed_by(&crate::OpenToastSession)
                         .resolve(window, cx)
                 {
                     label = format!("{label} {open}");
@@ -1046,6 +1107,14 @@ impl Waku {
                         "terminal.localhost_open_in_tab",
                         keys = in_tab
                     )));
+                }
+            }
+            if matches!(kind, ToastActionKind::GitHubIssue { .. }) {
+                if let Some(open) =
+                    crate::ui::shortcut::ShortcutHint::action(&crate::OpenCreatedIssueInGitHub)
+                        .resolve(window, cx)
+                {
+                    label = format!("{label} {open}");
                 }
             }
             div()
@@ -1082,6 +1151,17 @@ impl Waku {
                                 this.hide_toast();
                                 this.relocate_project(*project_id, cx);
                             }
+                            ToastActionKind::GitHubIssue {
+                                project,
+                                number,
+                                url,
+                            } => this.open_created_issue(
+                                *project,
+                                *number,
+                                url.as_ref(),
+                                window,
+                                cx,
+                            ),
                         }
                         cx.stop_propagation();
                     }
@@ -1101,6 +1181,17 @@ impl Waku {
                                 this.hide_toast();
                                 this.relocate_project(*project_id, cx);
                             }
+                            ToastActionKind::GitHubIssue {
+                                project,
+                                number,
+                                url,
+                            } => this.open_created_issue(
+                                *project,
+                                *number,
+                                url.as_ref(),
+                                window,
+                                cx,
+                            ),
                         }
                         cx.stop_propagation();
                     }

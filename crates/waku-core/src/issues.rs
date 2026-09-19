@@ -8,7 +8,9 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use waku_protocol::workspace::{IssueDetail, IssueState, IssueSummary, WorkItemQueryState};
+use waku_protocol::workspace::{
+    CreateIssueInput, IssueDetail, IssueState, IssueSummary, WorkItemQueryState,
+};
 
 use crate::github::{
     GhComment, GhLabel, GhUser, gh_output, gh_query_state, gh_time, parse_gh_stdout,
@@ -79,6 +81,53 @@ pub fn comment(cwd: &Path, number: u64, body: &str) -> anyhow::Result<()> {
         cwd,
         &["issue", "comment", &number, "--body", body].map(OsStr::new),
     )
+}
+
+/// `gh issue create --title … --body …` plus the optional flags. `gh`
+/// prints the new issue's URL on stdout; the number is its last path
+/// segment — `None` when stdout was not a recognizable issue URL.
+pub fn create(cwd: &Path, input: &CreateIssueInput) -> anyhow::Result<(Option<u64>, String)> {
+    let mut args = vec![
+        OsString::from("issue"),
+        OsString::from("create"),
+        OsString::from("--title"),
+        OsString::from(input.title.as_str()),
+        OsString::from("--body"),
+        OsString::from(input.body.as_str()),
+    ];
+    for label in &input.labels {
+        args.push(OsString::from("--label"));
+        args.push(OsString::from(label.as_str()));
+    }
+    for assignee in &input.assignees {
+        args.push(OsString::from("--assignee"));
+        args.push(OsString::from(assignee.as_str()));
+    }
+    if let Some(milestone) = input
+        .milestone
+        .as_deref()
+        .map(str::trim)
+        .filter(|milestone| !milestone.is_empty())
+    {
+        args.push(OsString::from("--milestone"));
+        args.push(OsString::from(milestone));
+    }
+    let url = crate::github::gh_write_output(
+        cwd,
+        &args.iter().map(OsString::as_os_str).collect::<Vec<_>>(),
+    )?;
+    let number = issue_number_from_url(&url);
+    Ok((number, url))
+}
+
+fn issue_number_from_url(url: &str) -> Option<u64> {
+    let url = url.trim().trim_end_matches('/');
+    let (path, number) = url.rsplit_once('/')?;
+    // Only an issues/<number> shape counts — `gh` could print an
+    // explanatory line instead of the URL on some failure-adjacent paths.
+    (path.ends_with("/issues") || path == "issues")
+        .then(|| number.parse::<u64>().ok())
+        .flatten()
 }
 
 #[derive(Deserialize)]
@@ -185,6 +234,23 @@ mod tests {
         assert_eq!(summaries[0].author.as_deref(), Some("sam"));
         assert_eq!(summaries[0].labels, ["bug"]);
         assert_eq!(summaries[0].assignees, ["sam"]);
+    }
+
+    #[test]
+    fn issue_number_parses_only_issue_urls() {
+        assert_eq!(
+            issue_number_from_url("https://github.com/acme/widget/issues/42\n"),
+            Some(42)
+        );
+        assert_eq!(
+            issue_number_from_url("https://ghe.acme.example/acme/widget/issues/7"),
+            Some(7)
+        );
+        assert_eq!(
+            issue_number_from_url("https://github.com/acme/widget/pull/42"),
+            None
+        );
+        assert_eq!(issue_number_from_url("Created successfully"), None);
     }
 
     #[test]

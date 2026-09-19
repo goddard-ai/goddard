@@ -1,8 +1,11 @@
-use super::composer::next_picker_highlight;
+use super::composer::{
+    PickerGranularity, model_picker_subtitle, next_picker_highlight, visible_picker_rows,
+};
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
-use gpui::{KeyBinding, actions};
+use gpui::{HighlightStyle, KeyBinding, StyledText, actions};
+use waku_protocol::routing::TaskClass;
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -174,17 +177,227 @@ pub(super) struct RemoteHostEditor {
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
+/// Friends is an experiment — its row only appears while the opt-in is on.
 pub(super) fn visible_settings_pages(
     query: &str,
+    computer_use_experiment_enabled: bool,
+    friends_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
-        .filter(|(page, ..)| page.is_visible_in_navigation())
+        .filter(move |(page, ..)| {
+            page.is_visible_in_navigation(computer_use_experiment_enabled, friends_enabled)
+        })
         .filter_map(move |(page, label_key, icon, keywords_key)| {
             let label = crate::i18n::translate(label_key);
             let keywords = crate::i18n::translate(keywords_key).to_lowercase();
             (query.is_empty() || keywords.contains(query)).then_some((page, label, icon))
         })
+}
+
+/// The pages whose render functions carry searchable setting rows, in
+/// sidebar order. The other pages are self-contained surfaces (tables,
+/// master/detail panes) with their own filters — they never appear in
+/// search results rather than rendering degenerate inside a section.
+const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 8] = [
+    SettingsPage::General,
+    SettingsPage::Appearance,
+    SettingsPage::Providers,
+    SettingsPage::Friends,
+    SettingsPage::Commands,
+    SettingsPage::Daemon,
+    SettingsPage::ComputerUse,
+    SettingsPage::Experiments,
+];
+
+/// The query state shared by every settings row built in one render pass.
+/// `hits` counts the rows a page keeps under the query so the content column
+/// can tell whether a whole section rendered empty without diffing trees.
+#[derive(Clone)]
+pub(super) struct SettingSearch {
+    /// Trimmed, lowercased field content; empty means "not searching".
+    query: Rc<str>,
+    hits: Rc<Cell<usize>>,
+}
+
+impl SettingSearch {
+    fn new(query: &str) -> Self {
+        Self {
+            query: Rc::from(query),
+            hits: Rc::new(Cell::new(0)),
+        }
+    }
+
+    /// The unfiltered mode every row renders under outside a search.
+    fn inactive() -> Self {
+        Self::new("")
+    }
+
+    pub(super) fn active(&self) -> bool {
+        !self.query.is_empty()
+    }
+
+    pub(super) fn hits(&self) -> usize {
+        self.hits.get()
+    }
+
+    /// The title and description match ranges when the row stays visible —
+    /// every row when `force` is on or the query is empty — else `None`.
+    /// Each kept row counts toward the page's hit total while searching.
+    pub(super) fn matched(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Option<(Vec<Range<usize>>, Vec<Range<usize>>)> {
+        let title_ranges = settings_match_ranges(title, &self.query);
+        let description_ranges = settings_match_ranges(description, &self.query);
+        if self.active() {
+            if title_ranges.is_empty() && description_ranges.is_empty() {
+                return None;
+            }
+            self.hits.set(self.hits.get() + 1);
+        }
+        Some((title_ranges, description_ranges))
+    }
+}
+
+/// Every occurrence of `query` inside `text` as byte ranges, matched
+/// case-insensitively. `StyledText` slices the original on these offsets, so
+/// when lowercasing changes the text's length (rare, e.g. İ) the whole
+/// string counts as one match rather than risking a misaligned range.
+pub(super) fn settings_match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let lowered = text.to_lowercase();
+    if lowered.len() != text.len() {
+        return if lowered.contains(query) {
+            vec![0..text.len()]
+        } else {
+            Vec::new()
+        };
+    }
+    lowered
+        .match_indices(query)
+        .map(|(index, hit)| index..index + hit.len())
+        .collect()
+}
+
+/// The marker a search match gets inside a settings row — a warning-tinted
+/// wash behind full-strength text so the hit reads in either theme.
+fn settings_search_highlight(theme: Theme) -> HighlightStyle {
+    HighlightStyle {
+        color: Some(theme.text),
+        background_color: Some(theme.warning.alpha(0.3)),
+        ..Default::default()
+    }
+}
+
+#[track_caller]
+pub(super) fn settings_search_text(
+    text: impl Into<SharedString>,
+    ranges: Vec<Range<usize>>,
+    theme: Theme,
+) -> AnyElement {
+    let text = text.into();
+    if ranges.is_empty() {
+        text.into_any_element()
+    } else {
+        let highlight = settings_search_highlight(theme);
+        StyledText::new(text)
+            .with_highlights(ranges.into_iter().map(|range| (range, highlight)))
+            .into_any_element()
+    }
+}
+
+/// The title + description column every settings row shares, with the
+/// query's matches highlighted. `matched` comes from
+/// [`SettingSearch::matched`]; the caller only builds the row it wraps when
+/// that returns `Some`.
+#[track_caller]
+pub(super) fn settings_row_text(
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    matched: (Vec<Range<usize>>, Vec<Range<usize>>),
+    theme: Theme,
+) -> Div {
+    let title = title.into();
+    let description = description.into();
+    let (title_ranges, description_ranges) = matched;
+    div()
+        .flex_1()
+        .min_w_0()
+        .child(
+            div()
+                .text_size(sp(13.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(settings_search_text(title, title_ranges, theme)),
+        )
+        .child(
+            div()
+                .mt(px(5.0))
+                .text_size(sp(12.5))
+                .line_height(sp(18.0))
+                .text_color(theme.text_secondary)
+                .child(settings_search_text(description, description_ranges, theme)),
+        )
+}
+
+/// A standalone-card settings row — the General page's shape — kept or
+/// dropped by the search. Pass an empty `div()` as the control for text-only
+/// cards.
+#[track_caller]
+fn setting_card(
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    control: impl IntoElement,
+    theme: Theme,
+    search: &SettingSearch,
+) -> Option<AnyElement> {
+    let title = title.into();
+    let description = description.into();
+    let matched = search.matched(&title, &description)?;
+    Some(
+        div()
+            .mt(px(15.0))
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(settings_row_text(title, description, matched, theme))
+            .child(control)
+            .into_any_element(),
+    )
+}
+
+/// One shared card around whichever rows the search kept, hairlines between
+/// visible rows only. `None` when the query removed every row, so an empty
+/// shell never renders.
+#[track_caller]
+fn settings_row_card(rows: Vec<Option<AnyElement>>, theme: Theme) -> Option<Div> {
+    let mut rows = rows.into_iter().flatten().peekable();
+    rows.peek()?;
+    let mut card = div()
+        .mt(px(15.0))
+        .w_full()
+        .flex()
+        .flex_col()
+        .rounded(px(16.0))
+        .overflow_hidden()
+        .bg(theme.raised);
+    while let Some(row) = rows.next() {
+        card = card.child(row);
+        if rows.peek().is_some() {
+            card = card.child(div().mx(px(20.0)).h(hairline()).bg(theme.separator));
+        }
+    }
+    Some(card)
 }
 
 /// The archived rows the search query and project filter leave visible,
@@ -220,6 +433,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
+        // The content column renders first: while a search is active it
+        // records which sections actually produced rows, and the sidebar
+        // filters itself down to exactly that set.
+        let content = self.render_settings_content(window, cx);
+        let sidebar = self.render_settings_sidebar(window, cx);
 
         div()
             .key_context("Waku")
@@ -244,8 +462,8 @@ impl Waku {
             .bg(theme.canvas)
             .text_color(theme.text)
             .font_family(crate::fonts::current(cx).ui)
-            .child(self.render_settings_sidebar(window, cx))
-            .child(self.render_settings_content(window, cx))
+            .child(sidebar)
+            .child(content)
             .into_any_element()
     }
 
@@ -253,10 +471,36 @@ impl Waku {
         let theme = Theme::current(cx);
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
         let query = self.settings_search_query(cx);
+        let searching = !query.is_empty();
         let mut navigation = div().flex().flex_col().gap(px(3.0));
 
-        for (page, label, icon_path) in visible_settings_pages(&query) {
-            let selected = current_page == page;
+        // While searching the sidebar mirrors the results column: only the
+        // sections that actually rendered, in scroll order, and none drawn
+        // as selected — clicking one scrolls to it instead of switching
+        // pages.
+        let pages: Vec<(SettingsPage, String, &'static str)> = if searching {
+            self.settings_search_sections
+                .iter()
+                .filter_map(|page| {
+                    SETTINGS_PAGES
+                        .into_iter()
+                        .find(|(candidate, ..)| *candidate == *page)
+                        .map(|(page, label_key, icon, _)| {
+                            (page, crate::i18n::translate(label_key), icon)
+                        })
+                })
+                .collect()
+        } else {
+            visible_settings_pages(
+                &query,
+                self.state.computer_use_experiment_enabled,
+                self.state.friends_enabled,
+            )
+            .collect()
+        };
+
+        for (page, label, icon_path) in pages {
+            let selected = !searching && current_page == page;
             navigation = navigation.child(
                 div()
                     .id(SharedString::from(format!(
@@ -292,7 +536,11 @@ impl Waku {
                     ))
                     .child(label)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_settings_page(page, window, cx);
+                        if searching {
+                            this.scroll_to_settings_section(page, cx);
+                        } else {
+                            this.open_settings_page(page, window, cx);
+                        }
                     })),
             );
         }
@@ -356,16 +604,47 @@ impl Waku {
             .to_lowercase()
     }
 
+    /// Scroll the results column so `page`'s section lands at the top. The
+    /// sections are the scroll element's direct children, so its index in
+    /// `settings_search_sections` is the item index the handle understands.
+    fn scroll_to_settings_section(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        if let Some(index) = self
+            .settings_search_sections
+            .iter()
+            .position(|candidate| *candidate == page)
+        {
+            self.settings_scroll.scroll_to_top_of_item(index);
+            self.settings_search_target = Some(page);
+            cx.notify();
+        }
+    }
+
     /// Step the selected page through the rows the search leaves visible,
     /// wrapping at both ends. The field keeps focus so typing keeps narrowing
     /// the list; the landing page renders immediately, so there is no separate
     /// confirm step. A selection filtered out by the query re-enters the list
-    /// from whichever end matches the key.
+    /// from whichever end matches the key. While searching, the same keys
+    /// step through the rendered sections and scroll each into view.
     fn cycle_settings_page(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.settings_search_query(cx);
-        let pages = visible_settings_pages(&query)
-            .map(|(page, ..)| page)
-            .collect::<Vec<_>>();
+        if !query.is_empty() {
+            let pages = self.settings_search_sections.clone();
+            let current = self
+                .settings_search_target
+                .and_then(|target| pages.iter().position(|page| *page == target));
+            let Some(next) = next_picker_highlight(current, pages.len(), key) else {
+                return;
+            };
+            self.scroll_to_settings_section(pages[next], cx);
+            return;
+        }
+        let pages = visible_settings_pages(
+            &query,
+            self.state.computer_use_experiment_enabled,
+            self.state.friends_enabled,
+        )
+        .map(|(page, ..)| page)
+        .collect::<Vec<_>>();
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
         let current = pages.iter().position(|page| *page == current_page);
         let Some(next) = next_picker_highlight(current, pages.len(), key) else {
@@ -422,7 +701,23 @@ impl Waku {
 
     fn render_settings_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let page = self.settings_page.unwrap_or(SettingsPage::General);
+        // A persisted page whose navigation gate closed (e.g. the Computer
+        // Use experiment was switched back off) falls back to General instead
+        // of rendering a surface the sidebar no longer lists.
+        let query = self.settings_search_query(cx);
+        if !query.is_empty() {
+            return self.render_settings_search_results(&query, window, cx);
+        }
+        self.settings_search_sections.clear();
+        self.settings_search_target = None;
+        let search = SettingSearch::inactive();
+        let page = self
+            .settings_page
+            .unwrap_or(SettingsPage::General)
+            .into_visible(
+                self.state.computer_use_experiment_enabled,
+                self.state.friends_enabled,
+            );
         let right_window_controls = self.render_client_window_controls(
             super::window_chrome::WindowControlSide::Right,
             window,
@@ -532,20 +827,26 @@ impl Waku {
                     }),
             )
             .child(match page {
-                SettingsPage::General => self.render_general_settings(cx),
-                SettingsPage::Providers => self.render_providers_settings(cx),
+                SettingsPage::General => self.render_general_settings(&search, cx),
+                SettingsPage::Providers => self.render_providers_settings(&search, cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
-                SettingsPage::Friends => self.render_friends_settings(cx),
+                SettingsPage::Friends => self.render_friends_settings(&search, cx),
                 SettingsPage::Archived => self.render_archived_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
-                SettingsPage::Daemon => self.render_daemon_settings(cx),
-                SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
-                SettingsPage::Commands => self.render_commands_settings(cx),
-                SettingsPage::Appearance => self.render_appearance_settings(cx),
+                SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
+                SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
+                SettingsPage::Commands => self.render_commands_settings(&search, cx),
+                SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                 SettingsPage::Git => self.render_git_settings(window, cx),
-                SettingsPage::Experiments => self.render_experiments_settings(cx),
+                SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
                 SettingsPage::Keybindings => div().into_any_element(),
             });
+
+        let git_scrollbar = if page == SettingsPage::Git {
+            self.render_git_settings_scrollbar()
+        } else {
+            None
+        };
 
         div()
             .flex_1()
@@ -592,11 +893,145 @@ impl Waku {
                             &self.settings_scroll,
                             &self.settings_scrollbar,
                         ))
-                    }),
+                    })
+                    .children(git_scrollbar),
             )
     }
 
-    fn render_general_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The search results column: every section that has a matching setting
+    /// renders its heading plus only the matched rows, in sidebar order.
+    /// Each section is a direct child of the scroll element so the sidebar
+    /// and arrow keys can `scroll_to_top_of_item` straight to it.
+    fn render_settings_search_results(
+        &mut self,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let right_window_controls = self.render_client_window_controls(
+            super::window_chrome::WindowControlSide::Right,
+            window,
+            cx,
+        );
+        let content_scrolled = self.settings_scroll.offset().y < px(-1.0);
+
+        self.settings_search_sections.clear();
+        let mut sections: Vec<Div> = Vec::new();
+        for page in SEARCHABLE_SETTINGS_PAGES {
+            if !page.is_visible_in_navigation(
+                self.state.computer_use_experiment_enabled,
+                self.state.friends_enabled,
+            ) {
+                continue;
+            }
+            let Some((_, label_key, _, _)) = SETTINGS_PAGES
+                .into_iter()
+                .find(|(candidate, ..)| *candidate == page)
+            else {
+                continue;
+            };
+            let label = crate::i18n::translate(label_key);
+            let search = SettingSearch::new(query);
+            let content = match page {
+                SettingsPage::General => self.render_general_settings(&search, cx),
+                SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
+                SettingsPage::Providers => self.render_providers_settings(&search, cx),
+                SettingsPage::Friends => self.render_friends_settings(&search, cx),
+                SettingsPage::Commands => self.render_commands_settings(&search, cx),
+                SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
+                SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
+                SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
+                _ => continue,
+            };
+            if search.hits() == 0 {
+                continue;
+            }
+            self.settings_search_sections.push(page);
+            let first = sections.is_empty();
+            sections.push(
+                div()
+                    .when(!first, |element| element.mt(px(28.0)))
+                    .px(px(32.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(SETTINGS_CONTENT_MAX_WIDTH))
+                            .mx_auto()
+                            .child(
+                                div()
+                                    .pt(px(2.0))
+                                    .pl(px(6.0))
+                                    .flex_none()
+                                    .text_size(sp(18.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(label),
+                            )
+                            .child(content),
+                    ),
+            );
+        }
+
+        let scroll = div()
+            .id("settings-content-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.settings_scroll)
+            .pb(px(48.0))
+            .children(sections);
+        let scroll = if self.settings_search_sections.is_empty() {
+            scroll.child(
+                div()
+                    .mt(px(48.0))
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("settings.search_empty")),
+            )
+        } else {
+            scroll
+        };
+
+        div()
+            .flex_1()
+            .h_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .border_l(hairline())
+            .border_color(theme.sidebar_border)
+            .bg(theme.surface)
+            .child(
+                self.render_settings_drag_region("settings-content-titlebar", cx)
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .children(right_window_controls)
+                    .when(content_scrolled, |element| {
+                        element.border_b(hairline()).border_color(theme.separator)
+                    }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(scroll)
+                    .child(scrollbar::vertical(
+                        &self.settings_scroll,
+                        &self.settings_scrollbar,
+                    )),
+            )
+    }
+
+    fn render_general_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let updater_available = cx
             .try_global::<crate::updater::UpdaterState>()
@@ -611,413 +1046,214 @@ impl Waku {
             move |this, _, cx| this.set_analytics_enabled(!analytics_enabled, cx),
         );
         div()
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .px(px(20.0))
-                    .py(px(14.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .child(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("settings.local_by_default")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("settings.local_by_default_description")),
-                    ),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.share_anonymous_usage_data")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.share_anonymous_usage_data_description")),
-                            ),
-                    )
-                    .child(analytics_toggle),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.render_math")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.render_math_description")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "render-math-toggle",
-                        self.state.render_math,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.render_math;
-                            move |this, _, cx| this.set_render_math(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.show_response_token_speed")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.show_response_token_speed_description")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "response-token-speed-toggle",
-                        self.state.show_response_token_speed,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.show_response_token_speed;
-                            move |this, _, cx| this.set_show_response_token_speed(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.markdown_preview")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.markdown_preview_description")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "markdown-preview-toggle",
-                        self.state.markdown_preview,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.markdown_preview;
-                            move |this, _, cx| this.set_markdown_preview(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.open_at_last_prompt")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.open_at_last_prompt_description")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "open-at-last-prompt-toggle",
-                        self.state.open_at_last_prompt,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.open_at_last_prompt;
-                            move |this, _, cx| this.set_open_at_last_prompt(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.sync_with_merge")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.sync_with_merge_description")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "sync-with-merge-toggle",
-                        self.state.sync_with_merge,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.sync_with_merge;
-                            move |this, _, cx| this.set_sync_with_merge(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.sidebar_shortcut_tags")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!(
-                                        "settings.sidebar_shortcut_tags_description",
-                                        keys = crate::platform::primary_shortcut(
-                                            "⌘1–⌘9",
-                                            "Ctrl+1–Ctrl+9"
-                                        ),
-                                        modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
-                                    )),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "sidebar-shortcut-tags-toggle",
-                        self.state.sidebar_shortcut_tags,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.sidebar_shortcut_tags;
-                            move |this, _, cx| this.set_sidebar_shortcut_tags(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.new_worktree_default_branch")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.new_worktree_default_branch_description")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "new-worktree-default-branch-toggle",
-                        self.state.new_worktree_default_branch,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.new_worktree_default_branch;
-                            move |this, _, cx| this.set_new_worktree_default_branch(!enabled, cx)
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.new_worktree_sync_default_branch")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!(
-                                        "settings.new_worktree_sync_default_branch_description"
-                                    )),
-                            )
-                            .child(
+            .children(setting_card(
+                tr!("settings.local_by_default"),
+                tr!("settings.local_by_default_description"),
+                div(),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.share_anonymous_usage_data"),
+                tr!("settings.share_anonymous_usage_data_description"),
+                analytics_toggle,
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.render_math"),
+                tr!("settings.render_math_description"),
+                toggle_switch(
+                    "render-math-toggle",
+                    self.state.render_math,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.render_math;
+                        move |this, _, cx| this.set_render_math(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.show_response_token_speed"),
+                tr!("settings.show_response_token_speed_description"),
+                toggle_switch(
+                    "response-token-speed-toggle",
+                    self.state.show_response_token_speed,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.show_response_token_speed;
+                        move |this, _, cx| this.set_show_response_token_speed(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.markdown_preview"),
+                tr!("settings.markdown_preview_description"),
+                toggle_switch(
+                    "markdown-preview-toggle",
+                    self.state.markdown_preview,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.markdown_preview;
+                        move |this, _, cx| this.set_markdown_preview(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.open_at_last_prompt"),
+                tr!("settings.open_at_last_prompt_description"),
+                toggle_switch(
+                    "open-at-last-prompt-toggle",
+                    self.state.open_at_last_prompt,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.open_at_last_prompt;
+                        move |this, _, cx| this.set_open_at_last_prompt(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children({
+                let navigation = self.state.archive_navigation;
+                let weak = cx.entity().downgrade();
+                let navigation_handle = self.menu_handle("archive-navigation-selector", cx);
+                let navigation_selector = dropdown_menu(
+                    MenuChip::new("archive-navigation-selector")
+                        .label(tr!(navigation.label_key()))
+                        .outlined()
+                        .selected(navigation_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "archive-navigation-selector-menu",
+                    &navigation_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        ArchiveNavigation::ALL
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(tr!(option.label_key()), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_archive_navigation(option, cx);
+                                    });
+                                })
+                                .selected(option == navigation)
+                            })
+                            .collect()
+                    },
+                );
+                setting_card(
+                    tr!("settings.archive_navigation"),
+                    tr!("settings.archive_navigation_description"),
+                    navigation_selector,
+                    theme,
+                    search,
+                )
+            })
+            .children(setting_card(
+                tr!("settings.sync_with_merge"),
+                tr!("settings.sync_with_merge_description"),
+                toggle_switch(
+                    "sync-with-merge-toggle",
+                    self.state.sync_with_merge,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.sync_with_merge;
+                        move |this, _, cx| this.set_sync_with_merge(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.auto_resolve_in_chat"),
+                tr!("settings.auto_resolve_in_chat_description"),
+                toggle_switch(
+                    "auto-resolve-in-chat-toggle",
+                    self.state.auto_resolve_in_chat,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.auto_resolve_in_chat;
+                        move |this, _, cx| this.set_auto_resolve_in_chat(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.sidebar_shortcut_tags"),
+                tr!(
+                    "settings.sidebar_shortcut_tags_description",
+                    keys = crate::platform::primary_shortcut("⌘1–⌘9", "Ctrl+1–Ctrl+9"),
+                    modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                ),
+                toggle_switch(
+                    "sidebar-shortcut-tags-toggle",
+                    self.state.sidebar_shortcut_tags,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.sidebar_shortcut_tags;
+                        move |this, _, cx| this.set_sidebar_shortcut_tags(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
+                tr!("settings.new_worktree_default_branch"),
+                tr!("settings.new_worktree_default_branch_description"),
+                toggle_switch(
+                    "new-worktree-default-branch-toggle",
+                    self.state.new_worktree_default_branch,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.new_worktree_default_branch;
+                        move |this, _, cx| this.set_new_worktree_default_branch(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children({
+                let title = tr!("settings.new_worktree_sync_default_branch");
+                let description = tr!("settings.new_worktree_sync_default_branch_description");
+                search.matched(&title, &description).map(|matched| {
+                    div()
+                        .mt(px(15.0))
+                        .w_full()
+                        .min_h(px(60.0))
+                        .px(px(20.0))
+                        .py(px(12.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(
+                            settings_row_text(title, description, matched, theme).child(
                                 div().mt(px(9.0)).max_w(px(360.0)).child(
                                     TextField::new(
                                         "worktree-sync-branches-field",
@@ -1026,73 +1262,45 @@ impl Waku {
                                     .w_full(),
                                 ),
                             ),
-                    )
-                    .child(toggle_switch(
-                        "new-worktree-sync-default-branch-toggle",
-                        self.state.new_worktree_sync_default_branch,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.new_worktree_sync_default_branch;
-                            move |this, _, cx| {
-                                this.set_new_worktree_sync_default_branch(!enabled, cx)
-                            }
-                        },
-                    )),
-            )
+                        )
+                        .child(toggle_switch(
+                            "new-worktree-sync-default-branch-toggle",
+                            self.state.new_worktree_sync_default_branch,
+                            false,
+                            theme,
+                            cx,
+                            {
+                                let enabled = self.state.new_worktree_sync_default_branch;
+                                move |this, _, cx| {
+                                    this.set_new_worktree_sync_default_branch(!enabled, cx)
+                                }
+                            },
+                        ))
+                })
+            })
             .when(cfg!(target_os = "macos"), |element| {
                 // The platform recognizer reads the trackpad's touch stream,
                 // which macOS only hands over when no system gesture claims
                 // three-finger horizontal swipes.
                 let enabled = self.state.three_finger_swipe_navigation;
-                element.child(
-                    div()
-                        .mt(px(15.0))
-                        .w_full()
-                        .min_h(px(60.0))
-                        .px(px(20.0))
-                        .py(px(12.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
-                        .flex()
-                        .items_center()
-                        .gap(px(24.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(sp(13.5))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(tr!("settings.three_finger_swipe_navigation")),
-                                )
-                                .child(
-                                    div()
-                                        .mt(px(5.0))
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(18.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!(
-                                            "settings.three_finger_swipe_navigation_description"
-                                        )),
-                                ),
-                        )
-                        .child(toggle_switch(
-                            "three-finger-swipe-toggle",
-                            enabled,
-                            false,
-                            theme,
-                            cx,
-                            move |this, window, cx| {
-                                this.set_three_finger_swipe_navigation(!enabled, window, cx)
-                            },
-                        )),
-                )
+                element.children(setting_card(
+                    tr!("settings.three_finger_swipe_navigation"),
+                    tr!("settings.three_finger_swipe_navigation_description"),
+                    toggle_switch(
+                        "three-finger-swipe-toggle",
+                        enabled,
+                        false,
+                        theme,
+                        cx,
+                        move |this, window, cx| {
+                            this.set_three_finger_swipe_navigation(!enabled, window, cx)
+                        },
+                    ),
+                    theme,
+                    search,
+                ))
             })
-            .child({
+            .children({
                 let enabled = self.state.completion_sound_enabled;
                 let selected_sound = self.state.completion_sound;
                 let volume = self.state.completion_sound_volume;
@@ -1103,7 +1311,7 @@ impl Waku {
                     crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
                     volume,
                     cx,
-                    |this, volume, cx| this.set_completion_sound_volume(volume, cx),
+                    |this, volume, _, cx| this.set_completion_sound_volume(volume, cx),
                 );
                 let weak = cx.entity().downgrade();
                 let sound_handle = self.menu_handle("completion-sound-selector", cx);
@@ -1135,19 +1343,30 @@ impl Waku {
                             .collect()
                     },
                 );
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .flex_col()
-                    .child(
+                let toggle_row = settings_row(
+                    tr!("settings.completion_sound"),
+                    tr!("settings.completion_sound_description"),
+                    toggle_switch(
+                        "completion-sound-toggle",
+                        enabled,
+                        false,
+                        theme,
+                        cx,
+                        move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
+                    ),
+                    theme,
+                    search,
+                );
+                let sound_row = if !enabled {
+                    None
+                } else {
+                    let title = tr!("settings.completion_sound_name");
+                    search.matched(&title, "").map(|(ranges, _)| {
                         div()
                             .w_full()
-                            .min_h(px(60.0))
+                            .min_h(px(52.0))
                             .px(px(20.0))
-                            .py(px(12.0))
+                            .py(px(10.0))
                             .flex()
                             .items_center()
                             .gap(px(24.0))
@@ -1155,133 +1374,74 @@ impl Waku {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .child(
-                                        div()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("settings.completion_sound")),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt(px(5.0))
-                                            .text_size(sp(12.5))
-                                            .line_height(sp(18.0))
-                                            .text_color(theme.text_secondary)
-                                            .child(tr!("settings.completion_sound_description")),
-                                    ),
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(title, ranges, theme)),
                             )
-                            .child(toggle_switch(
-                                "completion-sound-toggle",
-                                enabled,
-                                false,
-                                theme,
-                                cx,
-                                move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
-                            )),
-                    )
-                    .when(enabled, |card| {
-                        card.child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+                            .child(sound_selector)
+                    })
+                };
+                let volume_row = if !enabled {
+                    None
+                } else {
+                    let title = tr!("settings.completion_sound_volume");
+                    search.matched(&title, "").map(|(ranges, _)| {
+                        div()
+                            .w_full()
+                            .min_h(px(52.0))
+                            .px(px(20.0))
+                            .py(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
                             .child(
                                 div()
-                                    .w_full()
-                                    .min_h(px(52.0))
-                                    .px(px(20.0))
-                                    .py(px(10.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(24.0))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("settings.completion_sound_name")),
-                                    )
-                                    .child(sound_selector),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(title, ranges, theme)),
                             )
-                            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
+                            .child(volume_slider.w(px(140.0)).flex_none())
                             .child(
                                 div()
-                                    .w_full()
-                                    .min_h(px(52.0))
-                                    .px(px(20.0))
-                                    .py(px(10.0))
+                                    .w(px(32.0))
+                                    .flex_none()
                                     .flex()
-                                    .items_center()
-                                    .gap(px(12.0))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("settings.completion_sound_volume")),
-                                    )
-                                    .child(volume_slider.w(px(140.0)).flex_none())
-                                    .child(
-                                        div()
-                                            .w(px(32.0))
-                                            .flex_none()
-                                            .flex()
-                                            .justify_end()
-                                            .text_size(sp(12.5))
-                                            .text_color(theme.text_secondary)
-                                            .child(format!(
-                                                "{}%",
-                                                (volume_shown * 100.0).round() as i32
-                                            )),
-                                    ),
+                                    .justify_end()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(format!("{}%", (volume_shown * 100.0).round() as i32)),
                             )
                     })
+                };
+                settings_row_card(
+                    vec![
+                        toggle_row,
+                        sound_row.map(|row| row.into_any_element()),
+                        volume_row.map(|row| row.into_any_element()),
+                    ],
+                    theme,
+                )
             })
             .when(updater_available, |column| {
                 let enabled = self.automatic_updates_enabled;
-                let toggle = toggle_switch(
-                    "automatic-updates-toggle",
-                    enabled,
-                    false,
+                column.children(setting_card(
+                    tr!("settings.automatic_updates"),
+                    tr!("settings.automatic_updates_description"),
+                    toggle_switch(
+                        "automatic-updates-toggle",
+                        enabled,
+                        false,
+                        theme,
+                        cx,
+                        move |this, _, cx| this.set_automatic_updates_enabled(!enabled, cx),
+                    ),
                     theme,
-                    cx,
-                    move |this, _, cx| this.set_automatic_updates_enabled(!enabled, cx),
-                );
-                column.child(
-                    div()
-                        .mt(px(15.0))
-                        .w_full()
-                        .min_h(px(60.0))
-                        .px(px(20.0))
-                        .py(px(12.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .flex()
-                        .items_center()
-                        .gap(px(24.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(sp(13.5))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(tr!("settings.automatic_updates")),
-                                )
-                                .child(
-                                    div()
-                                        .mt(px(5.0))
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(18.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("settings.automatic_updates_description")),
-                                ),
-                        )
-                        .child(toggle),
-                )
+                    search,
+                ))
             })
             .into_any_element()
     }
@@ -1601,94 +1761,87 @@ impl Waku {
         cx.notify();
     }
 
-    fn render_commands_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_commands_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
-        let mut column = div()
-            .mt(px(15.0))
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
+        let mut column = div().mt(px(15.0)).w_full().flex().flex_col().gap(px(12.0));
+        let header = {
+            let title = tr!("commands.title");
+            let description = tr!("commands.description");
+            search.matched(&title, &description).map(|matched| {
                 div()
                     .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
                     .rounded(px(16.0))
                     .bg(theme.raised)
-                    .child(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("commands.title")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("commands.description")),
-                    ),
-            );
+                    .child(settings_row_text(title, description, matched, theme))
+                    .into_any_element()
+            })
+        };
+        column = column.children(header);
 
-        if let Some(editor) = &self.custom_command_editor {
-            return column
-                .child(self.render_custom_command_editor(editor, theme, cx))
-                .into_any_element();
-        }
+        if !search.active() {
+            if let Some(editor) = &self.custom_command_editor {
+                return column
+                    .child(self.render_custom_command_editor(editor, theme, cx))
+                    .into_any_element();
+            }
 
-        column = column.child(
-            div()
-                .id("new-custom-command")
-                .tab_index(0)
-                .w_full()
-                .px(px(20.0))
-                .py(px(12.0))
-                .rounded(px(16.0))
-                .bg(theme.raised)
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .cursor_default()
-                .text_size(sp(13.0))
-                .text_color(theme.text_secondary)
-                .hover(|element| element.bg(theme.overlay))
-                .active(|element| element.bg(theme.overlay_strong))
-                .focus_visible(|style| style.border_color(theme.accent))
-                .child(icon("icons/plus.svg", 14.0, theme.text_tertiary))
-                .child(tr!("commands.new_command"))
-                .on_activation(cx, |this, window, cx| {
-                    this.open_custom_command_editor(None, window, cx);
-                }),
-        );
-
-        if self.state.custom_commands.is_empty() {
             column = column.child(
                 div()
+                    .id("new-custom-command")
+                    .tab_index(0)
                     .w_full()
                     .px(px(20.0))
-                    .py(px(24.0))
+                    .py(px(12.0))
                     .rounded(px(16.0))
                     .bg(theme.raised)
                     .flex()
-                    .flex_col()
                     .items_center()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(sp(13.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("commands.empty")),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("commands.empty_description")),
-                    ),
+                    .gap(px(10.0))
+                    .cursor_default()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .child(icon("icons/plus.svg", 14.0, theme.text_tertiary))
+                    .child(tr!("commands.new_command"))
+                    .on_activation(cx, |this, window, cx| {
+                        this.open_custom_command_editor(None, window, cx);
+                    }),
             );
+
+            if self.state.custom_commands.is_empty() {
+                column = column.child(
+                    div()
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(24.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .text_size(sp(13.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("commands.empty")),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("commands.empty_description")),
+                        ),
+                );
+            }
         }
 
         for command in &self.state.custom_commands {
@@ -1697,6 +1850,9 @@ impl Waku {
             let script = command.script.clone();
             let edit_command = command.clone();
             let agent_added = command.created_by_task.is_some();
+            let Some((label_ranges, _)) = search.matched(&label, "") else {
+                continue;
+            };
             column = column.child(
                 div()
                     .w_full()
@@ -1727,7 +1883,11 @@ impl Waku {
                                             .text_size(sp(13.0))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme.text)
-                                            .child(label),
+                                            .child(settings_search_text(
+                                                label,
+                                                label_ranges,
+                                                theme,
+                                            )),
                                     )
                                     .when(agent_added, |row| {
                                         row.child(
@@ -1998,43 +2158,35 @@ impl Waku {
             )
     }
 
-    fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_daemon_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let agent_tools_card = self.agent_tools_card(theme, cx);
-        let agent_settings_card = self.agent_settings_card(theme, cx);
-        let remote_hosts_card = self.render_remote_hosts_card(theme, cx);
+        let agent_tools_card = self.agent_tools_card(theme, search, cx);
+        let agent_settings_card = self.agent_settings_card(theme, search, cx);
+        let remote_hosts_card = self.render_remote_hosts_card(theme, search, cx);
         if self.daemon.is_externally_managed() {
+            let external_card = {
+                let title = tr!("daemon.external_title");
+                let description = tr!("daemon.external_description");
+                search.matched(&title, &description).map(|matched| {
+                    div()
+                        .px(px(20.0))
+                        .py(px(16.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .child(settings_row_text(title, description, matched, theme))
+                        .into_any_element()
+                })
+            };
             return div()
                 .mt(px(15.0))
                 .w_full()
                 .flex()
                 .flex_col()
                 .gap(px(12.0))
-                .child(remote_hosts_card)
-                .child(
-                    div()
-                        .px(px(20.0))
-                        .py(px(16.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .child(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("daemon.external_title")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(5.0))
-                                .text_size(sp(12.5))
-                                .line_height(sp(18.0))
-                                .text_color(theme.text_secondary)
-                                .child(tr!("daemon.external_description")),
-                        ),
-                )
-                .child(agent_tools_card)
-                .child(agent_settings_card)
+                .children(remote_hosts_card)
+                .children(external_card)
+                .children(agent_tools_card)
+                .children(agent_settings_card)
                 .into_any_element();
         }
 
@@ -2262,297 +2414,362 @@ impl Waku {
             })
             .child(tr!("daemon.regenerate_token"));
 
+        let expose_card = {
+            let title = tr!("daemon.expose_title");
+            let description = tr!("daemon.expose_description");
+            search
+                .matched(&title, &description)
+                .map(|(title_ranges, description_ranges)| {
+                    div()
+                        .min_h(px(66.0))
+                        .px(px(20.0))
+                        .py(px(13.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(7.0))
+                                        .child(
+                                            div()
+                                                .text_size(sp(13.5))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.text)
+                                                .child(settings_search_text(
+                                                    title,
+                                                    title_ranges,
+                                                    theme,
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .px(px(6.0))
+                                                .py(px(2.0))
+                                                .rounded_full()
+                                                .text_size(sp(12.5))
+                                                .text_color(if enabled {
+                                                    theme.success
+                                                } else {
+                                                    theme.text_tertiary
+                                                })
+                                                .bg(theme.overlay)
+                                                .child(if pending {
+                                                    tr!("daemon.status_restarting")
+                                                } else if enabled {
+                                                    tr!("daemon.status_exposed")
+                                                } else {
+                                                    tr!("daemon.status_local")
+                                                }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(5.0))
+                                        .min_w_0()
+                                        .whitespace_normal()
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(18.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(settings_search_text(
+                                            description,
+                                            description_ranges,
+                                            theme,
+                                        )),
+                                ),
+                        )
+                        .child(exposure_toggle)
+                        .into_any_element()
+                })
+        };
+
+        let connection_card = if !enabled {
+            None
+        } else {
+            let before = search.hits();
+            let header = {
+                let title = tr!("daemon.connection_title");
+                let description = tr!("daemon.connection_description");
+                search
+                    .matched(&title, &description)
+                    .map(|(title_ranges, description_ranges)| {
+                        div()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(title, title_ranges, theme)),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        description_ranges,
+                                        theme,
+                                    )),
+                            )
+                    })
+            };
+            let field_row = |title: String, description: String, field: TextField| -> Option<Div> {
+                search
+                    .matched(&title, &description)
+                    .map(|(title_ranges, description_ranges)| {
+                        div()
+                            .mt(px(14.0))
+                            .flex()
+                            .items_start()
+                            .gap(px(24.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(sp(12.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(settings_search_text(
+                                                title,
+                                                title_ranges,
+                                                theme,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(3.0))
+                                            .whitespace_normal()
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(14.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(settings_search_text(
+                                                description,
+                                                description_ranges,
+                                                theme,
+                                            )),
+                                    ),
+                            )
+                            .child(div().flex_1().min_w_0().flex().justify_end().child(field))
+                    })
+            };
+            let port_row = field_row(
+                tr!("daemon.port"),
+                tr!("daemon.port_description"),
+                TextField::new("daemon-port-field", self.daemon_port_input.clone()).w(px(150.0)),
+            );
+            let origins_row = field_row(
+                tr!("daemon.allowed_origins"),
+                tr!("daemon.allowed_origins_description"),
+                TextField::new("daemon-origins-field", self.daemon_origins_input.clone())
+                    .w_full()
+                    .max_w(px(360.0)),
+            );
+            if search.active() && search.hits() == before {
+                None
+            } else {
+                Some(
+                    div()
+                        .px(px(20.0))
+                        .py(px(15.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .children(header)
+                        .children(port_row)
+                        .children(origins_row)
+                        .when(!search.active(), |card| {
+                            card.child(div().mt(px(13.0)).flex().justify_end().child(apply_button))
+                        })
+                        .into_any_element(),
+                )
+            }
+        };
+
+        let credentials_card = if !enabled {
+            None
+        } else {
+            let before = search.hits();
+            let header = {
+                let title = tr!("daemon.credentials_title");
+                let description = tr!("daemon.credentials_description");
+                search
+                    .matched(&title, &description)
+                    .map(|(title_ranges, description_ranges)| {
+                        div()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(title, title_ranges, theme)),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        description_ranges,
+                                        theme,
+                                    )),
+                            )
+                    })
+            };
+            let url_row = {
+                let title = tr!("daemon.websocket_url");
+                search.matched(&title, "").map(|(ranges, _)| {
+                    div()
+                        .mt(px(13.0))
+                        .py(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(
+                            div()
+                                .w(px(80.0))
+                                .flex_none()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(settings_search_text(title, ranges, theme)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(crate::fonts::current(cx).code)
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .child(SharedString::from(format!(
+                                    "ws://{}:{port}",
+                                    self.daemon_hostname
+                                ))),
+                        )
+                        .child(copy_url_button)
+                })
+            };
+            let token_row = {
+                let title = tr!("daemon.token");
+                search.matched(&title, "").map(|(ranges, _)| {
+                    div()
+                        .py(px(8.0))
+                        .border_t(hairline())
+                        .border_color(theme.separator)
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(
+                            div()
+                                .w(px(80.0))
+                                .flex_none()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(settings_search_text(title, ranges, theme)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(crate::fonts::current(cx).code)
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .child(SharedString::from(if token_revealed {
+                                    token.clone()
+                                } else {
+                                    "••••••••••••••••••••••••••••••••".to_owned()
+                                })),
+                        )
+                        .child(reveal_token_button)
+                        .child(copy_token_button)
+                        .child(regenerate_button)
+                })
+            };
+            if search.active() && search.hits() == before {
+                None
+            } else {
+                Some(
+                    div()
+                        .px(px(20.0))
+                        .py(px(15.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .children(header)
+                        .children(url_row)
+                        .children(token_row)
+                        .when(!search.active(), |card| {
+                            card.child(
+                                div()
+                                    .mt(px(7.0))
+                                    .px(px(10.0))
+                                    .py(px(8.0))
+                                    .rounded(px(10.0))
+                                    .bg(theme.inset)
+                                    .w_full()
+                                    .min_w_0()
+                                    .flex()
+                                    .gap(px(8.0))
+                                    .child(icon("icons/alert.svg", 13.0, theme.warning))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .whitespace_normal()
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(15.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!("daemon.security_warning")),
+                                    ),
+                            )
+                        })
+                        .into_any_element(),
+                )
+            }
+        };
+
         div()
             .mt(px(15.0))
             .w_full()
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(
-                div()
-                    .min_h(px(66.0))
-                    .px(px(20.0))
-                    .py(px(13.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(7.0))
-                                    .child(
-                                        div()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("daemon.expose_title")),
-                                    )
-                                    .child(
-                                        div()
-                                            .px(px(6.0))
-                                            .py(px(2.0))
-                                            .rounded_full()
-                                            .text_size(sp(12.5))
-                                            .text_color(if enabled {
-                                                theme.success
-                                            } else {
-                                                theme.text_tertiary
-                                            })
-                                            .bg(theme.overlay)
-                                            .child(if pending {
-                                                tr!("daemon.status_restarting")
-                                            } else if enabled {
-                                                tr!("daemon.status_exposed")
-                                            } else {
-                                                tr!("daemon.status_local")
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("daemon.expose_description")),
-                            ),
-                    )
-                    .child(exposure_toggle),
-            )
-            .when(enabled, |column| {
-                column.child(
-                    div()
-                        .px(px(20.0))
-                        .py(px(15.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .child(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("daemon.connection_title")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .child(tr!("daemon.connection_description")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(14.0))
-                                .flex()
-                                .items_start()
-                                .gap(px(24.0))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(
-                                            div()
-                                                .text_size(sp(12.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.text)
-                                                .child(tr!("daemon.port")),
-                                        )
-                                        .child(
-                                            div()
-                                                .mt(px(3.0))
-                                                .whitespace_normal()
-                                                .text_size(sp(12.5))
-                                                .line_height(sp(14.0))
-                                                .text_color(theme.text_tertiary)
-                                                .child(tr!("daemon.port_description")),
-                                        ),
-                                )
-                                .child(
-                                    div().flex_1().min_w_0().flex().justify_end().child(
-                                        TextField::new(
-                                            "daemon-port-field",
-                                            self.daemon_port_input.clone(),
-                                        )
-                                        .w(px(150.0)),
-                                    ),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .mt(px(14.0))
-                                .flex()
-                                .items_start()
-                                .gap(px(24.0))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(
-                                            div()
-                                                .text_size(sp(12.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.text)
-                                                .child(tr!("daemon.allowed_origins")),
-                                        )
-                                        .child(
-                                            div()
-                                                .mt(px(3.0))
-                                                .whitespace_normal()
-                                                .text_size(sp(12.5))
-                                                .line_height(sp(14.0))
-                                                .text_color(theme.text_tertiary)
-                                                .child(tr!("daemon.allowed_origins_description")),
-                                        ),
-                                )
-                                .child(
-                                    div().flex_1().min_w_0().flex().justify_end().child(
-                                        TextField::new(
-                                            "daemon-origins-field",
-                                            self.daemon_origins_input.clone(),
-                                        )
-                                        .w_full()
-                                        .max_w(px(360.0)),
-                                    ),
-                                ),
-                        )
-                        .child(div().mt(px(13.0)).flex().justify_end().child(apply_button)),
-                )
-            })
-            .when(enabled, |column| {
-                column.child(
-                    div()
-                        .px(px(20.0))
-                        .py(px(15.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .child(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("daemon.credentials_title")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .child(tr!("daemon.credentials_description")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(13.0))
-                                .py(px(8.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(
-                                    div()
-                                        .w(px(80.0))
-                                        .flex_none()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_tertiary)
-                                        .child(tr!("daemon.websocket_url")),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_family(crate::fonts::current(cx).code)
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text)
-                                        .child(SharedString::from(format!(
-                                            "ws://{}:{port}",
-                                            self.daemon_hostname
-                                        ))),
-                                )
-                                .child(copy_url_button),
-                        )
-                        .child(
-                            div()
-                                .py(px(8.0))
-                                .border_t(hairline())
-                                .border_color(theme.separator)
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(
-                                    div()
-                                        .w(px(80.0))
-                                        .flex_none()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_tertiary)
-                                        .child(tr!("daemon.token")),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_family(crate::fonts::current(cx).code)
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text)
-                                        .child(SharedString::from(if token_revealed {
-                                            token.clone()
-                                        } else {
-                                            "••••••••••••••••••••••••••••••••".to_owned()
-                                        })),
-                                )
-                                .child(reveal_token_button)
-                                .child(copy_token_button)
-                                .child(regenerate_button),
-                        )
-                        .child(
-                            div()
-                                .mt(px(7.0))
-                                .px(px(10.0))
-                                .py(px(8.0))
-                                .rounded(px(10.0))
-                                .bg(theme.inset)
-                                .w_full()
-                                .min_w_0()
-                                .flex()
-                                .gap(px(8.0))
-                                .child(icon("icons/alert.svg", 13.0, theme.warning))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .whitespace_normal()
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(15.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("daemon.security_warning")),
-                                ),
-                        ),
-                )
-            })
-            .child(remote_hosts_card)
-            .child(agent_tools_card)
-            .child(agent_settings_card)
+            .children(expose_card)
+            .children(connection_card)
+            .children(credentials_card)
+            .children(remote_hosts_card)
+            .children(agent_tools_card)
+            .children(agent_settings_card)
             .into_any_element()
     }
 
     /// Saved remote daemons merged into this window's catalog. Each row shows
     /// the record's live connection state; editing re-points the same id so
     /// its projects and sessions keep their owner.
-    fn render_remote_hosts_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn render_remote_hosts_card(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let title = tr!("daemon.remote_hosts_title");
+        let description = tr!("daemon.remote_hosts_description");
+        let (title_ranges, description_ranges) = search.matched(&title, &description)?;
         let mut rows = div().flex().flex_col();
         for (index, host) in self.state.remote_hosts.iter().enumerate() {
             let host_id = host.id;
@@ -2736,7 +2953,7 @@ impl Waku {
                     .text_size(sp(13.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(tr!("daemon.remote_hosts_title")),
+                    .child(settings_search_text(title, title_ranges, theme)),
             )
             .child(
                 div()
@@ -2746,18 +2963,23 @@ impl Waku {
                     .text_size(sp(12.5))
                     .line_height(sp(16.0))
                     .text_color(theme.text_secondary)
-                    .child(tr!("daemon.remote_hosts_description")),
+                    .child(settings_search_text(description, description_ranges, theme)),
             );
-        if let Some(editor) = &self.remote_host_editor {
-            card = card.child(self.render_remote_host_editor(editor, theme, cx));
-        } else {
-            card = card
-                .when(!self.state.remote_hosts.is_empty(), |card| {
-                    card.child(div().mt(px(6.0)).child(rows))
-                })
-                .child(div().mt(px(12.0)).flex().justify_end().child(add_button));
+        // The editor form and the add button are chrome, not matches — a
+        // search renders the card's saved rows only.
+        if !search.active() {
+            if let Some(editor) = &self.remote_host_editor {
+                card = card.child(self.render_remote_host_editor(editor, theme, cx));
+            } else {
+                card = card.child(div().mt(px(12.0)).flex().justify_end().child(add_button));
+            }
         }
-        card.into_any_element()
+        if self.remote_host_editor.is_none() || search.active() {
+            card = card.when(!self.state.remote_hosts.is_empty(), |card| {
+                card.child(div().mt(px(6.0)).child(rows))
+            });
+        }
+        Some(card.into_any_element())
     }
 
     fn render_remote_host_editor(
@@ -2905,8 +3127,16 @@ impl Waku {
     /// The daemon-scoped opt-in for agent-to-agent commands. Toggling it only
     /// affects sessions started afterwards — running sessions keep the launch
     /// environment they already have.
-    fn agent_tools_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn agent_tools_card(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let enabled = self.state.agent_tools_enabled;
+        let title = tr!("daemon.agent_tools_title");
+        let description = tr!("daemon.agent_tools_description");
+        let matched = search.matched(&title, &description)?;
         let toggle = toggle_switch(
             "agent-tools-toggle",
             enabled,
@@ -2915,39 +3145,20 @@ impl Waku {
             cx,
             move |this, _, cx| this.set_agent_tools_enabled(!enabled, cx),
         );
-        div()
-            .min_h(px(66.0))
-            .px(px(20.0))
-            .py(px(13.0))
-            .rounded(px(16.0))
-            .bg(theme.raised)
-            .flex()
-            .items_center()
-            .gap(px(24.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("daemon.agent_tools_title")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("daemon.agent_tools_description")),
-                    ),
-            )
-            .child(toggle)
-            .into_any_element()
+        Some(
+            div()
+                .min_h(px(66.0))
+                .px(px(20.0))
+                .py(px(13.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(24.0))
+                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(toggle)
+                .into_any_element(),
+        )
     }
 
     fn set_agent_tools_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -2960,8 +3171,16 @@ impl Waku {
     /// today. On by default; turning it off makes the daemon reject the
     /// `goddard-agent command` calls outright while `create`/`prompt` stay gated
     /// by their own switch above.
-    fn agent_settings_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn agent_settings_card(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let enabled = self.state.agent_settings_enabled;
+        let title = tr!("daemon.agent_settings_title");
+        let description = tr!("daemon.agent_settings_description");
+        let matched = search.matched(&title, &description)?;
         let toggle = toggle_switch(
             "agent-settings-toggle",
             enabled,
@@ -2970,39 +3189,20 @@ impl Waku {
             cx,
             move |this, _, cx| this.set_agent_settings_enabled(!enabled, cx),
         );
-        div()
-            .min_h(px(66.0))
-            .px(px(20.0))
-            .py(px(13.0))
-            .rounded(px(16.0))
-            .bg(theme.raised)
-            .flex()
-            .items_center()
-            .gap(px(24.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("daemon.agent_settings_title")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("daemon.agent_settings_description")),
-                    ),
-            )
-            .child(toggle)
-            .into_any_element()
+        Some(
+            div()
+                .min_h(px(66.0))
+                .px(px(20.0))
+                .py(px(13.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(24.0))
+                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(toggle)
+                .into_any_element(),
+        )
     }
 
     fn set_agent_settings_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -3012,79 +3212,123 @@ impl Waku {
     }
 
     /// The Experiments page: one opt-in card per unfinished feature, each
-    /// defaulting off. Subagents is daemon-owned — its flag travels with the
-    /// daemon settings `save()` already syncs.
-    fn render_experiments_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// defaulting off. Subagents and Computer Use are daemon-owned — their
+    /// flags travel with the daemon settings `save()` already syncs.
+    fn render_experiments_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         div()
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .px(px(20.0))
-                    .py(px(14.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .child(
-                        div()
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("settings.experiments_description")),
-                    ),
-            )
+            .when(!search.active(), |element| {
+                element.child(
+                    div()
+                        .mt(px(15.0))
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(14.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .child(
+                            div()
+                                .text_size(sp(12.5))
+                                .line_height(sp(18.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("settings.experiments_description")),
+                        ),
+                )
+            })
             .child(
                 div()
                     .mt(px(15.0))
                     .flex()
                     .flex_col()
                     .gap(px(10.0))
-                    .child(self.experiment_card(
+                    .children(self.experiment_card(
                         "big-picture-experiment-toggle",
                         "experiments.big_picture_title",
                         "experiments.big_picture_description",
                         self.state.big_picture_enabled,
                         theme,
+                        search,
                         cx,
                         |this, enabled, cx| this.set_big_picture_enabled(enabled, cx),
                     ))
-                    .child(self.experiment_card(
+                    .children(self.experiment_card(
                         "git-panel-experiment-toggle",
                         "experiments.git_panel_title",
                         "experiments.git_panel_description",
                         self.state.git_panel_enabled,
                         theme,
+                        search,
                         cx,
                         |this, enabled, cx| this.set_git_panel_enabled(enabled, cx),
                     ))
-                    .child(self.experiment_card(
+                    .children(self.experiment_card(
                         "github-experiment-toggle",
                         "experiments.github_title",
                         "experiments.github_description",
                         self.state.github_enabled,
                         theme,
+                        search,
                         cx,
                         |this, enabled, cx| this.set_github_enabled(enabled, cx),
                     ))
-                    .child(self.experiment_card(
+                    .children(self.experiment_card(
                         "projects-page-experiment-toggle",
                         "experiments.projects_page_title",
                         "experiments.projects_page_description",
                         self.state.projects_page_enabled,
                         theme,
+                        search,
                         cx,
                         |this, enabled, cx| this.set_projects_page_enabled(enabled, cx),
                     ))
-                    .child(self.experiment_card(
+                    .children(self.experiment_card(
                         "subagents-experiment-toggle",
                         "experiments.subagents_title",
                         "experiments.subagents_description",
                         self.state.subagents_enabled,
                         theme,
+                        search,
                         cx,
                         |this, enabled, cx| this.set_subagents_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "computer-use-experiment-toggle",
+                        "experiments.computer_use_title",
+                        "experiments.computer_use_description",
+                        self.state.computer_use_experiment_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_computer_use_experiment_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "friends-experiment-toggle",
+                        "experiments.friends_title",
+                        "experiments.friends_description",
+                        self.state.friends_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_friends_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "model-router-experiment-toggle",
+                        "experiments.model_router_title",
+                        "experiments.model_router_description",
+                        self.state.model_router_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_model_router_enabled(enabled, cx),
                     )),
             )
+            .when(self.state.model_router_enabled, |element| {
+                element.child(self.render_model_routing_settings(theme, search, cx))
+            })
             .into_any_element()
     }
 
@@ -3095,45 +3339,30 @@ impl Waku {
         description_key: &'static str,
         enabled: bool,
         theme: Theme,
+        search: &SettingSearch,
         cx: &mut Context<Self>,
         set: impl Fn(&mut Self, bool, &mut Context<Self>) + 'static,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
+        let title = tr!(title_key);
+        let description = tr!(description_key);
+        let matched = search.matched(&title, &description)?;
         let toggle = toggle_switch(id, enabled, false, theme, cx, move |this, _, cx| {
             set(this, !enabled, cx)
         });
-        div()
-            .min_h(px(66.0))
-            .px(px(20.0))
-            .py(px(13.0))
-            .rounded(px(16.0))
-            .bg(theme.raised)
-            .flex()
-            .items_center()
-            .gap(px(24.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!(title_key)),
-                    )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!(description_key)),
-                    ),
-            )
-            .child(toggle)
-            .into_any_element()
+        Some(
+            div()
+                .min_h(px(66.0))
+                .px(px(20.0))
+                .py(px(13.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(24.0))
+                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(toggle)
+                .into_any_element(),
+        )
     }
 
     fn set_big_picture_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -3155,6 +3384,9 @@ impl Waku {
     }
 
     fn set_github_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.notifications.reset();
+        }
         self.state.github_enabled = enabled;
         self.save();
         cx.notify();
@@ -3173,6 +3405,683 @@ impl Waku {
         self.state.subagents_enabled = enabled;
         self.save();
         cx.notify();
+    }
+
+    /// The Computer Use experiment opt-in also decides whether its dedicated
+    /// settings page appears in navigation. Disabling the experiment turns the
+    /// feature flag itself off so new sessions stop registering the Cua bridge.
+    fn set_computer_use_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.computer_use_experiment_enabled = enabled;
+        if !enabled {
+            self.state.computer_use_enabled = false;
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_friends_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled && self.settings_page == Some(SettingsPage::Friends) {
+            self.settings_page = None;
+        }
+        self.state.friends_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_model_router_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.model_router_enabled = enabled;
+        if enabled {
+            // The section below the card reads the policy view and the eval
+            // mirror — warm both rather than waiting for the first frame to
+            // discover they are missing.
+            self.seed_eval_inputs(cx);
+            self.request_route_policy(cx);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Fill the evaluation credential fields from the daemon's settings
+    /// mirror, once. After that the fields own their contents until Apply —
+    /// re-seeding on every settings broadcast would eat in-progress edits.
+    pub(super) fn seed_eval_inputs(&mut self, cx: &mut Context<Self>) {
+        if self.eval_inputs_seeded {
+            return;
+        }
+        self.eval_inputs_seeded = true;
+        let eval = self.state.eval.clone().unwrap_or_default();
+        for (input, value) in [
+            (&self.eval_typesafe_key_input, eval.typesafe_api_key),
+            (&self.eval_vercel_key_input, eval.vercel_api_key),
+            (&self.eval_vercel_team_input, eval.vercel_team_id),
+            (
+                &self.eval_cloudflare_account_input,
+                eval.cloudflare_account_id,
+            ),
+            (&self.eval_cloudflare_token_input, eval.cloudflare_api_token),
+        ] {
+            if let Some(value) = value {
+                input.update(cx, |input, cx| input.set_content(value, cx));
+            }
+        }
+    }
+
+    fn set_eval_backend(
+        &mut self,
+        backend: waku_protocol::eval::EvalBackend,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.eval.get_or_insert_with(Default::default).backend = backend;
+        self.save();
+        cx.notify();
+    }
+
+    /// Whether any credential field differs from the mirror — the Apply
+    /// button's enabled state.
+    fn eval_credentials_dirty(&self, cx: &App) -> bool {
+        let eval = self.state.eval.clone().unwrap_or_default();
+        let content = |input: &Entity<TextInput>| {
+            let content = input.read(cx).content().trim().to_owned();
+            (!content.is_empty()).then_some(content)
+        };
+        content(&self.eval_typesafe_key_input) != eval.typesafe_api_key
+            || content(&self.eval_vercel_key_input) != eval.vercel_api_key
+            || content(&self.eval_vercel_team_input) != eval.vercel_team_id
+            || content(&self.eval_cloudflare_account_input) != eval.cloudflare_account_id
+            || content(&self.eval_cloudflare_token_input) != eval.cloudflare_api_token
+    }
+
+    /// Persist every credential field into the eval settings document — one
+    /// write so the daemon sees a consistent set. An empty field clears the
+    /// slot rather than storing whitespace.
+    pub(super) fn save_eval_credentials(&mut self, cx: &mut Context<Self>) {
+        let content = |input: &Entity<TextInput>| {
+            let content = input.read(cx).content().trim().to_owned();
+            (!content.is_empty()).then_some(content)
+        };
+        let eval = self.state.eval.get_or_insert_with(Default::default);
+        eval.typesafe_api_key = content(&self.eval_typesafe_key_input);
+        eval.vercel_api_key = content(&self.eval_vercel_key_input);
+        eval.vercel_team_id = content(&self.eval_vercel_team_input);
+        eval.cloudflare_account_id = content(&self.eval_cloudflare_account_input);
+        eval.cloudflare_api_token = content(&self.eval_cloudflare_token_input);
+        self.save();
+        cx.notify();
+    }
+
+    /// The routing configuration under the experiment card: the eval backend
+    /// and its credentials, then the three class-level targets the policy
+    /// document resolves through. The document stays authoritative — the
+    /// dropdowns write through `SetRouteClassTarget` and re-read the result.
+    fn render_model_routing_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let weak = cx.entity().downgrade();
+        let eval = self.state.eval.clone().unwrap_or_default();
+        let backend = eval.backend;
+
+        let backend_handle = self.menu_handle("eval-backend-selector", cx);
+        let backend_selector = dropdown_menu(
+            MenuChip::new("eval-backend-selector")
+                .label(eval_backend_label(backend))
+                .outlined()
+                .selected(backend_handle.is_open())
+                .w(px(200.0))
+                .justify_between(),
+            "eval-backend-selector-menu",
+            &backend_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                [
+                    waku_protocol::eval::EvalBackend::TypeSafe,
+                    waku_protocol::eval::EvalBackend::VercelGateway,
+                    waku_protocol::eval::EvalBackend::Cloudflare,
+                ]
+                .into_iter()
+                .map(|option| {
+                    let weak = weak.clone();
+                    MenuItem::new(eval_backend_label(option), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| this.set_eval_backend(option, cx));
+                    })
+                    .selected(option == backend)
+                })
+                .collect()
+            },
+        );
+
+        let dirty = self.eval_credentials_dirty(cx);
+        let apply_button = div()
+            .id("apply-eval-credentials")
+            .tab_index(0)
+            .h(px(29.0))
+            .px(px(11.0))
+            .rounded(px(9.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if dirty { 1.0 } else { 0.55 })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when(dirty, |element| {
+                element
+                    .hover(|element| element.bg(theme.overlay))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.save_eval_credentials(cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.save_eval_credentials(cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(tr!("daemon.apply"));
+
+        let mut credential_rows: Vec<Option<AnyElement>> = match backend {
+            waku_protocol::eval::EvalBackend::TypeSafe => vec![settings_row(
+                tr!("routing.typesafe_key"),
+                tr!("routing.typesafe_key_description"),
+                TextField::new("eval-typesafe-key", self.eval_typesafe_key_input.clone())
+                    .w(px(300.0)),
+                theme,
+                search,
+            )],
+            waku_protocol::eval::EvalBackend::VercelGateway => vec![
+                settings_row(
+                    tr!("routing.vercel_key"),
+                    tr!("routing.vercel_key_description"),
+                    TextField::new("eval-vercel-key", self.eval_vercel_key_input.clone())
+                        .w(px(300.0)),
+                    theme,
+                    search,
+                ),
+                settings_row(
+                    tr!("routing.vercel_team"),
+                    tr!("routing.vercel_team_description"),
+                    TextField::new("eval-vercel-team", self.eval_vercel_team_input.clone())
+                        .w(px(300.0)),
+                    theme,
+                    search,
+                ),
+            ],
+            waku_protocol::eval::EvalBackend::Cloudflare => vec![
+                settings_row(
+                    tr!("routing.cloudflare_account"),
+                    tr!("routing.cloudflare_account_description"),
+                    TextField::new(
+                        "eval-cloudflare-account",
+                        self.eval_cloudflare_account_input.clone(),
+                    )
+                    .w(px(300.0)),
+                    theme,
+                    search,
+                ),
+                settings_row(
+                    tr!("routing.cloudflare_token"),
+                    tr!("routing.cloudflare_token_description"),
+                    TextField::new(
+                        "eval-cloudflare-token",
+                        self.eval_cloudflare_token_input.clone(),
+                    )
+                    .w(px(300.0)),
+                    theme,
+                    search,
+                ),
+            ],
+        };
+
+        let mut credential_rows_with_backend = vec![settings_row(
+            tr!("routing.backend"),
+            tr!("routing.backend_description"),
+            backend_selector,
+            theme,
+            search,
+        )];
+        credential_rows_with_backend.append(&mut credential_rows);
+        let credentials = settings_row_card(credential_rows_with_backend, theme).map(|card| {
+            card.when(!search.active(), |card| {
+                card.child(
+                    div()
+                        .px(px(20.0))
+                        .pb(px(13.0))
+                        .flex()
+                        .justify_end()
+                        .child(apply_button),
+                )
+            })
+        });
+
+        // The three class dropdowns. `classes` comes from the last
+        // GetRoutePolicy answer; before it lands the rows show the shipped
+        // defaults — the same values an unmodified document carries.
+        let policy = self.route_policy.clone();
+        let class_target = |class: TaskClass| {
+            policy
+                .as_ref()
+                .and_then(|view| view.classes.get(class.id()).cloned())
+                .unwrap_or_else(|| default_route_class_target(class).to_owned())
+        };
+        let class_rows = [
+            (
+                TaskClass::Routine,
+                tr!("routing.class_routine"),
+                tr!("routing.class_routine_description"),
+            ),
+            (
+                TaskClass::General,
+                tr!("routing.class_general"),
+                tr!("routing.class_general_description"),
+            ),
+            (
+                TaskClass::Demanding,
+                tr!("routing.class_demanding"),
+                tr!("routing.class_demanding_description"),
+            ),
+        ];
+        let class_row_elements: Vec<Option<AnyElement>> = class_rows
+            .into_iter()
+            .map(|(class, title, description)| {
+                settings_row(
+                    title,
+                    description,
+                    self.route_class_selector(class, &class_target(class), cx),
+                    theme,
+                    search,
+                )
+            })
+            .collect();
+        let classes = settings_row_card(class_row_elements, theme).map(|card| {
+            card.when(!search.active(), |card| {
+                if let Some(view) = &policy {
+                    // The file is the source of truth; surface where it lives
+                    // and whether the document in effect is the user's own or
+                    // the shipped default their edit fell back to.
+                    let path = compact_path(&view.path);
+                    let status = if view.valid {
+                        tr!("routing.policy_valid")
+                    } else {
+                        tr!("routing.policy_invalid")
+                    };
+                    card.child(
+                        div()
+                            .px(px(20.0))
+                            .py(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(SharedString::from(path)),
+                            )
+                            .child(
+                                div()
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded_full()
+                                    .text_color(if view.valid {
+                                        theme.success
+                                    } else {
+                                        theme.warning
+                                    })
+                                    .bg(theme.overlay)
+                                    .child(status),
+                            ),
+                    )
+                } else {
+                    card
+                }
+            })
+        });
+
+        div()
+            .children(credentials)
+            .children(classes)
+            .into_any_element()
+    }
+
+    /// One class-level target picker: the composer's searchable model list at
+    /// model granularity — a policy target names no effort or tier — with the
+    /// policy's tier aliases and provider defaults on top. Selecting writes
+    /// the raw target string into the policy document — same grammar hand
+    /// edits use.
+    fn route_class_selector(
+        &self,
+        class: TaskClass,
+        current: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let weak = cx.entity().downgrade();
+        let menu_id = format!("route-class-{}", class.id());
+        let search = self.route_class_search.clone();
+        let scroll = self.route_class_scroll.clone();
+        let scrollbar_state = self.route_class_scrollbar.clone();
+        let handle = {
+            let reset_weak = weak.clone();
+            let reset_search = search.clone();
+            self.menu_handle_with(menu_id.clone(), cx, move |open, window, cx| {
+                let _ = reset_weak.update(cx, |this, cx| {
+                    if open {
+                        this.route_class_picker = Some(class);
+                        this.route_class_highlight = None;
+                        reset_search.update(cx, |search, cx| search.clear(cx));
+                        this.reveal_route_class_target(class);
+                    } else {
+                        this.route_class_picker = None;
+                        let focus = this.settings_focus.clone();
+                        window.focus(&focus, cx);
+                    }
+                    cx.notify();
+                });
+                if open {
+                    // The panel is deferred, so its input joins the dispatch
+                    // tree only after the deferred draw — the same two-frame
+                    // wait the model picker needs before it can take focus.
+                    // The reveal is re-issued here too: a parked scroll
+                    // request resolves against the previous paint's bounds,
+                    // so on the container's first-ever paint it lands wrong.
+                    let focus_weak = reset_weak.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| {
+                            let _ = focus_weak.update(cx, |this, cx| {
+                                let focus = this.route_class_search.read(cx).focus_handle(cx);
+                                window.focus(&focus, cx);
+                                this.reveal_route_class_target(class);
+                            });
+                        });
+                    });
+                }
+            })
+        };
+
+        // The same set Auto may pick between — a class target naming an
+        // uninstalled provider would resolve but could never start.
+        let probes: Vec<ProviderProbe> = self
+            .probes
+            .iter()
+            .filter(|probe| {
+                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
+            })
+            .cloned()
+            .collect();
+        let normalized_query = self
+            .route_class_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_ascii_lowercase();
+        let current = current.to_owned();
+        let label = route_target_label(&current, &self.probes);
+        // One ordering shared by the rendered rows and `enter`'s handler —
+        // the same rule the composer documents for its own list. Only built
+        // while the panel is open: it clones every provider's model list.
+        let available_rows = Rc::new(if handle.is_open() {
+            route_class_rows(&probes, &self.state.disabled_providers, &normalized_query)
+        } else {
+            Vec::new()
+        });
+        let highlight = self
+            .route_class_highlight
+            .filter(|index| *index < available_rows.len());
+
+        popover(
+            MenuChip::new(format!("route-class-selector-{}", class.id()))
+                .label(label)
+                .outlined()
+                .selected(handle.is_open())
+                .w(px(240.0))
+                .justify_between(),
+            &handle,
+            MenuAlign::BelowRight,
+            move |popover, _window, _cx| {
+                let popover = popover.clone();
+                let available_rows = available_rows.clone();
+
+                let search_input = div()
+                    .h(px(52.0))
+                    .px(px(12.0))
+                    .pt(px(10.0))
+                    .pb(px(8.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(34.0))
+                            .px(px(10.0))
+                            .rounded(px(11.0))
+                            .bg(theme.raised)
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                            .child(div().flex_1().min_w_0().child(search.clone())),
+                    );
+
+                let mut rows = div()
+                    .id("route-class-list")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .p(px(9.0));
+                if available_rows.is_empty() {
+                    rows = rows.child(
+                        div()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("models.none_found")),
+                    );
+                }
+
+                for (row_index, row) in available_rows.iter().enumerate() {
+                    let is_highlighted = highlight == Some(row_index);
+                    let is_selected = row.target() == current;
+                    let (mark, title, subtitle) = row.render_parts(&theme);
+                    let row_target = row.target();
+                    let select_weak = weak.clone();
+                    let select_popover = popover.clone();
+                    rows = rows.child(
+                        div()
+                            .id(SharedString::from(format!("route-class-row-{row_index}")))
+                            .h(px(58.0))
+                            .px(px(12.0))
+                            .rounded(px(11.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .cursor_default()
+                            // Reserved on every row so highlighting one cannot
+                            // resize it and shift the list by a pixel.
+                            .border(hairline())
+                            .border_color(gpui::transparent_black())
+                            .when(is_selected, |element| element.bg(theme.overlay_strong))
+                            .when(is_highlighted, |element| {
+                                element.bg(theme.overlay).border_color(theme.accent)
+                            })
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.opacity(0.85))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(mark)
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_size(sp(13.0))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(theme.text)
+                                                    .child(SharedString::from(title)),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(4.0))
+                                            .truncate()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_tertiary)
+                                            .child(SharedString::from(subtitle)),
+                                    ),
+                            )
+                            .when(is_selected, |element| {
+                                element.child(icon("icons/check.svg", 13.0, theme.accent))
+                            })
+                            .on_click(move |_, window, cx| {
+                                let _ = select_weak.update(cx, |this, cx| {
+                                    this.set_route_class_target(class, row_target.clone(), cx);
+                                });
+                                select_popover.close(window, cx);
+                            }),
+                    );
+                }
+
+                let next_rows = available_rows.clone();
+                let previous_rows = available_rows.clone();
+                let confirm_rows = available_rows.clone();
+                let next_weak = weak.clone();
+                let previous_weak = weak.clone();
+                let confirm_weak = weak.clone();
+                let confirm_popover = popover.clone();
+                div()
+                    .w(px(340.0))
+                    .h(px(390.0))
+                    .rounded(px(16.0))
+                    .overflow_hidden()
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.surface)
+                    .shadow_lg()
+                    .flex()
+                    .flex_col()
+                    // The filter field keeps focus and the selected row is
+                    // only drawn, never focused — the same split the model
+                    // picker uses. These arrive as actions bound to
+                    // `WakuMenu > TextInput`, the only way to claim a key out
+                    // from under a focused text field.
+                    .on_action(move |_: &SelectNextEntry, _, cx| {
+                        let _ = next_weak.update(cx, |this, cx| {
+                            this.move_route_class_highlight("down", &next_rows, cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                        let _ = previous_weak.update(cx, |this, cx| {
+                            this.move_route_class_highlight("up", &previous_rows, cx);
+                        });
+                    })
+                    .on_action(move |_: &ConfirmEntry, window, cx| {
+                        let _ = confirm_weak.update(cx, |this, cx| {
+                            this.choose_route_class_row(class, &confirm_rows, cx);
+                        });
+                        confirm_popover.close(window, cx);
+                        window.refresh();
+                    })
+                    .child(search_input)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .relative()
+                            .child(rows)
+                            .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                    )
+                    .into_any_element()
+            },
+        )
+        .into_any_element()
+    }
+
+    /// Move the class picker's drawn selection. Nothing is focused: the
+    /// filter field keeps focus so typing continues to narrow the list.
+    /// Unmoved, the cursor seeds on the class's current target.
+    fn move_route_class_highlight(
+        &mut self,
+        key: &str,
+        rows: &[RouteClassRow],
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .route_class_highlight
+            .filter(|index| *index < rows.len())
+            .or_else(|| {
+                let class = self.route_class_picker?;
+                let current = self.route_class_target(class);
+                rows.iter().position(|row| row.target() == current)
+            });
+        let Some(next) = next_picker_highlight(current, rows.len(), key) else {
+            return;
+        };
+        self.route_class_highlight = Some(next);
+        self.route_class_scroll.scroll_to_item(next);
+        cx.notify();
+    }
+
+    /// Write the highlighted row's target into the class's policy slot —
+    /// the highlight when the keyboard moved, else the first row.
+    fn choose_route_class_row(
+        &mut self,
+        class: TaskClass,
+        rows: &[RouteClassRow],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = rows.get(self.route_class_highlight.unwrap_or(0)) else {
+            return;
+        };
+        let target = row.target();
+        self.set_route_class_target(class, target, cx);
+    }
+
+    /// Bring the class's current target row into view — the same reveal the
+    /// model picker does for the session's combo.
+    pub(super) fn reveal_route_class_target(&self, class: TaskClass) {
+        let current = self.route_class_target(class);
+        let probes: Vec<ProviderProbe> = self
+            .probes
+            .iter()
+            .filter(|probe| {
+                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
+            })
+            .cloned()
+            .collect();
+        let rows = route_class_rows(&probes, &self.state.disabled_providers, "");
+        let index = rows
+            .iter()
+            .position(|row| row.target() == current)
+            .unwrap_or(0);
+        self.route_class_scroll.scroll_to_item(index);
+    }
+
+    /// The class's effective target — the policy's entry when a view has
+    /// landed, else the shipped default.
+    fn route_class_target(&self, class: TaskClass) -> String {
+        self.route_policy
+            .as_ref()
+            .and_then(|view| view.classes.get(class.id()).cloned())
+            .unwrap_or_else(|| default_route_class_target(class).to_owned())
     }
 
     fn daemon_exposure_from_fields(
@@ -3561,7 +4470,14 @@ impl Waku {
         let project_name = self.project_display_name(session.project_id);
         let updated =
             super::sidebar::format_time_ago(unix_time().saturating_sub(session.updated_at));
-        let detail = format!("{project_name} · {updated}");
+        let detail = if session.landed_at.is_some() {
+            format!(
+                "{project_name} · {updated} · {}",
+                tr!("settings.archived_landed")
+            )
+        } else {
+            format!("{project_name} · {updated}")
+        };
 
         let unarchive_button = div()
             .id(SharedString::from(format!(
@@ -3667,8 +4583,14 @@ impl Waku {
                     .child(
                         div()
                             .mt(px(1.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
                             .text_size(sp(11.5))
                             .text_color(theme.text_tertiary)
+                            .when(session.landed_at.is_some(), |element| {
+                                element.child(icon("icons/check.svg", 11.0, theme.success))
+                            })
                             .child(detail),
                     ),
             )
@@ -3684,7 +4606,11 @@ impl Waku {
             .into_any_element()
     }
 
-    fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_appearance_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let theme_settings = self.state.theme;
         let match_system = theme_settings.mode == ThemeMode::System;
@@ -3966,15 +4892,93 @@ impl Waku {
             },
         );
 
-        div()
-            .mt(px(15.0))
-            .w_full()
-            .flex()
-            .flex_col()
-            .rounded(px(16.0))
-            .overflow_hidden()
-            .bg(theme.raised)
-            .child(settings_row(
+        let preview_open = self.theme_preview_expanded
+            || mode_handle.is_open()
+            || light_handle.is_open()
+            || dark_handle.is_open();
+        let preview_row = {
+            let title = tr!("settings.preview");
+            let description = tr!("settings.preview_description");
+            search
+                .matched(&title, &description)
+                .map(|matched| self.render_theme_preview(preview_open, matched, cx))
+        };
+
+        // Vibrancy is a macOS-only effect; on other platforms the sidebar is
+        // already a solid fill and there is nothing to switch.
+        let transparency_rows = if cfg!(target_os = "macos") {
+            let transparent = self.state.sidebar_transparency;
+            let amount = self.state.sidebar_transparency_amount;
+            let amount_shown = self.sidebar_transparency_slider.shown(amount);
+            let amount_slider = slider::slider(
+                "sidebar-transparency-slider",
+                &self.sidebar_transparency_slider,
+                crate::persistence::MAX_SIDEBAR_TRANSPARENCY,
+                amount,
+                cx,
+                |this, amount, window, cx| this.set_sidebar_transparency_amount(amount, window, cx),
+            );
+            let toggle_row = settings_row(
+                tr!("settings.sidebar_transparency"),
+                tr!("settings.sidebar_transparency_description"),
+                toggle_switch(
+                    "sidebar-transparency-toggle",
+                    transparent,
+                    false,
+                    theme,
+                    cx,
+                    move |this, window, cx| this.set_sidebar_transparency(!transparent, window, cx),
+                ),
+                theme,
+                search,
+            );
+            // Same shape as the completion-volume row: the slider only exists
+            // while the feature is on, so an in-flight drag cannot outlive
+            // it — `set_sidebar_transparency` cancels the drag state on the
+            // way off.
+            let amount_row = if !transparent {
+                None
+            } else {
+                let title = tr!("settings.sidebar_transparency_amount");
+                search.matched(&title, "").map(|(ranges, _)| {
+                    div()
+                        .w_full()
+                        .min_h(px(52.0))
+                        .px(px(20.0))
+                        .py(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(title, ranges, theme)),
+                        )
+                        .child(amount_slider.w(px(140.0)).flex_none())
+                        .child(
+                            div()
+                                .w(px(32.0))
+                                .flex_none()
+                                .flex()
+                                .justify_end()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(format!("{}%", (amount_shown * 100.0).round() as i32)),
+                        )
+                        .into_any_element()
+                })
+            };
+            vec![toggle_row, amount_row]
+        } else {
+            Vec::new()
+        };
+
+        let mut rows: Vec<Option<AnyElement>> = vec![
+            settings_row(
                 tr!("settings.match_system"),
                 tr!("settings.match_system_description"),
                 toggle_switch(
@@ -3998,225 +5002,80 @@ impl Waku {
                     },
                 ),
                 theme,
-            ))
-            .when(!match_system, |element| {
-                element
-                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-                    .child(settings_row(
-                        tr!("settings.appearance"),
-                        tr!("settings.appearance_mode_description"),
-                        mode_selector,
-                        theme,
-                    ))
-            })
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(settings_row(
+                search,
+            ),
+            if match_system {
+                None
+            } else {
+                settings_row(
+                    tr!("settings.appearance"),
+                    tr!("settings.appearance_mode_description"),
+                    mode_selector,
+                    theme,
+                    search,
+                )
+            },
+            settings_row(
                 tr!("settings.light_theme"),
                 tr!("settings.light_theme_description"),
                 light_theme_selector,
                 theme,
-            ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(settings_row(
+                search,
+            ),
+            settings_row(
                 tr!("settings.dark_theme"),
                 tr!("settings.dark_theme_description"),
                 dark_theme_selector,
                 theme,
-            ))
-            .when(cfg!(target_os = "macos"), |element| {
-                // Vibrancy is a macOS-only effect; on other platforms the
-                // sidebar is already a solid fill and there is nothing to
-                // switch.
-                let transparent = self.state.sidebar_transparency;
-                element
-                    .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-                    .child(
-                        div()
-                            .w_full()
-                            .min_h(px(60.0))
-                            .px(px(20.0))
-                            .py(px(12.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(24.0))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(
-                                        div()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("settings.sidebar_transparency")),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt(px(5.0))
-                                            .text_size(sp(12.5))
-                                            .line_height(sp(18.0))
-                                            .text_color(theme.text_secondary)
-                                            .child(tr!(
-                                                "settings.sidebar_transparency_description"
-                                            )),
-                                    ),
-                            )
-                            .child(toggle_switch(
-                                "sidebar-transparency-toggle",
-                                transparent,
-                                false,
-                                theme,
-                                cx,
-                                move |this, window, cx| {
-                                    this.set_sidebar_transparency(!transparent, window, cx)
-                                },
-                            )),
-                    )
-            })
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("language.title")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("language.description")),
-                            ),
-                    )
-                    .child(language_selector),
-            )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(settings_row(
+                search,
+            ),
+            preview_row,
+        ];
+        rows.extend(transparency_rows);
+        rows.extend([
+            settings_row(
+                tr!("language.title"),
+                tr!("language.description"),
+                language_selector,
+                theme,
+                search,
+            ),
+            settings_row(
                 tr!("settings.ui_font"),
                 tr!("settings.ui_font_description"),
                 ui_font_selector,
                 theme,
-            ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(settings_row(
+                search,
+            ),
+            settings_row(
                 tr!("settings.code_font"),
                 tr!("settings.code_font_description"),
                 code_font_selector,
                 theme,
-            ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.ui_font_size")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.ui_font_size_description")),
-                            ),
-                    )
-                    .child(ui_font_size_selector),
-            )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.code_font_size")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.code_font_size_description")),
-                            ),
-                    )
-                    .child(code_font_size_selector),
-            )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.terminal_font_size")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.terminal_font_size_description")),
-                            ),
-                    )
-                    .child(terminal_font_size_selector),
-            )
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(settings_row(
+                search,
+            ),
+            settings_row(
+                tr!("settings.ui_font_size"),
+                tr!("settings.ui_font_size_description"),
+                ui_font_size_selector,
+                theme,
+                search,
+            ),
+            settings_row(
+                tr!("settings.code_font_size"),
+                tr!("settings.code_font_size_description"),
+                code_font_size_selector,
+                theme,
+                search,
+            ),
+            settings_row(
+                tr!("settings.terminal_font_size"),
+                tr!("settings.terminal_font_size_description"),
+                terminal_font_size_selector,
+                theme,
+                search,
+            ),
+            settings_row(
                 tr!("settings.thick_borders"),
                 tr!("settings.thick_borders_description"),
                 toggle_switch(
@@ -4231,9 +5090,47 @@ impl Waku {
                     },
                 ),
                 theme,
-            ))
-            .child(div().mx(px(20.0)).h(hairline()).bg(theme.separator))
-            .child(settings_row(
+                search,
+            ),
+            settings_row(
+                tr!("settings.border_intensity"),
+                tr!("settings.border_intensity_description"),
+                {
+                    let intensity = self.state.border_intensity;
+                    let shown = self.border_intensity_slider.shown(intensity);
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(
+                            slider::slider(
+                                "border-intensity-slider",
+                                &self.border_intensity_slider,
+                                crate::persistence::MAX_BORDER_INTENSITY,
+                                intensity,
+                                cx,
+                                |this, intensity, window, cx| {
+                                    this.set_border_intensity(intensity, window, cx)
+                                },
+                            )
+                            .w(px(140.0))
+                            .flex_none(),
+                        )
+                        .child(
+                            div()
+                                .w(px(32.0))
+                                .flex_none()
+                                .flex()
+                                .justify_end()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(format!("{}%", (shown * 100.0).round() as i32)),
+                        )
+                },
+                theme,
+                search,
+            ),
+            settings_row(
                 tr!("settings.high_contrast"),
                 tr!("settings.high_contrast_description"),
                 toggle_switch(
@@ -4248,7 +5145,190 @@ impl Waku {
                     },
                 ),
                 theme,
+                search,
+            ),
+        ]);
+
+        settings_row_card(rows, theme)
+            .map(|card| card.into_any_element())
+            .unwrap_or_else(|| div().into_any_element())
+    }
+
+    /// The Appearance page's collapsible sample: a miniature transcript —
+    /// user bubble, assistant reply, code block — painted on the transcript's
+    /// `surface` so a previewed palette reads exactly as it will in chat.
+    /// `open` also comes in held by an open theme selector, so the sample
+    /// appears for the duration of a pick.
+    fn render_theme_preview(
+        &self,
+        open: bool,
+        matched: (Vec<Range<usize>>, Vec<Range<usize>>),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let metrics = self.scaled_markdown_metrics(MarkdownMetrics::BODY);
+        let syntax = theme.syntax;
+
+        let disclosure = div()
+            .id("theme-preview-disclosure")
+            .tab_index(0)
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .cursor_default()
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .child(settings_row_text(
+                tr!("settings.preview"),
+                tr!("settings.preview_description"),
+                matched,
+                theme,
             ))
+            .child(icon(
+                if open {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                10.5,
+                theme.text_tertiary,
+            ))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.theme_preview_expanded = !this.theme_preview_expanded;
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.theme_preview_expanded = !this.theme_preview_expanded;
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }));
+
+        if !open {
+            return disclosure.into_any_element();
+        }
+
+        let code_line =
+            |spans: &[(&'static str, Hsla)]| {
+                div()
+                    .flex()
+                    .children(spans.iter().map(|&(text, color)| {
+                        div().text_color(color).child(text).into_any_element()
+                    }))
+                    .into_any_element()
+            };
+        let plain = theme.text_secondary;
+        let code_block = div()
+            .w_full()
+            .min_w_0()
+            .rounded(px(10.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.inset)
+            .overflow_hidden()
+            .child(
+                div()
+                    .w_full()
+                    .h(px(28.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .border_b(hairline())
+                    .border_color(theme.separator)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(12.5))
+                            .line_height(px(14.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_ghost)
+                            .child("rust"),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px(px(10.0))
+                    .py(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(px(metrics.code_text_size))
+                    .line_height(px(metrics.code_line_height))
+                    .whitespace_nowrap()
+                    .child(code_line(&[
+                        ("fn ", syntax.keyword),
+                        ("greet", syntax.function),
+                        ("(name: ", plain),
+                        ("&str", syntax.ty),
+                        (") -> ", plain),
+                        ("String", syntax.ty),
+                        (" {", plain),
+                    ]))
+                    .child(code_line(&[(
+                        "    // Return a greeting for the given name.",
+                        syntax.comment,
+                    )]))
+                    .child(code_line(&[
+                        ("    ", plain),
+                        ("format!", syntax.meta),
+                        ("(", plain),
+                        ("\"Hello, {name}!\"", syntax.string),
+                        (");", plain),
+                    ]))
+                    .child(code_line(&[("}", plain)])),
+            );
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(disclosure)
+            .child(
+                div().px(px(20.0)).pb(px(16.0)).child(
+                    div()
+                        .w_full()
+                        .rounded(px(12.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.surface)
+                        .px(px(16.0))
+                        .py(px(14.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(10.0))
+                        .child(
+                            div().w_full().flex().justify_end().child(
+                                div()
+                                    .rounded(px(15.0))
+                                    .border(hairline())
+                                    .border_color(theme.raised)
+                                    .bg(theme.raised)
+                                    .px(px(11.0))
+                                    .py(px(7.0))
+                                    .text_size(px(metrics.text_size))
+                                    .line_height(px(metrics.line_height))
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.preview_user_message")),
+                            ),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(metrics.text_size))
+                                .line_height(px(metrics.line_height))
+                                .text_color(theme.text)
+                                .child(tr!("settings.preview_assistant_reply")),
+                        )
+                        .child(code_block),
+                ),
+            )
             .into_any_element()
     }
 
@@ -4712,11 +5792,29 @@ impl Waku {
         cx.notify();
     }
 
+    fn set_archive_navigation(&mut self, navigation: ArchiveNavigation, cx: &mut Context<Self>) {
+        if self.state.archive_navigation == navigation {
+            return;
+        }
+        self.state.archive_navigation = navigation;
+        self.save();
+        cx.notify();
+    }
+
     fn set_sync_with_merge(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.sync_with_merge == enabled {
             return;
         }
         self.state.sync_with_merge = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_auto_resolve_in_chat(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.auto_resolve_in_chat == enabled {
+            return;
+        }
+        self.state.auto_resolve_in_chat = enabled;
         self.save();
         cx.notify();
     }
@@ -4757,9 +5855,8 @@ impl Waku {
     /// Persist the whitelist field's current names as the user types; the
     /// list applies to the next worktree created.
     pub(super) fn apply_worktree_sync_branches(&mut self, cx: &mut Context<Self>) {
-        let branches = sync_branches_from_text(
-            &self.worktree_sync_branches_input.read(cx).content(),
-        );
+        let branches =
+            sync_branches_from_text(&self.worktree_sync_branches_input.read(cx).content());
         if branches != self.state.new_worktree_sync_branches {
             self.state.new_worktree_sync_branches = branches;
             self.save();
@@ -4854,7 +5951,11 @@ impl Waku {
             .reset(self.skills_rows.borrow().len());
     }
 
-    fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_providers_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let checking = self.provider_detection_remaining > 0;
         let checked_label = self
@@ -4890,9 +5991,8 @@ impl Waku {
                 cx.notify();
             }));
 
-        let mut rows = div().mt(px(4.0)).flex().flex_col();
-        let provider_count = ProviderKind::ALL.len();
-        for (index, kind) in ProviderKind::ALL.into_iter().enumerate() {
+        let mut provider_rows: Vec<AnyElement> = Vec::new();
+        for kind in ProviderKind::ALL {
             let probe = self.provider_probe(kind);
             let installed = probe.is_some_and(|probe| probe.installed);
             let binary_path = probe
@@ -4914,7 +6014,7 @@ impl Waku {
                 theme.success
             };
 
-            let detail: AnyElement = if installed {
+            let detail_text: String = if installed {
                 let mut parts = Vec::new();
                 if let Some(path) = binary_path {
                     parts.push(path);
@@ -4928,18 +6028,28 @@ impl Waku {
                         tr!("providers.model_count_many", count = model_count)
                     });
                 }
+                parts.join("  ·  ")
+            } else {
+                tr!("providers.not_detected_as", command = kind.command())
+            };
+
+            // The provider row is searchable on its name and the detail line
+            // under it — path, model count, or the not-detected hint.
+            let Some((title_ranges, detail_ranges)) =
+                search.matched(kind.display_name(), &detail_text)
+            else {
+                continue;
+            };
+            let detail: AnyElement = if installed {
                 div()
                     .truncate()
-                    .child(SharedString::from(parts.join("  ·  ")))
+                    .child(settings_search_text(detail_text, detail_ranges, theme))
                     .into_any_element()
             } else {
                 div()
                     .flex()
                     .items_baseline()
-                    .child(SharedString::from(tr!(
-                        "providers.not_detected_as",
-                        command = kind.command()
-                    )))
+                    .child(settings_search_text(detail_text, detail_ranges, theme))
                     .into_any_element()
             };
 
@@ -5019,7 +6129,7 @@ impl Waku {
                             &theme,
                             kind,
                             16.0,
-                            provider_color(&theme, kind).opacity(if installed { 1.0 } else { 0.5 }),
+                            theme.text_secondary.opacity(if installed { 1.0 } else { 0.5 }),
                         ))
                         .child(
                             div()
@@ -5052,7 +6162,11 @@ impl Waku {
                                         } else {
                                             theme.text_secondary
                                         })
-                                        .child(kind.display_name()),
+                                        .child(settings_search_text(
+                                            kind.display_name(),
+                                            title_ranges,
+                                            theme,
+                                        )),
                                 )
                                 .when_some(version, |element, version| {
                                     element.child(
@@ -5076,19 +6190,47 @@ impl Waku {
                 .child(expand_button)
                 .when(installed, |element| element.child(toggle));
 
-            rows = rows.child(
+            provider_rows.push(
                 div()
                     .py(px(11.0))
                     .flex()
                     .flex_col()
-                    .when(index + 1 != provider_count, |element| {
+                    .child(header)
+                    .when(expanded && !search.active(), |element| {
+                        element.child(self.render_provider_expanded_settings(kind, theme, cx))
+                    })
+                    .into_any_element(),
+            );
+        }
+        let any_rows = !provider_rows.is_empty();
+        let last_row = provider_rows.len().saturating_sub(1);
+        let mut rows = div().mt(px(4.0)).flex().flex_col();
+        for (index, row) in provider_rows.into_iter().enumerate() {
+            rows = rows.child(
+                div()
+                    .when(index != last_row, |element| {
                         element.border_b(hairline()).border_color(theme.separator)
                     })
-                    .child(header)
-                    .when(expanded, |element| {
-                        element.child(self.render_provider_expanded_settings(kind, theme, cx))
-                    }),
+                    .child(row),
             );
+        }
+
+        let header = {
+            let title = tr!("providers.coding_agents");
+            let description = tr!("providers.description");
+            search.matched(&title, &description).map(|matched| {
+                div().flex_1().min_w_0().child(settings_row_text(
+                    title,
+                    description,
+                    matched,
+                    theme,
+                ))
+            })
+        };
+        // The card drops out of the results entirely when neither its header
+        // nor a provider row matched.
+        if search.active() && header.is_none() && !any_rows {
+            return div().into_any_element();
         }
 
         div()
@@ -5103,43 +6245,26 @@ impl Waku {
                     .flex()
                     .items_start()
                     .gap(px(20.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("providers.coding_agents")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("providers.description")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .flex_col()
-                            .items_end()
-                            .gap(px(6.0))
-                            .child(refresh)
-                            .when_some(checked_label, |element, label| {
-                                element.child(
-                                    div()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_ghost)
-                                        .child(SharedString::from(label)),
-                                )
-                            }),
-                    ),
+                    .children(header)
+                    .when(!search.active(), |element| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .flex_col()
+                                .items_end()
+                                .gap(px(6.0))
+                                .child(refresh)
+                                .when_some(checked_label, |element, label| {
+                                    element.child(
+                                        div()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_ghost)
+                                            .child(SharedString::from(label)),
+                                    )
+                                }),
+                        )
+                    }),
             )
             .child(rows)
             .into_any_element()
@@ -5684,7 +6809,11 @@ impl Waku {
         cx.notify();
     }
 
-    fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_computer_use_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let enabled = self.state.computer_use_enabled;
         let permissions = self.computer_permissions.clone();
@@ -5766,13 +6895,10 @@ impl Waku {
             }
         }
 
-        div()
-            .mt(px(15.0))
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
+        let allow_card = {
+            let title = tr!("computer_use.allow_apps");
+            let description = tr!("computer_use.availability");
+            search.matched(&title, &description).map(|matched| {
                 div()
                     .px(px(20.0))
                     .py(px(14.0))
@@ -5781,26 +6907,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(20.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("computer_use.allow_apps")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("computer_use.availability")),
-                            ),
-                    )
+                    .child(settings_row_text(title, description, matched, theme))
                     .child(toggle_switch(
                         "computer-use-enabled",
                         enabled,
@@ -5808,10 +6915,130 @@ impl Waku {
                         theme,
                         cx,
                         move |this, _, cx| this.set_computer_use_enabled(!enabled, cx),
-                    )),
-            )
-            .when(cfg!(target_os = "macos"), |element| {
-                element.child(
+                    ))
+                    .into_any_element()
+            })
+        };
+
+        let macos_card = if !cfg!(target_os = "macos") {
+            None
+        } else {
+            let before = search.hits();
+            let header = {
+                let title = tr!("computer_use.macos_access");
+                let description = tr!("computer_use.helper_access", helper = helper_name);
+                search
+                    .matched(&title, &description)
+                    .map(|(title_ranges, description_ranges)| {
+                        div()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(title, title_ranges, theme)),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        description_ranges,
+                                        theme,
+                                    )),
+                            )
+                    })
+            };
+            let screen_row = permission_status_row(
+                tr!("computer_use.screen_recording"),
+                tr!("computer_use.screen_recording_description"),
+                permissions.screen_recording,
+                "screen-recording-settings",
+                theme,
+                search,
+                cx,
+            );
+            let accessibility_row = permission_status_row(
+                tr!("computer_use.accessibility"),
+                tr!("computer_use.accessibility_description"),
+                permissions.accessibility,
+                "accessibility-settings",
+                theme,
+                search,
+                cx,
+            );
+            if search.active() && search.hits() == before {
+                None
+            } else {
+                Some(
+                    div()
+                        .px(px(20.0))
+                        .py(px(14.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .children(header)
+                        .children(screen_row)
+                        .children(accessibility_row)
+                        .when(!search.active(), |card| {
+                            card.child(
+                                div().mt(px(11.0)).flex().items_center().gap(px(8.0)).child(
+                                    div()
+                                        .id("recheck-computer-permissions")
+                                        .h(px(28.0))
+                                        .px(px(11.0))
+                                        .rounded(px(9.0))
+                                        .border(hairline())
+                                        .border_color(theme.border_strong)
+                                        .text_color(theme.text_secondary)
+                                        .flex()
+                                        .items_center()
+                                        .cursor_default()
+                                        .text_size(sp(12.5))
+                                        .opacity(if pending { 0.6 } else { 1.0 })
+                                        .child(if pending {
+                                            tr!("common.checking")
+                                        } else {
+                                            tr!("common.recheck")
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.request_computer_permissions(false, cx);
+                                        })),
+                                ),
+                            )
+                        })
+                        .into_any_element(),
+                )
+            }
+        };
+
+        let desktop_card = if cfg!(target_os = "macos") {
+            None
+        } else {
+            let title = tr!("computer_use.desktop_access");
+            let description = if cfg!(target_os = "windows") {
+                tr!("computer_use.windows_access_description")
+            } else {
+                tr!("computer_use.linux_access_description")
+            };
+            search.matched(&title, &description).map(|matched| {
+                div()
+                    .px(px(20.0))
+                    .py(px(14.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .child(settings_row_text(title, description, matched, theme))
+                    .into_any_element()
+            })
+        };
+
+        let apps_card = {
+            let title = tr!("computer_use.always_allowed_apps");
+            let description = tr!("computer_use.always_allowed_apps_description");
+            search
+                .matched(&title, &description)
+                .map(|(title_ranges, description_ranges)| {
                     div()
                         .px(px(20.0))
                         .py(px(14.0))
@@ -5822,111 +7049,34 @@ impl Waku {
                                 .text_size(sp(13.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text)
-                                .child(tr!("computer_use.macos_access")),
+                                .child(settings_search_text(title, title_ranges, theme)),
                         )
                         .child(
                             div()
                                 .mt(px(4.0))
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_secondary)
-                                .child(SharedString::from(tr!(
-                                    "computer_use.helper_access",
-                                    helper = helper_name
-                                ))),
+                                .child(settings_search_text(
+                                    description,
+                                    description_ranges,
+                                    theme,
+                                )),
                         )
-                        .child(permission_status_row(
-                            tr!("computer_use.screen_recording"),
-                            tr!("computer_use.screen_recording_description"),
-                            permissions.screen_recording,
-                            "screen-recording-settings",
-                            theme,
-                            cx,
-                        ))
-                        .child(permission_status_row(
-                            tr!("computer_use.accessibility"),
-                            tr!("computer_use.accessibility_description"),
-                            permissions.accessibility,
-                            "accessibility-settings",
-                            theme,
-                            cx,
-                        ))
-                        .child(
-                            div().mt(px(11.0)).flex().items_center().gap(px(8.0)).child(
-                                div()
-                                    .id("recheck-computer-permissions")
-                                    .h(px(28.0))
-                                    .px(px(11.0))
-                                    .rounded(px(9.0))
-                                    .border(hairline())
-                                    .border_color(theme.border_strong)
-                                    .text_color(theme.text_secondary)
-                                    .flex()
-                                    .items_center()
-                                    .cursor_default()
-                                    .text_size(sp(12.5))
-                                    .opacity(if pending { 0.6 } else { 1.0 })
-                                    .child(if pending {
-                                        tr!("common.checking")
-                                    } else {
-                                        tr!("common.recheck")
-                                    })
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.request_computer_permissions(false, cx);
-                                    })),
-                            ),
-                        ),
-                )
-            })
-            .when(!cfg!(target_os = "macos"), |element| {
-                element.child(
-                    div()
-                        .px(px(20.0))
-                        .py(px(14.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .child(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("computer_use.desktop_access")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(5.0))
-                                .text_size(sp(12.5))
-                                .line_height(sp(18.0))
-                                .text_color(theme.text_secondary)
-                                .child(if cfg!(target_os = "windows") {
-                                    tr!("computer_use.windows_access_description")
-                                } else {
-                                    tr!("computer_use.linux_access_description")
-                                }),
-                        ),
-                )
-            })
-            .child(
-                div()
-                    .px(px(20.0))
-                    .py(px(14.0))
-                    .rounded(px(16.0))
-                    .bg(theme.raised)
-                    .child(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("computer_use.always_allowed_apps")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(4.0))
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("computer_use.always_allowed_apps_description")),
-                    )
-                    .child(allowed_apps),
-            )
+                        .when(!search.active(), |card| card.child(allowed_apps))
+                        .into_any_element()
+                })
+        };
+
+        div()
+            .mt(px(15.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .children(allow_card)
+            .children(macos_card)
+            .children(desktop_card)
+            .children(apps_card)
             .into_any_element()
     }
 
@@ -5941,7 +7091,7 @@ impl Waku {
 
     pub(super) fn request_computer_permissions(&mut self, prompt: bool, cx: &mut Context<Self>) {
         if !cfg!(target_os = "macos")
-            || !crate::computer_use::is_available()
+            || !self.state.computer_use_experiment_enabled
             || self.computer_permission_request_pending
         {
             return;
@@ -6071,7 +7221,13 @@ impl Waku {
             return;
         }
         self.state.theme = settings;
-        crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
+        crate::theme::apply_theme_preference(
+            settings,
+            self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }
@@ -6091,7 +7247,13 @@ impl Waku {
             return;
         }
         self.theme_preview_active = true;
-        crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
+        crate::theme::apply_theme_preference(
+            settings,
+            self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
     }
 
     /// Re-apply the persisted theme after a previewed choice is dismissed
@@ -6106,6 +7268,7 @@ impl Waku {
         crate::theme::apply_theme_preference(
             self.state.theme,
             self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
             window,
             cx,
         );
@@ -6152,12 +7315,41 @@ impl Waku {
         self.state.sidebar_transparency
     }
 
+    pub(crate) fn sidebar_transparency_amount(&self) -> f32 {
+        self.state.sidebar_transparency_amount
+    }
+
     fn set_thick_borders(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.thick_borders == enabled {
             return;
         }
         self.state.thick_borders = enabled;
         crate::theme::set_thick_borders(enabled);
+        self.save();
+        cx.notify();
+    }
+
+    /// The intensity slider commits once per gesture; each commit rebuilds
+    /// the border tiers off the rescaled floors, like a contrast-mode flip.
+    fn set_border_intensity(
+        &mut self,
+        intensity: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let intensity = crate::persistence::sanitized_border_intensity(intensity);
+        if self.state.border_intensity == intensity {
+            return;
+        }
+        self.state.border_intensity = intensity;
+        crate::theme::set_border_intensity(intensity);
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }
@@ -6175,6 +7367,7 @@ impl Waku {
         crate::theme::apply_theme_preference(
             self.state.theme,
             self.state.sidebar_transparency,
+            self.state.sidebar_transparency_amount,
             window,
             cx,
         );
@@ -6191,8 +7384,41 @@ impl Waku {
         if self.state.sidebar_transparency == transparent {
             return;
         }
+        if !transparent {
+            self.sidebar_transparency_slider.cancel();
+        }
         self.state.sidebar_transparency = transparent;
-        crate::theme::apply_theme_preference(self.state.theme, transparent, window, cx);
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            transparent,
+            self.state.sidebar_transparency_amount,
+            window,
+            cx,
+        );
+        self.save();
+        cx.notify();
+    }
+
+    /// The transparency slider commits once per gesture; each commit retints
+    /// the native vibrancy stack and persists like the toggle does.
+    fn set_sidebar_transparency_amount(
+        &mut self,
+        amount: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let amount = crate::persistence::sanitized_sidebar_transparency_amount(amount);
+        if self.state.sidebar_transparency_amount == amount {
+            return;
+        }
+        self.state.sidebar_transparency_amount = amount;
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            self.state.sidebar_transparency,
+            amount,
+            window,
+            cx,
+        );
         self.save();
         cx.notify();
     }
@@ -6294,6 +7520,7 @@ impl Waku {
         });
         self.refresh_command_palette_localized_text(cx);
         self.refresh_file_finder_localized_text(cx);
+        self.refresh_sync_branch_localized_text(cx);
         self.refresh_file_search_localized_text(cx);
         self.refresh_transcript_search_localized_text(cx);
         for browser in self.right_panel_browsers.values() {
@@ -6419,43 +7646,208 @@ fn font_row_label(family: &SharedString) -> SharedString {
 
 /// A settings card row: title and description on the left, control on the
 /// right — the card's divider lines are drawn by the caller.
+#[track_caller]
 fn settings_row(
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     control: impl IntoElement,
     theme: Theme,
-) -> Div {
+    search: &SettingSearch,
+) -> Option<AnyElement> {
     let title = title.into();
     let description = description.into();
-    div()
-        .w_full()
-        .min_h(px(60.0))
-        .px(px(20.0))
-        .py(px(12.0))
-        .flex()
-        .items_center()
-        .gap(px(24.0))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .text_size(sp(13.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .mt(px(5.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(18.0))
-                        .text_color(theme.text_secondary)
-                        .child(description),
+    let matched = search.matched(&title, &description)?;
+    Some(
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(settings_row_text(title, description, matched, theme))
+            .child(control)
+            .into_any_element(),
+    )
+}
+
+/// Display label for an eval backend in the routing section's selector.
+fn eval_backend_label(backend: waku_protocol::eval::EvalBackend) -> &'static str {
+    match backend {
+        waku_protocol::eval::EvalBackend::TypeSafe => "TypeSafe",
+        waku_protocol::eval::EvalBackend::VercelGateway => "Vercel AI Gateway",
+        waku_protocol::eval::EvalBackend::Cloudflare => "Cloudflare Workers AI",
+    }
+}
+
+/// The shipped default for a class — what an unmodified policy document
+/// carries, shown before the first GetRoutePolicy answer lands.
+fn default_route_class_target(class: TaskClass) -> &'static str {
+    match class {
+        TaskClass::Routine => "session:tier:fast",
+        TaskClass::General => "session:tier:default",
+        TaskClass::Demanding => "session:tier:heavy",
+    }
+}
+
+/// A friendly label for a raw policy target string, resolving provider and
+/// model ids against the probe catalog. Unknown strings pass through so a
+/// hand-edited value still shows what it says.
+fn route_target_label(target: &str, probes: &[ProviderProbe]) -> String {
+    match target {
+        "session:tier:fast" => tr!("routing.session_tier_fast"),
+        "session:tier:default" => tr!("routing.session_tier_default"),
+        "session:tier:heavy" => tr!("routing.session_tier_heavy"),
+        "tier:fast" => tr!("routing.tier_fast"),
+        "tier:default" => tr!("routing.tier_default"),
+        "tier:heavy" => tr!("routing.tier_heavy"),
+        "last_used" => tr!("routing.last_used"),
+        other => {
+            let (provider_id, model_id) = other
+                .split_once(':')
+                .map(|(provider, model)| (provider, Some(model)))
+                .unwrap_or((other, None));
+            let Some(provider) = ProviderKind::ALL
+                .into_iter()
+                .find(|kind| kind.id() == provider_id)
+            else {
+                return other.to_owned();
+            };
+            match model_id {
+                Some(model_id) => {
+                    let name = probes
+                        .iter()
+                        .find(|probe| probe.provider == provider)
+                        .and_then(|probe| probe.model(model_id))
+                        .map(|model| model.name.clone())
+                        .unwrap_or_else(|| model_id.to_owned());
+                    format!("{} · {}", name, provider.short_name())
+                }
+                None => format!(
+                    "{} ({})",
+                    provider.short_name(),
+                    tr!("routing.provider_default")
                 ),
+            }
+        }
+    }
+}
+
+/// One row in a class-target picker: a policy alias, a provider default, or
+/// a concrete model — the same list the composer's model picker draws, at
+/// model granularity because a policy target names no effort or tier.
+pub(super) enum RouteClassRow {
+    /// `session:tier:*` — resolves through the session provider's tier
+    /// table at route time.
+    SessionTier(&'static str),
+    /// `tier:*` — resolves through the policy's tier table at route time.
+    Tier(&'static str),
+    /// `provider` — the provider's own default model.
+    ProviderDefault(ProviderKind),
+    /// `provider:model` — a concrete catalog model.
+    Model(ProviderKind, ProviderModel),
+}
+
+impl RouteClassRow {
+    /// The raw policy target the row writes — same grammar hand edits use.
+    pub(super) fn target(&self) -> String {
+        match self {
+            RouteClassRow::SessionTier(target) | RouteClassRow::Tier(target) => {
+                (*target).to_owned()
+            }
+            RouteClassRow::ProviderDefault(provider) => provider.id().to_owned(),
+            RouteClassRow::Model(provider, model) => {
+                format!("{}:{}", provider.id(), model.id)
+            }
+        }
+    }
+
+    /// The row's mark, title, and subtitle — the composer's two-line shape.
+    fn render_parts(&self, theme: &Theme) -> (AnyElement, String, String) {
+        match self {
+            RouteClassRow::SessionTier(target) | RouteClassRow::Tier(target) => (
+                icon("icons/chart-column.svg", 14.0, theme.accent.opacity(0.9))
+                    .into_any_element(),
+                route_target_label(target, &[]),
+                (*target).to_owned(),
+            ),
+            RouteClassRow::ProviderDefault(provider) => (
+                provider_mark(theme, *provider, 14.0, theme.text_secondary).into_any_element(),
+                provider.short_name().to_owned(),
+                tr!("routing.provider_default"),
+            ),
+            RouteClassRow::Model(provider, model) => (
+                provider_mark(theme, *provider, 14.0, theme.text_secondary)
+                .into_any_element(),
+                model
+                    .name_i18n
+                    .as_ref()
+                    .map(waku_client::WireTranslation::render)
+                    .unwrap_or_else(|| model.name.clone()),
+                model_picker_subtitle(*provider, model.sub_provider.as_deref()),
+            ),
+        }
+    }
+}
+
+/// The class picker's full list: tier aliases first, then each provider's
+/// default, then every catalog model — flat, matching how a hand-edited
+/// policy reads. All rows share the picker's token-filter rule.
+pub(super) fn route_class_rows(
+    probes: &[ProviderProbe],
+    disabled_providers: &[ProviderKind],
+    normalized_query: &str,
+) -> Vec<RouteClassRow> {
+    let searching = !normalized_query.is_empty();
+    let matches = |searchable: String| {
+        !searching
+            || normalized_query
+                .split_whitespace()
+                .all(|token| searchable.to_ascii_lowercase().contains(token))
+    };
+    let mut rows = Vec::new();
+    // The policy's own vocabulary first — the session-scoped tier aliases
+    // the shipped defaults use, then the global preference-order tiers.
+    for target in [
+        "session:tier:fast",
+        "session:tier:default",
+        "session:tier:heavy",
+    ] {
+        if matches(format!("{target} {}", route_target_label(target, &[]))) {
+            rows.push(RouteClassRow::SessionTier(target));
+        }
+    }
+    for target in ["tier:fast", "tier:default", "tier:heavy"] {
+        if matches(format!("{target} {}", route_target_label(target, &[]))) {
+            rows.push(RouteClassRow::Tier(target));
+        }
+    }
+    for probe in probes {
+        if matches(format!(
+            "{} {} {}",
+            probe.provider.id(),
+            probe.provider.short_name(),
+            tr!("routing.provider_default")
+        )) {
+            rows.push(RouteClassRow::ProviderDefault(probe.provider));
+        }
+    }
+    rows.extend(
+        visible_picker_rows(
+            probes,
+            &[],
+            &[],
+            disabled_providers,
+            None,
+            normalized_query,
+            false,
+            PickerGranularity::Models,
         )
-        .child(control)
+        .into_iter()
+        .map(|row| RouteClassRow::Model(row.provider, row.model)),
+    );
+    rows
 }
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
@@ -6494,14 +7886,17 @@ pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
     }
 }
 
+#[track_caller]
 fn permission_status_row(
     name: String,
     description: String,
     granted: bool,
     id: &'static str,
     theme: Theme,
+    search: &SettingSearch,
     cx: &mut Context<Waku>,
-) -> Div {
+) -> Option<Div> {
+    let matched = search.matched(&name, &description)?;
     let status = if granted {
         div()
             .id(id)
@@ -6536,34 +7931,36 @@ fn permission_status_row(
             }))
     };
 
-    div()
-        .mt(px(10.0))
-        .pt(px(10.0))
-        .border_t(hairline())
-        .border_color(theme.separator)
-        .flex()
-        .items_center()
-        .gap(px(10.0))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(name),
-                )
-                .child(
-                    div()
-                        .mt(px(2.0))
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(description),
-                ),
-        )
-        .child(status)
+    Some(
+        div()
+            .mt(px(10.0))
+            .pt(px(10.0))
+            .border_t(hairline())
+            .border_color(theme.separator)
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(settings_search_text(name, matched.0, theme)),
+                    )
+                    .child(
+                        div()
+                            .mt(px(2.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(settings_search_text(description, matched.1, theme)),
+                    ),
+            )
+            .child(status),
+    )
 }
 
 #[cfg(test)]
@@ -6679,5 +8076,37 @@ mod tests {
             abbreviate_home_path(Path::new("/opt/homebrew/bin/codex"), Some(home)),
             "/opt/homebrew/bin/codex"
         );
+    }
+
+    #[test]
+    fn settings_match_ranges_finds_every_case_insensitive_hit() {
+        assert_eq!(
+            super::settings_match_ranges("Font size and FONT family", "font"),
+            vec![0..4, 14..18]
+        );
+        assert!(super::settings_match_ranges("no hit here", "font").is_empty());
+        assert!(super::settings_match_ranges("anything", "").is_empty());
+        // A query that occurs past the end of a shorter text reports nothing.
+        assert!(super::settings_match_ranges("ab", "abc").is_empty());
+    }
+
+    #[test]
+    fn setting_search_keeps_title_or_description_hits_only() {
+        let search = super::SettingSearch::new("font");
+        assert!(search.matched("UI Font", "ignored").is_some());
+        // A description-only match still keeps the row.
+        assert!(search.matched("ignored", "the font used").is_some());
+        assert!(search.matched("ignored", "also ignored").is_none());
+        assert_eq!(search.hits(), 2);
+    }
+
+    #[test]
+    fn setting_search_inactive_matches_everything_without_counting() {
+        let search = super::SettingSearch::inactive();
+        let (title_ranges, description_ranges) = search
+            .matched("anything", "goes")
+            .expect("inactive search keeps rows");
+        assert!(title_ranges.is_empty() && description_ranges.is_empty());
+        assert_eq!(search.hits(), 0);
     }
 }
