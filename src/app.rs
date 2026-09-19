@@ -1631,6 +1631,16 @@ fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPa
     restored
 }
 
+/// The accent dot painted at the top of a transcript whose session was opened
+/// with unseen completions. `armed_at` orders it against
+/// `transcript_last_wheel_scroll` — a wheel gesture predating the activation
+/// must not dismiss it — and `fading` swaps the dot for its exit animation.
+#[derive(Clone, Copy)]
+struct NewContentDot {
+    armed_at: Instant,
+    fading: bool,
+}
+
 /// Where a session activation parks the transcript.
 #[derive(Clone, Copy)]
 enum TranscriptLanding {
@@ -2844,6 +2854,9 @@ pub struct Waku {
     /// Whether the transcript's scrollbar thumb was held at the last frame, so
     /// render can notice a drag starting and ending.
     transcript_scrollbar_dragging: Cell<bool>,
+    /// Armed when a session with unseen completions is activated; the first
+    /// scroll gesture on the transcript fades it out.
+    transcript_new_content_dot: Option<NewContentDot>,
     transcript_layout_width: Cell<Pixels>,
     /// Parsed markdown per assistant message, keeping each response's
     /// incremental parse and flattened blocks alive across frames.
@@ -5529,6 +5542,7 @@ impl Waku {
                 pending_sidebar_scroll: Cell::new(None),
                 transcript_scroll_to_bottom_visible: Cell::new(false),
                 transcript_scrollbar_dragging: Cell::new(false),
+                transcript_new_content_dot: None,
                 transcript_layout_width: Cell::new(Pixels::ZERO),
                 message_markdown: RefCell::new(HashMap::new()),
                 user_message_viewports: RefCell::new(HashMap::new()),

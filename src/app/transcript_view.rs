@@ -52,6 +52,19 @@ const CHANGED_FILES_DIFF_MIN_BODY_HEIGHT: f32 = 72.0;
 /// A preview is a summary like an activity diff: past this many rows, Review
 /// is where the change should be read.
 const CHANGED_FILES_DIFF_MAX_ROWS: usize = 400;
+/// The new-content marker's diameter — the sidebar's unseen dot, moved to the
+/// top of the transcript it describes.
+const NEW_CONTENT_DOT_SIZE: f32 = 7.0;
+/// Clearance between the marker and the content column's left edge.
+const NEW_CONTENT_DOT_GAP: f32 = 12.0;
+/// Distance below the transcript's top edge, landing the marker beside the
+/// first row's text line (row 0 pads 22px, then the line's own leading).
+const NEW_CONTENT_DOT_TOP: f32 = 28.0;
+/// The marker's left-inset floor for windows narrow enough to pin the content
+/// column at its 20px minimum margin.
+const NEW_CONTENT_DOT_MIN_LEFT: f32 = 4.0;
+/// The first scroll gesture dismisses the marker over this long.
+const NEW_CONTENT_DOT_FADE: Duration = Duration::from_millis(150);
 
 #[derive(Clone, Debug)]
 struct ConversationNavigationRailSnapshot {
@@ -244,6 +257,19 @@ impl Waku {
                 self.transcript_tail_recheck.set(true);
             }
         }
+        // The first scroll gesture — wheel or thumb drag — dismisses the
+        // new-content dot. `transcript_is_scrolled` can't stand in for the
+        // gesture: a landing restore writes it before the first frame.
+        if let Some(dot) = &mut self.transcript_new_content_dot
+            && !dot.fading
+            && (scrollbar_dragging
+                || self
+                    .transcript_last_wheel_scroll
+                    .get()
+                    .is_some_and(|at| at > dot.armed_at))
+        {
+            dot.fading = true;
+        }
         let anchor_end_space = self.update_transcript_anchor_end_space(window);
         if self.transcript_anchor_following.get()
             && anchor_end_space <= Pixels::ZERO
@@ -380,6 +406,32 @@ impl Waku {
         });
         let transcript_focus = self.transcript_focus.clone();
         let theme = Theme::current(cx);
+        let new_content_dot = self.transcript_new_content_dot.map(|dot| {
+            // The centered content column's left edge — the same solve
+            // `should_show_navigation_rail` uses to place the rail.
+            let content_left = ((chat_viewport_width - CONTENT_MAX_WIDTH) / 2.0).max(20.0);
+            let element = div()
+                .absolute()
+                .left(
+                    px((content_left - NEW_CONTENT_DOT_GAP - NEW_CONTENT_DOT_SIZE)
+                        .max(NEW_CONTENT_DOT_MIN_LEFT)),
+                )
+                .top(px(NEW_CONTENT_DOT_TOP))
+                .size(px(NEW_CONTENT_DOT_SIZE))
+                .rounded_full()
+                .bg(theme.accent);
+            if dot.fading {
+                element
+                    .with_animation(
+                        "transcript-new-content-dot",
+                        Animation::new(NEW_CONTENT_DOT_FADE),
+                        |element, delta| element.opacity(1.0 - delta),
+                    )
+                    .into_any_element()
+            } else {
+                element.into_any_element()
+            }
+        });
         div()
             .flex_1()
             .min_h_0()
@@ -416,6 +468,7 @@ impl Waku {
                 theme.surface,
             ))
             .children(navigation_rail)
+            .children(new_content_dot)
             .children(scroll_to_bottom)
             .child(scrollbar::vertical(
                 &scrollbar_handle,
