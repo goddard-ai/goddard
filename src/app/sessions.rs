@@ -3073,6 +3073,20 @@ impl Waku {
         // objective after this stop and begin pursuing it; the user asked to
         // stop, so they leave with the turn.
         self.pending_goal_operations.remove(&session_id);
+        // The registry marks this turn's work Stopped below, but a retained
+        // runtime keeps provider-side work running unless it is told. Stop
+        // each stoppable foreground item while the driver is still attached;
+        // detached work survives Stop by design.
+        if self.runtimes.contains_key(&session_id) {
+            let keys = self
+                .background_work
+                .get(&session_id)
+                .map(|registry| registry.live_stoppable_foreground_keys())
+                .unwrap_or_default();
+            for key in keys {
+                self.stop_background_work(session_id, key, cx);
+            }
+        }
         let mut runtime = self.runtimes.remove(&session_id);
         if let Some(runtime) = runtime.as_ref() {
             runtime.driver.cancel();
