@@ -42,6 +42,13 @@ const MAX_MEMORY_LINES: usize = 60;
 /// One log line, one durable fact — matching the discipline a one-line note
 /// can carry.
 const MAX_NOTE_CHARS: usize = 280;
+/// How many log lines relevance ranking considers before scoring; beyond
+/// that the oldest are never candidates.
+const RANK_CANDIDATES: usize = 60;
+/// How many ranked notes the injected block may carry.
+const MAX_INJECTED_NOTES: usize = 15;
+/// The recency fallback when eval is unavailable or finds nothing relevant.
+const RECENT_NOTES_FALLBACK: usize = 20;
 /// The minimum new transcript content that justifies a provider call.
 const MIN_NEW_MESSAGES: usize = 4;
 /// One segment is one rendered message, capped so a paste or a huge tool
@@ -69,6 +76,9 @@ struct MemoryState {
 #[serde(default, rename_all = "camelCase")]
 struct SessionWatermark {
     position: usize,
+    /// The store was injected into this session's first prompt; later
+    /// prompts pass through untouched.
+    injected: bool,
 }
 
 /// Owns scheduling and execution of project-memory work. Cloned cheaply into
@@ -117,15 +127,7 @@ impl MemoryService {
         if !self.settings.get().memory_experiment_enabled {
             return;
         }
-        let project_id = {
-            let state = self.task_state.lock();
-            state
-                .sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .map(|session| session.project_id)
-        };
-        let Some(project_id) = project_id else {
+        let Some(project_id) = self.session_project(session_id) else {
             return;
         };
         {
@@ -142,6 +144,74 @@ impl MemoryService {
         if spawned.is_err() {
             self.in_flight.lock().remove(&project_id);
         }
+    }
+
+    /// Prepend the project's memory block to a session's first prompt.
+    /// Returns the prompt untouched when the experiment is off, the project
+    /// has no store yet, or this session was already injected. Reads are
+    /// small file loads plus at most one eval call — callers run on daemon
+    /// threads, never the UI thread.
+    pub fn prompt_with_memory(&self, session_id: Uuid, prompt: &str) -> String {
+        let Some(block) = self.memory_block(session_id, prompt) else {
+            return prompt.to_owned();
+        };
+        format!("{block}\n\n{prompt}")
+    }
+
+    /// Compose the injection block, or `None` when nothing should ship.
+    /// A successful composition marks the session injected so the block
+    /// lands exactly once.
+    fn memory_block(&self, session_id: Uuid, task: &str) -> Option<String> {
+        let settings = self.settings.get();
+        if !settings.memory_experiment_enabled {
+            return None;
+        }
+        let project_path = self.project_path(self.session_project(session_id)?)?;
+        let store = memory_dir(&project_path);
+        if !store.join(MEMORY_FILE).exists() && !store.join(LOG_FILE).exists() {
+            return None;
+        }
+        let mut memory_state = load_state(&store);
+        if memory_state
+            .sessions
+            .get(&session_id)
+            .is_some_and(|entry| entry.injected)
+        {
+            return None;
+        }
+
+        let memory_md = read_memory(&store);
+        let notes = rank_notes(
+            settings.eval.as_ref(),
+            task,
+            &read_log_lines(&store),
+        );
+        let block = compose_block(&memory_md, &notes, &store.join(LOG_FILE))?;
+        memory_state
+            .sessions
+            .entry(session_id)
+            .or_default()
+            .injected = true;
+        let _ = save_state(&store, &memory_state);
+        Some(block)
+    }
+
+    fn session_project(&self, session_id: Uuid) -> Option<Uuid> {
+        let state = self.task_state.lock();
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id)
+    }
+
+    fn project_path(&self, project_id: Uuid) -> Option<PathBuf> {
+        let state = self.task_state.lock();
+        state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
     }
 
     /// Worker loop: distill once, then re-run while turns landed during the
@@ -560,6 +630,125 @@ fn log_tail(store: &Path, count: usize) -> Vec<String> {
         .collect()
 }
 
+fn read_log_lines(store: &Path) -> Vec<String> {
+    std::fs::read_to_string(store.join(LOG_FILE))
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Pick the log lines worth injecting ahead of `task`. With eval configured,
+/// each of the last `RANK_CANDIDATES` lines gets a Noul score against the
+/// task; without it (or on failure), the newest lines win — recency is the
+/// honest default when relevance is unknown.
+fn rank_notes(
+    eval: Option<&waku_protocol::eval::EvalSettings>,
+    task: &str,
+    lines: &[String],
+) -> Vec<String> {
+    let candidates: Vec<String> = lines
+        .iter()
+        .rev()
+        .take(RANK_CANDIDATES)
+        .rev()
+        .cloned()
+        .collect();
+    let Some(settings) = eval else {
+        return recent_notes(&candidates);
+    };
+
+    let state = json!({ "task": task, "notes": candidates });
+    let questions: BTreeMap<String, EvalQuestion> = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            (
+                format!("note_{index}"),
+                EvalQuestion::Noul {
+                    instructions: format!(
+                        "Is `notes[{index}]` relevant to the task in `task` — could it \
+                         change what the agent should do or avoid? Answer no for generic \
+                         facts unrelated to the request."
+                    ),
+                    criteria: None,
+                },
+            )
+        })
+        .collect();
+    let mut record = EvalDecisionRecord::empty("memory-rank");
+    match crate::eval::evaluate(settings, &state, &questions) {
+        Ok(evaluation) => {
+            record.model = Some(evaluation.model.clone());
+            record.latency_ms = Some(evaluation.latency_ms);
+            record.answers = Some(evaluation.answers.clone());
+            crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+            let ranked: Vec<String> = candidates
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    evaluation
+                        .answers
+                        .get(&format!("note_{index}"))
+                        .is_some_and(|answer| match answer {
+                            waku_protocol::eval::EvalAnswer::Noul { noul } => *noul >= 0.5,
+                            _ => false,
+                        })
+                })
+                .take(MAX_INJECTED_NOTES)
+                .map(|(_, line)| line.clone())
+                .collect();
+            if ranked.is_empty() {
+                recent_notes(&candidates)
+            } else {
+                ranked
+            }
+        }
+        Err(error) => {
+            record.error = Some(format!("{error:#}"));
+            crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+            recent_notes(&candidates)
+        }
+    }
+}
+
+fn recent_notes(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .rev()
+        .take(RECENT_NOTES_FALLBACK)
+        .rev()
+        .cloned()
+        .collect()
+}
+
+/// The hidden block prepended to a session's first prompt. `None` when both
+/// sections would be empty — an empty store should not inject a shell.
+fn compose_block(memory_md: &str, notes: &[String], log_path: &Path) -> Option<String> {
+    let mut block = String::from(
+        "<project-memory>\n\
+         This project has persistent memory distilled from earlier sessions.\n",
+    );
+    if !memory_md.trim().is_empty() {
+        block.push_str(&format!("\n## Memory\n{}\n", memory_md.trim_end()));
+    }
+    if !notes.is_empty() {
+        block.push_str(&format!("\n## Notes\n{}\n", notes.join("\n")));
+    }
+    if memory_md.trim().is_empty() && notes.is_empty() {
+        return None;
+    }
+    block.push_str(&format!(
+        "\nFull history lives in {} — grep it when unsure. These notes are \
+         context, not ground truth; verify anything that looks stale.\n\
+         </project-memory>",
+        log_path.display()
+    ));
+    Some(block)
+}
+
 /// Append scrubbed, dated notes to `LOG.txt`. Secret-looking candidates are
 /// dropped here as the last line of defense.
 fn append_notes(store: &Path, notes: &[String]) -> anyhow::Result<()> {
@@ -776,6 +965,29 @@ mod tests {
         exclude_from_git(&root);
         assert!(gitdir.join("info/exclude").exists());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rank_falls_back_to_recent_without_eval() {
+        let lines: Vec<String> = (0..40).map(|i| format!("note {i}")).collect();
+        let ranked = rank_notes(None, "fix the login bug", &lines);
+        assert_eq!(ranked.len(), RECENT_NOTES_FALLBACK);
+        assert_eq!(ranked.first().unwrap(), "note 20");
+        assert_eq!(ranked.last().unwrap(), "note 39");
+    }
+
+    #[test]
+    fn compose_block_omits_empty_sections() {
+        let log = Path::new("/tmp/proj/.goddard/memory/LOG.txt");
+        let block = compose_block("# Facts\n- uses bun", &["2026-01-01 decided x".into()], log)
+            .unwrap();
+        assert!(block.contains("## Memory\n# Facts\n- uses bun"));
+        assert!(block.contains("## Notes\n2026-01-01 decided x"));
+        assert!(block.contains(log.to_str().unwrap()));
+        let notes_only = compose_block("", &["2026-01-01 y".into()], log).unwrap();
+        assert!(!notes_only.contains("## Memory"));
+        assert!(notes_only.contains("## Notes"));
+        assert!(compose_block("  ", &[], log).is_none());
     }
 
     #[test]
