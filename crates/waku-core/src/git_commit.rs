@@ -520,6 +520,20 @@ pub(crate) fn agent_arguments(
             }
             return args;
         }
+        // `goose run` is the one-shot client; `--no-session` keeps the
+        // commit-message run out of the user's session history, and the
+        // prompt is what forbids tool use.
+        ProviderKind::Goose => {
+            push(&mut args, "run");
+            push(&mut args, "--no-session");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            push(&mut args, "--text");
+            push(&mut args, prompt);
+            return args;
+        }
         // `muse exec` is the one-shot client; the prompt forbids tool use.
         ProviderKind::Muse => {
             push(&mut args, "exec");
@@ -1104,6 +1118,12 @@ mod tests {
                     assert!(has(&args, "--no-save"));
                     assert!(has(&args, "--no-color"));
                     assert!(has(&args, "--"));
+                }
+                ProviderKind::Goose => {
+                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("run"));
+                    assert!(has(&args, "--no-session"));
+                    assert!(has_pair(&args, "--model", "model"));
+                    assert!(has_pair(&args, "--text", prompt));
                 }
                 ProviderKind::Grok => {
                     assert!(has_pair(&args, "--single", prompt));

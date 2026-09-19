@@ -1155,7 +1155,8 @@ impl Backend for WakuBackend {
                     ProviderKind::Cursor
                     | ProviderKind::Devin
                     | ProviderKind::Fx
-                    | ProviderKind::Droid => {
+                    | ProviderKind::Droid
+                    | ProviderKind::Goose => {
                         crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
                     }
                     ProviderKind::OpenCode => {
@@ -1245,6 +1246,7 @@ impl Backend for WakuBackend {
                     | ProviderResumeCursor::Devin { session_id }
                     | ProviderResumeCursor::Fx { session_id }
                     | ProviderResumeCursor::OpenCode { session_id }
+                    | ProviderResumeCursor::Goose { session_id }
                     | ProviderResumeCursor::Grok { session_id }
                     | ProviderResumeCursor::Kimi { session_id }
                     | ProviderResumeCursor::Droid { session_id } => {
@@ -2103,6 +2105,7 @@ impl WakuBackend {
             | ProviderKind::Devin
             | ProviderKind::Droid
             | ProviderKind::Fx
+            | ProviderKind::Goose
             | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
@@ -2391,6 +2394,7 @@ impl WakuBackend {
             | ProviderKind::Devin
             | ProviderKind::Droid
             | ProviderKind::Fx
+            | ProviderKind::Goose
             | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",

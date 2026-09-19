@@ -849,6 +849,7 @@ fn perform_provider_rewind(
             | ProviderKind::Devin
             | ProviderKind::Droid
             | ProviderKind::Fx
+            | ProviderKind::Goose
             | ProviderKind::Kimi => {
             Err(anyhow::anyhow!(tr!(
                 "errors.provider_turn_branching_unsupported",
@@ -1237,6 +1238,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                 | ProviderKind::Devin
                 | ProviderKind::Droid
                 | ProviderKind::Fx
+                | ProviderKind::Goose
                 | ProviderKind::Kimi => {
                 anyhow::bail!(tr!(
                     "errors.provider_turn_branching_unsupported",

@@ -114,10 +114,12 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // Antigravity's catalog is the account's quota, reported by `agy
         // models`. An invented fallback would offer models the CLI rejects.
         ProviderKind::Antigravity => Vec::new(),
-        // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
-        // configured LLM providers. A fabricated fallback would make
+        // Pi, Oh My Pi, Kimi Code, and Goose all take their catalog from the
+        // user's configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
-        ProviderKind::Kimi | ProviderKind::OhMyPi | ProviderKind::Pi => Vec::new(),
+        ProviderKind::Goose | ProviderKind::Kimi | ProviderKind::OhMyPi | ProviderKind::Pi => {
+            Vec::new()
+        }
         // Muse's catalog comes from `model/list` on its own serve host — the
         // account's providers and profiles decide what is selectable, so an
         // invented fallback would offer models the host rejects.
@@ -165,6 +167,9 @@ pub fn discover_catalog(
         ProviderKind::OpenCode => (discover_opencode_models(binary), None),
         ProviderKind::OpenCode2 => crate::opencode2_session::discover_catalog(binary),
         ProviderKind::Grok => (discover_grok_models(binary), None),
+        // Goose's model lives in its own `goose configure` config; there is
+        // no catalog to probe.
+        ProviderKind::Goose => (Vec::new(), None),
         ProviderKind::Kimi => (discover_kimi_models(binary), None),
         // `model/list` is served by the shared `muse serve` host; with no
         // session running there is nothing to ask, and the cache stands in.

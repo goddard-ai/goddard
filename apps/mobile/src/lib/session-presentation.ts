@@ -175,6 +175,7 @@ export function providerLabel(provider: ProviderKind): string {
     fx: 'Fx',
     openCode: 'OpenCode',
     openCode2: 'OpenCode 2',
+    goose: 'Goose',
     grok: 'Grok',
     kimi: 'Kimi',
     ohMyPi: 'Oh My Pi',

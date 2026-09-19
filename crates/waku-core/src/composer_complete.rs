@@ -349,6 +349,7 @@ fn assemble_slash_commands(
         // over ACP rather than from files Goddard could scan.
         ProviderKind::DeepSeek
         | ProviderKind::Droid
+        | ProviderKind::Goose
         | ProviderKind::Grok
         | ProviderKind::Kimi
         | ProviderKind::Muse => {}
