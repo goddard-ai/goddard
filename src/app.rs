@@ -2335,6 +2335,9 @@ pub struct Waku {
     sidebar_dock_hovered: bool,
     /// Dock item under the pointer — its label pill floats above the button.
     sidebar_dock_hover_item: Option<SidebarDockItem>,
+    /// Pointer x in window coordinates while inside the dock's zone or the
+    /// dock itself — the center of the magnification bump.
+    sidebar_dock_mouse_x: Option<f32>,
     /// The right-panel surface currently maximized over the window, if any —
     /// runtime-only; the docked layout it covers comes back exactly as it
     /// was. The path of the file shown at entry rides alongside so a
@@ -5285,6 +5288,7 @@ impl Waku {
                 sidebar_dock_zone_hovered: false,
                 sidebar_dock_hovered: false,
                 sidebar_dock_hover_item: None,
+                sidebar_dock_mouse_x: None,
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {

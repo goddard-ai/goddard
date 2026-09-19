@@ -256,6 +256,16 @@ const SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH: f32 = 28.0;
 /// rerun on this cadence in addition to path-set fingerprint changes.
 const SIDEBAR_CHECKOUT_STATUS_RESCAN: Duration = Duration::from_secs(10);
 
+/// Resting diameter of a dock button. The Sketch row is drawn at the peak.
+const DOCK_ITEM_REST: f32 = 36.0;
+/// Magnified diameter — the Sketch-authored 45px is the largest reached.
+const DOCK_ITEM_PEAK: f32 = 45.0;
+/// Horizontal reach of the magnification bump, in px from the pointer.
+const DOCK_MAGNIFY_RADIUS: f32 = 90.0;
+/// The row's leading inset from the sidebar edge, and its button spacing.
+const DOCK_LEFT_INSET: f32 = 4.5;
+const DOCK_ITEM_GAP: f32 = 2.0;
+
 /// The session row's trailing time: how long ago the agent last replied,
 /// shown through a live turn too. A session that has never replied shows
 /// nothing.
@@ -1584,7 +1594,17 @@ impl Waku {
             // settings cog — raises the quick-action dock.
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                 this.sidebar_dock_zone_hovered = *hovered;
+                if !*hovered && !this.sidebar_dock_hovered {
+                    this.sidebar_dock_mouse_x = None;
+                }
                 cx.notify();
+            }))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                let mouse_x = f32::from(event.position.x);
+                if this.sidebar_dock_mouse_x != Some(mouse_x) {
+                    this.sidebar_dock_mouse_x = Some(mouse_x);
+                    cx.notify();
+                }
             }))
             .flex_none()
             .h(px(40.0))
@@ -1671,6 +1691,25 @@ impl Waku {
         if self.state.friends_enabled {
             items.insert(0, SidebarDockItem::Friends);
         }
+        // The magnification bump is anchored to each button's *resting*
+        // center — the real centers reflow as diameters change, and a moving
+        // field would chase its own tail.
+        let mouse_x = self.sidebar_dock_mouse_x;
+        let rest_pitch = DOCK_ITEM_REST + DOCK_ITEM_GAP;
+        let diameter_at = |index: usize| -> f32 {
+            let Some(mouse_x) = mouse_x else {
+                return DOCK_ITEM_REST;
+            };
+            let center =
+                DOCK_LEFT_INSET + index as f32 * rest_pitch + DOCK_ITEM_REST * 0.5;
+            let distance = (mouse_x - center).abs();
+            if distance >= DOCK_MAGNIFY_RADIUS {
+                return DOCK_ITEM_REST;
+            }
+            let influence =
+                (1.0 + (std::f32::consts::PI * distance / DOCK_MAGNIFY_RADIUS).cos()) * 0.5;
+            DOCK_ITEM_REST + (DOCK_ITEM_PEAK - DOCK_ITEM_REST) * influence
+        };
         // Sketch "Dock": the buttons overlap the bar that raised them — their
         // bottoms land 3.5px above the sidebar's bottom edge, and the row is
         // anchored 4.5px off its leading edge. Occluding keeps clicks on the
@@ -1693,19 +1732,32 @@ impl Waku {
                     this.sidebar_dock_hovered = *hovered;
                     if !*hovered {
                         this.sidebar_dock_hover_item = None;
+                        if !this.sidebar_dock_zone_hovered {
+                            this.sidebar_dock_mouse_x = None;
+                        }
                     }
                     cx.notify();
+                }))
+                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                    let mouse_x = f32::from(event.position.x);
+                    if this.sidebar_dock_mouse_x != Some(mouse_x) {
+                        this.sidebar_dock_mouse_x = Some(mouse_x);
+                        cx.notify();
+                    }
                 }))
                 .child(
                     div()
                         .flex()
                         .items_end()
-                        .gap(px(2.0))
-                        .children(
-                            items
-                                .iter()
-                                .map(|item| self.render_sidebar_dock_item(*item, &theme, cx)),
-                        ),
+                        .gap(px(DOCK_ITEM_GAP))
+                        .children(items.iter().enumerate().map(|(index, item)| {
+                            self.render_sidebar_dock_item(
+                                *item,
+                                diameter_at(index),
+                                &theme,
+                                cx,
+                            )
+                        })),
                 )
                 .into_any_element(),
         )
@@ -1715,6 +1767,7 @@ impl Waku {
     fn render_sidebar_dock_item(
         &self,
         item: SidebarDockItem,
+        diameter: f32,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
@@ -1774,7 +1827,7 @@ impl Waku {
             .flex()
             .flex_col()
             .items_center()
-            .w(px(45.0))
+            .w(px(diameter))
             .cursor_default()
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered {
@@ -1809,7 +1862,7 @@ impl Waku {
             )
             .child(
                 div()
-                    .size(px(45.0))
+                    .size(px(diameter))
                     .rounded_full()
                     .bg(rgb(0xFFFFFF))
                     .relative()
@@ -1824,7 +1877,12 @@ impl Waku {
                     )
                     // img() keeps the SVG's authored colors and blur-filtered
                     // shadows; icon() would flatten it to a tinted alpha mask.
-                    .child(img(path).w(glyph_size.width).h(glyph_size.height).flex_none()),
+                    .child(
+                        img(path)
+                            .w(glyph_size.width * (diameter / DOCK_ITEM_PEAK))
+                            .h(glyph_size.height * (diameter / DOCK_ITEM_PEAK))
+                            .flex_none(),
+                    ),
             )
             .focus_visible(|style| {
                 style
