@@ -621,6 +621,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_model_picker_action))
             .on_action(cx.listener(Self::select_favorite_model_action))
             .on_action(cx.listener(Self::cycle_reasoning_effort_action))
+            .on_action(cx.listener(Self::cycle_favorite_model_action))
             .on_action(cx.listener(Self::toggle_branch_picker_action))
             .on_action(cx.listener(Self::toggle_runtime_mode_picker_action))
             .on_action(cx.listener(Self::toggle_environment_action))

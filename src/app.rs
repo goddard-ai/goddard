@@ -82,7 +82,7 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    CycleReasoningEffort, DismissDraftsLayer, DismissInbox, DismissProjectsLayer,
+    CycleFavoriteModel, CycleReasoningEffort, DismissDraftsLayer, DismissInbox, DismissProjectsLayer,
     EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
     FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
     MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,

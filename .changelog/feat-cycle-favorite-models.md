@@ -1,0 +1,1 @@
+- ⌥Tab cycles the composer session through its favorited model+effort combos plus the most recently used selection
