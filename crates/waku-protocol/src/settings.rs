@@ -66,6 +66,11 @@ pub struct DaemonSettings {
     /// `subagents_enabled` is off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub subagent_tiers: BTreeMap<String, SubagentTier>,
+    /// Experimental: prepend a token-budgeted structural map of the session's
+    /// workspace to the first prompt of every new session, so providers skip
+    /// cold repo exploration. Off by default in release builds, on in debug
+    /// builds; affects only sessions started afterwards.
+    pub project_map_enabled: bool,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
     /// Hosted evaluation-model configuration (backend + BYOK credentials).
@@ -100,6 +105,7 @@ impl Default for DaemonSettings {
             disabled_providers: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
+            project_map_enabled: default_experiment_enabled(),
             provider_binary_overrides: HashMap::new(),
             eval: None,
             memory_experiment_enabled: default_experiment_enabled(),

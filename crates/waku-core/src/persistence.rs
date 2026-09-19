@@ -350,6 +350,10 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
+    /// Experimental: whether new sessions get the workspace project map
+    /// prepended to their first prompt, mirrored from the settings document.
+    #[serde(default = "default_experiment_enabled")]
+    pub project_map_enabled: bool,
     /// Hosted evaluation-model settings mirrored from the settings document.
     /// Kept out of the on-disk state deliberately: the credential-bearing
     /// document is the daemon's `settings.json`, and this copy exists so the
@@ -468,6 +472,7 @@ impl PersistedState {
             subagents_enabled: default_experiment_enabled(),
             subagent_tiers: BTreeMap::new(),
             memory_experiment_enabled: default_experiment_enabled(),
+            project_map_enabled: default_experiment_enabled(),
             eval: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
@@ -619,6 +624,7 @@ impl PersistedState {
             subagents_enabled: self.subagents_enabled,
             subagent_tiers: self.subagent_tiers.clone(),
             memory_experiment_enabled: self.memory_experiment_enabled,
+            project_map_enabled: self.project_map_enabled,
             eval: self.eval.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
@@ -663,6 +669,7 @@ impl PersistedState {
         self.subagents_enabled = settings.subagents_enabled;
         self.subagent_tiers = settings.subagent_tiers;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
+        self.project_map_enabled = settings.project_map_enabled;
         self.eval = settings.eval;
         self.daemon_settings_extra = settings.extra;
     }

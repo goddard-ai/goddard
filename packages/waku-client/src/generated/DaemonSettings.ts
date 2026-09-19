@@ -46,7 +46,14 @@ subagents_enabled: boolean,
  * built-in read-only `goddard-explore` agent is injected. Ignored while
  * `subagents_enabled` is off.
  */
-subagent_tiers?: { [key in string]: SubagentTier }, provider_binary_overrides: { [key in ProviderKind]?: string },
+subagent_tiers?: { [key in string]: SubagentTier },
+/**
+ * Experimental: prepend a token-budgeted structural map of the session's
+ * workspace to the first prompt of every new session, so providers skip
+ * cold repo exploration. Off by default in release builds, on in debug
+ * builds; affects only sessions started afterwards.
+ */
+project_map_enabled: boolean, provider_binary_overrides: { [key in ProviderKind]?: string },
 /**
  * Hosted evaluation-model configuration (backend + BYOK credentials).
  * `None` means no eval feature can run — callers degrade to their
