@@ -1390,6 +1390,18 @@ impl Backend for WakuBackend {
                         hidden: *hidden,
                     })?)?;
                 }
+                // Project memory rides the first visible prompt: the wire
+                // event above already published the user's text, so the
+                // injected block reaches the provider without entering the
+                // transcript as a user message.
+                let mut command = command;
+                if let Command::Prompt {
+                    prompt, hidden, ..
+                } = &mut command
+                    && !*hidden
+                {
+                    *prompt = self.memory.prompt_with_memory(session_id, prompt);
+                }
                 handle_driver_command(&driver, command)
             }
         }
@@ -2648,7 +2660,7 @@ impl WakuBackend {
             sent_by_task: sender,
             hidden: false,
         })?)?;
-        driver.prompt(prompt);
+        driver.prompt(self.memory.prompt_with_memory(session_id, &prompt));
         Ok(session_id)
     }
 
