@@ -1026,7 +1026,7 @@ impl Waku {
                     .border_color(theme.separator)
                     .rounded_t(px(CARD_RADIUS - 1.0))
                     .bg(theme.surface)
-                    .child(self.render_session_row_body(session_id, false, false, cx)),
+                    .child(self.render_session_row_body(session_id, false, cx)),
             )
             .child(
                 div()
