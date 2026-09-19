@@ -2006,6 +2006,9 @@ impl Waku {
     ) {
         self.settings_page = Some(SettingsPage::General);
         self.settings_scroll.set_offset(gpui::Point::default());
+        // The footer's hover zone unmounts without firing hover-off; only the
+        // dock's own hover may keep it alive across the swap.
+        self.sidebar_dock_zone_hovered = false;
         // Sparkle owns this value and its consent prompt can flip it outside
         // the settings UI, so re-mirror it each time settings opens.
         self.automatic_updates_enabled = cx

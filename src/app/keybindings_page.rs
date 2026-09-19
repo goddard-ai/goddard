@@ -319,6 +319,9 @@ impl super::Waku {
         // Settings-family pages close the inbox on open; the early return
         // in `open_settings_page` skips its clear, so match it here.
         self.notifications.open = false;
+        // The footer's hover zone unmounts without firing hover-off; only the
+        // dock's own hover may keep it alive across the swap.
+        self.sidebar_dock_zone_hovered = false;
         if let Some(ui) = &self.keybindings {
             ui.search.read(cx).focus().focus(window, cx);
         }

@@ -70,6 +70,9 @@ impl Waku {
         }
         self.settings_page = Some(page);
         self.notifications.open = false;
+        // The footer's hover zone unmounts without firing hover-off; only the
+        // dock's own hover may keep it alive across the swap.
+        self.sidebar_dock_zone_hovered = false;
         // Each page starts at its own top; a scroll position carried over
         // from the previous page would land mid-content.
         self.settings_scroll.set_offset(gpui::Point::default());
