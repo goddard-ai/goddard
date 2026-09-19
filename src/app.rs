@@ -772,6 +772,17 @@ enum SidebarPeek {
     },
 }
 
+/// One button in the sidebar footer's hover-raised quick-action dock.
+/// Friends is experimental, so it only joins the row once that opt-in is on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SidebarDockItem {
+    Friends,
+    Inbox,
+    Archive,
+    Shortcuts,
+    Settings,
+}
+
 /// A turn whose checkpoint still has to be captured.
 struct PendingCheckpointCapture {
     session_id: Uuid,
@@ -2172,6 +2183,14 @@ pub struct Waku {
     /// deferred exit at menu close is suppressed — the overlay stays until
     /// the pointer next enters and leaves it.
     sidebar_peek_action_hold: bool,
+    /// Pointer is inside the sidebar's bottom strip — the whole footer row,
+    /// not just the settings button — which raises the quick-action dock.
+    sidebar_dock_zone_hovered: bool,
+    /// Pointer is on the raised dock itself. Unioned with the zone hover so
+    /// crossing from the footer onto the dock does not flicker it away.
+    sidebar_dock_hovered: bool,
+    /// Dock item under the pointer — its label pill floats above the button.
+    sidebar_dock_hover_item: Option<SidebarDockItem>,
     /// The right-panel surface currently maximized over the window, if any —
     /// runtime-only; the docked layout it covers comes back exactly as it
     /// was. The path of the file shown at entry rides alongside so a
@@ -4930,6 +4949,9 @@ impl Waku {
                 sidebar_peek: SidebarPeek::Hidden,
                 sidebar_peek_menu_hold: false,
                 sidebar_peek_action_hold: false,
+                sidebar_dock_zone_hovered: false,
+                sidebar_dock_hovered: false,
+                sidebar_dock_hover_item: None,
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {

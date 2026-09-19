@@ -1446,9 +1446,16 @@ impl Waku {
         )
     }
 
-    fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
+    fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
         div()
+            .id("sidebar-footer")
+            // Hovering anywhere across the bottom strip — not just the
+            // settings cog — raises the quick-action dock.
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.sidebar_dock_zone_hovered = *hovered;
+                cx.notify();
+            }))
             .flex_none()
             .h(px(40.0))
             .px(px(10.0))
@@ -1496,31 +1503,13 @@ impl Waku {
                     .tooltip(Tooltip::text(tr!("shortcuts.title")))
                     .child(icon("icons/keyboard.svg", 14.0, theme.text_tertiary))
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if crate::keybindings::manager_enabled() {
-                            this.open_keybindings_page(window, cx);
-                            return;
-                        }
-                        let focus = this.open_shortcuts_dialog(cx);
-                        // Like the other deferred surfaces, focus lands two
-                        // frames after the modal joins the dispatch tree.
-                        window.on_next_frame(move |window, _| {
-                            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                        });
+                        this.open_shortcuts(window, cx);
                     }))
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         if !event.keystroke.modifiers.modified()
                             && matches!(event.keystroke.key.as_str(), "enter" | "space")
                         {
-                            if crate::keybindings::manager_enabled() {
-                                this.open_keybindings_page(window, cx);
-                            } else {
-                                let focus = this.open_shortcuts_dialog(cx);
-                                window.on_next_frame(move |window, _| {
-                                    window.on_next_frame(move |window, cx| {
-                                        window.focus(&focus, cx)
-                                    });
-                                });
-                            }
+                            this.open_shortcuts(window, cx);
                             cx.stop_propagation();
                         }
                     })),
@@ -1532,6 +1521,190 @@ impl Waku {
             .when_some(self.render_updater_button(cx), |footer, button| {
                 footer.child(button)
             })
+    }
+
+    /// The quick-action dock that rises above the footer while the sidebar's
+    /// bottom strip is hovered. It keeps its own hover state so the pointer
+    /// can cross from the footer onto it without flicker.
+    fn render_sidebar_dock(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.sidebar_dock_zone_hovered && !self.sidebar_dock_hovered {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        let mut items = vec![
+            SidebarDockItem::Inbox,
+            SidebarDockItem::Archive,
+            SidebarDockItem::Shortcuts,
+            SidebarDockItem::Settings,
+        ];
+        if self.state.friends_enabled {
+            items.insert(0, SidebarDockItem::Friends);
+        }
+        Some(
+            div()
+                .id("sidebar-dock")
+                .absolute()
+                .bottom(px(40.0))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    this.sidebar_dock_hovered = *hovered;
+                    if !*hovered {
+                        this.sidebar_dock_hover_item = None;
+                    }
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_end()
+                        .gap(px(6.0))
+                        .children(
+                            items
+                                .iter()
+                                .map(|item| self.render_sidebar_dock_item(*item, &theme, cx)),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    #[track_caller]
+    fn render_sidebar_dock_item(
+        &self,
+        item: SidebarDockItem,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let (id, path, label) = match item {
+            SidebarDockItem::Friends => ("friends", "icons/friends.svg", tr!("settings.friends")),
+            SidebarDockItem::Inbox => ("inbox", "icons/inbox.svg", tr!("sidebar.inbox")),
+            SidebarDockItem::Archive => ("archive", "icons/archive.svg", tr!("settings.archived")),
+            SidebarDockItem::Shortcuts => {
+                ("shortcuts", "icons/keyboard.svg", tr!("shortcuts.title"))
+            }
+            SidebarDockItem::Settings => (
+                "settings",
+                "icons/settings-hexagon.svg",
+                tr!("common.settings"),
+            ),
+        };
+        let hovered = self.sidebar_dock_hover_item == Some(item);
+        let surface = linear_gradient(
+            180.0,
+            linear_color_stop(theme.raised, 0.0),
+            linear_color_stop(theme.inset, 1.0),
+        );
+        div()
+            .id(SharedString::from(format!("sidebar-dock-{id}")))
+            .tab_index(0)
+            .flex()
+            .flex_col()
+            .items_center()
+            .w(px(44.0))
+            .cursor_default()
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                if *hovered {
+                    this.sidebar_dock_hover_item = Some(item);
+                } else if this.sidebar_dock_hover_item == Some(item) {
+                    this.sidebar_dock_hover_item = None;
+                }
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .h(px(20.0))
+                    .flex()
+                    .items_center()
+                    .when(hovered, |slot| {
+                        slot.child(
+                            div()
+                                .h(px(18.0))
+                                .px(px(8.0))
+                                .rounded_full()
+                                .bg(surface.clone())
+                                .border(hairline())
+                                .border_color(theme.border_subtle)
+                                .flex()
+                                .items_center()
+                                .text_size(sp(10.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_secondary)
+                                .child(label),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .size(px(40.0))
+                    .rounded_full()
+                    .bg(surface)
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .shadow_sm()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon(path, 19.0, theme.text)),
+            )
+            .focus_visible(|style| {
+                style
+                    .border(hairline())
+                    .border_color(theme.accent)
+                    .rounded(px(12.0))
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.activate_sidebar_dock_item(item, window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.activate_sidebar_dock_item(item, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
+    fn activate_sidebar_dock_item(
+        &mut self,
+        item: SidebarDockItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match item {
+            SidebarDockItem::Friends => {
+                self.open_settings_page(SettingsPage::Friends, window, cx)
+            }
+            SidebarDockItem::Inbox => {
+                if self.notifications.open {
+                    self.close_inbox(cx);
+                } else {
+                    self.open_inbox(window, cx);
+                }
+            }
+            SidebarDockItem::Archive => {
+                self.open_settings_page(SettingsPage::Archived, window, cx)
+            }
+            SidebarDockItem::Shortcuts => self.open_shortcuts(window, cx),
+            SidebarDockItem::Settings => self.open_settings_action(&OpenSettings, window, cx),
+        }
+    }
+
+    /// The footer keyboard button's target: the keybindings manager when it
+    /// is enabled, otherwise the legacy shortcuts dialog, whose focus lands
+    /// two frames after the modal joins the dispatch tree.
+    fn open_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if crate::keybindings::manager_enabled() {
+            self.open_keybindings_page(window, cx);
+            return;
+        }
+        let focus = self.open_shortcuts_dialog(cx);
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        });
     }
 
     /// Aggregate in-flight friend transfers into one footer ring beside the
@@ -2089,7 +2262,15 @@ impl Waku {
                         )
                     }),
             )
-            .child(self.render_sidebar_footer(cx))
+            .child(
+                div()
+                    .flex_none()
+                    .relative()
+                    .when_some(self.render_sidebar_dock(cx), |container, dock| {
+                        container.child(dock)
+                    })
+                    .child(self.render_sidebar_footer(cx)),
+            )
     }
 
     /// Keep a newly selected task visible without disturbing the sidebar when
