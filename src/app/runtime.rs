@@ -3212,7 +3212,7 @@ impl Waku {
         let locked_provider = match self.model_picker_target {
             composer::ModelPickerTarget::Composer => self
                 .selected_session()
-                .filter(|session| !session.messages.is_empty())
+                .filter(|session| session.provider_locked())
                 .map(|session| session.provider),
             composer::ModelPickerTarget::AutomationEditor => None,
         };

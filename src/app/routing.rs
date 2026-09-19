@@ -191,7 +191,7 @@ impl Waku {
         self.state.model_router_enabled
             && self
                 .composer_session()
-                .is_some_and(|session| session.messages.is_empty())
+                .is_some_and(|session| !session.provider_locked())
             && !self.route_candidates().is_empty()
     }
 

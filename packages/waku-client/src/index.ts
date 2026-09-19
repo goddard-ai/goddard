@@ -20,3 +20,4 @@ export * from "./transcript-presentation";
 export * from "./composer-annotations";
 export * from "./composer-preferences";
 export * from "./provider-probe-cache";
+export * from "./session-state";

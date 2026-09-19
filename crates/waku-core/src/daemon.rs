@@ -658,7 +658,7 @@ fn create_transfer_session(
             id
         }
     };
-    let mut session = AgentSession::new(project_id, ProviderKind::Claude);
+    let mut session = state.new_session(project_id, state.last_provider);
     session.title = format!("{} from {}", transfer.title, transfer.peer_name);
     // The receipt is a notification, not a prompt awaiting a reply — a
     // provider turn holds the assistant messages so they render like an
@@ -4339,6 +4339,11 @@ mod tests {
         let share_dir = root.join("share");
         let store = Arc::new(StateStore::daemon(root.join("app.db")));
         let task_state = Arc::new(Mutex::new(PersistedState::fresh(root.join("repo"))));
+        {
+            let mut state = task_state.lock();
+            state.last_provider = ProviderKind::Grok;
+            state.last_model = Some("grok-code-fast-1".into());
+        }
         let transfer = waku_protocol::friends::TransferInfo {
             id: Uuid::new_v4(),
             direction: waku_protocol::friends::TransferDirection::Incoming,
@@ -4375,6 +4380,10 @@ mod tests {
                 "received files run in the sandbox VM once trusted"
             );
             assert_eq!(session.status, SessionStatus::Idle);
+            assert_eq!(session.provider, ProviderKind::Grok);
+            assert_eq!(session.model.as_deref(), Some("grok-code-fast-1"));
+            assert!(!session.provider_locked());
+            assert!(session.can_choose_model(ProviderKind::Claude));
             assert_eq!(session.project_id, project.id);
             assert_eq!(session.title, "design.pdf from maya");
             let receipt = &session.turns[0];

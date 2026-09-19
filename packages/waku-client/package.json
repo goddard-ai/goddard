@@ -12,6 +12,7 @@
     "./composer-autocomplete": "./src/composer-autocomplete.ts",
     "./fuzzy-search": "./src/fuzzy-search.ts",
     "./provider-probe-cache": "./src/provider-probe-cache.ts",
+    "./session-state": "./src/session-state.ts",
     "./protocol": "./src/generated/index.ts"
   },
   "scripts": {

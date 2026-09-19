@@ -2031,7 +2031,7 @@ impl Waku {
         match self.model_picker_target {
             ModelPickerTarget::Composer => self
                 .composer_session()
-                .filter(|session| !session.messages.is_empty())
+                .filter(|session| session.provider_locked())
                 .map(|session| session.provider),
             ModelPickerTarget::AutomationEditor => None,
         }

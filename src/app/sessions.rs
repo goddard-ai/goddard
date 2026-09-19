@@ -3425,7 +3425,7 @@ impl Waku {
         }
         // A switched-off provider's favorite stays reachable only for the
         // session already locked to it — same rule the picker's rows follow.
-        let locked = !session.messages.is_empty() && session.provider == favorite.provider;
+        let locked = session.provider_locked() && session.provider == favorite.provider;
         if !locked && !self.provider_enabled(favorite.provider) {
             return;
         }
@@ -3474,7 +3474,7 @@ impl Waku {
         };
         // Same gate the ⌘⌥n chords apply: a started session only runs its
         // locked provider; a draft runs whichever providers are enabled.
-        let locked_provider = (!session.messages.is_empty()).then_some(session.provider);
+        let locked_provider = session.provider_locked().then_some(session.provider);
         let eligible = |provider: ProviderKind| {
             session.can_choose_model(provider)
                 && (Some(provider) == locked_provider

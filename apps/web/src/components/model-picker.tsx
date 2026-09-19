@@ -1,4 +1,4 @@
-import type { AgentSession, ProviderKind, ProviderModel, ProviderProbe } from '@waku/client'
+import { sessionProviderLocked, type AgentSession, type ProviderKind, type ProviderModel, type ProviderProbe } from '@waku/client'
 import { Popover } from '@base-ui/react/popover'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ProviderIcon, PROVIDERS, providerMeta, WakuIcon } from '@/components/waku-icon'
@@ -41,7 +41,7 @@ export function ModelPicker({
   const list = useRef<HTMLDivElement>(null)
   const settings = useDaemonSettings()
   const probes = useProviderProbes(open)
-  const lockedProvider = session.messages.length ? session.provider : null
+  const lockedProvider = sessionProviderLocked(session) ? session.provider : null
   const currentModel = currentProbe?.models.find((model) => model.id === session.model)
     ?? currentProbe?.models.find((model) => model.is_default)
     ?? currentProbe?.models[0]
@@ -68,7 +68,7 @@ export function ModelPicker({
 
   const usable = PROVIDERS.filter(({ id }) => {
     if (lockedProvider && id !== lockedProvider) return false
-    if (id === session.provider) return true
+    if (id === lockedProvider) return true
     return !settings.data?.disabled_providers.includes(id) && probeMap[id]?.installed
   })
   const rows = (() => {

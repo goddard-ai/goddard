@@ -1763,8 +1763,24 @@ impl AgentSession {
         true
     }
 
+    /// Whether this session has a provider conversation to preserve. Locally
+    /// synthesized assistant messages — a transfer's delivery receipt, for
+    /// example — do not count until the user actually prompts the session.
+    pub fn provider_locked(&self) -> bool {
+        // A skeleton cannot inspect its transcript; assume it is locked
+        // rather than offering a provider switch the detail may disprove.
+        !self.detail_loaded
+            || self.provider_cursor.is_some()
+            || self.provider_session_id.is_some()
+            || self
+                .messages
+                .iter()
+                .any(|message| message.role == MessageRole::User)
+            || self.turns.iter().any(|turn| turn.provider_turn_started)
+    }
+
     pub fn can_choose_model(&self, provider: ProviderKind) -> bool {
-        !self.status.is_busy() && (self.messages.is_empty() || self.provider == provider)
+        !self.status.is_busy() && (!self.provider_locked() || self.provider == provider)
     }
 
     pub fn migrate_legacy_state(&mut self) {
@@ -5006,6 +5022,26 @@ mod tests {
 
         session.push_message(MessageRole::User, "first turn");
         assert!(session.can_choose_model(ProviderKind::Codex));
+        assert!(!session.can_choose_model(ProviderKind::Claude));
+    }
+
+    #[test]
+    fn model_selection_ignores_local_assistant_receipts() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+
+        session.begin_provider_turn();
+        session.push_message(MessageRole::Assistant, "received file receipt");
+        session.finish_active_turn(TurnStatus::Completed);
+
+        assert!(!session.provider_locked());
+        assert!(session.can_choose_model(ProviderKind::Claude));
+
+        session.begin_provider_turn();
+        session.mark_active_turn_provider_started();
+        session.finish_active_turn(TurnStatus::Completed);
+
+        assert!(session.provider_locked());
         assert!(!session.can_choose_model(ProviderKind::Claude));
     }
 
