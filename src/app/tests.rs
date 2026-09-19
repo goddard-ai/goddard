@@ -498,29 +498,33 @@ fn collapsed_paste_blocks_follow_the_typed_text_in_order() {
 
 #[test]
 fn branch_picker_pins_selection_and_filters_by_name() {
+    const NOW: u64 = 1_800_000_000;
     let branches = vec![
         BranchEntry {
             name: "topic/zebra".into(),
             checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - 90 * 86_400),
         },
         BranchEntry {
             name: "main".into(),
             checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - 30 * 86_400),
         },
         BranchEntry {
             name: "topic/apple".into(),
             checked_out_elsewhere: true,
+            last_commit_at: Some(NOW - 86_400),
         },
     ];
     assert_eq!(
-        visible_branch_entries(&branches, "main", "")
+        visible_branch_entries(&branches, "main", "", NOW)
             .iter()
             .map(|branch| branch.name.as_str())
             .collect::<Vec<_>>(),
         vec!["main", "topic/apple", "topic/zebra"]
     );
     assert_eq!(
-        visible_branch_entries(&branches, "main", "TOPIC APPLE")
+        visible_branch_entries(&branches, "main", "TOPIC APPLE", NOW)
             .iter()
             .map(|branch| branch.name.as_str())
             .collect::<Vec<_>>(),
@@ -530,36 +534,83 @@ fn branch_picker_pins_selection_and_filters_by_name() {
 
 #[test]
 fn branch_picker_prefers_exact_matches() {
+    const NOW: u64 = 1_800_000_000;
     let branches = vec![
         BranchEntry {
             name: "mainline".into(),
             checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - 86_400),
         },
         BranchEntry {
             name: "topic/main".into(),
             checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - 86_400),
         },
         BranchEntry {
             name: "main".into(),
             checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - 86_400),
         },
     ];
     // The exact match leads even when another branch is selected, and the
     // query's case does not matter.
     assert_eq!(
-        visible_branch_entries(&branches, "topic/main", "MAIN")
+        visible_branch_entries(&branches, "topic/main", "MAIN", NOW)
             .iter()
             .map(|branch| branch.name.as_str())
             .collect::<Vec<_>>(),
         vec!["main", "topic/main", "mainline"]
     );
-    // A partial query keeps the selection pinned and sorts by name.
+    // A partial query keeps the selection pinned; equally close matches fall
+    // back to name order when their commits are equally fresh.
     assert_eq!(
-        visible_branch_entries(&branches, "topic/main", "mai")
+        visible_branch_entries(&branches, "topic/main", "mai", NOW)
             .iter()
             .map(|branch| branch.name.as_str())
             .collect::<Vec<_>>(),
         vec!["topic/main", "main", "mainline"]
+    );
+}
+
+#[test]
+fn branch_picker_blends_match_fit_with_recency() {
+    const NOW: u64 = 1_800_000_000;
+    const DAY: u64 = 86_400;
+    let branches = vec![
+        BranchEntry {
+            name: "topic/fix".into(),
+            checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - DAY),
+        },
+        BranchEntry {
+            name: "fix-old".into(),
+            checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - 2 * 365 * DAY),
+        },
+        BranchEntry {
+            name: "x-fix".into(),
+            checked_out_elsewhere: false,
+            last_commit_at: Some(NOW - DAY),
+        },
+    ];
+    // A fresh branch outranks a stale one with a marginally better fit, while
+    // a large fit gap still beats recency: "fix-old" starts with the query but
+    // is two years old, "x-fix" is one day old, and "topic/fix" is fresh but
+    // the worst fit of the three.
+    assert_eq!(
+        visible_branch_entries(&branches, "", "fix", NOW)
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["x-fix", "fix-old", "topic/fix"]
+    );
+    // Without a query the ranking reduces to last-committed order.
+    assert_eq!(
+        visible_branch_entries(&branches, "", "", NOW)
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["topic/fix", "x-fix", "fix-old"]
     );
 }
 

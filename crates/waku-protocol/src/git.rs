@@ -9,6 +9,9 @@ use crate::model::ProviderKind;
 pub struct BranchEntry {
     pub name: String,
     pub checked_out_elsewhere: bool,
+    /// Committer date of the branch tip, unix seconds (`%(committerdate:unix)`).
+    /// Feeds the picker's recency ranking; `None` only if Git reported no date.
+    pub last_commit_at: Option<u64>,
 }
 
 /// The checked-out branch's relationship to its configured upstream —

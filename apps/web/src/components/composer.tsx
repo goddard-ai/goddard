@@ -41,6 +41,7 @@ import {
   useWorkspaceBranches,
 } from '@/hooks/use-daemon-data'
 import { importDaemonPathAttachment, importFiles, readAttachmentImage } from '@/lib/attachments'
+import { visibleBranches } from '@/lib/branch-search'
 import {
   checkoutWorkspaceBranch,
   daemonKeys,
@@ -1763,16 +1764,7 @@ function BranchPicker({
       ? snapshot.current ?? workspace.branch ?? snapshot.detached_head
       : snapshot.current ?? snapshot.detached_head
   const normalized = query.trim().toLowerCase()
-  const visible = [...snapshot.branches]
-    .filter((branch) => normalized.split(/\s+/).filter(Boolean).every((part) => branch.name.toLowerCase().includes(part)))
-    .sort((left, right) => {
-      const leftExact = left.name.toLowerCase() === normalized
-      const rightExact = right.name.toLowerCase() === normalized
-      if (leftExact !== rightExact) return leftExact ? -1 : 1
-      if (left.name === selected) return -1
-      if (right.name === selected) return 1
-      return left.name.localeCompare(right.name)
-    })
+  const visible = visibleBranches(snapshot.branches, selected, normalized, Date.now() / 1_000)
   const actions = [
     ...visible
       .filter((branch) => plannedWorktree || !branch.checked_out_elsewhere || branch.name === selected)
