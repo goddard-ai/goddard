@@ -1,0 +1,1 @@
+- ⌘S now opens a "Sync branch…" picker outside the file editor (where ⌘S still saves). It lists the repository's checkouts that track an upstream — defaulting to the current branch in a session — and pulls with `git pull --rebase` (or merge, per the sync setting). Conflicts reuse the sync-conflict dialog, whose "Resolve in chat" now starts a new chat on the folder being synced

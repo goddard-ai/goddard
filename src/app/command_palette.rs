@@ -187,6 +187,7 @@ enum PaletteAction {
     OpenOnGitHub,
     MoveToWorktree,
     LandChanges,
+    SyncBranch,
     CompactContext,
     ToggleUsage,
     CollapseSidebarGroups,
@@ -1512,6 +1513,20 @@ impl Waku {
                     _ => None,
                 });
             commands.push(item);
+        }
+
+        // Same reachability as ⌘S outside the file editor: a session's
+        // workspace or a selected project supplies the repository.
+        if self.selected_workspace_path().is_some() || self.selected_project().is_some() {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.sync_branch"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::SyncBranch,
+                "sync branch pull rebase merge upstream tracking checkout update git",
+                next(),
+            ));
         }
 
         // Same gate as the composer's `/compact`: the session has a compact
@@ -3094,6 +3109,10 @@ impl Waku {
             PaletteAction::LandChanges => {
                 self.settings_page = None;
                 self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
+            }
+            PaletteAction::SyncBranch => {
+                self.settings_page = None;
+                self.open_sync_branch(window, cx);
             }
             PaletteAction::CompactContext => {
                 self.settings_page = None;

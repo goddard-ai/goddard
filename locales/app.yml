@@ -186,6 +186,8 @@ command_palette.create_draft:
   en: Create draft
 command_palette.view_drafts:
   en: View drafts
+command_palette.sync_branch:
+  en: Sync branch…
 command_palette.new_custom_command:
   en: New custom command…
 command_palette.choose_model:
@@ -927,6 +929,8 @@ a11y.command_palette:
   en: Command palette
 a11y.file_finder:
   en: File finder
+a11y.sync_branch:
+  en: Sync branch
 a11y.task_name:
   en: Task name
 a11y.task_description:
@@ -3010,6 +3014,21 @@ git_panel.resolve_land_rebase_prompt:
   en: "The rebase of this worktree onto `%{base}` stopped on conflicts. Resolve the conflicts in the working tree and run `git rebase --continue` until the rebase completes. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
 git_panel.resolve_land_merge_prompt:
   en: "The merge of `%{base}` into this worktree stopped on conflicts. Resolve the conflicts in the working tree and complete the merge. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
+
+sync_branch.current:
+  en: Current branch
+sync_branch.loading:
+  en: Loading branches…
+sync_branch.no_results:
+  en: No branches with a tracking branch
+sync_branch.no_results_hint:
+  en: Only branches checked out in a working tree can be synced
+sync_branch.syncing:
+  en: "Syncing %{branch}…"
+sync_branch.synced:
+  en: Synced %{branch}
+sync_branch.busy:
+  en: Another Git operation is still running
 
 terminal.transport_failed:
   en: Terminal transport failed

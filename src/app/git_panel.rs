@@ -115,6 +115,10 @@ pub(super) enum SyncConflict {
         workspace: PathBuf,
         /// Working-tree paths still carrying conflict markers.
         files: Vec<String>,
+        /// The "Sync branch…" modal raised this one — its checkout may not be
+        /// the selected task's, so Resolve in chat opens a fresh chat rooted
+        /// at `workspace` instead of pasting into the current composer.
+        new_chat: bool,
     },
     Land {
         in_progress: SyncInProgress,
@@ -157,6 +161,11 @@ pub(super) struct GitPanelOperation {
     /// composer has no pending indicator of its own. `finish_git_panel_op`
     /// settles it to the outcome, or retires it when a modal takes over.
     pub toast_id: Option<u64>,
+    /// The "Sync branch…" modal started this operation — or inherited the
+    /// marker from the modal-origin conflict a "Merge instead" retry came
+    /// from. Its pull conflicts resolve in a fresh chat on the checkout, and
+    /// its completion closes the picker card.
+    pub sync_branch: bool,
 }
 
 /// Everything the panel needs, created when the panel opens and rebuilt when
@@ -985,8 +994,8 @@ impl Waku {
 
     /// Same guard and bookkeeping as `begin_git_panel_op`, for operations the
     /// panel does not have to be open to start — `/land` runs it from the
-    /// composer.
-    fn begin_workspace_op(
+    /// composer, the "Sync branch…" picker from its modal.
+    pub(super) fn begin_workspace_op(
         &mut self,
         pending: GitPanelPending,
         workspace: PathBuf,
@@ -1001,6 +1010,7 @@ impl Waku {
             workspace: workspace.clone(),
             pending,
             toast_id: None,
+            sync_branch: false,
         });
         cx.notify();
         Some((id, workspace))
@@ -1253,11 +1263,17 @@ impl Waku {
         let Some(conflict) = self.git_panel_sync_conflict.take() else {
             return;
         };
+        // A picker-origin conflict that stops the merge retry too still
+        // resolves in a fresh chat on the checkout.
+        let sync_branch = matches!(&conflict, SyncConflict::Pull { new_chat: true, .. });
         let Some((op_id, workspace)) =
             self.begin_workspace_op(GitPanelPending::AbortingSync, conflict.workspace(), cx)
         else {
             return;
         };
+        if let Some(operation) = self.git_panel_operation.as_mut() {
+            operation.sync_branch = sync_branch;
+        }
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
                 op_id,
@@ -1336,29 +1352,44 @@ impl Waku {
     /// The conflict modal's Resolve in chat: paste the resolution prompt
     /// into the composer for the user to send — a pull completes with
     /// `rebase --continue`, a land still owes the base its fast-forward
-    /// afterward.
+    /// afterward. A conflict the "Sync branch…" picker raised resolves in a
+    /// fresh chat rooted at the checkout it was syncing — that worktree is
+    /// not necessarily the selected task's.
     fn git_panel_resolve_in_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let prompt = match self.git_panel_sync_conflict.take() {
-            Some(SyncConflict::Pull {
-                in_progress: SyncInProgress::Rebase,
-                ..
-            }) => tr!("git_panel.resolve_rebase_prompt"),
-            Some(SyncConflict::Pull {
-                in_progress: SyncInProgress::Merge,
-                ..
-            }) => tr!("git_panel.resolve_merge_prompt"),
-            Some(SyncConflict::Land {
-                in_progress: SyncInProgress::Rebase,
-                base,
-                ..
-            }) => tr!("git_panel.resolve_land_rebase_prompt", base = base),
-            Some(SyncConflict::Land {
-                in_progress: SyncInProgress::Merge,
-                base,
-                ..
-            }) => tr!("git_panel.resolve_land_merge_prompt", base = base),
-            None => return,
+        let Some(conflict) = self.git_panel_sync_conflict.take() else {
+            return;
         };
+        let new_chat_workspace = match &conflict {
+            SyncConflict::Pull {
+                workspace,
+                new_chat: true,
+                ..
+            } => Some(workspace.clone()),
+            _ => None,
+        };
+        let prompt = match conflict {
+            SyncConflict::Pull {
+                in_progress: SyncInProgress::Rebase,
+                ..
+            } => tr!("git_panel.resolve_rebase_prompt"),
+            SyncConflict::Pull {
+                in_progress: SyncInProgress::Merge,
+                ..
+            } => tr!("git_panel.resolve_merge_prompt"),
+            SyncConflict::Land {
+                in_progress: SyncInProgress::Rebase,
+                base,
+                ..
+            } => tr!("git_panel.resolve_land_rebase_prompt", base = base),
+            SyncConflict::Land {
+                in_progress: SyncInProgress::Merge,
+                base,
+                ..
+            } => tr!("git_panel.resolve_land_merge_prompt", base = base),
+        };
+        if let Some(workspace) = new_chat_workspace {
+            self.create_task_in_directory(workspace, window, cx);
+        }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         self.composer
@@ -1369,7 +1400,7 @@ impl Waku {
 
     /// Every panel operation lands here: drop the pending marker, apply the
     /// result to the panel that asked for it, and refresh what moved.
-    fn finish_git_panel_op(
+    pub(super) fn finish_git_panel_op(
         &mut self,
         op_id: Uuid,
         result: Result<WorkspaceResult, anyhow::Error>,
@@ -1385,6 +1416,9 @@ impl Waku {
             .git_panel
             .as_ref()
             .is_some_and(|panel| panel.workspace == op.workspace);
+        // The "Sync branch…" picker's pending row: the branch name the card
+        // is holding for its completion toast, taken once the op lands.
+        let picker_sync = self.sync_branch.take_syncing(op_id);
         match result {
             Ok(WorkspaceResult::CommitMessage { message }) => {
                 if let GitPanelPending::Generating { include_unstaged } = op.pending
@@ -1409,7 +1443,14 @@ impl Waku {
                     in_progress,
                     workspace: op.workspace.clone(),
                     files,
+                    new_chat: op.sync_branch,
                 });
+                // The conflict modal takes over from the picker card — when
+                // this is the operation the card is waiting on. An inherited
+                // marker (a "Merge instead" retry) leaves an open picker alone.
+                if picker_sync.is_some() {
+                    self.close_sync_branch(cx);
+                }
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
             }
@@ -1463,6 +1504,13 @@ impl Waku {
                             .update(cx, |input, cx| input.set_content("", cx));
                     }
                 }
+                // A clean pull the picker ran retires its card and reports
+                // the branch it synced — even when the card was dismissed
+                // mid-flight.
+                if let Some(branch) = picker_sync {
+                    self.close_sync_branch(cx);
+                    self.show_success_toast(tr!("sync_branch.synced", branch = branch));
+                }
                 self.invalidate_workspace_queries(cx);
                 self.refresh_git_panel(cx);
                 self.refresh_git_panel_commits(cx);
@@ -1471,12 +1519,16 @@ impl Waku {
                 // A composer-started land can fail with the panel closed;
                 // its errors need a surface the panel doesn't provide. When
                 // the panel shows the failed workspace it carries the error
-                // inline — a run that raised a toast still resolves it.
+                // inline — a run that raised a toast still resolves it, and
+                // the picker's runs always toast since its card is gone.
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = Some(error.to_string());
                 }
-                if op.toast_id.is_some() || !same_panel {
+                if op.toast_id.is_some() || !same_panel || op.sync_branch {
                     self.settle_operation_toast(op.toast_id, error.to_string(), ToastTone::Alert);
+                }
+                if picker_sync.is_some() {
+                    self.close_sync_branch(cx);
                 }
                 self.invalidate_workspace_queries(cx);
                 cx.notify();

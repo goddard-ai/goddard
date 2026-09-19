@@ -215,6 +215,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "app.usage_panel", action: || Box::new(crate::ToggleUsagePanel), title_key: "shortcuts.usage_panel", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.run_script", action: || Box::new(crate::RunProjectScript), title_key: "menu.run_project_script", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.save_file", action: || Box::new(crate::SaveFile), title_key: "shortcuts.save_file", title_index: None, category: C::Editor, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "app.sync_branch", action: || Box::new(crate::SyncBranch), title_key: "command_palette.sync_branch", title_index: None, category: C::Git, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_localhost", action: || Box::new(crate::OpenLocalhostUrl), title_key: "shortcuts.open_localhost", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.open_localhost_tab", action: || Box::new(crate::OpenLocalhostUrlInTab), title_key: "shortcuts.open_localhost_tab", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "app.view_unarchived_task", action: || Box::new(crate::OpenToastSession), title_key: "shortcuts.view_unarchived_task", title_index: None, category: C::Global, editability: EDITABLE, builtin_label: None },
@@ -460,6 +461,19 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("palette.select_page_up", All, "pageup", FinderSearch),
     e("palette.confirm", All, "enter", FinderSearch),
     e("palette.dismiss", All, "escape", FileFinder),
+    // === app::init_sync_branch =======================================================
+    e("palette.select_next", All, "down", SyncBranchSearch),
+    e("palette.select_previous", All, "up", SyncBranchSearch),
+    e("palette.select_next", All, "ctrl-n", SyncBranchSearch),
+    e("palette.select_previous", All, "ctrl-p", SyncBranchSearch),
+    e("palette.select_next", All, "tab", SyncBranchSearch),
+    e("palette.select_previous", All, "shift-tab", SyncBranchSearch),
+    e("palette.select_first", All, "home", SyncBranchSearch),
+    e("palette.select_last", All, "end", SyncBranchSearch),
+    e("palette.select_page_down", All, "pagedown", SyncBranchSearch),
+    e("palette.select_page_up", All, "pageup", SyncBranchSearch),
+    e("palette.confirm", All, "enter", SyncBranchSearch),
+    e("palette.dismiss", All, "escape", SyncBranchCard),
     // === app::init_commit_dialog_keys ==============================================
     e("dialog.commit.confirm", All, "secondary-enter", CommitInput),
     e("dialog.commit.confirm", All, "secondary-enter", CommitDialog),
@@ -670,6 +684,8 @@ mod ctx {
     pub const CommandPalette: &str = "CommandPalette";
     pub const FinderSearch: &str = "FileFinder > TextInput";
     pub const FileFinder: &str = "FileFinder";
+    pub const SyncBranchSearch: &str = "SyncBranch > TextInput";
+    pub const SyncBranchCard: &str = "SyncBranch";
     pub const CommitInput: &str = "CommitDialog > TextInput";
     pub const CommitDialog: &str = "CommitDialog";
     pub const GitPanelInput: &str = "GitPanel > TextInput";

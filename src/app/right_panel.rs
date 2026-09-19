@@ -4763,10 +4763,13 @@ impl Waku {
     pub(super) fn save_right_panel_file_action(
         &mut self,
         _: &SaveFile,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // ⌘S doubles as "Sync branch…" outside the file editor: with no file
+        // surface active the chord opens the branch picker instead.
         let Some(relative_path) = self.visible_right_panel_file_path() else {
+            self.open_sync_branch(window, cx);
             return;
         };
         let Some(project_path) = self

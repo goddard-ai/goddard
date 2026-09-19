@@ -576,6 +576,7 @@ impl Render for Waku {
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let ssh_prompt = self.render_ssh_prompt(window, cx);
+        let sync_branch_modal = self.render_sync_branch(window, cx);
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
@@ -625,6 +626,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_workspace_action))
             .on_action(cx.listener(Self::toggle_usage_panel_action))
             .on_action(cx.listener(Self::save_right_panel_file_action))
+            .on_action(cx.listener(Self::sync_branch_action))
             .on_action(cx.listener(Self::cancel_turn_action))
             .on_action(cx.listener(Self::archive_session_action))
             .on_action(cx.listener(Self::toggle_session_pin_action))
@@ -934,6 +936,7 @@ impl Render for Waku {
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(ssh_prompt)
+            .children(sync_branch_modal)
             .children(git_panel_overlays)
             .children(image_preview)
             .children(task_switcher)

@@ -89,7 +89,7 @@ use crate::{
     OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
     SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
     SelectProjectsTab, SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward,
-    SwitchTaskBackward, SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker,
+    SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleBigPicture, ToggleBranchPicker,
     ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder, ToggleFindCaseSensitive,
     ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage,
     ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
@@ -1687,6 +1687,8 @@ pub struct Waku {
     composer_draft_save_generation: u64,
     command_palette: command_palette::CommandPaletteUi,
     file_finder: file_finder::FileFinderUi,
+    /// The ⌘S "Sync branch…" picker — a modal over the session's repository.
+    sync_branch: sync_branch::SyncBranchUi,
     task_switcher: task_switcher::TaskSwitcherUi,
     project_switcher: project_switcher::ProjectSwitcherUi,
     big_picture: big_picture::BigPictureUi,
@@ -2757,6 +2759,7 @@ mod shortcuts_dialog;
 mod sidebar;
 mod skills_page;
 mod streaming;
+mod sync_branch;
 mod task_switcher;
 mod terminals;
 mod transcript;
@@ -2789,6 +2792,7 @@ pub use shortcuts_dialog::init as init_shortcuts_dialog_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow, format_time_ago, mix_str};
 pub use skills_page::init as init_skills_keys;
+pub use sync_branch::init as init_sync_branch;
 
 // Re-exported for the keybinding catalog (`crate::keybindings`), which needs
 // every dispatchable action by path without making each module public.
@@ -3495,6 +3499,12 @@ impl Waku {
                 .clear_on_escape()
                 .accessibility_label(tr!("a11y.file_finder"))
                 .placeholder(tr!("file_finder.placeholder"))
+        });
+        let sync_branch_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("a11y.sync_branch"))
+                .placeholder(tr!("input.search_branches"))
         });
         let model_search = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -4325,6 +4335,15 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
+                &sync_branch_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.sync_branch_query_edited(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &branch_search,
                 |this: &mut Self, search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited)
@@ -4667,6 +4686,7 @@ impl Waku {
                 composer_draft_save_generation: 0,
                 command_palette: command_palette::CommandPaletteUi::new(command_palette_search),
                 file_finder: file_finder::FileFinderUi::new(file_finder_search),
+                sync_branch: sync_branch::SyncBranchUi::new(sync_branch_search),
                 task_switcher,
                 project_switcher,
                 big_picture,
