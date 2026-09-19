@@ -4661,6 +4661,7 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
+        let fullscreen = self.panel_fullscreen_active();
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
             *cache = Some((relative_path.to_owned(), MarkdownView::new()));
@@ -4709,11 +4710,20 @@ impl Waku {
                     .child(md::render::frame_reset(self.file_preview_selection.clone()))
                     .child(
                         div()
-                            .px(px(16.0))
-                            .pt(px(14.0))
-                            .pb(px(24.0))
-                            .text_color(theme.text)
-                            .children(document),
+                            .when(fullscreen, |element| {
+                                element.w_full().flex().justify_center()
+                            })
+                            .child(
+                                div()
+                                    .when(fullscreen, |element| {
+                                        element.w_full().max_w(px(CONTENT_MAX_WIDTH)).min_w_0()
+                                    })
+                                    .px(px(16.0))
+                                    .pt(px(14.0))
+                                    .pb(px(24.0))
+                                    .text_color(theme.text)
+                                    .children(document),
+                            ),
                     ),
             )
             .child(selection_input)
