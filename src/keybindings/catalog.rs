@@ -562,6 +562,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("app.inbox_page", All, "secondary-shift-i", ""),
     e("projects.tab.1", All, "secondary-alt-1", ProjectsPage),
     e("projects.tab.2", All, "secondary-alt-2", ProjectsPage),
+    e("automations.tab.1", All, "secondary-alt-1", AutomationsPage),
+    e("automations.tab.2", All, "secondary-alt-2", AutomationsPage),
     e("model.favorite.1", All, "secondary-alt-1", ComposerScope),
     e("model.favorite.2", All, "secondary-alt-2", ComposerScope),
     e("model.favorite.3", All, "secondary-alt-3", ComposerScope),
@@ -715,14 +717,16 @@ mod ctx {
     pub const NotTerminal: &str = "!Terminal";
     pub const Waku: &str = "Waku";
     pub const ProjectsPage: &str = "ProjectsPage";
+    pub const AutomationsPage: &str = "AutomationsPage";
     pub const GitSettingsPage: &str = "GitSettingsPage";
     pub const InboxPage: &str = "InboxPage";
     pub const DraftsPage: &str = "DraftsPage";
     pub const WakuNotTerminal: &str = "Waku && !Terminal";
     /// Where the composer session is reachable without covering the
     /// surfaces that own their own chords: the terminal (pty input) and
-    /// the Projects page (its ⌘⌥ tab chords).
-    pub const ComposerScope: &str = "Waku && !Terminal && !ProjectsPage";
+    /// the tabbed pages (their ⌘⌥ tab chords).
+    pub const ComposerScope: &str =
+        "Waku && !Terminal && !ProjectsPage && !AutomationsPage";
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";

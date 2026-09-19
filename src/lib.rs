@@ -188,6 +188,14 @@ pub struct SelectProjectsTab {
     pub index: usize,
 }
 
+/// Switch the Automations page to its nth tab (⌘⌥1–⌘⌥2). Only bound inside
+/// the page's key context.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct SelectAutomationsTab {
+    pub index: usize,
+}
+
 /// Apply the nth starred model selection to the composer session (⌘⌥1–⌘⌥9),
 /// ordered as in the model picker's favorites section. Carries the target
 /// index so nine bindings share one action.
@@ -593,6 +601,16 @@ pub(crate) fn bind_keys(cx: &mut App) {
             SelectProjectsTab { index: 1 },
             Some("ProjectsPage"),
         ),
+        KeyBinding::new(
+            "secondary-alt-1",
+            SelectAutomationsTab { index: 0 },
+            Some("AutomationsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-2",
+            SelectAutomationsTab { index: 1 },
+            Some("AutomationsPage"),
+        ),
         // ⌘⌥1–⌘⌥9 apply the nth starred model selection to the composer
         // session — a draft or an idle task, ordered as in the picker's
         // favorites section. The terminal keeps every chord as pty input;
@@ -600,47 +618,47 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary-alt-1",
             SelectFavoriteModel { index: 0 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-2",
             SelectFavoriteModel { index: 1 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-3",
             SelectFavoriteModel { index: 2 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-4",
             SelectFavoriteModel { index: 3 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-5",
             SelectFavoriteModel { index: 4 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-6",
             SelectFavoriteModel { index: 5 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-7",
             SelectFavoriteModel { index: 6 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-8",
             SelectFavoriteModel { index: 7 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-9",
             SelectFavoriteModel { index: 8 },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         // ⌘E cycles the composer session's reasoning effort through the
         // current model's ladder; ⌘⇧E walks it in reverse.
@@ -649,14 +667,14 @@ pub(crate) fn bind_keys(cx: &mut App) {
             CycleReasoningEffort {
                 direction: EffortCycleDirection::Forward,
             },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-shift-e",
             CycleReasoningEffort {
                 direction: EffortCycleDirection::Backward,
             },
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own

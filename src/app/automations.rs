@@ -59,6 +59,10 @@ pub(super) enum AutomationsTab {
     Runs,
 }
 
+impl AutomationsTab {
+    const ALL: [AutomationsTab; 2] = [AutomationsTab::Schedules, AutomationsTab::Runs];
+}
+
 /// The editor's schedule segmented control — one variant per
 /// [`AutomationSchedule`] kind.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -206,6 +210,23 @@ impl Waku {
         }
         self.automations_tab = tab;
         cx.notify();
+    }
+
+    /// ⌘⌥1–2: switch the open page's tab. The chord only exists inside the
+    /// page's key context, so a closed page never sees it.
+    pub(super) fn select_automations_tab_action(
+        &mut self,
+        action: &SelectAutomationsTab,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.automations_page {
+            return;
+        }
+        let Some(tab) = AutomationsTab::ALL.get(action.index).copied() else {
+            return;
+        };
+        self.set_automations_tab(tab, cx);
     }
 
     /// Toggling the experiment off closes the page and any editor so the

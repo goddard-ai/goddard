@@ -654,6 +654,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_terminals_action))
             .on_action(cx.listener(Self::toggle_projects_page_action))
             .on_action(cx.listener(Self::toggle_automations_page_action))
+            .on_action(cx.listener(Self::select_automations_tab_action))
             .on_action(cx.listener(Self::toggle_inbox_page_action))
             .on_action(cx.listener(Self::select_projects_tab_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
