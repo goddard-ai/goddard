@@ -394,6 +394,167 @@ async function releaseHyprlandRules(): Promise<void> {
   await $`hyprctl eval ${code}`.quiet().nothrow();
 }
 
+// Cargo reports units only as they finish — never a total — so the bar's
+// denominator is the previous build's dirty-unit count for the same label,
+// persisted across runs. Tiny or unknown counts render an animated
+// indeterminate bar instead of a fake percentage.
+const buildStatsPath = join(targetDir, "debug", "goddard-build-stats.json");
+const progressBarWidth = 16;
+
+function readBuildStats(): Record<string, number> {
+  try {
+    return JSON.parse(readFileSync(buildStatsPath, "utf8")) as Record<
+      string,
+      number
+    >;
+  } catch {
+    return {};
+  }
+}
+
+function recordBuildStats(label: string, dirtyUnits: number): void {
+  try {
+    const stats = readBuildStats();
+    stats[label] = dirtyUnits;
+    mkdirSync(dirname(buildStatsPath), { recursive: true });
+    writeFileSync(buildStatsPath, `${JSON.stringify(stats)}\n`);
+  } catch {
+    // The stats file only refines the bar; a failed write changes nothing.
+  }
+}
+
+function elapsedLabel(since: number): string {
+  const seconds = Math.floor((Date.now() - since) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function progressLine(
+  label: string,
+  done: number,
+  expected: number | undefined,
+  crate: string,
+  startedAt: number,
+): string {
+  let bar: string;
+  let count: string;
+  if (expected !== undefined && expected > 2) {
+    const fraction = Math.min(done / expected, 0.99);
+    const filled = Math.round(fraction * progressBarWidth);
+    bar =
+      "█".repeat(filled) + "░".repeat(progressBarWidth - filled);
+    count = `${done}/${expected}`;
+  } else {
+    const block = 5;
+    const head =
+      Math.floor((Date.now() - startedAt) / 90) %
+      (progressBarWidth + block);
+    bar = Array.from({ length: progressBarWidth }, (_, index) =>
+      index <= head && index > head - block ? "█" : "░",
+    ).join("");
+    count = `${done}`;
+  }
+  const detail = crate ? ` · ${crate}` : "";
+  return `[goddard-dev] Compiling ${label} ${bar} ${count} crate${done === 1 ? "" : "s"}${detail} · ${elapsedLabel(startedAt)}`;
+}
+
+// Runs cargo with a live one-line progress bar on a TTY by parsing the
+// compiler's JSON stream; diagnostics still print rendered (with color) so
+// warnings and errors look exactly as they do today. Off a TTY cargo's own
+// output passes straight through.
+async function cargoBuild(label: string, args: string[]): Promise<boolean> {
+  if (!stdoutIsTTY) {
+    console.log(`[goddard-dev] Building ${label}...`);
+    const result = await $`cargo build ${args}`.nothrow();
+    return result.exitCode === 0;
+  }
+
+  const expected = readBuildStats()[label];
+  const child = Bun.spawn(
+    [
+      "cargo",
+      "build",
+      "--message-format=json-diagnostic-rendered-ansi",
+      ...args,
+    ],
+    {
+      cwd: root,
+      env: { ...process.env, CARGO_TERM_COLOR: "always" },
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  );
+  const startedAt = Date.now();
+  let done = 0;
+  let crate = "";
+  const draw = () =>
+    process.stdout.write(
+      `\r\x1b[K${progressLine(label, done, expected, crate, startedAt)}`,
+    );
+  const print = (text: string) => {
+    process.stdout.write(`\r\x1b[K${text}${text.endsWith("\n") ? "" : "\n"}`);
+    draw();
+  };
+  const ticker = setInterval(draw, 100);
+  draw();
+  try {
+    const stdout = child.stdout;
+    if (stdout !== null && typeof stdout !== "number") {
+      const reader = stdout.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let newline = buffer.indexOf("\n");
+        while (newline !== -1) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf("\n");
+          let parsed: {
+            reason?: string;
+            fresh?: boolean;
+            target?: { name?: string };
+            message?: { rendered?: string | null; message?: string };
+            text?: string;
+          };
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            print(line);
+            continue;
+          }
+          if (parsed.reason === "compiler-artifact") {
+            if (parsed.fresh === false) {
+              done += 1;
+              crate = parsed.target?.name ?? crate;
+              draw();
+            }
+          } else if (parsed.reason === "build-script-executed") {
+            done += 1;
+          } else if (parsed.reason === "compiler-message") {
+            const rendered =
+              parsed.message?.rendered ?? parsed.message?.message;
+            if (rendered) print(rendered);
+          } else if (parsed.reason === "text" && parsed.text) {
+            print(parsed.text);
+          }
+        }
+      }
+    }
+  } finally {
+    clearInterval(ticker);
+  }
+  const exitCode = await child.exited;
+  process.stdout.write("\r\x1b[K");
+  if (exitCode !== 0) return false;
+  recordBuildStats(label, done);
+  console.log(
+    `[goddard-dev] ${label === "app" ? "App" : "Daemon"} compiled in ${elapsedLabel(startedAt)}${done === 0 ? " (all fresh)" : ""}.`,
+  );
+  return true;
+}
+
 async function build(target: BuildTarget): Promise<boolean> {
   if (target === "daemon") {
     return buildDaemon();
@@ -406,14 +567,51 @@ async function build(target: BuildTarget): Promise<boolean> {
     );
     return false;
   }
-  const result = isMacOS
-    ? await $`${join(root, "scripts/bundle.sh")} debug`.nothrow()
-    : await $`cargo build --package waku --bin goddard --bin goddard_js_repl --package waku-computer-use --bin goddard_computer_use --package waku-agent --bin goddard-agent`.nothrow();
-  if (result.exitCode !== 0) {
+  const appArgs = isMacOS
+    ? [
+        "--package",
+        "waku",
+        "--bin",
+        "goddard",
+        "--bin",
+        "goddard_js_repl",
+        "--package",
+        "waku-agent",
+        "--bin",
+        "goddard-agent",
+      ]
+    : [
+        "--package",
+        "waku",
+        "--bin",
+        "goddard",
+        "--bin",
+        "goddard_js_repl",
+        "--package",
+        "waku-computer-use",
+        "--bin",
+        "goddard_computer_use",
+        "--package",
+        "waku-agent",
+        "--bin",
+        "goddard-agent",
+      ];
+  if (!(await cargoBuild("app", appArgs))) {
     console.error("[goddard-dev] Build failed; keeping the current app open.");
     return false;
   }
-  if (!isMacOS) {
+  if (isMacOS) {
+    // The watcher already ran cargo itself so it could draw progress;
+    // bundle.sh only packages and signs the binaries it just produced.
+    const result =
+      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${join(root, "scripts/bundle.sh")} debug`.nothrow();
+    if (result.exitCode !== 0) {
+      console.error(
+        "[goddard-dev] Bundle failed; keeping the current app open.",
+      );
+      return false;
+    }
+  } else {
     try {
       await bundleComputerUse(
         join(targetDir, "debug"),
@@ -429,10 +627,20 @@ async function build(target: BuildTarget): Promise<boolean> {
 }
 
 async function buildDaemon(): Promise<boolean> {
-  console.log("[goddard-dev] Building daemon...");
-  const result =
-    await $`cargo build --package waku-daemon --features dev-binary --bin goddard-debug-daemon --package waku-agent --bin goddard-agent`.nothrow();
-  if (result.exitCode !== 0) {
+  if (
+    !(await cargoBuild("daemon", [
+      "--package",
+      "waku-daemon",
+      "--features",
+      "dev-binary",
+      "--bin",
+      "goddard-debug-daemon",
+      "--package",
+      "waku-agent",
+      "--bin",
+      "goddard-agent",
+    ]))
+  ) {
     console.error(
       "[goddard-dev] Daemon build failed; keeping the current daemon running.",
     );
