@@ -9,6 +9,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::git::SyncInProgress;
+use crate::model::SessionStatus;
 
 /// Whole friends document, carried wholesale on every change — it's small
 /// and every client applies it, same convention as `SettingsChanged`.
@@ -125,6 +126,10 @@ pub struct SharedProjectInfo {
     pub repo_path: PathBuf,
     /// The friend enabled sync on this share — the link is mutual.
     pub peer_sync_enabled: bool,
+    /// We let the friend watch this project's sessions — read-only, live.
+    /// Independent of sync: either can be on without the other.
+    #[serde(default)]
+    pub share_sessions: bool,
     pub shared_at_ms: u64,
 }
 
@@ -144,7 +149,26 @@ pub struct IncomingShareInfo {
     pub matched_project_name: Option<String>,
     /// We already opted in — the `sync_links` row is authoritative.
     pub sync_enabled: bool,
+    /// The friend lets us watch this project's sessions — read-only, live.
+    /// `false` for shares offered before session sharing existed.
+    #[serde(default)]
+    pub share_sessions: bool,
     pub received_at_ms: u64,
+}
+
+/// A session a friend exposes on a shared project — slim enough to render
+/// their session list without shipping any transcript content.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedSessionSummary {
+    pub session_id: Uuid,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_title: Option<String>,
+    pub status: SessionStatus,
+    pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reply_at: Option<u64>,
 }
 
 /// A sync relationship we opted into — branches are synced when the

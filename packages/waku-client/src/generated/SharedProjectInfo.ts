@@ -23,4 +23,9 @@ repoPath: string,
 /**
  * The friend enabled sync on this share — the link is mutual.
  */
-peerSyncEnabled: boolean, sharedAtMs: number, };
+peerSyncEnabled: boolean,
+/**
+ * We let the friend watch this project's sessions — read-only, live.
+ * Independent of sync: either can be on without the other.
+ */
+shareSessions: boolean, sharedAtMs: number, };

@@ -10949,6 +10949,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
+ "waku-protocol",
 ]
 
 [[package]]

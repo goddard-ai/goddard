@@ -240,6 +240,57 @@ impl WakuBackend {
                     .unwrap_or_default()
             }));
         }
+        {
+            // The share layer's view of sessions — what friends may list
+            // and watch on projects shared with session sharing on.
+            // Archived sessions and side chats stay hidden, matching
+            // task-list semantics.
+            let task_state = backend.task_state.clone();
+            backend
+                .share
+                .set_session_source(crate::share::SessionSource {
+                    list: Arc::new({
+                        let task_state = task_state.clone();
+                        move |repo_path| {
+                            let state = task_state.lock();
+                            let Some(project) = state
+                                .projects
+                                .iter()
+                                .find(|project| project.path == repo_path)
+                            else {
+                                return Vec::new();
+                            };
+                            state
+                                .sessions
+                                .iter()
+                                .filter(|session| {
+                                    session.project_id == project.id
+                                        && session.archived_at.is_none()
+                                        && session.side_chat_of.is_none()
+                                })
+                                .map(|session| {
+                                    waku_protocol::friends::SharedSessionSummary {
+                                        session_id: session.id,
+                                        title: session.title.clone(),
+                                        auto_title: session.auto_title.clone(),
+                                        status: session.status,
+                                        created_at: session.created_at,
+                                        last_reply_at: session.last_reply_at,
+                                    }
+                                })
+                                .collect()
+                        }
+                    }),
+                    snapshot: Arc::new(move |session_id| {
+                        task_state
+                            .lock()
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == session_id)
+                            .cloned()
+                    }),
+                });
+        }
         Ok(backend)
     }
 
@@ -592,6 +643,14 @@ impl Backend for WakuBackend {
         self.share.set_review_notifier(notifier);
     }
 
+    fn set_session_streamer(&self, streamer: crate::share::SessionStreamer) {
+        self.share.set_session_streamer(streamer);
+    }
+
+    fn set_friend_session_sink(&self, sink: crate::share::FriendSessionSink) {
+        self.share.set_friend_session_sink(sink);
+    }
+
     fn handle(
         &self,
         request: Request,
@@ -730,6 +789,38 @@ impl Backend for WakuBackend {
                     branches,
                     default_branch,
                 })
+            }
+            Command::SetFriendSessionSharing {
+                node_id,
+                origin_url,
+                enabled,
+            } => {
+                self.share
+                    .set_session_sharing(node_id, origin_url, enabled)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::GetFriendSessions {
+                node_id,
+                origin_url,
+            } => {
+                let sessions = self.share.friend_sessions(node_id, origin_url)?;
+                Ok(ResponsePayload::FriendSessions { sessions })
+            }
+            Command::WatchFriendSession {
+                node_id,
+                origin_url,
+                session_id,
+            } => {
+                let session =
+                    self.share
+                        .watch_friend_session(node_id, origin_url, session_id)?;
+                Ok(ResponsePayload::FriendSession {
+                    session: Box::new(session),
+                })
+            }
+            Command::UnwatchFriendSession { session_id } => {
+                self.share.unwatch_friend_session(session_id)?;
+                Ok(ResponsePayload::Ack)
             }
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
@@ -3654,7 +3745,11 @@ fn handle_driver_command(
         | Command::SetFriendSyncConfig { .. }
         | Command::FriendSyncNow { .. }
         | Command::FriendSyncAlertAction { .. }
-        | Command::GetFriendSyncBranches { .. } => {
+        | Command::GetFriendSyncBranches { .. }
+        | Command::SetFriendSessionSharing { .. }
+        | Command::GetFriendSessions { .. }
+        | Command::WatchFriendSession { .. }
+        | Command::UnwatchFriendSession { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

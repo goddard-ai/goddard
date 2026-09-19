@@ -34,6 +34,10 @@ struct ClientInner {
     daemon_commit: Option<String>,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
+    /// Friend-session watchers: deliver every event for the session
+    /// regardless of the sharer's runtime id — runtimes rotate on the
+    /// friend's side and a watcher follows them all.
+    session_watchers: Mutex<HashMap<Uuid, Vec<Sender<SequencedEvent>>>>,
     pending_events: Mutex<HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>>,
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
     settings_subscribers: Mutex<Vec<Sender<DaemonSettings>>>,
@@ -41,6 +45,8 @@ struct ClientInner {
     automations_subscribers: Mutex<Vec<Sender<waku_protocol::automations::AutomationsState>>>,
     /// `ReviewChanged` broadcasts — the origin URL whose QA state moved.
     review_subscribers: Mutex<Vec<Sender<String>>>,
+    /// `(session_id, revoked)` — a watched friend session's stream ended.
+    friend_session_closed_subscribers: Mutex<Vec<Sender<(Uuid, bool)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -119,12 +125,14 @@ impl DaemonClient {
             daemon_commit,
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
+            session_watchers: Mutex::new(HashMap::new()),
             pending_events: Mutex::new(HashMap::new()),
             task_state_subscribers: Mutex::new(Vec::new()),
             settings_subscribers: Mutex::new(Vec::new()),
             friends_subscribers: Mutex::new(Vec::new()),
             automations_subscribers: Mutex::new(Vec::new()),
             review_subscribers: Mutex::new(Vec::new()),
+            friend_session_closed_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -159,6 +167,20 @@ impl DaemonClient {
                 let _ = events.send(event);
             }
         }
+        receiver
+    }
+
+    /// Every event for `session_id` under any runtime — the watch side of
+    /// a friend's shared session, where the sharer's runtime ids are
+    /// foreign and rotate on reconnect.
+    pub fn subscribe_session_events(&self, session_id: Uuid) -> Receiver<SequencedEvent> {
+        let (events, receiver) = unbounded();
+        self.inner
+            .session_watchers
+            .lock()
+            .entry(session_id)
+            .or_default()
+            .push(events);
         receiver
     }
 
@@ -258,6 +280,18 @@ impl DaemonClient {
     pub fn subscribe_review(&self) -> Receiver<String> {
         let (events, receiver) = unbounded();
         self.inner.review_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// A watched friend session's stream ended — `(session_id, revoked)`.
+    /// `revoked` means the friend turned sharing off or unshared; `false`
+    /// is a disconnect or a deleted session.
+    pub fn subscribe_friend_session_closed(&self) -> Receiver<(Uuid, bool)> {
+        let (events, receiver) = unbounded();
+        self.inner
+            .friend_session_closed_subscribers
+            .lock()
+            .push(events);
         receiver
     }
 
@@ -411,6 +445,13 @@ fn run_client(
                             }
                         };
                         if should_deliver {
+                            if let Some(watchers) = inner
+                                .session_watchers
+                                .lock()
+                                .get_mut(&event.session_id)
+                            {
+                                watchers.retain(|watcher| watcher.send(event.clone()).is_ok());
+                            }
                             let key = (event.session_id, event.runtime_id);
                             let sessions = inner.sessions.lock();
                             if let Some(events) = sessions.get(&key) {
@@ -455,6 +496,15 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(origin_url.clone()).is_ok());
                     }
+                    ServerMessage::FriendSessionClosed {
+                        session_id,
+                        revoked,
+                    } => {
+                        inner
+                            .friend_session_closed_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send((session_id, revoked)).is_ok());
+                    }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
                 }
@@ -488,11 +538,13 @@ fn fail_connection(inner: &ClientInner) {
     // runtime still exists. Real provider exits arrive through the replayable
     // `processExited` event emitted by the daemon.
     drop(std::mem::take(&mut *inner.sessions.lock()));
+    drop(std::mem::take(&mut *inner.session_watchers.lock()));
     inner.task_state_subscribers.lock().clear();
     inner.settings_subscribers.lock().clear();
     inner.friends_subscribers.lock().clear();
     inner.automations_subscribers.lock().clear();
     inner.review_subscribers.lock().clear();
+    inner.friend_session_closed_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

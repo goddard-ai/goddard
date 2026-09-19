@@ -596,6 +596,34 @@ pub enum Command {
     GetFriendSyncBranches {
         link_id: String,
     },
+    /// Opt in or out of letting the friend watch this shared project's
+    /// sessions — live, read-only. Independent of repo sync; toggling
+    /// re-sends the shared set so the friend's incoming share row updates.
+    SetFriendSessionSharing {
+        node_id: String,
+        origin_url: String,
+        enabled: bool,
+    },
+    /// List the sessions a friend exposes on their shared project.
+    /// Answers `FriendSessions`; errors when the friend is unreachable or
+    /// hasn't enabled session sharing.
+    GetFriendSessions {
+        node_id: String,
+        origin_url: String,
+    },
+    /// Open a live, read-only view of a friend's session. The response is
+    /// the current snapshot; updates arrive as `Event` broadcasts under
+    /// the friend's session/runtime ids until `FriendSessionClosed`.
+    WatchFriendSession {
+        node_id: String,
+        origin_url: String,
+        session_id: Uuid,
+    },
+    /// Stop watching a friend's session — the peer subscription closes
+    /// and its events stop reaching this client's broadcast stream.
+    UnwatchFriendSession {
+        session_id: Uuid,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -738,6 +766,14 @@ pub enum ServerMessage {
     /// — here or on a friend's machine. Review surfaces for a project
     /// with that remote should re-read their queue.
     ReviewChanged { origin_url: String },
+    /// A watched friend session's stream ended. `revoked` means the friend
+    /// turned session sharing off or unshared the project — render that,
+    /// not a disconnect. Otherwise the peer went away or the session was
+    /// deleted; watching again refetches a fresh snapshot.
+    FriendSessionClosed {
+        session_id: Uuid,
+        revoked: bool,
+    },
     ShuttingDown,
 }
 
@@ -838,6 +874,15 @@ pub enum ResponsePayload {
         link_id: String,
         branches: Vec<String>,
         default_branch: Option<String>,
+    },
+    /// A friend's shared sessions, as read for `getFriendSessions`.
+    FriendSessions {
+        sessions: Vec<crate::friends::SharedSessionSummary>,
+    },
+    /// The snapshot that opens a friend session watch, as read for
+    /// `watchFriendSession`. Live updates follow as `Event` broadcasts.
+    FriendSession {
+        session: Box<AgentSession>,
     },
     Session {
         session: Option<AgentSession>,

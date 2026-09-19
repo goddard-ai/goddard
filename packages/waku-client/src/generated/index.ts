@@ -150,6 +150,7 @@ export type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
 export type { SessionStatus } from "./SessionStatus";
 export type { SessionWorkspace } from "./SessionWorkspace";
 export type { SharedProjectInfo } from "./SharedProjectInfo";
+export type { SharedSessionSummary } from "./SharedSessionSummary";
 export type { SkillEntry } from "./SkillEntry";
 export type { SkillInstall } from "./SkillInstall";
 export type { SkillScope } from "./SkillScope";
