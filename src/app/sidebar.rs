@@ -265,6 +265,14 @@ const DOCK_MAGNIFY_RADIUS: f32 = 90.0;
 /// The row's leading inset from the sidebar edge, and its button spacing.
 const DOCK_LEFT_INSET: f32 = 4.5;
 const DOCK_ITEM_GAP: f32 = 2.0;
+/// The dock's resting bottom inset — the Sketch placement.
+const DOCK_BOTTOM_INSET: f32 = 3.5;
+/// How far below its resting spot the dock parks while hidden: enough to
+/// drop its top edge (label slot included) under the window's bottom edge.
+const DOCK_HIDDEN_DEPTH: f32 = 80.0;
+/// Rise on hover; the drop is quicker so the dock clears promptly.
+const DOCK_RISE: Duration = Duration::from_millis(180);
+const DOCK_DROP: Duration = Duration::from_millis(140);
 
 /// The session row's trailing time: how long ago the agent last replied,
 /// shown through a live turn too. A session that has never replied shows
@@ -1677,10 +1685,78 @@ impl Waku {
     /// bottom strip is hovered. It keeps its own hover state so the pointer
     /// can cross from the footer onto it without flicker — and so it survives
     /// the sidebar swap when a button opens the settings page.
-    pub(super) fn render_sidebar_dock(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.sidebar_dock_zone_hovered && !self.sidebar_dock_hovered {
-            return None;
+    pub(super) fn render_sidebar_dock(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        // The hover flags gate *wanted* visibility; the slide gate is the
+        // motion state, so the dock stays mounted while it drops back off
+        // the window's bottom edge. Requesting the next frame here notifies
+        // only the view being rendered — the sidebar pane or the settings
+        // root — not the whole window.
+        let raised = self.sidebar_dock_zone_hovered || self.sidebar_dock_hovered;
+        if cx.reduce_motion() {
+            self.sidebar_dock_motion.set(if raised {
+                SidebarDockMotion::Shown
+            } else {
+                SidebarDockMotion::Hidden
+            });
         }
+        let bottom = match self.sidebar_dock_motion.get() {
+            SidebarDockMotion::Hidden => {
+                if !raised {
+                    return None;
+                }
+                self.sidebar_dock_motion.set(SidebarDockMotion::Moving {
+                    progress: 0.0,
+                    last_frame: Instant::now(),
+                });
+                window.request_animation_frame();
+                DOCK_BOTTOM_INSET - DOCK_HIDDEN_DEPTH
+            }
+            SidebarDockMotion::Shown => {
+                if !raised {
+                    self.sidebar_dock_motion.set(SidebarDockMotion::Moving {
+                        progress: 1.0,
+                        last_frame: Instant::now(),
+                    });
+                    window.request_animation_frame();
+                }
+                DOCK_BOTTOM_INSET
+            }
+            SidebarDockMotion::Moving {
+                progress,
+                last_frame,
+            } => {
+                let now = Instant::now();
+                let step = now.duration_since(last_frame).as_secs_f32()
+                    / if raised { DOCK_RISE } else { DOCK_DROP }.as_secs_f32();
+                let progress = if raised {
+                    progress + step
+                } else {
+                    progress - step
+                }
+                .clamp(0.0, 1.0);
+                if progress >= 1.0 && raised {
+                    self.sidebar_dock_motion.set(SidebarDockMotion::Shown);
+                    DOCK_BOTTOM_INSET
+                } else if progress <= 0.0 && !raised {
+                    self.sidebar_dock_motion.set(SidebarDockMotion::Hidden);
+                    return None;
+                } else {
+                    self.sidebar_dock_motion.set(SidebarDockMotion::Moving {
+                        progress,
+                        last_frame: now,
+                    });
+                    window.request_animation_frame();
+                    // The same ease-out-quint curve serves both ways: rising
+                    // it decelerates into place; falling it accelerates off
+                    // the edge, and a mid-flight reversal stays continuous.
+                    DOCK_BOTTOM_INSET - DOCK_HIDDEN_DEPTH * (1.0 - ease_out_quint()(progress))
+                }
+            }
+        };
         let theme = Theme::current(cx);
         let mut items = vec![
             SidebarDockItem::Inbox,
@@ -1719,7 +1795,7 @@ impl Waku {
             div()
                 .id("sidebar-dock")
                 .absolute()
-                .bottom(px(3.5))
+                .bottom(px(bottom))
                 .left(px(4.5))
                 .occlude()
                 .flex()
@@ -2495,7 +2571,7 @@ impl Waku {
                     // paint after it to stay on top — visually and in the
                     // hit-test order.
                     .child(self.render_sidebar_footer(cx))
-                    .when_some(self.render_sidebar_dock(cx), |container, dock| {
+                    .when_some(self.render_sidebar_dock(window, cx), |container, dock| {
                         container.child(dock)
                     }),
             )
