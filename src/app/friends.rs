@@ -6,9 +6,31 @@
 use super::settings::{SettingSearch, settings_search_text, settings_title_jump};
 use super::*;
 use waku_client::friends::{
-    FriendInfo, FriendSyncAlertAction, IncomingShareInfo, SyncAlertInfo, SyncAlertKind,
-    SyncLinkInfo, TransferDirection, TransferInfo, TransferStatus,
+    FriendInfo, FriendSyncAlertAction, IncomingShareInfo, SharedSessionSummary, SyncAlertInfo,
+    SyncAlertKind, SyncLinkInfo, TransferDirection, TransferInfo, TransferStatus,
 };
+
+/// A session we're watching on a friend's shared project — the friend
+/// owns the runtime; our driver handle is a read-only no-op.
+pub(super) struct FriendWatch {
+    pub peer_name: String,
+    /// `Some` once the stream ended — `true` the friend revoked, `false`
+    /// the connection dropped or the friend went offline.
+    pub closed: Option<bool>,
+}
+
+/// A `GetFriendSessions` answer for one incoming share — empty `Ready`
+/// means the project simply has no sessions yet.
+pub(super) enum FriendSessionList {
+    Loading,
+    Ready(Vec<SharedSessionSummary>),
+    Error(String),
+}
+
+/// `friend_session_lists` key — one entry per (peer, shared origin).
+pub(super) fn friend_session_list_key(node_id: &str, origin_url: &str) -> String {
+    format!("{node_id}|{origin_url}")
+}
 
 impl Waku {
     fn friends_card(&self, theme: &Theme, children: impl IntoIterator<Item = AnyElement>) -> Div {
@@ -985,6 +1007,50 @@ impl Waku {
                     ))
                     .into_any_element(),
             );
+            // Opt-in second layer: the friend can peek at this project's
+            // sessions, live and read-only, independent of repo sync.
+            if let Some(share) = shared {
+                let peer = node_id.to_owned();
+                let origin = share.origin_url.clone();
+                let next = !share.share_sessions;
+                children.push(
+                    div()
+                        .mt(px(2.0))
+                        .ml(px(12.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(sp(11.5))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("friends.share_sessions")),
+                        )
+                        .child(toggle_switch(
+                            SharedString::from(format!(
+                                "share-sessions-{}-{}",
+                                node_id, project.id
+                            )),
+                            share.share_sessions,
+                            false,
+                            *theme,
+                            cx,
+                            move |this, _window, cx| {
+                                this.friends_command(
+                                    waku_client::Command::SetFriendSessionSharing {
+                                        node_id: peer.clone(),
+                                        origin_url: origin.clone(),
+                                        enabled: next,
+                                    },
+                                    cx,
+                                );
+                            },
+                        ))
+                        .into_any_element(),
+                );
+            }
         }
         if project_rows == 0 {
             children.push(
@@ -1060,7 +1126,27 @@ impl Waku {
                         cx,
                     ));
                 }
+                if share.share_sessions {
+                    let key = friend_session_list_key(node_id, &share.origin_url);
+                    let fetched = self.friend_session_lists.contains_key(&key);
+                    if !fetched {
+                        let peer = node_id.to_owned();
+                        let origin = share.origin_url.clone();
+                        row = row.child(self.friends_button(
+                            SharedString::from(format!("sessions-{key}")),
+                            tr!("friends.sessions"),
+                            theme,
+                            move |this, cx| {
+                                this.fetch_friend_sessions(peer.clone(), origin.clone(), cx)
+                            },
+                            cx,
+                        ));
+                    }
+                }
                 children.push(row.into_any_element());
+                if share.share_sessions {
+                    children.push(self.render_friend_session_list(node_id, share, theme, cx));
+                }
             }
         }
 
@@ -1081,6 +1167,198 @@ impl Waku {
             .pb(px(4.0))
             .children(children)
             .into_any_element()
+    }
+
+    /// The strip above a watched friend session's transcript: who it
+    /// belongs to, that it's read-only, and the stream's closed state.
+    pub(super) fn friend_watch_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let watch = self.selected_friend_watch()?;
+        let session_id = self.state.selected_session?;
+        let theme = Theme::current(cx);
+        let text = match watch.closed {
+            Some(true) => tr!("friends.watch_revoked", name = watch.peer_name.clone()).to_string(),
+            Some(false) => tr!("friends.watch_ended").to_string(),
+            None => tr!("friends.watching_session", name = watch.peer_name.clone()).to_string(),
+        };
+        Some(
+            div()
+                .flex_none()
+                .px(px(12.0))
+                .h(px(28.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .bg(theme.inset)
+                .border_b(hairline())
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(text),
+                )
+                .child(
+                    div()
+                        .id("friend-watch-stop")
+                        .tab_index(0)
+                        .px(px(8.0))
+                        .h(px(20.0))
+                        .rounded(px(6.0))
+                        .flex()
+                        .items_center()
+                        .cursor_default()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .focus_visible(|style| style.bg(theme.overlay))
+                        .hover(|element| element.bg(theme.overlay).text_color(theme.text))
+                        .child(tr!("friends.stop_watching"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.stop_watching_friend_session(session_id, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if !event.keystroke.modifiers.modified()
+                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                this.stop_watching_friend_session(session_id, cx);
+                                cx.stop_propagation();
+                            }
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The fetched session list under an incoming share — each row opens
+    /// the session as a read-only live view in the main area.
+    fn render_friend_session_list(
+        &mut self,
+        node_id: &str,
+        share: &IncomingShareInfo,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let key = friend_session_list_key(node_id, &share.origin_url);
+        let Some(list) = self.friend_session_lists.get(&key) else {
+            return div().into_any_element();
+        };
+        let mut children: Vec<AnyElement> = Vec::new();
+        match list {
+            FriendSessionList::Loading => children.push(
+                div()
+                    .mt(px(4.0))
+                    .ml(px(12.0))
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("friends.sessions_loading"))
+                    .into_any_element(),
+            ),
+            FriendSessionList::Error(error) => children.push(
+                div()
+                    .mt(px(4.0))
+                    .ml(px(12.0))
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("friends.sessions_error", error = error.clone()))
+                    .into_any_element(),
+            ),
+            FriendSessionList::Ready(sessions) => {
+                if sessions.is_empty() {
+                    children.push(
+                        div()
+                            .mt(px(4.0))
+                            .ml(px(12.0))
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("friends.sessions_empty"))
+                            .into_any_element(),
+                    );
+                }
+                for session in sessions {
+                    let watched = self.friend_sessions.contains_key(&session.session_id);
+                    let session_id = session.session_id;
+                    let title = if session.title.is_empty() {
+                        session
+                            .auto_title
+                            .clone()
+                            .unwrap_or_else(|| tr!("friends.untitled_session").to_string())
+                    } else {
+                        session.title.clone()
+                    };
+                    children.push(
+                        div()
+                            .id(SharedString::from(format!("friend-session-{session_id}")))
+                            .tab_index(0)
+                            .mt(px(2.0))
+                            .ml(px(12.0))
+                            .px(px(6.0))
+                            .py(px(3.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .cursor_default()
+                            .focus_visible(|style| style.bg(theme.overlay))
+                            .hover(|element| element.bg(theme.overlay))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(10.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(if watched {
+                                        tr!("friends.watching").to_string()
+                                    } else if session.status.is_busy() {
+                                        tr!("friends.session_running").to_string()
+                                    } else {
+                                        tr!("friends.watch").to_string()
+                                    }),
+                            )
+                            .on_click(cx.listener({
+                                let peer = node_id.to_owned();
+                                let origin = share.origin_url.clone();
+                                move |this, _, _, cx| {
+                                    this.open_friend_session(
+                                        peer.clone(),
+                                        origin.clone(),
+                                        session_id,
+                                        cx,
+                                    );
+                                }
+                            }))
+                            .on_key_down(cx.listener({
+                                let peer = node_id.to_owned();
+                                let origin = share.origin_url.clone();
+                                move |this, event: &KeyDownEvent, _, cx| {
+                                    if !event.keystroke.modifiers.modified()
+                                        && matches!(
+                                            event.keystroke.key.as_str(),
+                                            "enter" | "space"
+                                        )
+                                    {
+                                        this.open_friend_session(
+                                            peer.clone(),
+                                            origin.clone(),
+                                            session_id,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }
+                                }
+                            }))
+                            .into_any_element(),
+                    );
+                }
+            }
+        }
+        div().children(children).into_any_element()
     }
 
     /// One sync link's config block inside the sharing panel: auto-push

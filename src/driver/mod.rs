@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
-    BackgroundWorkKey, DriverEvent, ProviderKind, ProviderResumeCursor, RuntimeEventCursor,
+    BackgroundWorkKey, DriverEvent, MessageAttachment, ProviderKind, ProviderResumeCursor,
+    RuntimeEventCursor,
 };
 use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
@@ -475,5 +476,127 @@ impl Drop for RemoteDriverControl {
         let _ = self.shutdown.try_send(());
         let client = self.client.lock().clone();
         client.unsubscribe(self.session_id, self.runtime_id);
+    }
+}
+
+/// A read-only tail of a friend's shared session. The friend's events
+/// arrive through our own daemon's broadcast stream — this pump just
+/// re-keys them into the runtime event channel, so the transcript applies
+/// them like any other driver's. Every control is a no-op: watching is
+/// strictly read-only.
+pub(crate) fn watch_friend_session(
+    client: waku_client::DaemonClient,
+    session_id: uuid::Uuid,
+    peer_name: String,
+    events: DriverEventSender,
+) -> anyhow::Result<DriverHandle> {
+    let remote_events = client.subscribe_session_events(session_id);
+    let closed_events = client.subscribe_friend_session_closed();
+    let (shutdown, shutdown_rx) = bounded(1);
+    let forwarding = events.clone();
+    std::thread::Builder::new()
+        .name(format!("goddard-friend-session-{session_id}"))
+        .spawn(move || {
+            loop {
+                select! {
+                    recv(shutdown_rx) -> _ => return,
+                    recv(remote_events) -> sequenced => {
+                        let Ok(sequenced) = sequenced else {
+                            return;
+                        };
+                        let cursor = RuntimeEventCursor {
+                            runtime_id: sequenced.runtime_id,
+                            epoch: sequenced.epoch,
+                            sequence: sequenced.sequence,
+                        };
+                        let event = match waku_client::event_from_wire(sequenced.event) {
+                            Ok(event) => event,
+                            Err(error) => DriverEvent::Error(format!(
+                                "the friend session sent an invalid event: {error}"
+                            )),
+                        };
+                        // A provider exit on the friend's side doesn't end
+                        // the watch — the session-level subscription keeps
+                        // streaming once the next runtime starts.
+                        if matches!(event, DriverEvent::ProcessExited) {
+                            continue;
+                        }
+                        if forwarding.send(event).is_err()
+                            || forwarding
+                                .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
+                                .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    recv(closed_events) -> closed => {
+                        let Ok((closed_session, revoked)) = closed else {
+                            return;
+                        };
+                        if closed_session != session_id {
+                            continue;
+                        }
+                        let _ = forwarding.send(DriverEvent::Error(if revoked {
+                            format!("{peer_name} stopped sharing this session")
+                        } else {
+                            "the connection to the friend session ended".to_owned()
+                        }));
+                        let _ = forwarding.send(DriverEvent::ProcessExited);
+                        return;
+                    }
+                }
+            }
+        })?;
+    Ok(DriverHandle::from_control(Arc::new(FriendWatchControl {
+        client,
+        session_id,
+        shutdown,
+    })))
+}
+
+struct FriendWatchControl {
+    client: waku_client::DaemonClient,
+    session_id: uuid::Uuid,
+    shutdown: Sender<()>,
+}
+
+impl DriverControl for FriendWatchControl {
+    fn prompt(
+        &self,
+        _prompt: String,
+        _turn_id: Option<uuid::Uuid>,
+        _message_id: Option<uuid::Uuid>,
+        _hidden: bool,
+        _attachments: Vec<MessageAttachment>,
+    ) {
+    }
+
+    fn cancel(&self) {}
+
+    fn respond(&self, _request_id: String, _option_id: String) {}
+
+    fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+        anyhow::bail!("a friend's session is read-only")
+    }
+
+    fn fork(&self, _turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
+        anyhow::bail!("a friend's session is read-only")
+    }
+
+    fn close(&self) {
+        let _ = self.shutdown.try_send(());
+        let _ = self.client.notify(
+            uuid::Uuid::nil(),
+            uuid::Uuid::nil(),
+            waku_client::Command::UnwatchFriendSession {
+                session_id: self.session_id,
+            },
+        );
+    }
+}
+
+impl Drop for FriendWatchControl {
+    fn drop(&mut self) {
+        self.close();
     }
 }

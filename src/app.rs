@@ -2118,6 +2118,18 @@ pub struct Waku {
     /// `(daemon, origin_url)` whose `qa` review state moved.
     review_tx: Sender<(waku_client::DaemonKey, String)>,
     review_events: Receiver<(waku_client::DaemonKey, String)>,
+    /// Sessions we're watching on a friend's shared project, session id →
+    /// watch state. Friend sessions live in `state.sessions` while watched
+    /// but stay out of the sidebar, task-state saves, and every mutation
+    /// path — their driver handle is a read-only no-op.
+    friend_sessions: HashMap<Uuid, friends::FriendWatch>,
+    /// Session lists fetched from friends (`GetFriendSessions`), keyed
+    /// `"{node_id}|{origin_url}"`.
+    friend_session_lists: HashMap<String, friends::FriendSessionList>,
+    /// `friendSessionClosed` broadcasts forwarded by the task-state sync
+    /// worker — a watched session's stream ended.
+    friend_session_closed_tx: Sender<(Uuid, bool)>,
+    friend_session_closed_events: Receiver<(Uuid, bool)>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
     /// The Settings → Friends display-name field — the name friends see on
@@ -4228,6 +4240,7 @@ impl Waku {
         let (friends_tx, friends_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
         let (review_tx, review_events) = unbounded();
+        let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (route_policy_tx, route_policy_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
         #[cfg(target_os = "macos")]
@@ -5223,6 +5236,10 @@ impl Waku {
                 automations_events,
                 review_tx,
                 review_events,
+                friend_sessions: HashMap::new(),
+                friend_session_lists: HashMap::new(),
+                friend_session_closed_tx,
+                friend_session_closed_events,
                 route_policy_tx,
                 route_policy_events,
                 route_policy: None,

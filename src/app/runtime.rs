@@ -1308,6 +1308,7 @@ impl Waku {
         let friends_updates = self.friends_tx.clone();
         let automations_updates = self.automations_tx.clone();
         let review_updates = self.review_tx.clone();
+        let closed_updates = self.friend_session_closed_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
@@ -1324,6 +1325,7 @@ impl Waku {
                     let friends = client.subscribe_friends();
                     let automations = client.subscribe_automations();
                     let review = client.subscribe_review();
+                    let session_closed = client.subscribe_friend_session_closed();
                     // Seed the document before broadcasts arrive — a client
                     // connecting after the last change sees no event until
                     // something mutates friends state again.
@@ -1428,6 +1430,18 @@ impl Waku {
                                     break replacement;
                                 };
                                 if review_updates.send((key, origin_url)).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
+                            recv(session_closed) -> closed => {
+                                let Ok(closed) = closed else {
+                                    let Ok(replacement) = clients.recv() else {
+                                        return;
+                                    };
+                                    break replacement;
+                                };
+                                if closed_updates.send(closed).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1664,6 +1678,227 @@ impl Waku {
         .detach();
     }
 
+    /// Whether this session is a friend's shared session we're watching —
+    /// read-only, so the composer and every mutation path stay hidden.
+    pub(super) fn is_friend_session(&self, session_id: Uuid) -> bool {
+        self.friend_sessions.contains_key(&session_id)
+    }
+
+    /// Fetch a shared project's session list for the friends panel;
+    /// results land in `friend_session_lists`.
+    pub(super) fn fetch_friend_sessions(
+        &mut self,
+        node_id: String,
+        origin_url: String,
+        cx: &mut Context<Self>,
+    ) {
+        let key = friends::friend_session_list_key(&node_id, &origin_url);
+        self.friend_session_lists
+            .insert(key.clone(), friends::FriendSessionList::Loading);
+        let client = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::GetFriendSessions {
+                            node_id,
+                            origin_url,
+                        },
+                    )
+                })
+                .await;
+            let list = match result {
+                Ok(waku_client::ResponsePayload::FriendSessions { sessions }) => {
+                    friends::FriendSessionList::Ready(sessions)
+                }
+                Ok(_) => friends::FriendSessionList::Error(
+                    "the daemon returned an invalid response".into(),
+                ),
+                Err(error) => friends::FriendSessionList::Error(error.to_string()),
+            };
+            let _ = this.update(cx, move |this, cx| {
+                this.friend_session_lists.insert(key, list);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Open a friend's shared session as a live, read-only view. The
+    /// snapshot seeds the transcript; the watch runtime then applies the
+    /// friend's events as they arrive.
+    pub(super) fn open_friend_session(
+        &mut self,
+        node_id: String,
+        origin_url: String,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_friend_session(session_id) {
+            self.select_session(session_id, cx);
+            return;
+        }
+        let peer_name = self
+            .friends_state
+            .friends
+            .iter()
+            .find(|friend| friend.node_id == node_id)
+            .map(|friend| friend.nickname.clone().unwrap_or_else(|| friend.name.clone()))
+            .unwrap_or_else(|| tr!("friends.a_friend").to_string());
+        let client = self.daemon.client();
+        let request_peer = node_id.clone();
+        let request_origin = origin_url.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::WatchFriendSession {
+                            node_id: request_peer,
+                            origin_url: request_origin,
+                            session_id,
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, move |waku, cx| {
+                match result {
+                    Ok(waku_client::ResponsePayload::FriendSession { session }) => {
+                        waku.install_friend_watch(*session, peer_name, cx);
+                        waku.select_session(session_id, cx);
+                    }
+                    Ok(_) => waku.show_toast(tr!("friends.command_failed", error = "the daemon returned an invalid response")),
+                    Err(error) => waku.show_toast(tr!(
+                        "friends.command_failed",
+                        error = error.to_string()
+                    )),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn install_friend_watch(
+        &mut self,
+        mut session: AgentSession,
+        peer_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = session.id;
+        let (event_tx, events) = driver::event_channel(self.event_wake_tx.clone());
+        let handle = match driver::watch_friend_session(
+            self.daemon.client(),
+            session_id,
+            peer_name.clone(),
+            event_tx,
+        ) {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.show_toast(tr!("friends.command_failed", error = error.to_string()));
+                return;
+            }
+        };
+        // The snapshot is the whole session — no hydration pass needed.
+        session.detail_loaded = true;
+        if let Some(existing) = self
+            .state
+            .sessions
+            .iter_mut()
+            .find(|existing| existing.id == session_id)
+        {
+            *existing = session;
+        } else {
+            self.state.sessions.push(session);
+        }
+        self.friend_sessions.insert(
+            session_id,
+            friends::FriendWatch {
+                peer_name,
+                closed: None,
+            },
+        );
+        self.runtimes.insert(
+            session_id,
+            SessionRuntime {
+                driver: handle,
+                options_generation: 0,
+                events,
+                pending_events: VecDeque::new(),
+                pending_steers: VecDeque::new(),
+                stream_phase: None,
+                pending_reasoning_newlines: 0,
+                park_announced: false,
+                stream_remeasure_pending: false,
+                pending_permission: None,
+                pending_user_input: None,
+                pending_computer_approval: None,
+                computer_use_previews: Vec::new(),
+                computer_session_grants: HashSet::new(),
+                last_driver_error: None,
+                last_active_at: Instant::now(),
+                last_background_refresh_at: Instant::now()
+                    .checked_sub(BACKGROUND_WORK_REFRESH_INTERVAL)
+                    .unwrap_or_else(Instant::now),
+                project_map: None,
+            },
+        );
+        signal_event_pump(&self.event_wake_tx);
+        cx.notify();
+    }
+
+    /// Detach the watch and drop the session row — the friend's session
+    /// stays untouched; we just stop looking at it.
+    pub(super) fn stop_watching_friend_session(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        if self.friend_sessions.remove(&session_id).is_none() {
+            return;
+        }
+        if let Some(runtime) = self.runtimes.remove(&session_id) {
+            runtime.driver.close();
+        }
+        self.state.sessions.retain(|session| session.id != session_id);
+        self.transcript_scroll_positions.remove(&session_id);
+        self.background_work.remove(&session_id);
+        if self.state.selected_session == Some(session_id) {
+            self.state.selected_session = None;
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// A watched friend session's stream ended — `true` the friend
+    /// revoked sharing, `false` the connection dropped.
+    fn drain_friend_session_closed_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok((session_id, revoked)) = self.friend_session_closed_events.try_recv() {
+            if let Some(watch) = self.friend_sessions.get_mut(&session_id) {
+                watch.closed = Some(revoked);
+                changed = true;
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    /// The watch state for the selected session, when it's a friend's.
+    pub(super) fn selected_friend_watch(&self) -> Option<&friends::FriendWatch> {
+        self.state
+            .selected_session
+            .and_then(|session_id| self.friend_sessions.get(&session_id))
+    }
+
     /// Fold a `settingsChanged` broadcast into the local mirrors. The
     /// supervisor's cache is marked persisted so the writer thread does not
     /// echo the document back; the palette and settings pages read the new
@@ -1721,7 +1956,12 @@ impl Waku {
         let removed = merge_remote_session_catalog(
             &mut self.state.sessions,
             snapshot.sessions.clone(),
-            |session_id| self.daemons.session_owner(session_id) == key,
+            // Watched friend sessions are borrowed from a peer — no
+            // daemon's catalog owns or retires them.
+            |session_id| {
+                self.daemons.session_owner(session_id) == key
+                    && !self.friend_sessions.contains_key(&session_id)
+            },
             |session_id| runtime_ids.contains(&session_id),
         );
         for session_id in &removed {
@@ -2969,11 +3209,28 @@ impl Waku {
             .update_settings(self.state.daemon_settings())
             .err()
             .map(|error| error.to_string());
-        let app_error = self
-            .store
-            .save(&mut self.state)
-            .err()
-            .map(|error| error.to_string());
+        let app_error = if self.friend_sessions.is_empty() {
+            self.store
+                .save(&mut self.state)
+                .err()
+                .map(|error| error.to_string())
+        } else {
+            // Friend sessions are borrowed views of another daemon's
+            // task state — persisting them would resurrect them locally.
+            let (kept, watched): (Vec<_>, Vec<_>) = self
+                .state
+                .sessions
+                .drain(..)
+                .partition(|session| !self.friend_sessions.contains_key(&session.id));
+            self.state.sessions = kept;
+            let result = self
+                .store
+                .save(&mut self.state)
+                .err()
+                .map(|error| error.to_string());
+            self.state.sessions.extend(watched);
+            result
+        };
         if let Some(error) = daemon_error.or(app_error) {
             self.show_toast(tr!("errors.save_local_state", error = error));
         } else {
@@ -5299,6 +5556,7 @@ impl Waku {
             | self.drain_friends_events(cx)
             | self.drain_automations_events(cx)
             | self.drain_review_events(cx)
+            | self.drain_friend_session_closed_events(cx)
             | self.drain_route_policy_events()
             | self.drain_status_marker_events()
         {

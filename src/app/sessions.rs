@@ -1037,6 +1037,12 @@ impl Waku {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
+        // "Remove" on a watched friend session just closes our view —
+        // the friend's own task list is untouched.
+        if self.is_friend_session(session_id) {
+            self.stop_watching_friend_session(session_id, cx);
+            return;
+        }
         if self.response_fork_preparations.contains_key(&session_id) {
             self.show_toast(tr!("session.response_fork_in_progress"));
             cx.notify();
@@ -1279,6 +1285,12 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // "Archive" on a watched friend session just closes our view —
+        // the friend's own task list is untouched.
+        if self.is_friend_session(session_id) {
+            self.stop_watching_friend_session(session_id, cx);
+            return;
+        }
         self.hold_sidebar_peek();
         let Some(session) = self
             .state
