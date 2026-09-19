@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ed554f59-f966-44b3-b541-3469651526a1",
-  "prevId": "16106d32-2b1d-4c55-b0ac-d511b68648b7",
+  "id": "dc8bfb41-417d-4326-b6ad-2ced3e35efdd",
+  "prevId": "f2922bb4-b616-4d55-b390-2c42b5e79e92",
   "tables": {
     "messages": {
       "name": "messages",
@@ -153,6 +153,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "temporary": {
+          "name": "temporary",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
       "indexes": {},
@@ -267,13 +275,6 @@
         },
         "pinned_at": {
           "name": "pinned_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "landed_at": {
-          "name": "landed_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
