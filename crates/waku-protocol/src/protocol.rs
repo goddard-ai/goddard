@@ -10,7 +10,7 @@ use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::automations::{Automation, AutomationInput, AutomationRun, AutomationsState};
 use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
-use crate::eval::{EvalQuestion, Evaluation};
+use crate::eval::{EvalQuestion, EvalSettings, Evaluation};
 use crate::model::{
     AgentSession, AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProviderKind,
     ProviderProbe, ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary,
@@ -287,6 +287,10 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         feature: Option<String>,
     },
+    /// Smoke-test an evaluation backend configuration for the settings
+    /// pane. Carries the full settings so unsaved field edits can be tested;
+    /// the daemon makes one minimal call and writes no decision log record.
+    TestEvalConnection { settings: EvalSettings },
     /// Route a new session's first prompt: evaluate the task, resolve the
     /// routing policy against `candidates`, and answer with the provider and
     /// model to start on. `last_used` backs the policy's `last_used` default.

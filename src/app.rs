@@ -1787,6 +1787,11 @@ pub struct Waku {
     eval_cloudflare_account_input: Entity<TextInput>,
     eval_cloudflare_token_input: Entity<TextInput>,
     eval_inputs_seeded: bool,
+    /// The Jev page's "Test connection" probe — `Some` once a run answers,
+    /// `Ok` carrying the answering model id and round-trip latency.
+    /// Runtime-only; re-run after edits rather than cleared per keystroke.
+    eval_probe_pending: bool,
+    eval_probe_result: Option<Result<(String, u64), String>>,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -5015,6 +5020,8 @@ impl Waku {
                 eval_cloudflare_account_input,
                 eval_cloudflare_token_input,
                 eval_inputs_seeded: false,
+                eval_probe_pending: false,
+                eval_probe_result: None,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,

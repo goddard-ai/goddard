@@ -690,6 +690,14 @@ routing.cloudflare_token_description:
   en: A Workers AI–scoped token for the account above.
 routing.cloudflare_token_placeholder:
   en: Cloudflare API token
+routing.test_connection:
+  en: Test connection
+routing.testing:
+  en: Checking…
+routing.connection_ok:
+  en: "Connected — %{model} answered in %{latency} ms"
+routing.connection_failed:
+  en: "Connection failed: %{error}"
 routing.class_routine:
   en: Routine tasks
 routing.class_routine_description:
