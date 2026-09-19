@@ -2791,6 +2791,72 @@ impl Waku {
         )
     }
 
+    /// The daemon's project-map state for the composer session, as a chip.
+    /// Hidden entirely while the experiment emits nothing for the session.
+    #[track_caller]
+    pub(super) fn render_project_map_control(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session_id = self.composer_session()?.id;
+        let status = self.runtimes.get(&session_id)?.project_map.as_ref()?;
+        let theme = Theme::current(cx);
+        let color = theme.text_tertiary;
+        use crate::model::ProjectMapStatus;
+        let (label, icon_path, busy) = match status {
+            ProjectMapStatus::Building => (
+                tr!("project_map.indexing"),
+                "icons/loader-circle.svg",
+                true,
+            ),
+            ProjectMapStatus::Ready { indexed_files } => (
+                tr!("project_map.ready", files = *indexed_files),
+                "icons/projects.svg",
+                false,
+            ),
+            ProjectMapStatus::Refreshing => (
+                tr!("project_map.refreshing"),
+                "icons/loader-circle.svg",
+                true,
+            ),
+            ProjectMapStatus::Sent {
+                mapped_files,
+                estimated_tokens,
+                ..
+            } => (
+                tr!(
+                    "project_map.sent",
+                    files = *mapped_files,
+                    tokens = *estimated_tokens
+                ),
+                "icons/projects.svg",
+                false,
+            ),
+        };
+        let glyph = icon(icon_path, 10.5, color);
+        Some(
+            div()
+                .id("composer-project-map")
+                .h(px(24.0))
+                .px(px(7.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_default()
+                .text_size(sp(12.5))
+                .line_height(sp(14.0))
+                .text_color(color)
+                .child(if busy {
+                    motion::spin(glyph)
+                } else {
+                    glyph.into_any_element()
+                })
+                .child(div().max_w(px(220.0)).truncate().child(label))
+                .into_any_element(),
+        )
+    }
+
     /// Stage files dropped onto the composer as attachment chips. The mention
     /// each chip will submit takes the autocomplete's form: relative to the
     /// project root when the file is inside it, absolute otherwise,
@@ -4528,6 +4594,7 @@ impl Waku {
                         .child(self.render_access_control(cx))
                         .children(self.render_drafts_count_button(cx))
                         .children(self.render_goal_control(cx))
+                        .children(self.render_project_map_control(cx))
                         .child(div().flex_1())
                         .child(match submit_action {
                             ComposerSubmitAction::Preparing => div()

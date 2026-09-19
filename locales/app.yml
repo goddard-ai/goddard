@@ -372,6 +372,19 @@ big_picture.empty_transcript:
 project_switcher.recently_used:
   en: Recently used
 
+project_map.indexing:
+  en: Indexing workspace…
+project_map.ready:
+  en: Map ready · %{files} files
+project_map.refreshing:
+  en: Refreshing map…
+project_map.sent:
+  en: Map · %{files} files · ~%{tokens} tok
+project_map.artifact_title:
+  en: Project map · %{files} files · ~%{tokens} tokens
+project_map.action_label:
+  en: project map
+
 language.title:
   en: Language
 language.system:
@@ -625,6 +638,10 @@ experiments.memory_title:
   en: Project memory
 experiments.memory_description:
   en: Give each project a persistent memory. Finished sessions are distilled into a .goddard/memory store the next session's first prompt carries — decisions, preferences, and failed approaches included.
+experiments.project_map_title:
+  en: Project map
+experiments.project_map_description:
+  en: Give each new session a compact structural map of the workspace — top-level symbols of the most-referenced files, budgeted near 1,000 tokens — so the agent skips cold repo exploration. Applies to sessions started after turning it on.
 status_markers.complete:
   en: Complete
 status_markers.awaiting_input:
