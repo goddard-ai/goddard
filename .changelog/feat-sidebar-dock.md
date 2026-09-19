@@ -1,0 +1,1 @@
+- Hovering anywhere along the sidebar's bottom strip now raises a quick-action dock — Inbox, Archived chats, Shortcuts, and Settings (plus Friends when the experiment is on) as round buttons with hover labels
