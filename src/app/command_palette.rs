@@ -326,7 +326,7 @@ pub(super) fn next_selection_index(selected: usize, len: usize, delta: isize) ->
     })
 }
 
-fn palette_content_match_text(
+pub(super) fn palette_content_match_text(
     matched: &crate::persistence::SessionMessageMatch,
     query: &str,
     window: &Window,
@@ -1289,7 +1289,11 @@ impl Waku {
         };
         let search = self
             .store
-            .session_message_search(query.clone(), MESSAGE_SEARCH_LIMIT);
+            .session_message_search(
+                query.clone(),
+                MESSAGE_SEARCH_LIMIT,
+                crate::persistence::SessionMessageSearchScope::Active,
+            );
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(MESSAGE_SEARCH_DEBOUNCE)

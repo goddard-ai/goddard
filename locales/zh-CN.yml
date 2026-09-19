@@ -167,6 +167,7 @@ settings.archived_empty: 没有已归档的聊天。
 settings.archived_search: 搜索已归档的聊天
 settings.archived_all_projects: 所有项目
 settings.archived_no_match: 没有符合当前条件的已归档聊天。
+settings.archived_searching: 正在搜索已归档的聊天…
 settings.archived_landed: 已合入
 settings.back: 返回
 settings.search: 搜索设置

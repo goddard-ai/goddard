@@ -217,3 +217,16 @@ pub struct SessionMessageMatch {
     pub source: MessageRole,
     pub snippet: String,
 }
+
+/// Which slice of the message store a transcript search scans. The surfaces
+/// stay complementary: the command palette searches active tasks, the
+/// Archived settings page searches the archive.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionMessageSearchScope {
+    /// Non-archived sessions only.
+    #[default]
+    Active,
+    /// Archived sessions only.
+    Archived,
+}

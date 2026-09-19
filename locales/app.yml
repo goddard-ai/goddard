@@ -409,6 +409,8 @@ settings.archived_all_projects:
   en: All projects
 settings.archived_no_match:
   en: No archived chats match the current filters.
+settings.archived_searching:
+  en: Searching archived chats…
 settings.archived_landed:
   en: Landed
 settings.back:

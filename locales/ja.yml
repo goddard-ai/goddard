@@ -163,6 +163,7 @@ settings.archived_empty: アーカイブ済みのチャットはありません�
 settings.archived_search: アーカイブ済みチャットを検索
 settings.archived_all_projects: すべてのプロジェクト
 settings.archived_no_match: 現在の条件に一致するアーカイブ済みチャットはありません。
+settings.archived_searching: アーカイブ済みチャットを検索中…
 settings.archived_landed: 取り込み済み
 settings.back: 戻る
 settings.search: 設定を検索

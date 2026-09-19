@@ -29,7 +29,7 @@ pub use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAnnotation, ComposerDraftAnnotationSpan, ComposerDraftAttachment,
     ComposerDraftChange, ComposerDraftFileAnnotation, ComposerDraftKey, ComposerDraftTarget,
-    ComposerDrafts, SessionMessageMatch,
+    ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
 };
 
 const STATE_VERSION: u32 = 5;
@@ -1946,6 +1946,7 @@ impl StateStore {
         &self,
         query: String,
         limit: usize,
+        scope: SessionMessageSearchScope,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let daemons = self.daemons.clone();
         move || {
@@ -1958,6 +1959,7 @@ impl StateStore {
                     Command::SearchSessionMessages {
                         query: query.clone(),
                         limit,
+                        scope,
                     },
                 ) {
                     Ok(ResponsePayload::SessionMessageMatches { matches: found }) => {

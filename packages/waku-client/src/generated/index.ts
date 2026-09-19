@@ -123,6 +123,7 @@ export type { RuntimeMode } from "./RuntimeMode";
 export type { SequencedEvent } from "./SequencedEvent";
 export type { ServerMessage } from "./ServerMessage";
 export type { SessionMessageMatch } from "./SessionMessageMatch";
+export type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
 export type { SessionStatus } from "./SessionStatus";
 export type { SessionWorkspace } from "./SessionWorkspace";
 export type { SkillEntry } from "./SkillEntry";
