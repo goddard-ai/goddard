@@ -38,6 +38,7 @@ struct ClientInner {
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
     settings_subscribers: Mutex<Vec<Sender<DaemonSettings>>>,
     friends_subscribers: Mutex<Vec<Sender<waku_protocol::friends::FriendsState>>>,
+    automations_subscribers: Mutex<Vec<Sender<waku_protocol::automations::AutomationsState>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -120,6 +121,7 @@ impl DaemonClient {
             task_state_subscribers: Mutex::new(Vec::new()),
             settings_subscribers: Mutex::new(Vec::new()),
             friends_subscribers: Mutex::new(Vec::new()),
+            automations_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -235,6 +237,15 @@ impl DaemonClient {
     pub fn subscribe_friends(&self) -> Receiver<waku_protocol::friends::FriendsState> {
         let (events, receiver) = unbounded();
         self.inner.friends_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// Every `automationsChanged` the daemon broadcasts — a definition edit
+    /// or a run recording progress — lands here as the authoritative
+    /// document.
+    pub fn subscribe_automations(&self) -> Receiver<waku_protocol::automations::AutomationsState> {
+        let (events, receiver) = unbounded();
+        self.inner.automations_subscribers.lock().push(events);
         receiver
     }
 
@@ -420,6 +431,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(state.clone()).is_ok());
                     }
+                    ServerMessage::AutomationsChanged { state } => {
+                        inner
+                            .automations_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send(state.clone()).is_ok());
+                    }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
                 }
@@ -456,6 +473,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.task_state_subscribers.lock().clear();
     inner.settings_subscribers.lock().clear();
     inner.friends_subscribers.lock().clear();
+    inner.automations_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

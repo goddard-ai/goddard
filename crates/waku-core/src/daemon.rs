@@ -14,21 +14,22 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::attachments::AttachmentStore;
+use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, DriverEvent,
-    Project, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace, TurnStatus,
+    AgentSession, Checkpoint, CheckpointStatus, DriverEvent, Project, ProviderKind,
+    ProviderResumeCursor, SessionStatus, SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
+#[cfg(test)]
+use serde_json::json;
 use waku_protocol::custom_commands::CustomCommand;
+#[cfg(test)]
+use waku_protocol::event_from_wire;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 use waku_protocol::routing::RoutePolicyView;
 use waku_protocol::{decode_enum, event_to_wire};
-#[cfg(test)]
-use serde_json::json;
-#[cfg(test)]
-use waku_protocol::event_from_wire;
 
 /// How many fully hydrated transcripts the daemon keeps resident.
 ///
@@ -83,6 +84,9 @@ pub struct WakuBackend {
     share: Arc<crate::share::ShareService>,
     /// The hot-reloading view of the user's `route-policy.json`.
     route_policy: crate::route_policy::PolicyStore,
+    /// Scheduled automations — definitions, run history, and the tick that
+    /// dispatches them whether or not a client is attached.
+    automations: Arc<AutomationService>,
 }
 
 impl WakuBackend {
@@ -112,6 +116,10 @@ impl WakuBackend {
         let usage_rates_dir = data_dir.clone();
         let route_policy =
             crate::route_policy::PolicyStore::open(data_dir.join("route-policy.json"));
+        let automations = Arc::new(
+            AutomationService::open(data_dir.join("automations.json"))
+                .context("could not load Goddard automations")?,
+        );
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             terminals: Mutex::new(HashMap::new()),
@@ -132,21 +140,27 @@ impl WakuBackend {
             route_policy,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             share: Arc::new(crate::share::ShareService::new(share_dir.clone(), our_name)),
+            automations,
         };
         backend.purge_expired_archived_sessions();
         {
             let task_state = backend.task_state.clone();
             let task_store = backend.task_store.clone();
             let share_dir = share_dir.clone();
-            backend.share.set_transfer_hook(Arc::new(move |transfer| {
-                match create_transfer_session(&task_state, &task_store, &share_dir, transfer) {
+            backend.share.set_transfer_hook(Arc::new(
+                move |transfer| match create_transfer_session(
+                    &task_state,
+                    &task_store,
+                    &share_dir,
+                    transfer,
+                ) {
                     Ok(session_id) => Some(session_id),
                     Err(error) => {
                         eprintln!("could not create transfer session: {error:#}");
                         None
                     }
-                }
-            }));
+                },
+            ));
         }
         Ok(backend)
     }
@@ -156,6 +170,13 @@ impl WakuBackend {
     /// serving; providers launched while it is unset get no agent surface.
     pub fn set_daemon_address(&self, address: String) {
         *self.daemon_address.lock() = Some(address);
+    }
+
+    /// Start the automation scheduler: reconcile runs a previous daemon
+    /// left open, then tick. Called once by the daemon executable before it
+    /// starts serving — the service needs the backend's `Arc` for dispatch.
+    pub fn start_automations(self: &Arc<Self>) {
+        self.automations.start(self);
     }
 
     #[cfg(all(test, unix))]
@@ -455,6 +476,14 @@ impl Backend for WakuBackend {
         self.share.set_task_notifier(sink);
     }
 
+    fn set_automations_sink(&self, sink: crate::automations::AutomationsSink) {
+        self.automations.set_sink(sink);
+    }
+
+    fn set_event_source(&self, events: EventSink) {
+        self.automations.set_event_source(events);
+    }
+
     fn handle(
         &self,
         request: Request,
@@ -491,6 +520,19 @@ impl Backend for WakuBackend {
                     state: self.share.state(),
                 })
             }
+            Command::GetAutomations => Ok(ResponsePayload::Automations {
+                state: self.automations.document(),
+            }),
+            Command::UpsertAutomation { input } => Ok(ResponsePayload::Automation {
+                automation: self.automations.upsert(input)?,
+            }),
+            Command::RemoveAutomation { automation_id } => {
+                self.automations.remove(automation_id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RunAutomationNow { automation_id } => Ok(ResponsePayload::AutomationRun {
+                run: self.automations.run_now(automation_id)?,
+            }),
             Command::SendFriendRequest { code, name } => {
                 self.share.send_friend_request(code, name)?;
                 Ok(ResponsePayload::Ack)
@@ -1347,6 +1389,7 @@ impl Backend for WakuBackend {
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);
         self.share.shutdown();
+        self.automations.stop();
     }
 }
 
@@ -2171,7 +2214,7 @@ impl WakuBackend {
     }
 
     /// Whether `session_id` names a task the daemon knows.
-    fn known_session(&self, session_id: Uuid) -> bool {
+    pub(crate) fn known_session(&self, session_id: Uuid) -> bool {
         self.task_state
             .lock()
             .sessions
@@ -2325,6 +2368,7 @@ impl WakuBackend {
         let task_state = self.task_state.clone();
         let task_store = self.task_store.clone();
         let sessions = self.sessions.clone();
+        let automations = self.automations.clone();
         std::thread::Builder::new()
             .name(format!("goddard-daemon-events-{session_id}"))
             .spawn(move || {
@@ -2338,6 +2382,7 @@ impl WakuBackend {
                     task_state,
                     task_store,
                     sessions,
+                    automations,
                 );
             })
             .context("could not start daemon event forwarding thread")?;
@@ -2470,6 +2515,33 @@ impl WakuBackend {
         events: EventSink,
     ) -> anyhow::Result<ResponsePayload> {
         self.require_agent_tools()?;
+        let session_id = self.create_agent_task(
+            sender,
+            provider,
+            model,
+            project,
+            workspace,
+            base_branch,
+            prompt,
+            &events,
+        )?;
+        Ok(ResponsePayload::AgentSessionCreated { session_id })
+    }
+
+    /// The task-creation half of `agent create`, shared with the automation
+    /// scheduler: the agent-tools credential gate is the only difference —
+    /// the daemon's own scheduler needs no scoped token.
+    pub(crate) fn create_agent_task(
+        &self,
+        sender: Option<Uuid>,
+        provider: ProviderKind,
+        model: String,
+        project: PathBuf,
+        workspace: AgentWorkspace,
+        base_branch: Option<String>,
+        prompt: String,
+        events: &EventSink,
+    ) -> anyhow::Result<Uuid> {
         if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
         }
@@ -2546,7 +2618,7 @@ impl WakuBackend {
         // The adopted prompt above already persisted, so a launch failure
         // still leaves a normal task behind. Delivering it now starts the
         // first turn immediately.
-        let (runtime_id, driver) = self.ensure_agent_runtime(session_id, &events)?;
+        let (runtime_id, driver) = self.ensure_agent_runtime(session_id, events)?;
         let sink = events.for_session(session_id, runtime_id);
         sink.send(event_to_wire(DriverEvent::PromptSubmitted {
             message: prompt.clone(),
@@ -2556,13 +2628,13 @@ impl WakuBackend {
             hidden: false,
         })?)?;
         driver.prompt(prompt);
-        Ok(ResponsePayload::AgentSessionCreated { session_id })
+        Ok(session_id)
     }
 
     /// Persisted quarantine flag — set on received-file sessions until the
     /// user trusts the transfer. Checked against `task_state`, not the
     /// running-driver map, so it holds for sessions that aren't running.
-    fn session_quarantined(&self, session_id: Uuid) -> bool {
+    pub(crate) fn session_quarantined(&self, session_id: Uuid) -> bool {
         let mut state = self.task_state.lock();
         let Some(index) = state
             .sessions
@@ -2626,21 +2698,33 @@ impl WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             AgentPromptDelivery::Queue => {
-                // Enqueue before checking turn state so a prompt can never
-                // slip between a finishing turn and its queue drain.
-                self.agent
-                    .enqueue(target, crate::agent::AgentPrompt { prompt, sender });
-                if self.agent.is_working(target) {
-                    // The runtime event forwarder delivers queued prompts in
-                    // order once the provider finishes the turn.
-                    return Ok(ResponsePayload::Ack);
-                }
-                let (runtime_id, driver) = self.ensure_agent_runtime(target, &events)?;
-                let sink = events.for_session(target, runtime_id);
-                self.drain_agent_queue(target, &driver, &sink)?;
+                self.queue_agent_prompt(target, prompt, sender, &events)?;
                 Ok(ResponsePayload::Ack)
             }
         }
+    }
+
+    /// Queue-mode delivery shared with the automation scheduler: the prompt
+    /// waits behind any open turn and drains once the session goes idle.
+    /// Enqueueing before the working check means a prompt can never slip
+    /// between a finishing turn and its queue drain.
+    pub(crate) fn queue_agent_prompt(
+        &self,
+        target: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        self.agent
+            .enqueue(target, crate::agent::AgentPrompt { prompt, sender });
+        if self.agent.is_working(target) {
+            // The runtime event forwarder delivers queued prompts in
+            // order once the provider finishes the turn.
+            return Ok(());
+        }
+        let (runtime_id, driver) = self.ensure_agent_runtime(target, events)?;
+        let sink = events.for_session(target, runtime_id);
+        self.drain_agent_queue(target, &driver, &sink)
     }
 
     /// Pop every queued agent prompt for the session, in submission order.
@@ -3051,7 +3135,11 @@ fn handle_driver_command(
         | Command::CancelTransfer { .. }
         | Command::ProbeFriend { .. }
         | Command::SetFriendDisplayName { .. }
-        | Command::SetFriendNickname { .. } => {
+        | Command::SetFriendNickname { .. }
+        | Command::GetAutomations
+        | Command::UpsertAutomation { .. }
+        | Command::RemoveAutomation { .. }
+        | Command::RunAutomationNow { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }
@@ -3082,9 +3170,11 @@ fn forward_driver_events(
     task_state: Arc<Mutex<PersistedState>>,
     task_store: Arc<StateStore>,
     sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
+    automations: Arc<AutomationService>,
 ) {
     while let Ok(event) = event_receiver.recv() {
         agent.note_driver_event(session_id, &event);
+        automations.note_driver_event(session_id, &event);
         let event = match event {
             DriverEvent::Connected { provider_cursor } => {
                 // The daemon keeps its own copy of the resume cursor so

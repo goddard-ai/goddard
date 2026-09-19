@@ -77,10 +77,14 @@ fn main() -> anyhow::Result<()> {
     // Agent-scoped credentials dial back through this address; it is the
     // bound socket, not the `--bind` request.
     backend.set_daemon_address(address.to_string());
+    let backend = Arc::new(backend);
+    // Scheduled automations tick whether or not a client ever connects;
+    // starting here is what makes them daemon-owned.
+    backend.start_automations();
     waku_core::serve(
         listener,
         token,
-        Arc::new(backend),
+        backend,
         shutdown,
         waku_core::ServerOptions {
             allowed_origins: arguments.allowed_origins.into_iter().collect(),

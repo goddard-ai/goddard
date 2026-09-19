@@ -1,0 +1,1 @@
+- [Experimental] Automations: opt in under Settings → Experiments for an Automations page (⌘⇧U) that schedules prompts on a timer — hourly, daily, weekdays, weekly, or a custom cron expression with an optional IANA timezone — running each into a fresh task, a new worktree, or an existing one, with a run history that links every run back to its task.

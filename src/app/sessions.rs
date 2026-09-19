@@ -359,6 +359,8 @@ impl Waku {
         // Projects and Drafts pages keep their state for the next visit.
         self.projects_page = None;
         self.drafts_page = false;
+        self.automations_page = false;
+        self.automations_detail = None;
         if let Some((
             project_id,
             provider,
@@ -544,6 +546,10 @@ impl Waku {
                 project_exists(&id).then_some(NavigationLocation::ProjectsPage(id))
             }
             PersistedNavigationLocation::DraftsPage => Some(NavigationLocation::DraftsPage),
+            PersistedNavigationLocation::AutomationsPage => self
+                .state
+                .automations_enabled
+                .then_some(NavigationLocation::AutomationsPage),
         };
         self.session_navigation.back = self
             .state
@@ -1902,7 +1908,9 @@ impl Waku {
     /// selected task's transcript, then the full-width terminal that
     /// parked it.
     pub(super) fn navigation_location(&self) -> Option<NavigationLocation> {
-        if self.drafts_page {
+        if self.automations_page {
+            Some(NavigationLocation::AutomationsPage)
+        } else if self.drafts_page {
             Some(NavigationLocation::DraftsPage)
         } else if let Some(project_id) = self.projects_page {
             Some(NavigationLocation::ProjectsPage(project_id))
@@ -1918,15 +1926,19 @@ impl Waku {
     pub(super) fn prune_navigation_stack(
         projects: &[Project],
         projects_page_enabled: bool,
+        automations_enabled: bool,
         stack: &mut Vec<NavigationLocation>,
     ) {
-        while let Some(NavigationLocation::ProjectsPage(project_id)) = stack.last() {
-            if projects_page_enabled
-                && projects
-                    .iter()
-                    .any(|project| project.id == *project_id && !project.is_projectless())
-            {
-                break;
+        loop {
+            match stack.last() {
+                Some(NavigationLocation::ProjectsPage(project_id))
+                    if !(projects_page_enabled
+                        && projects.iter().any(|project| {
+                            project.id == *project_id && !project.is_projectless()
+                        })) => {}
+                Some(NavigationLocation::AutomationsPage) if automations_enabled => break,
+                Some(NavigationLocation::AutomationsPage) => {}
+                _ => break,
             }
             stack.pop();
         }
@@ -1951,6 +1963,7 @@ impl Waku {
         Self::prune_navigation_stack(
             &self.state.projects,
             self.state.projects_page_enabled,
+            self.state.automations_enabled,
             &mut self.session_navigation.back,
         );
         let Some(current) = self.navigation_location() else {
@@ -1976,6 +1989,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_drafts_page(window, cx);
             }
+            Some(NavigationLocation::AutomationsPage) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_automations_page(window, cx);
+            }
             None => {}
         }
     }
@@ -1996,6 +2013,7 @@ impl Waku {
         Self::prune_navigation_stack(
             &self.state.projects,
             self.state.projects_page_enabled,
+            self.state.automations_enabled,
             &mut self.session_navigation.forward,
         );
         let Some(current) = self.navigation_location() else {
@@ -2020,6 +2038,10 @@ impl Waku {
             Some(NavigationLocation::DraftsPage) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_drafts_page(window, cx);
+            }
+            Some(NavigationLocation::AutomationsPage) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_automations_page(window, cx);
             }
             None => {}
         }

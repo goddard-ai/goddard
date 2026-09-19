@@ -3918,3 +3918,219 @@ keybind.keywords:
   en: keybindings keyboard shortcuts hotkeys keys remap
 shortcuts.projects_page:
   en: Projects
+automations.title:
+  en: Automations
+automations.new:
+  en: New
+automations.new_title:
+  en: New automation
+automations.edit_title:
+  en: Edit automation
+automations.search:
+  en: Search automations
+automations.search_placeholder:
+  en: Search name, project, or prompt…
+automations.tab_schedules:
+  en: Schedules
+automations.tab_runs:
+  en: Runs
+automations.empty_title:
+  en: No automations yet
+automations.empty_hint:
+  en: Schedule a prompt to run on a timer — New above starts one.
+automations.no_match:
+  en: No matches
+automations.no_match_hint:
+  en: Try a different search.
+automations.runs_empty_title:
+  en: No runs yet
+automations.runs_empty_hint:
+  en: Runs land here the first time a schedule fires or Run now is used.
+automations.runs_heading:
+  en: Run history
+automations.enabled:
+  en: Enabled
+automations.paused:
+  en: Paused
+automations.run_now:
+  en: Run now
+automations.edit:
+  en: Edit
+automations.pause:
+  en: Pause
+automations.resume:
+  en: Resume
+automations.delete:
+  en: Delete
+automations.save:
+  en: Save
+automations.create:
+  en: Create
+automations.cancel:
+  en: Cancel
+automations.open_task:
+  en: Open task
+automations.deleted_name:
+  en: Deleted automation
+automations.detail_gone:
+  en: Automation removed
+automations.detail_gone_hint:
+  en: It was deleted on the daemon — the entry is gone.
+automations.daemon_unreachable:
+  en: That daemon is not connected.
+automations.command_failed:
+  en: "Automation command failed: %{error}"
+automations.advanced:
+  en: Advanced
+automations.field_name:
+  en: Name
+automations.field_prompt:
+  en: Prompt
+automations.field_schedule:
+  en: Schedule
+automations.field_time:
+  en: Time
+automations.field_cron:
+  en: Cron
+automations.field_timezone:
+  en: Timezone
+automations.field_agent:
+  en: Agent
+automations.field_model:
+  en: Model
+automations.field_project:
+  en: Project
+automations.field_workspace:
+  en: Workspace
+automations.field_base_branch:
+  en: Base branch
+automations.field_host:
+  en: Host
+automations.field_next_run:
+  en: Next run
+automations.field_last_run:
+  en: Last run
+automations.field_precheck:
+  en: Precheck
+automations.field_precheck_timeout:
+  en: Timeout (s)
+automations.field_grace:
+  en: Grace (min)
+automations.field_reuse:
+  en: Reuse task
+automations.field_enabled:
+  en: Enabled
+automations.name_placeholder:
+  en: Weekday triage
+automations.prompt_placeholder:
+  en: What should the agent do each run?
+automations.timezone_placeholder:
+  en: System zone
+automations.model_placeholder:
+  en: Default
+automations.precheck_placeholder:
+  en: Shell command that must exit 0
+automations.grace_placeholder:
+  en: Skip missed
+automations.project_pick:
+  en: Pick a project…
+automations.session_pick:
+  en: Pick a task…
+automations.session_missing:
+  en: Task no longer exists
+automations.preset_hourly:
+  en: Hourly
+automations.preset_daily:
+  en: Daily
+automations.preset_weekdays:
+  en: Weekdays
+automations.preset_weekly:
+  en: Weekly
+automations.preset_cron:
+  en: Cron
+automations.schedule_none:
+  en: No schedule
+automations.schedule_hourly:
+  en: Hourly at :%{minute}
+automations.schedule_daily:
+  en: Daily at %{time}
+automations.schedule_weekdays:
+  en: Weekdays at %{time}
+automations.schedule_weekly:
+  en: "%{day}s at %{time}"
+automations.schedule_cron:
+  en: Cron %{expression}
+automations.weekday_sun:
+  en: Sunday
+automations.weekday_mon:
+  en: Monday
+automations.weekday_tue:
+  en: Tuesday
+automations.weekday_wed:
+  en: Wednesday
+automations.weekday_thu:
+  en: Thursday
+automations.weekday_fri:
+  en: Friday
+automations.weekday_sat:
+  en: Saturday
+automations.workspace_local:
+  en: Project directory
+automations.workspace_worktree:
+  en: New worktree each run
+automations.workspace_existing:
+  en: Existing task
+automations.reuse_session:
+  en: Reuse the last run's task while it's idle
+automations.host_local:
+  en: This Mac
+automations.host_remote:
+  en: Remote host
+automations.soon:
+  en: in under a minute
+automations.in_minutes:
+  en: in %{count}m
+automations.in_hours:
+  en: in %{count}h
+automations.in_days:
+  en: in %{count}d
+automations.last_run_never:
+  en: Never run
+automations.status_pending:
+  en: Pending
+automations.status_running:
+  en: Running
+automations.status_completed:
+  en: Completed
+automations.status_failed:
+  en: Failed
+automations.status_precheck:
+  en: Pre-check skipped
+automations.status_missed:
+  en: Missed
+automations.status_unavailable:
+  en: Unavailable
+automations.trigger_scheduled:
+  en: Scheduled
+automations.trigger_manual:
+  en: Manual
+automations.refusal_count:
+  en: skipped %{count}×
+automations.grace_value:
+  en: Run once if missed within %{count} min
+automations.error_name_required:
+  en: Name is required.
+automations.error_prompt_required:
+  en: Prompt is required.
+automations.error_schedule_invalid:
+  en: Enter the time as HH:MM (or :MM for hourly), or a cron expression.
+automations.error_project_required:
+  en: Pick a project.
+automations.error_session_required:
+  en: Pick the task to run in.
+sidebar.automations:
+  en: Automations
+experiments.automations_title:
+  en: Automations
+experiments.automations_description:
+  en: An Automations page that schedules prompts on a timer — hourly, daily, weekdays, weekly, or cron — running each as its own task or into an existing one, with run history and one-off manual runs.

@@ -492,6 +492,8 @@ impl Waku {
         }
         self.pending_session_activation = None;
         self.drafts_page = false;
+        self.automations_page = false;
+        self.automations_detail = None;
         if self
             .sidebar_collapsed_groups
             .insert(SidebarGroup::Terminals)

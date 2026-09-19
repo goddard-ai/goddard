@@ -31,6 +31,7 @@ macro_rules! tr {
 }
 
 pub mod attachments;
+pub mod automations;
 pub mod blob;
 pub mod checkpoint;
 pub mod composer;

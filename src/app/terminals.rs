@@ -651,6 +651,8 @@ impl Waku {
         // their state for the next visit.
         self.projects_page = None;
         self.drafts_page = false;
+        self.automations_page = false;
+        self.automations_detail = None;
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);

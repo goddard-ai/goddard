@@ -35,6 +35,8 @@ uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-protocol = { path = "../waku-protocol" }
 waku-share = { path = "../waku-share" }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+cron = "0.15"
+chrono-tz = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
