@@ -67,10 +67,6 @@ enum ShareCommand {
         accept: bool,
         reply: Sender<anyhow::Result<()>>,
     },
-    Remove {
-        node_id: String,
-        reply: Sender<anyhow::Result<()>>,
-    },
     SendFile {
         node_id: String,
         path: PathBuf,
@@ -348,8 +344,20 @@ impl ShareService {
         Ok(())
     }
 
+    /// Store-level mutation like `withdraw_friend_request` — no endpoint
+    /// needed, so it must not queue behind in-flight probes or sends.
     pub fn remove_friend(&self, node_id: String) -> anyhow::Result<()> {
-        self.call(|reply| ShareCommand::Remove { node_id, reply })
+        let id = node_id.parse::<EndpointId>()?;
+        {
+            let inner = self.state.lock();
+            let mut store = inner.store.lock();
+            if store.friends.remove(&id).is_none() {
+                anyhow::bail!("no friend with that code");
+            }
+            let _ = store.save();
+        }
+        publish(&self.state, &self.sink);
+        Ok(())
     }
 
     pub fn send_file(
@@ -907,17 +915,6 @@ fn run_runtime(
                     };
                     publish(&state, &sink);
                     let _ = reply.send(result);
-                }
-                ShareCommand::Remove { node_id, reply } => {
-                    {
-                        let s = state.lock();
-                        if let Ok(id) = node_id.parse::<EndpointId>() {
-                            s.store.lock().friends.remove(&id);
-                            let _ = s.store.lock().save();
-                        }
-                    }
-                    publish(&state, &sink);
-                    let _ = reply.send(Ok(()));
                 }
                 ShareCommand::SendFile {
                     node_id,
