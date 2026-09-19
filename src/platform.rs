@@ -679,8 +679,9 @@ pub fn configure_sidebar_material(
 ) {
     use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
-        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode,
+        NSAutoresizingMaskOptions, NSColor, NSGlassEffectViewStyle, NSView,
+        NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
+        NSVisualEffectView, NSWindowOrderingMode,
     };
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -759,14 +760,15 @@ pub fn configure_sidebar_material(
         // stays hidden on that path. Allocation itself is gated — the class
         // is absent on older systems and `class!` would panic.
         if glass_effect_supported() {
-            // Glass tints must stay light — the vibrancy-path opacity (up to
-            // 100%) would repaint the flat look over the lensing. The slider
-            // keeps its direction: more transparency, clearer glass.
+            // The tint's squared curve gives the slider real travel: 0 still
+            // lands solid, the default sits in frosted-glass territory, and
+            // past the midpoint the material switches to Clear so the top
+            // half sheds frost instead of only thinning a wash.
             let glass_tint = NSColor::colorWithSRGBRed_green_blue_alpha(
                 r,
                 g,
                 b,
-                tint_opacity * 0.35,
+                tint_opacity * tint_opacity,
             );
             SIDEBAR_GLASS_VIEW.with_borrow_mut(|slot| {
                 let needs_new_view = slot.as_ref().is_none_or(|glass_view| {
@@ -797,6 +799,11 @@ pub fn configure_sidebar_material(
                 if let Some(glass_view) = slot.as_ref() {
                     glass_view.setHidden(!glass_active);
                     if glass_active {
+                        glass_view.setStyle(if tint_opacity <= 0.5 {
+                            NSGlassEffectViewStyle::Clear
+                        } else {
+                            NSGlassEffectViewStyle::Regular
+                        });
                         glass_view.setTintColor(Some(&glass_tint));
                     }
                 }
