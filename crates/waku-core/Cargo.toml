@@ -37,6 +37,14 @@ waku-share = { path = "../waku-share" }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 cron = "0.15"
 chrono-tz = "0.10"
+tree-sitter = "0.25"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-go = "0.25.0"
+tree-sitter-swift = "0.7.3"
+ignore = "0.4.33"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
