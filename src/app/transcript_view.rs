@@ -2019,11 +2019,11 @@ impl Waku {
             .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
             .child(tr_cow!("transcript.review_changes"))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_turn_diff(turn_id, cx);
+                this.open_turn_diff(turn_id, None, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.open_turn_diff(turn_id, cx);
+                    this.open_turn_diff(turn_id, None, cx);
                     cx.stop_propagation();
                 }
             }));
@@ -2147,11 +2147,11 @@ impl Waku {
                     );
                 }))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_activity_file(&click_path, cx);
+                    this.open_turn_diff(turn_id, Some(click_path.clone()), cx);
                 }))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.open_activity_file(&key_path, cx);
+                        this.open_turn_diff(turn_id, Some(key_path.clone()), cx);
                         cx.stop_propagation();
                     }
                 }))
