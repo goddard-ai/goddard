@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    COMMANDS, CommandDescriptor, CommandId, ENTRIES, PlatformSet, command, command_rows,
+    CommandDescriptor, CommandId, ENTRIES, PlatformSet, command, command_rows,
 };
 use crate::keybindings::CommandRow;
 

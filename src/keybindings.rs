@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{Action, App, DummyKeyboardMapper, KeyBinding, KeyBindingContextPredicate};
+use gpui::{App, DummyKeyboardMapper, KeyBinding, KeyBindingContextPredicate};
 
 mod catalog;
 mod conflict;
@@ -45,6 +45,8 @@ pub type CommandId = &'static str;
 
 /// Product grouping shown as the table's Category column. The cheatsheet
 /// sections double as the i18n keys.
+// Some categories have no commands yet; the full set is part of the spec.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CommandCategory {
     Global,
@@ -118,6 +120,8 @@ impl CommandCategory {
 }
 
 /// Whether the manager may offer capture for this command's bindings.
+// `reason_key` is read by the manager UI when it renders editability states.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum Editability {
     /// Standard editable binding.
@@ -147,6 +151,8 @@ pub fn current_entries() -> impl Iterator<Item = &'static CatalogEntry> {
 /// Uses the same `KeyBinding::load` path `KeyBinding::new` uses — dummy
 /// keyboard mapper, no key equivalents — so generated bindings are identical
 /// to the hand-written ones they replace.
+// Only exercised by the parity test until `bind_catalog_keys` is wired in.
+#[allow(dead_code)]
 pub fn generate_key_bindings() -> Vec<KeyBinding> {
     current_entries()
         .filter_map(|entry| {
@@ -269,6 +275,7 @@ pub fn apply_saved_overrides(cx: &mut App) {
 
 /// Debug-build assertion the spec asks for: duplicate command ids are a
 /// catalog authoring bug, not a runtime condition.
+#[allow(dead_code)]
 pub fn validate_catalog() -> Result<(), Vec<CommandId>> {
     let mut seen = HashMap::new();
     let mut duplicates = Vec::new();
@@ -293,6 +300,7 @@ pub fn validate_catalog() -> Result<(), Vec<CommandId>> {
 
 /// Register generated bindings — the flag-gated replacement for the
 /// hand-written init lists once parity is proven.
+#[allow(dead_code)]
 pub fn bind_catalog_keys(cx: &mut App) {
     cx.bind_keys(generate_key_bindings());
 }
