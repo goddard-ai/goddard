@@ -1426,6 +1426,54 @@ impl Waku {
         cx.notify();
     }
 
+    /// The `auto_resolve_land_conflicts` path around the conflict modal:
+    /// send the same resolution prompt Resolve in chat pastes to the
+    /// session that owns the stopped land's workspace — queued behind a
+    /// running turn like any follow-up. `false` when no session owns it, so
+    /// the caller can raise the modal instead.
+    fn send_land_conflict_to_chat(
+        &mut self,
+        conflict: &SyncConflict,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let SyncConflict::Land {
+            base, workspace, ..
+        } = conflict
+        else {
+            return false;
+        };
+        let Some(session_id) = self.land_conflict_session(workspace) else {
+            return false;
+        };
+        let prompt = sync_conflict_prompt(conflict);
+        self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+        self.show_toast(tr!("git_panel.auto_resolving_in_chat", base = base.clone()));
+        true
+    }
+
+    /// The session whose checkout a stopped land ran in — the selected one
+    /// first, then any started session bound to the path. An unstarted
+    /// session cannot have produced a conflict, and a quarantined one
+    /// cannot take the prompt.
+    fn land_conflict_session(&self, workspace: &Path) -> Option<Uuid> {
+        let owns = |session: &AgentSession| {
+            session.has_started()
+                && !session.quarantined
+                && self.workspace_path_for_session(session) == Some(workspace)
+        };
+        self.state
+            .selected_session
+            .and_then(|id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == id)
+            })
+            .filter(|session| owns(session))
+            .or_else(|| self.state.sessions.iter().find(|session| owns(session)))
+            .map(|session| session.id)
+    }
+
     /// Every panel operation lands here: drop the pending marker, apply the
     /// result to the panel that asked for it, and refresh what moved.
     pub(super) fn finish_git_panel_op(
@@ -1506,12 +1554,20 @@ impl Waku {
                         workspace: op.workspace.clone(),
                         files,
                     };
-                    if self.state.auto_resolve_in_chat {
-                        // Same trade as a pull conflict: the modal gives way
-                        // to a chat that starts resolving on its own.
-                        self.auto_resolve_sync_conflict(conflict, cx);
-                    } else {
-                        self.git_panel_sync_conflict = Some(conflict);
+                    // The land-specific setting wins first — it hands the
+                    // conflict to the session that owns the worktree. The
+                    // broader sync setting — or no session owning the path —
+                    // falls back to a fresh chat on the checkout.
+                    let sent_to_owner = self.state.auto_resolve_land_conflicts
+                        && self.send_land_conflict_to_chat(&conflict, cx);
+                    if !sent_to_owner {
+                        if self.state.auto_resolve_in_chat {
+                            // Same trade as a pull conflict: the modal gives
+                            // way to a chat that starts resolving on its own.
+                            self.auto_resolve_sync_conflict(conflict, cx);
+                        } else {
+                            self.git_panel_sync_conflict = Some(conflict);
+                        }
                     }
                     self.invalidate_workspace_queries(cx);
                     cx.notify();

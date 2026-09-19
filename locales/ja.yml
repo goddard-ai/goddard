@@ -319,6 +319,10 @@ settings.archive_navigation_next_session: サイドバーの次のセッショ�
 settings.archive_navigation_new_task: 新しいタスクを作成
 settings.sync_with_merge: 変更の同期にマージを使用
 settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
+settings.auto_resolve_in_chat: 同期の競合をチャットで解決
+settings.auto_resolve_in_chat_description: プルまたは取り込みが競合で停止したとき、チェックアウトで新しいチャットを開始し、解決手順を送信済みの状態にします
+settings.auto_resolve_land_conflicts: 取り込みの競合をチャットで解決
+settings.auto_resolve_land_conflicts_description: 取り込みがリベースまたはマージの競合で停止したとき、競合ダイアログを表示する代わりに解決プロンプトをタスクのチャットへ送信します
 settings.new_worktree_default_branch: 新しいワークツリーはデフォルトブランチから作成
 settings.new_worktree_default_branch_description: 新規ワークツリーを、最後に使ったベースブランチではなく常にリポジトリのデフォルトブランチから作成します
 settings.new_worktree_sync_default_branch: 新しいワークツリーはデフォルトブランチを更新
@@ -1555,6 +1559,7 @@ git_panel.already_landed: "%{base} にはすでにすべてのコミットが含
 git_panel.land_conflict_description: "%{base} への取り込みが途中で停止しました — 競合は作業ツリーに残っています。"
 git_panel.resolve_land_rebase_prompt: "このワークツリーの `%{base}` へのリベースが競合で停止しました。作業ツリーの競合を解決し、リベースが完了するまで `git rebase --continue` を実行してください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"
 git_panel.resolve_land_merge_prompt: "`%{base}` のこのワークツリーへのマージが競合で停止しました。作業ツリーの競合を解決してマージを完了させてください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"
+git_panel.auto_resolving_in_chat: "%{base} への取り込みが競合で停止しました — タスクのチャットで解決します"
 a11y.composer: 入力欄
 a11y.address_bar: アドレスバー
 a11y.command_palette: コマンドパレット

@@ -1405,6 +1405,25 @@ impl Waku {
                 search,
             ))
             .children(setting_card(
+                tr!("settings.auto_resolve_land_conflicts"),
+                tr!("settings.auto_resolve_land_conflicts_description"),
+                toggle_switch(
+                    "auto-resolve-land-conflicts-toggle",
+                    self.state.auto_resolve_land_conflicts,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.auto_resolve_land_conflicts;
+                        move |this, _, cx| {
+                            this.set_auto_resolve_land_conflicts(!enabled, cx)
+                        }
+                    },
+                ),
+                theme,
+                search,
+            ))
+            .children(setting_card(
                 tr!("settings.sidebar_shortcut_tags"),
                 tr!(
                     "settings.sidebar_shortcut_tags_description",
@@ -6412,6 +6431,15 @@ impl Waku {
             return;
         }
         self.state.archive_navigation = navigation;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_auto_resolve_land_conflicts(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.auto_resolve_land_conflicts == enabled {
+            return;
+        }
+        self.state.auto_resolve_land_conflicts = enabled;
         self.save();
         cx.notify();
     }

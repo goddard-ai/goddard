@@ -323,6 +323,10 @@ settings.archive_navigation_next_session: 前往侧栏中的下一个会话
 settings.archive_navigation_new_task: 撰写新任务
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
+settings.auto_resolve_in_chat: 在聊天中解决同步冲突
+settings.auto_resolve_in_chat_description: 当拉取或合入因冲突而停止时，在检出目录上开启一个新聊天并自动发送解决步骤
+settings.auto_resolve_land_conflicts: 在聊天中解决合入冲突
+settings.auto_resolve_land_conflicts_description: 当合入因变基或合并冲突而停止时，将解决提示发送到该任务的聊天，而不是显示冲突对话框
 settings.new_worktree_default_branch: 新工作树始终基于默认分支
 settings.new_worktree_default_branch_description: 创建新工作树时始终从仓库默认分支分叉，而不是沿用上次使用的基准分支
 settings.new_worktree_sync_default_branch: 新工作树更新默认分支
@@ -1512,6 +1516,7 @@ git_panel.already_landed: "%{base} 已包含此处的所有提交"
 git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
 git_panel.resolve_land_rebase_prompt: "此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"
 git_panel.resolve_land_merge_prompt: "`%{base}` 合并到此工作区时因冲突而停止。请解决工作区中的冲突并完成合并，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"
+git_panel.auto_resolving_in_chat: "合入 %{base} 因冲突而停止——正在该任务的聊天中解决"
 a11y.composer: 输入框
 a11y.address_bar: 地址栏
 a11y.command_palette: 命令面板

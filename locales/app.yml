@@ -901,6 +901,10 @@ settings.auto_resolve_in_chat:
   en: Resolve sync conflicts in a chat
 settings.auto_resolve_in_chat_description:
   en: When a pull or land stops on conflicts, start a fresh chat on the checkout with the resolution steps already sent
+settings.auto_resolve_land_conflicts:
+  en: Resolve land conflicts in chat
+settings.auto_resolve_land_conflicts_description:
+  en: When a land stops on rebase or merge conflicts, send the resolution prompt to the task's chat instead of showing the conflict dialog
 settings.new_worktree_default_branch:
   en: New worktrees use the default branch
 settings.new_worktree_default_branch_description:
@@ -3060,6 +3064,8 @@ git_panel.resolve_land_rebase_prompt:
   en: "The rebase of this worktree onto `%{base}` stopped on conflicts. Resolve the conflicts in the working tree and run `git rebase --continue` until the rebase completes. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
 git_panel.resolve_land_merge_prompt:
   en: "The merge of `%{base}` into this worktree stopped on conflicts. Resolve the conflicts in the working tree and complete the merge. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
+git_panel.auto_resolving_in_chat:
+  en: "Landing onto %{base} stopped on conflicts — resolving in the task's chat"
 
 sync_branch.current:
   en: Current branch
