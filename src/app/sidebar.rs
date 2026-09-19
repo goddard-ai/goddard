@@ -1848,38 +1848,40 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        // Each glyph keeps its Sketch-authored size; the SVGs were exported at
-        // 2x, so the render size is half the authored pixel dimensions.
+        // Each glyph keeps its Sketch proportion against the button: the SVGs
+        // were exported at 2x, and the render size is the authored pixel
+        // dimensions — half that left the glyphs undersized once the buttons
+        // doubled.
         let (id, path, label, glyph_size) = match item {
             SidebarDockItem::Friends => (
                 "friends",
                 "icons/friends.svg",
                 tr!("settings.friends"),
-                size(px(23.0), px(23.5)),
+                size(px(46.0), px(47.0)),
             ),
             SidebarDockItem::Inbox => (
                 "inbox",
                 "icons/inbox.svg",
                 tr!("sidebar.inbox"),
-                size(px(21.0), px(21.0)),
+                size(px(42.0), px(42.0)),
             ),
             SidebarDockItem::Archive => (
                 "archive",
                 "icons/dock-archive.svg",
                 tr!("settings.archived"),
-                size(px(23.0), px(23.0)),
+                size(px(46.0), px(46.0)),
             ),
             SidebarDockItem::Shortcuts => (
                 "shortcuts",
                 "icons/dock-keyboard.svg",
                 tr!("shortcuts.title"),
-                size(px(24.0), px(24.0)),
+                size(px(48.0), px(48.0)),
             ),
             SidebarDockItem::Settings => (
                 "settings",
                 "icons/settings-hexagon.svg",
                 tr!("common.settings"),
-                size(px(24.0), px(24.0)),
+                size(px(48.0), px(48.0)),
             ),
         };
         let hovered = self.sidebar_dock_hover_item == Some(item);
