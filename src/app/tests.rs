@@ -3371,6 +3371,78 @@ fn picker_rows_expand_models_into_effort_and_fast_combos() {
 }
 
 #[test]
+fn picker_structured_tokens_filter_on_row_fields() {
+    use super::composer::{PickerGranularity, visible_picker_rows};
+
+    let probes = [
+        picker_probe(ProviderKind::Codex, "gpt", &["low", "high"], true),
+        picker_probe(ProviderKind::Claude, "opus", &["max"], false),
+        picker_probe(ProviderKind::Pi, "pi-model", &["high"], false),
+    ];
+
+    // provider: narrows to one provider's rows.
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "provider:codex", false, PickerGranularity::Combos);
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|row| row.provider == ProviderKind::Codex));
+
+    // effort: matches the row's effort id exactly.
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "effort:high", false, PickerGranularity::Combos);
+    assert_eq!(rows.len(), 3);
+    assert!(
+        rows.iter()
+            .all(|row| row.effort.as_deref() == Some("high"))
+    );
+
+    // Tokens compose, and mix with free text.
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "provider:codex effort:high", false, PickerGranularity::Combos);
+    assert_eq!(rows.len(), 2);
+    let rows = visible_picker_rows(&probes, &[], &[], &[], None, "provider:codex gpt", false, PickerGranularity::Combos);
+    assert_eq!(rows.len(), 4);
+
+    // Unrecognized values and unknown keys match nothing.
+    for query in ["provider:bogus", "effort:bogus", "tier:fast", "provider:"] {
+        assert!(
+            visible_picker_rows(&probes, &[], &[], &[], None, query, false, PickerGranularity::Combos)
+                .is_empty(),
+            "{query} should match nothing"
+        );
+    }
+}
+
+#[test]
+fn picker_provider_query_toggles_the_provider_token() {
+    use super::composer::picker_provider_query;
+
+    assert_eq!(picker_provider_query("", "pi"), "provider:pi");
+    assert_eq!(picker_provider_query("sonnet", "pi"), "sonnet provider:pi");
+    assert_eq!(picker_provider_query("provider:pi", "pi"), "");
+    assert_eq!(picker_provider_query("provider:pi sonnet", "pi"), "sonnet");
+    assert_eq!(
+        picker_provider_query("provider:claude sonnet", "pi"),
+        "provider:pi sonnet"
+    );
+    // Stray provider tokens collapse rather than stacking.
+    assert_eq!(
+        picker_provider_query("provider:pi provider:claude sonnet", "pi"),
+        "sonnet"
+    );
+}
+
+#[test]
+fn picker_query_annotations_wash_only_recognized_values() {
+    use super::composer::picker_query_annotations;
+
+    let probes = [picker_probe(ProviderKind::Codex, "gpt", &["high"], false)];
+    let ranges = picker_query_annotations(
+        "provider:pi effort:high provider:bogus effort:bogus foo:bar pi",
+        &probes,
+    );
+    // Only the `pi` and `high` value spans resolve; unknown keys and
+    // unrecognized values paint nothing.
+    assert_eq!(ranges, vec![(9..11, true), (19..23, true)]);
+}
+
+#[test]
 fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
     use super::composer::{PickerGranularity, visible_picker_rows};
     use crate::model::FavoriteModel;
