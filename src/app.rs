@@ -4243,7 +4243,10 @@ impl Waku {
             }
 
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
-                if this.state.theme.mode == ThemeMode::System {
+                // A live preview owns the applied theme — and the override it
+                // sets on the window is what fired this notification — so
+                // re-applying the persisted theme here would stomp it.
+                if this.state.theme.mode == ThemeMode::System && !this.theme_preview_active {
                     crate::theme::apply_theme_preference(
                         this.state.theme,
                         this.state.sidebar_transparency,
