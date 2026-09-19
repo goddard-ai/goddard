@@ -3139,6 +3139,10 @@ transcript.edit_message:
   en: Edit message
 transcript.sent_by_agent:
   en: Sent by agent
+transcript.landed:
+  en: Landed on %{base}
+transcript.landed_more:
+  en: "…and %{count} more"
 
 duration.second:
   en: "%{count} second"

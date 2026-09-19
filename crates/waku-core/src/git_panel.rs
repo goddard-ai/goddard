@@ -223,6 +223,10 @@ fn git_path_exists(cwd: &Path, name: &str) -> anyhow::Result<bool> {
     Ok(cwd.join(path).exists())
 }
 
+/// The commit list a landed outcome carries; `ahead` stays the true total
+/// when a land sends more.
+const LANDED_COMMITS_LIMIT: usize = 50;
+
 /// Land the checkout's commits on its base branch: rebase onto it — or merge
 /// it in with `PullStrategy::Merge` — then fast-forward the base to the
 /// result. `base` is the session's recorded base; [`land_base`] resolves the
@@ -269,8 +273,19 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
             bail!("{}", command_error(&output));
         }
     }
+    // The range must resolve before the base moves: after the fast-forward
+    // `base..HEAD` is empty. These are the commits that land, newest first.
+    let range = format!("{base}..HEAD");
+    let ahead = git_optional_stdout(cwd, &["rev-list", "--count", &range])?
+        .and_then(|count| count.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let commits = log_commits(cwd, &[range], 0, LANDED_COMMITS_LIMIT)?;
     fast_forward_base(cwd, &base)?;
-    Ok(LandOutcome::Landed { base })
+    Ok(LandOutcome::Landed {
+        base,
+        commits,
+        ahead,
+    })
 }
 
 /// The branch a land rebases onto and fast-forwards: the recorded base while
@@ -824,12 +839,18 @@ mod tests {
         commit_in(&worktree, "work.txt", "session\n");
 
         let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
-        assert_eq!(
-            outcome,
-            LandOutcome::Landed {
-                base: "main".to_owned()
-            }
-        );
+        let LandOutcome::Landed {
+            base,
+            commits,
+            ahead,
+        } = outcome
+        else {
+            panic!("expected Landed, got {outcome:?}");
+        };
+        assert_eq!(base, "main");
+        assert_eq!(ahead, 1);
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].subject, "session work");
         // The merge ran inside the primary checkout: its files moved too.
         assert!(repository.join("work.txt").exists());
         assert_eq!(
@@ -848,12 +869,11 @@ mod tests {
         commit_in(&worktree, "work.txt", "session\n");
 
         let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
-        assert_eq!(
-            outcome,
-            LandOutcome::Landed {
-                base: "main".to_owned()
-            }
-        );
+        let LandOutcome::Landed { commits, ahead, .. } = outcome else {
+            panic!("expected Landed, got {outcome:?}");
+        };
+        assert_eq!(ahead, 1);
+        assert_eq!(commits.len(), 1);
         assert!(worktree.join("base.txt").exists());
         assert_eq!(
             git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
@@ -910,12 +930,11 @@ mod tests {
         assert!(ref_exists(&worktree, "REBASE_HEAD").unwrap());
 
         let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
-        assert_eq!(
-            outcome,
-            LandOutcome::Landed {
-                base: "main".to_owned()
-            }
-        );
+        let LandOutcome::Landed { commits, ahead, .. } = outcome else {
+            panic!("expected Landed, got {outcome:?}");
+        };
+        assert_eq!(ahead, 1);
+        assert_eq!(commits.len(), 1);
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -928,12 +947,12 @@ mod tests {
         commit_in(&worktree, "work.txt", "session\n");
 
         let outcome = land(&worktree, Some("main"), PullStrategy::Merge).unwrap();
-        assert_eq!(
-            outcome,
-            LandOutcome::Landed {
-                base: "main".to_owned()
-            }
-        );
+        let LandOutcome::Landed { commits, ahead, .. } = outcome else {
+            panic!("expected Landed, got {outcome:?}");
+        };
+        // The merge commit plus the worktree's own commit land together.
+        assert_eq!(ahead, 2);
+        assert_eq!(commits.len(), 2);
         // The base fast-forwarded to a merge commit: two parents.
         git_stdout(&repository, &["rev-parse", "--verify", "main^2"]).unwrap();
         std::fs::remove_dir_all(root).ok();
@@ -946,12 +965,7 @@ mod tests {
         commit_in(&worktree, "work.txt", "session\n");
 
         let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
-        assert_eq!(
-            outcome,
-            LandOutcome::Landed {
-                base: "main".to_owned()
-            }
-        );
+        assert!(matches!(outcome, LandOutcome::Landed { base, .. } if base == "main"));
         assert_eq!(
             git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
             git_stdout(&worktree, &["rev-parse", "HEAD"]).unwrap()

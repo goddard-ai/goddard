@@ -31,7 +31,7 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, FavoriteModel, Message, MessageAttachment, MessageRole, Project, ProviderKind,
-    RuntimeMode, SessionWorkspace,
+    RuntimeMode, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -1426,7 +1426,7 @@ impl StateStore {
         let mut statement = connection
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments,
-                        created_at, streaming, sent_by_task, hidden
+                        created_at, streaming, sent_by_task, hidden, notice
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1443,6 +1443,7 @@ impl StateStore {
                     row.get::<_, i64>(7)?,
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, i64>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1764,6 +1765,7 @@ type MessageColumns = (
     i64,
     Option<String>,
     i64,
+    Option<String>,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
@@ -1778,12 +1780,14 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         streaming,
         sent_by_task,
         hidden,
+        notice,
     ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
         turn_id: turn_id.as_deref().and_then(|id| Uuid::parse_str(id).ok()),
         role: serde_json::from_value(serde_json::Value::String(role)).ok()?,
         content,
+        notice: notice.and_then(|json| serde_json::from_str::<TranscriptNotice>(&json).ok()),
         display_content,
         attachments: serde_json::from_str::<Vec<MessageAttachment>>(&attachments)
             .unwrap_or_default(),
@@ -1810,8 +1814,8 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, created_at, streaming, sent_by_task, hidden
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         attachments, created_at, streaming, sent_by_task, hidden, notice
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -1823,7 +1827,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          created_at = excluded.created_at,
          streaming  = excluded.streaming,
          sent_by_task = excluded.sent_by_task,
-         hidden     = excluded.hidden";
+         hidden     = excluded.hidden,
+         notice     = excluded.notice";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -1860,6 +1865,12 @@ fn write_messages(
         } else {
             serde_json::to_string(&message.attachments).map_err(to_io_error)?
         };
+        let notice = message
+            .notice
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(to_io_error)?;
         transaction
             .execute(
                 UPSERT_MESSAGE,
@@ -1883,6 +1894,7 @@ fn write_messages(
                         .sent_by_task
                         .map_or(Value::Null, |id| Value::Text(id.to_string())),
                     Value::Integer(i64::from(message.hidden)),
+                    notice.map_or(Value::Null, Value::Text),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -1955,6 +1967,16 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     if let Some(display_content) = &message.display_content {
         fold(1);
         fold(fingerprint(display_content));
+    } else {
+        fold(0);
+    }
+    // Notices are rare enough that serializing one to compare beats hashing
+    // every message's empty case differently.
+    if let Some(notice) = &message.notice {
+        fold(1);
+        if let Ok(json) = serde_json::to_string(notice) {
+            fold(fingerprint(&json));
+        }
     } else {
         fold(0);
     }

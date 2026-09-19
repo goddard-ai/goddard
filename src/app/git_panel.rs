@@ -1474,12 +1474,17 @@ impl Waku {
                     self.invalidate_workspace_queries(cx);
                     cx.notify();
                 }
-                LandOutcome::Landed { base } => {
+                LandOutcome::Landed {
+                    base,
+                    commits,
+                    ahead,
+                } => {
                     self.settle_operation_toast(
                         op.toast_id,
                         tr!("git_panel.landed", base = base),
                         ToastTone::Success,
                     );
+                    self.record_landed_transcript_notice(&op.workspace, &base, commits, ahead);
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
                     self.invalidate_workspace_queries(cx);
                     self.refresh_git_panel(cx);
@@ -1562,6 +1567,41 @@ impl Waku {
         }
         self.save();
         cx.notify();
+    }
+
+    /// A "Landed on `base`" row in the transcript of every session rooted at
+    /// `workspace` — the same set `mark_workspace_sessions_landed` flags,
+    /// except the row is written per land rather than once: a repeat land
+    /// after new commits appends another. The message keeps `content` as the
+    /// pill fallback and `turn_id` unset so a rewind never drops it.
+    fn record_landed_transcript_notice(
+        &mut self,
+        workspace: &Path,
+        base: &str,
+        commits: Vec<CommitEntry>,
+        ahead: u64,
+    ) {
+        let notice = TranscriptNotice::Landed {
+            base: base.to_owned(),
+            commits,
+            ahead,
+        };
+        let content = tr!("transcript.landed", base = base);
+        for session in self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| self.workspace_path_for_session(session) == Some(workspace))
+            .map(|session| session.id)
+            .collect::<Vec<_>>()
+        {
+            let Some(session) = self.state.session_mut(session) else {
+                continue;
+            };
+            let mut message = Message::new(MessageRole::System, content.clone());
+            message.notice = Some(notice.clone());
+            session.messages.push(message);
+        }
     }
 
     /// Settle an operation's spinner toast to its result: resolve it in

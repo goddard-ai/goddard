@@ -183,8 +183,13 @@ pub enum PullOutcome {
 #[serde(rename_all = "camelCase")]
 pub enum LandOutcome {
     /// The checkout's commits are on the base, which was fast-forwarded to
-    /// this HEAD.
-    Landed { base: String },
+    /// this HEAD. `commits` lists what landed, newest first, capped at the
+    /// land operation's collect limit — `ahead` is the true total.
+    Landed {
+        base: String,
+        commits: Vec<CommitEntry>,
+        ahead: u64,
+    },
     /// The base already contains every commit on the checkout — the land
     /// either already ran or there was never anything to send. A neutral
     /// result, not an error.

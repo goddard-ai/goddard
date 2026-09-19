@@ -2,6 +2,7 @@ use super::*;
 
 use chrono::{Datelike, Days};
 use std::path::Path;
+use waku_client::git::CommitEntry;
 
 const USER_MESSAGE_MAX_HEIGHT: f32 = 400.0;
 const USER_MESSAGE_VIEWPORT_MAX_HEIGHT: f32 = USER_MESSAGE_MAX_HEIGHT - 16.0;
@@ -1054,22 +1055,29 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             }
             column
         }
-        MessageRole::System => div().w_full().flex().justify_center().child(
-            div()
-                .px(px(10.0))
-                .py(px(4.0))
-                .rounded_full()
-                .bg(theme.overlay)
-                .text_size(sp(12.5))
-                .line_height(sp(16.0))
-                .child(md::render::plain_text(
-                    content.clone(),
-                    ctx.families().ui.clone(),
-                    FontWeight::NORMAL,
-                    theme.text_tertiary,
-                    ctx,
-                )),
-        ),
+        MessageRole::System => match &message.notice {
+            Some(TranscriptNotice::Landed {
+                base,
+                commits,
+                ahead,
+            }) => landed_notice_row(theme, base, commits, *ahead, ctx),
+            _ => div().w_full().flex().justify_center().child(
+                div()
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .rounded_full()
+                    .bg(theme.overlay)
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .child(md::render::plain_text(
+                        content.clone(),
+                        ctx.families().ui.clone(),
+                        FontWeight::NORMAL,
+                        theme.text_tertiary,
+                        ctx,
+                    )),
+            ),
+        },
     };
 
     let selection = ctx.selection().clone();
@@ -1089,6 +1097,83 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 cx,
             )
         },
+    )
+}
+
+/// How many commits the landed notice lists before folding the rest behind
+/// an "and N more" line.
+const LANDED_NOTICE_SHOWN_COMMITS: usize = 5;
+
+/// The "Landed on `base`" card a [`TranscriptNotice::Landed`] renders as:
+/// merge icon and title over the commit list. The SHAs ride the ctx's
+/// commit-ref detection — enabled for notice messages — so each one
+/// underlines and opens the commit diff on click.
+fn landed_notice_row(
+    theme: &Theme,
+    base: &str,
+    commits: &[CommitEntry],
+    ahead: u64,
+    ctx: &MarkdownCtx,
+) -> Div {
+    let title = div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(icon("icons/git-merge.svg", 12.0, theme.text_tertiary))
+        .child(md::render::plain_text(
+            tr!("transcript.landed", base = base),
+            ctx.families().ui.clone(),
+            FontWeight::MEDIUM,
+            theme.text_secondary,
+            ctx,
+        ));
+    let mut lines = commits
+        .iter()
+        .take(LANDED_NOTICE_SHOWN_COMMITS)
+        .map(|commit| {
+            div()
+                .flex()
+                .items_baseline()
+                .gap(px(8.0))
+                .child(md::render::plain_text(
+                    commit.short_sha.clone(),
+                    ctx.families().code.clone(),
+                    FontWeight::NORMAL,
+                    theme.text_tertiary,
+                    ctx,
+                ))
+                .child(md::render::plain_text(
+                    commit.subject.clone(),
+                    ctx.families().ui.clone(),
+                    FontWeight::NORMAL,
+                    theme.text_tertiary,
+                    ctx,
+                ))
+        })
+        .collect::<Vec<_>>();
+    let hidden = ahead.saturating_sub(lines.len() as u64);
+    if hidden > 0 {
+        lines.push(div().child(md::render::plain_text(
+            tr!("transcript.landed_more", count = hidden),
+            ctx.families().ui.clone(),
+            FontWeight::NORMAL,
+            theme.text_ghost,
+            ctx,
+        )));
+    }
+    div().w_full().flex().justify_center().child(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .rounded(px(10.0))
+            .bg(theme.overlay)
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .child(title)
+            .children(lines),
     )
 }
 

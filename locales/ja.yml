@@ -1356,6 +1356,8 @@ transcript.conversation_turns: 会話ターン
 transcript.turn_label: "ターン %{number}：%{prompt}"
 transcript.edit_message: メッセージを編集
 transcript.sent_by_agent: エージェントから送信
+transcript.landed: "%{base} に取り込みました"
+transcript.landed_more: "…その他 %{count} 件のコミット"
 
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"

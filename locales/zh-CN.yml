@@ -1316,6 +1316,8 @@ transcript.conversation_turns: 对话轮次
 transcript.turn_label: "第 %{number} 轮：%{prompt}"
 transcript.edit_message: 编辑消息
 transcript.sent_by_agent: 由智能体发送
+transcript.landed: 已合入 %{base}
+transcript.landed_more: "…以及另外 %{count} 个提交"
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
 duration.minute: "%{count} 分钟"

@@ -85,6 +85,8 @@ export const messages = sqliteTable(
     content: text("content").notNull(),
     /** User-visible text before provider-facing attachment mentions. */
     displayContent: text("display_content"),
+    /** JSON-serialized TranscriptNotice — a structured system row's payload. */
+    notice: text("notice"),
     /** JSON-serialized MessageAttachment array. */
     attachments: text("attachments").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),

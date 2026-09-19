@@ -78,6 +78,13 @@
       "when": 1789756540167,
       "tag": "0010_wild_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789777858574,
+      "tag": "0011_outstanding_exodus",
+      "breakpoints": true
     }
   ]
 }

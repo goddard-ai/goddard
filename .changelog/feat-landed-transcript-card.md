@@ -1,0 +1,1 @@
+- Landing a task now records a "Landed on `<base>`" card in its transcript listing the commits that landed — each SHA opens the commit diff — so where the work went stays visible in the session's record.

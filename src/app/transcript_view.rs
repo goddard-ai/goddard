@@ -1464,7 +1464,11 @@ impl Waku {
                             cx,
                         )
                         .with_context_menu(menu.clone())
-                        .with_commit_refs(message.role == MessageRole::Assistant);
+                        // Structured notices carry SHAs too — the landed
+                        // row's commits get the same link treatment.
+                        .with_commit_refs(
+                            message.role == MessageRole::Assistant || message.notice.is_some(),
+                        );
                     if message.role == MessageRole::User {
                         ctx = ctx.with_file_link_root(
                             self.selected_workspace_path()

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::git::CommitEntry;
 use crate::routing::RouteDecision;
 
 #[derive(
@@ -2178,6 +2179,23 @@ pub struct MessageAttachment {
     pub session_id: Option<Uuid>,
 }
 
+/// A structured transcript element persisted on a [`Message`]. `content`
+/// always carries a plain-text rendering of the same event so clients that
+/// predate a variant still show the pill; renderers that know it draw the
+/// bespoke element instead.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum TranscriptNotice {
+    /// The workspace's commits were landed on `base` — rebase-or-merge
+    /// integration plus a base fast-forward. `commits` is newest-first and
+    /// may be capped shorter than `ahead`, the true total.
+    Landed {
+        base: String,
+        commits: Vec<CommitEntry>,
+        ahead: u64,
+    },
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct Message {
     pub id: Uuid,
@@ -2185,6 +2203,10 @@ pub struct Message {
     pub turn_id: Option<Uuid>,
     pub role: MessageRole,
     pub content: String,
+    /// Structured rendering of a system row; `None` for ordinary messages.
+    /// Clients without the variant fall back to `content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<TranscriptNotice>,
     /// User-visible text before provider-facing attachment mentions were
     /// appended. Plain and legacy messages omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2212,6 +2234,7 @@ impl Message {
             turn_id: None,
             role,
             content: content.into(),
+            notice: None,
             display_content: None,
             attachments: Vec::new(),
             sent_by_task: None,
