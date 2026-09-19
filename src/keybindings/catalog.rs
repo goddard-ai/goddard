@@ -172,6 +172,8 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "dialog.git.confirm", action: || Box::new(crate::app::ConfirmGitPanelModal), title_key: "shortcuts.confirm", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.archive.confirm", action: || Box::new(crate::app::ConfirmArchiveDialog), title_key: "shortcuts.confirm_archive", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "dialog.archive.dismiss", action: || Box::new(crate::app::DismissArchiveDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "dialog.terminal_close.confirm", action: || Box::new(crate::app::ConfirmTerminalClose), title_key: "shortcuts.confirm_kill_terminal", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
+    CommandDescriptor { id: "dialog.terminal_close.dismiss", action: || Box::new(crate::app::DismissTerminalClose), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: EDITABLE, builtin_label: None },
     CommandDescriptor { id: "dialog.goal.confirm", action: || Box::new(crate::app::ConfirmGoalDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.goal.dismiss", action: || Box::new(crate::app::DismissGoalDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.send_file.confirm", action: || Box::new(crate::app::ConfirmSendFileDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
@@ -491,6 +493,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_archive_dialog_keys ===============================================
     e("dialog.archive.confirm", All, "enter", ArchiveDialog),
     e("dialog.archive.dismiss", All, "escape", ArchiveDialog),
+    // === app::init_terminal_close_dialog_keys ==========================================
+    e("dialog.terminal_close.confirm", All, "enter", TerminalCloseDialog),
+    e("dialog.terminal_close.dismiss", All, "escape", TerminalCloseDialog),
     // === app::init_big_picture_keys ===================================================
     e("bigpicture.dismiss", All, "escape", BigPicture),
     e("bigpicture.left", All, "left", BigPicture),
@@ -704,6 +709,7 @@ mod ctx {
     pub const GitPanel: &str = "GitPanel";
     pub const GitPanelModal: &str = "GitPanelModal";
     pub const ArchiveDialog: &str = "ArchiveDialog";
+    pub const TerminalCloseDialog: &str = "TerminalCloseDialog";
     pub const BigPicture: &str = "BigPicture";
     pub const GoalInput: &str = "GoalDialog > TextInput";
     pub const GoalDialog: &str = "GoalDialog";

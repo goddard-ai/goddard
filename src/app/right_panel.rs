@@ -2545,6 +2545,12 @@ impl Waku {
             self.set_git_panel_visible(false, window, cx);
             return;
         }
+        // A terminal filling the main area is the active surface: ⌘W kills
+        // it, asking first while a command is still running inside.
+        if let Some(terminal_id) = self.selected_terminal {
+            self.close_main_terminal(terminal_id, window, cx);
+            return;
+        }
         if let Some(active) = self.right_panel_active_surface {
             self.close_right_panel_surface(active, cx);
             if self.right_panel_surfaces.is_empty() {

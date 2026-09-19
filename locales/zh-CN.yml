@@ -1003,6 +1003,10 @@ sync.push: 推送更改
 sync.command_hint: "在终端中运行 %{command}"
 
 terminal.starting: 正在启动终端…
+terminal.close_title: 关闭此终端？
+terminal.close_title_named: "关闭 %{name}？"
+terminal.close_description: 该终端的 shell 中仍有命令在运行。关闭终端将终止该进程。
+terminal.kill: 关闭终端
 project.add_project: 添加项目
 errors.remote_project_picker: 添加守护进程主机上的项目需要远程路径选择器，但该功能尚不可用
 errors.remote_project_locate: 定位守护进程主机上的项目需要远程路径选择器，但该功能尚不可用
