@@ -691,6 +691,13 @@ pub(crate) fn bind_keys(cx: &mut App) {
             CycleFavoriteModel,
             Some("Waku && !Terminal && !ProjectsPage"),
         ),
+        // ⌥Tab rotates the composer session's combo through the starred
+        // selections plus the most recently used one.
+        KeyBinding::new(
+            "alt-tab",
+            CycleFavoriteModel,
+            Some("Waku && !Terminal && !ProjectsPage"),
+        ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own
         // ⌘A and first Escape. The Settings → Git page keeps the same
