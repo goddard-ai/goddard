@@ -1,10 +1,11 @@
 use super::*;
 
 fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
-    // Codex's app-server owns the Computer Use process tree, and Amp offers no
-    // interrupt on its stream — stopping it means ending the process. Both
-    // resume their native thread on the next prompt.
-    !matches!(provider, ProviderKind::Codex | ProviderKind::Amp)
+    // Amp offers no interrupt on its stream — stopping it means ending the
+    // process. The thread survives on Amp's side and the next prompt resumes
+    // it with `threads continue`. Every other provider has a protocol
+    // interrupt and keeps its runtime warm.
+    !matches!(provider, ProviderKind::Amp)
 }
 
 fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode) -> RuntimeMode {
@@ -3775,8 +3776,9 @@ impl Waku {
         if let Some(runtime) = runtime.as_ref() {
             runtime.driver.cancel();
             if retain_runtime {
-                // A detached process keeps Codex's app-server resident, but
-                // Computer Use descendants still belong to the cancelled turn.
+                // A retained runtime's Computer Use descendants still belong
+                // to the cancelled turn; the kernel's own cancel marker
+                // catches an in-flight `js` call.
                 runtime.driver.cancel_computer_use();
             }
         }
@@ -3841,11 +3843,11 @@ impl Waku {
         if let Some(previous_kinds) = previous_kinds.as_deref() {
             self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
         }
-        // A provider runtime owns its Goddard JavaScript REPL and Computer Use
-        // descendants. Normally Stop closes that process tree and the next
-        // prompt resumes the same provider thread with a fresh runtime. A
-        // detached process or subagent is the exception: its provider must
-        // remain resident so Goddard can keep observing and stopping it.
+        // A retained runtime keeps the provider process — and its native
+        // session — warm for the next prompt. Amp is the exception: with no
+        // stream interrupt, Stop must end the process and resume the thread
+        // later. A detached process or subagent also forces retention so
+        // Goddard can keep observing and stopping it.
         if retain_runtime && keep_runtime {
             if let Some(runtime) = runtime.take() {
                 self.runtimes.insert(session_id, runtime);
@@ -4458,12 +4460,11 @@ mod tests {
     }
 
     #[test]
-    fn stopping_releases_the_runtimes_that_cannot_be_interrupted_in_place() {
-        // Codex owns a Computer Use process tree; Amp has no stream interrupt.
-        assert!(!retain_runtime_after_cancel(ProviderKind::Codex));
+    fn stopping_releases_only_the_runtime_without_a_stream_interrupt() {
+        // Amp has no stream interrupt; every other provider keeps its runtime.
         assert!(!retain_runtime_after_cancel(ProviderKind::Amp));
         for provider in ProviderKind::ALL {
-            if !matches!(provider, ProviderKind::Codex | ProviderKind::Amp) {
+            if provider != ProviderKind::Amp {
                 assert!(retain_runtime_after_cancel(provider));
             }
         }

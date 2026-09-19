@@ -84,7 +84,7 @@ A runtime — and with it that session's provider process — is dropped when:
 
 | Trigger | Where |
 | --- | --- |
-| The user stops a turn, **Codex and Amp only** | [src/app/sessions.rs:3](../src/app/sessions.rs#L3) |
+| The user stops a turn, **Amp only** | [src/app/sessions.rs:3](../src/app/sessions.rs#L3) |
 | The provider changes, or an option changes that the transport cannot apply in session | `apply_session_options`, [src/app/runtime.rs](../src/app/runtime.rs) |
 | The session is deleted | [src/app/sessions.rs:178](../src/app/sessions.rs#L178) |
 | A rewind or branch leaves the driver on a stale native session | [src/app/runtime.rs](../src/app/runtime.rs) |
@@ -92,11 +92,14 @@ A runtime — and with it that session's provider process — is dropped when:
 | Nobody has touched the session for 30 minutes | `reap_idle_sessions`, [src/app/runtime.rs](../src/app/runtime.rs) |
 | Goddard quits | `cx.quit()` |
 
-Stop drops the runtime for Codex, whose app-server owns the Computer Use process
-tree, and for Amp, which offers no interrupt on its stream — for both, stopping
-means ending the process, and the next prompt resumes the native thread
-(`thread/resume`, `threads continue`). Every other provider has a protocol
-interrupt and keeps its runtime (`retain_runtime_after_cancel`).
+Stop drops the runtime only for Amp, which offers no interrupt on its stream —
+stopping means ending the process, and the next prompt resumes the native
+thread (`threads continue`). Every other provider has a protocol interrupt and
+keeps its runtime (`retain_runtime_after_cancel`). `cancel_computer_use` kills
+the turn's registered helpers on every provider and drops a `cancel-kernel`
+marker into the session's process directory, which the `goddard_js_repl`
+kernel polls to abort an in-flight `js` call — its serve loop is synchronous,
+so an MCP `notifications/cancelled` could never reach it.
 
 Option changes go through `DriverControl::apply_options`, which returns whether
 the transport absorbed the change or wants to be restarted:

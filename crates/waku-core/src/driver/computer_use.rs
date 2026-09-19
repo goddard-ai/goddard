@@ -149,6 +149,11 @@ pub(super) fn create_process_directory() -> anyhow::Result<PathBuf> {
 }
 
 pub(super) fn stop_registered_processes(directory: &Path, helper_executable: &Path) {
+    // An in-flight `js` call holds the kernel's serve loop and cannot see a
+    // helper die, so the kernel polls this marker itself. Each `tools/call`
+    // clears it on entry. The name is a wire contract with `goddard_js_repl`
+    // (src/js_repl.rs), which lives outside this crate.
+    let _ = fs::write(directory.join("cancel-kernel"), b"");
     let expected_executable =
         dunce::canonicalize(helper_executable).unwrap_or_else(|_| helper_executable.to_path_buf());
     for (pid, registration) in registered_processes(directory) {

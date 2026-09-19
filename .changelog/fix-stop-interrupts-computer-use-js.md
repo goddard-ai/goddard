@@ -1,0 +1,1 @@
+- Stop now interrupts an in-flight Computer Use `js` call on every provider: Goddard drops a `cancel-kernel` marker into the session's process directory that the QuickJS kernel polls, since its synchronous serve loop can never see an MCP `notifications/cancelled`. Stopping a Codex turn also keeps the app-server resident like every other provider instead of ending the process
