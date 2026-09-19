@@ -762,6 +762,12 @@ pub fn configure_sidebar_material(
         let glass_ok = glass_effect_supported();
         let glass_active = transparent && glass_ok;
         if glass_ok {
+            // Glass tints must stay light — the vibrancy-path opacity (up to
+            // 100%) would repaint the flat look over the lensing. The slider
+            // keeps its direction: more transparency, clearer glass.
+            let glass_tint = NSColor::colorWithSRGBRed_green_blue_alpha(
+                r, g, b, tint_opacity * 0.35,
+            );
             SIDEBAR_GLASS_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|glass_view| {
                 glass_view
@@ -791,7 +797,7 @@ pub fn configure_sidebar_material(
             if let Some(glass_view) = slot.as_ref() {
                 glass_view.setHidden(!glass_active);
                 if glass_active {
-                    glass_view.setTintColor(Some(&tint));
+                    glass_view.setTintColor(Some(&glass_tint));
                 }
             }
             });
@@ -1044,7 +1050,10 @@ pub fn sync_composer_glass(
                 glass_view.setHidden(!show);
                 if show {
                     let rgb: gpui::Rgba = tint.into();
-                    let tint_opacity = 1.0 - f64::from(transparency_amount.clamp(0.0, 1.0));
+                    // See the sidebar: heavy tints repaint the flat look over
+                    // the lensing, so the glass path runs much lighter.
+                    let tint_opacity =
+                        (1.0 - f64::from(transparency_amount.clamp(0.0, 1.0))) * 0.35;
                     glass_view.setTintColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
                         f64::from(rgb.r),
                         f64::from(rgb.g),
