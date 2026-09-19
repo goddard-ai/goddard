@@ -3,7 +3,7 @@
 //! from the daemon's `friendsChanged` document; this file only renders it
 //! and sends commands.
 
-use super::settings::{SettingSearch, settings_search_text};
+use super::settings::{SettingSearch, settings_search_text, settings_title_jump};
 use super::*;
 use waku_client::friends::{FriendInfo, TransferDirection, TransferInfo, TransferStatus};
 
@@ -116,20 +116,31 @@ impl Waku {
             let hint = tr!("friends.code_hint");
             search
                 .matched(&title, &hint)
-                .map(|(title_ranges, hint_ranges)| {
+                .map(|matched| {
                     let mut children: Vec<AnyElement> = vec![
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(settings_search_text(title, title_ranges, theme))
-                            .into_any_element(),
+                        settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ),
                         div()
                             .mt(px(5.0))
                             .text_size(sp(12.5))
                             .line_height(sp(18.0))
                             .text_color(theme.text_secondary)
-                            .child(settings_search_text(hint, hint_ranges, theme))
+                            .child(settings_search_text(
+                                hint,
+                                matched.description_ranges.clone(),
+                                theme,
+                            ))
                             .into_any_element(),
                     ];
                     if !search.active() {
@@ -181,20 +192,31 @@ impl Waku {
                 let hint = tr!("friends.add_hint");
                 search
                     .matched(&title, &hint)
-                    .map(|(title_ranges, hint_ranges)| {
+                    .map(|matched| {
                         let mut children: Vec<AnyElement> = vec![
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(title, title_ranges, theme))
-                                .into_any_element(),
+                            settings_title_jump(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ),
                             div()
                                 .mt(px(5.0))
                                 .text_size(sp(12.5))
                                 .line_height(sp(18.0))
                                 .text_color(theme.text_secondary)
-                                .child(settings_search_text(hint, hint_ranges, theme))
+                                .child(settings_search_text(
+                                    hint,
+                                    matched.description_ranges.clone(),
+                                    theme,
+                                ))
                                 .into_any_element(),
                         ];
                         if !search.active() {
@@ -236,7 +258,7 @@ impl Waku {
             let short = short_node_id(&request.node_id);
             let accept_id = node_id.clone();
             let decline_id = node_id.clone();
-            let Some((name_ranges, _)) = search.matched(&format!("{name} · {short}"), "") else {
+            let Some(matched) = search.matched(&format!("{name} · {short}"), "") else {
                 continue;
             };
             request_cards.push(
@@ -249,12 +271,16 @@ impl Waku {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(div().text_size(sp(13.0)).text_color(theme.text).child(
-                                settings_search_text(
-                                    format!("{name} · {short}"),
-                                    name_ranges,
-                                    theme,
+                            .child(settings_title_jump(
+                                div().text_size(sp(13.0)).text_color(theme.text).child(
+                                    settings_search_text(
+                                        format!("{name} · {short}"),
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    ),
                                 ),
+                                &matched,
+                                theme,
                             ))
                             .child(
                                 div()
@@ -367,7 +393,7 @@ impl Waku {
             let remove_id = node_id.clone();
             // Nicknames are searchable too — the row renders the resolved
             // name, so match on it rather than the self-reported one.
-            let Some((name_ranges, _)) = search.matched(&display, "") else {
+            let Some(matched) = search.matched(&display, "") else {
                 continue;
             };
             let edit_id = node_id.clone();
@@ -417,8 +443,16 @@ impl Waku {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(div().text_size(sp(13.0)).text_color(theme.text).child(
-                                settings_search_text(display.clone(), name_ranges, theme),
+                            .child(settings_title_jump(
+                                div().text_size(sp(13.0)).text_color(theme.text).child(
+                                    settings_search_text(
+                                        display.clone(),
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    ),
+                                ),
+                                &matched,
+                                theme,
                             ))
                             .child(
                                 div()

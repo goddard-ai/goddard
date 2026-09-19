@@ -13,8 +13,8 @@ use gpui::{
     Context, Div, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, FontWeight,
     HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
-    ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful,
-    StyleRefinement,
+    ObjectFit, PathPromptOptions, Pixels, Render, ScrollAnchor, ScrollHandle, SharedString,
+    Stateful, StyleRefinement,
     TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div, ease_out_quint, fill, font,
     img, linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
 };
@@ -258,7 +258,7 @@ enum BranchPickerAction {
     Create,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum SettingsPage {
     General,
     Providers,
@@ -2423,6 +2423,11 @@ pub struct Waku {
     /// The section the last search-mode navigation landed on; arrow cycling
     /// steps from it rather than from the selected page.
     settings_search_target: Option<SettingsPage>,
+    /// One scroll anchor per searchable row, keyed by (page, ordinal in
+    /// render order). The results column and the natural page run the same
+    /// render function, so a row keeps its ordinal on both sides and a
+    /// results-column click can scroll the page straight to it.
+    settings_row_anchors: Rc<RefCell<HashMap<(SettingsPage, usize), ScrollAnchor>>>,
     /// Filter query over the Archived Chats page's rows.
     archived_search: Entity<TextInput>,
     /// Project the archived list is narrowed to; `None` shows every project.
@@ -5146,6 +5151,7 @@ impl Waku {
                 settings_scrollbar: ScrollbarState::new(),
                 settings_search_sections: Vec::new(),
                 settings_search_target: None,
+                settings_row_anchors: Rc::new(RefCell::new(HashMap::new())),
                 archived_search,
                 archived_project_filter: None,
                 archived_sessions_list: ListState::new(0, ListAlignment::Top, px(256.0)),
