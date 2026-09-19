@@ -19,6 +19,12 @@
 //! * `provider:model` — a concrete target.
 //! * `provider` — a provider's own default model.
 //!
+//! `tiers` values are either a bare model id (`"fast": "claude-haiku-4-5"`)
+//! or an object carrying an optional effort override
+//! (`"heavy": {"model": "claude-opus-5", "effort": "high"}`). Routing uses
+//! the model only; effort is consumed by other tier clients such as the
+//! subagents experiment.
+//!
 //! The classifier never emits these strings; policy resolution is ordinary
 //! deterministic code.
 
@@ -137,6 +143,14 @@ pub enum Tier {
     Heavy,
 }
 
+/// One resolved tier entry: the model the tier maps to plus an optional
+/// provider-specific effort override.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TierModel {
+    pub model: String,
+    pub effort: Option<String>,
+}
+
 /// A family's override block: a class floor, per-class target overrides, or
 /// both.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -169,8 +183,8 @@ pub struct RoutePolicy {
     /// The raw `default` value as written ("last_used" or a target string).
     pub default_raw: String,
     pub family_overrides: BTreeMap<TaskFamily, FamilyOverride>,
-    /// provider -> tier -> model id.
-    pub tiers: BTreeMap<ProviderKind, BTreeMap<Tier, String>>,
+    /// provider -> tier -> model/effort entry.
+    pub tiers: BTreeMap<ProviderKind, BTreeMap<Tier, TierModel>>,
 }
 
 // ---------- raw document ----------
@@ -194,7 +208,32 @@ struct PolicyDocument {
     #[serde(default)]
     family_overrides: BTreeMap<String, FamilyOverrideDocument>,
     #[serde(default)]
-    tiers: BTreeMap<String, BTreeMap<String, String>>,
+    tiers: BTreeMap<String, BTreeMap<String, TierValue>>,
+}
+
+/// A `tiers` table value as written in the document: either the bare model
+/// id or `{ "model": ..., "effort": ... }`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum TierValue {
+    Model(String),
+    Full {
+        model: String,
+        #[serde(default)]
+        effort: Option<String>,
+    },
+}
+
+impl TierValue {
+    fn into_model(self) -> TierModel {
+        match self {
+            TierValue::Model(model) => TierModel {
+                model,
+                effort: None,
+            },
+            TierValue::Full { model, effort } => TierModel { model, effort },
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -274,7 +313,7 @@ pub fn parse_policy(source: &str) -> anyhow::Result<RoutePolicy> {
                 provider_from_id(provider).with_context(|| format!("tiers.{provider}"))?;
             let table = table
                 .iter()
-                .map(|(tier, model)| Ok((parse_tier(tier)?, model.clone())))
+                .map(|(tier, value)| Ok((parse_tier(tier)?, value.clone().into_model())))
                 .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
             Ok((provider, table))
         })
@@ -528,7 +567,7 @@ mod tests {
             PolicyTarget::SessionTier(Tier::Heavy)
         );
         assert_eq!(
-            policy.tiers[&ProviderKind::Claude][&Tier::Fast],
+            policy.tiers[&ProviderKind::Claude][&Tier::Fast].model,
             "claude-haiku-4-5"
         );
         assert_eq!(
@@ -565,6 +604,24 @@ mod tests {
         assert!(parse_target("session:claude").is_err());
         assert!(parse_target("tier:ludicrous").is_err());
         assert!(parse_target("notaprovider:x").is_err());
+    }
+
+    #[test]
+    fn tier_values_accept_an_optional_effort_object() {
+        let policy = parse_policy(
+            r#"{"version": 1,
+                "classes": {"routine": "tier:fast", "general": "tier:default", "demanding": "tier:heavy"},
+                "tiers": {"claude": {
+                    "fast": "claude-haiku-4-5",
+                    "heavy": {"model": "claude-opus-5", "effort": "high"}
+                }}}"#,
+        )
+        .unwrap();
+        let table = &policy.tiers[&ProviderKind::Claude];
+        assert_eq!(table[&Tier::Fast].model, "claude-haiku-4-5");
+        assert_eq!(table[&Tier::Fast].effort, None);
+        assert_eq!(table[&Tier::Heavy].model, "claude-opus-5");
+        assert_eq!(table[&Tier::Heavy].effort.as_deref(), Some("high"));
     }
 
     #[test]
