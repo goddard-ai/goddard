@@ -2189,9 +2189,15 @@ impl Waku {
         let start_size = match target {
             PanelResizeTarget::Sidebar => {
                 self.sidebar_slide = None;
-                self.sidebar_width = sidebar_width;
-                crate::platform::set_sidebar_material_width(window, sidebar_width);
-                sidebar_width
+                // Settings paints its own sidebar even while the workspace's
+                // is hidden — the drag starts from what is on screen.
+                self.sidebar_width = if self.settings_page.is_some() {
+                    self.settings_sidebar_width(window)
+                } else {
+                    sidebar_width
+                };
+                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
+                self.sidebar_width
             }
             PanelResizeTarget::RightPanel => {
                 self.right_panel_slide = None;
