@@ -1585,14 +1585,12 @@ impl Waku {
                             .items_center()
                             .gap(px(10.0))
                             .cursor_default()
-                            .border(hairline())
-                            .border_color(gpui::transparent_black())
                             .when(auto_route, |element| element.bg(theme.overlay_strong))
-                            .when(is_highlighted, |element| {
-                                element.bg(theme.overlay).border_color(theme.accent)
-                            })
                             .hover(|element| element.bg(theme.overlay))
                             .active(|element| element.opacity(0.85))
+                            .when(is_highlighted, |element| {
+                                element.bg(theme.accent.opacity(0.14))
+                            })
                             .child(
                                 div()
                                     .min_w_0()
@@ -1771,19 +1769,15 @@ impl Waku {
                         .items_center()
                         .gap(px(10.0))
                         .cursor_default()
-                        // Reserved on every row so highlighting one cannot
-                        // resize it and shift the list by a pixel.
-                        .border(hairline())
-                        .border_color(gpui::transparent_black())
                         .when(is_selected, |element| element.bg(theme.overlay_strong))
-                        // The keyboard cursor reads as a ring rather than a
-                        // fill, so it stays legible on the current model's
-                        // already-filled row.
-                        .when(is_highlighted, |element| {
-                            element.bg(theme.overlay).border_color(theme.accent)
-                        })
                         .hover(|element| element.bg(theme.overlay))
                         .active(|element| element.opacity(0.85))
+                        // The keyboard cursor reads as an accent tint rather
+                        // than a ring, so it stays legible on the current
+                        // model's already-filled row.
+                        .when(is_highlighted, |element| {
+                            element.bg(theme.accent.opacity(0.14))
+                        })
                         .child(
                             div()
                                 .min_w_0()
@@ -1933,7 +1927,10 @@ impl Waku {
                     row_element.into_any_element()
                 })
                 .size_full()
-                .p(px(9.0)),
+                .py(px(9.0))
+                // Extra horizontal inset keeps the rows' hover and
+                // highlight fills off the panel's edges.
+                .px(px(12.0)),
             );
         }
 
