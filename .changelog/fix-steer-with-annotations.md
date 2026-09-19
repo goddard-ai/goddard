@@ -1,1 +1,0 @@
-- ⌘Enter now steers a composer draft that only contains comment annotations, instead of doing nothing

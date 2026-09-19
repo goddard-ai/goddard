@@ -1,1 +1,0 @@
-- The "Task unarchived" toast now advertises ⌘⌥O — pressing it jumps straight to the restored task
