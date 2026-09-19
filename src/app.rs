@@ -1631,14 +1631,18 @@ fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPa
     restored
 }
 
-/// The accent dot painted at the top of a transcript whose session was opened
-/// with unseen completions. `armed_at` orders it against
+/// The accent dot painted beside the first line of the latest agent reply when
+/// its session was opened with unseen completions. `armed_at` orders it against
 /// `transcript_last_wheel_scroll` — a wheel gesture predating the activation
-/// must not dismiss it — and `fading` swaps the dot for its exit animation.
+/// must not dismiss it — and `fade_started` runs the exit animation, after
+/// which nothing renders so a remounting row cannot replay it.
 #[derive(Clone, Copy)]
 struct NewContentDot {
+    /// The assistant message the marker anchors to: the newest one in the
+    /// session, which is the reply the unseen completion produced.
+    message_id: Uuid,
     armed_at: Instant,
-    fading: bool,
+    fade_started: Option<Instant>,
 }
 
 /// Where a session activation parks the transcript.
@@ -2104,6 +2108,20 @@ pub struct Waku {
     friends_state: waku_client::friends::FriendsState,
     friends_tx: Sender<waku_client::friends::FriendsState>,
     friends_events: Receiver<waku_client::friends::FriendsState>,
+    /// `pairingChanged` broadcasts forwarded by the task-state sync worker:
+    /// pending pair requests and the paired-device roster.
+    pairing_state: waku_client::pairing::PairingState,
+    pairing_tx: Sender<waku_client::pairing::PairingState>,
+    pairing_events: Receiver<waku_client::pairing::PairingState>,
+    /// LAN browser feeding Settings → Daemon's nearby-daemon rows. Bound
+    /// lazily the first time the page opens; `updates` drains on the
+    /// event pump like the other crossbeam channels.
+    daemon_discovery: Option<Arc<waku_client::DaemonDiscovery>>,
+    /// Endpoint id string → the latest record that daemon announced.
+    nearby_daemons: HashMap<String, waku_client::discover::DiscoveredDaemon>,
+    /// Endpoint ids with a pair request awaiting the remote user's
+    /// decision — their rows render "waiting" instead of a Pair button.
+    pair_requests_in_flight: HashSet<String>,
     /// `automationsChanged` documents from every connected daemon — the
     /// per-daemon mirrors live in `automations`.
     automations_tx: Sender<(
@@ -4238,6 +4256,7 @@ impl Waku {
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
+        let (pairing_tx, pairing_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
@@ -4489,12 +4508,14 @@ impl Waku {
                             && this.composer_attachments.is_empty()
                             && this.composer_pasted_blocks.is_empty()
                             && !this.has_annotations()
-                            && this
-                                .selected_session()
-                                .is_some_and(composer::session_awaits_continue)
+                            && this.selected_session().is_some_and(|session| {
+                                composer::session_awaits_continue(session)
+                                    || this.quarantine_handoff_transfer(session).is_some()
+                            })
                         {
                             // Enter on an empty composer over a stopped turn
-                            // is the same affordance as the play button.
+                            // or an unstarted quarantined transfer is the
+                            // same affordance as the play button.
                             this.continue_interrupted_session(cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)
@@ -5242,6 +5263,12 @@ impl Waku {
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,
+                pairing_state: waku_client::pairing::PairingState::default(),
+                pairing_tx,
+                pairing_events,
+                daemon_discovery: None,
+                nearby_daemons: HashMap::new(),
+                pair_requests_in_flight: HashSet::new(),
                 automations_tx,
                 automations_events,
                 review_tx,

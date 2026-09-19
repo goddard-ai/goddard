@@ -3,4 +3,4 @@
 /**
  * What started a run.
  */
-export type AutomationTrigger = "scheduled" | "manual";
+export type AutomationTrigger = "scheduled" | "manual" | "webhook";

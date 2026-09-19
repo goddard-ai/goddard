@@ -102,13 +102,18 @@ pub struct WakuBackend {
     runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
     /// The address the daemon bound, published to provider sessions as
     /// `GODDARD_DAEMON_ADDRESS` when agent tools are enabled. Set once by the
-    /// daemon executable after it binds its listener.
-    daemon_address: Mutex<Option<String>>,
+    /// daemon executable after it binds its listener. `Arc` so the link
+    /// info handler can read it inside the share runtime.
+    daemon_address: Arc<Mutex<Option<String>>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
     /// friends command so tests and headless runs pay nothing.
     share: Arc<crate::share::ShareService>,
+    /// Per-device pairing tokens — requests, grants, revokes.
+    pairing: Arc<crate::pairing::PairingService>,
+    /// The `USER`-derived label share friends and pairers both see.
+    our_name: String,
     /// The hot-reloading view of the user's `route-policy.json`.
     route_policy: crate::route_policy::PolicyStore,
     /// Scheduled automations — definitions, run history, and the tick that
@@ -177,14 +182,23 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_start_locks: Mutex::new(HashMap::new()),
-            daemon_address: Mutex::new(None),
+            daemon_address: Arc::new(Mutex::new(None)),
             usage_rates_dir,
             route_policy,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            share: Arc::new(crate::share::ShareService::new(share_dir.clone(), our_name)),
+            share: Arc::new(crate::share::ShareService::new(
+                share_dir.clone(),
+                our_name.clone(),
+            )),
+            pairing: Arc::new(crate::pairing::PairingService::new(
+                &data_dir,
+                our_name.clone(),
+            )),
+            our_name,
             automations,
         };
         backend.purge_expired_archived_sessions();
+        backend.install_link_handlers();
         {
             let task_state = backend.task_state.clone();
             let task_store = backend.task_store.clone();
@@ -306,6 +320,64 @@ impl WakuBackend {
     /// starts serving — the service needs the backend's `Arc` for dispatch.
     pub fn start_automations(self: &Arc<Self>) {
         self.automations.start(self);
+    }
+
+    /// Point the `waku-link` ALPN at the daemon's metadata and pairing
+    /// service. The handlers are installed once; whichever share runtime
+    /// spawns later picks them up.
+    fn install_link_handlers(&self) {
+        let name = self.our_name.clone();
+        let share_dir = self.share_dir();
+        let daemon_address = self.daemon_address.clone();
+        let pairing = self.pairing.clone();
+        let info: waku_share::link::InfoHandler = Arc::new(move || {
+            // Only report a ws port when the daemon is actually bound
+            // beyond loopback — otherwise discovery would send clients to
+            // an address they cannot reach.
+            let ws_port = daemon_address
+                .lock()
+                .as_deref()
+                .and_then(|address| address.parse::<std::net::SocketAddr>().ok())
+                .filter(|address| !address.ip().is_loopback())
+                .map(|address| address.port());
+            let endpoint_id = waku_share::identity::load_or_create(&share_dir)
+                .map(|secret| secret.public().to_string())
+                .unwrap_or_default();
+            waku_share::link::DaemonInfo {
+                name: name.clone(),
+                ws_port,
+                protocol_version: waku_protocol::PROTOCOL_VERSION,
+                endpoint_id,
+            }
+        });
+        let pair: waku_share::link::PairHandler = Arc::new(move |_id, device_name| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let pairing = pairing.clone();
+            // The pairing service is synchronous; park its wait on a
+            // blocking thread so the share runtime's executor stays free.
+            std::thread::spawn(move || {
+                let decision = match pairing.request_blocking(&device_name, "link") {
+                    crate::pairing::PairReply::Granted { token } => {
+                        waku_share::link::PairDecision::Grant { token }
+                    }
+                    crate::pairing::PairReply::Declined { .. }
+                    | crate::pairing::PairReply::Busy { .. } => {
+                        waku_share::link::PairDecision::Decline
+                    }
+                };
+                let _ = tx.send(decision);
+            });
+            rx
+        });
+        self.share.set_link_handlers(info, pair);
+    }
+
+    fn share_dir(&self) -> std::path::PathBuf {
+        self.task_store
+            .path()
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("share")
     }
 
     #[cfg(all(test, unix))]
@@ -622,6 +694,35 @@ impl Backend for WakuBackend {
         self.agent.resolve(token)
     }
 
+    fn authenticate_paired(&self, token: &str) -> bool {
+        self.pairing.authenticate(token)
+    }
+
+    fn request_pair(&self, device_name: &str, transport: &str) -> crate::pairing::PairReply {
+        self.pairing.request_blocking(device_name, transport)
+    }
+
+    fn set_pairing_sink(&self, sink: crate::pairing::PairingSink) {
+        self.pairing.set_sink(sink);
+    }
+
+    fn daemon_name(&self) -> String {
+        self.our_name.clone()
+    }
+
+    fn lan_advertisement(&self) -> Option<(String, String)> {
+        // The EndpointId doubles as the daemon's LAN identity — the same
+        // string friend codes and iroh discovery carry.
+        let id = waku_share::identity::load_or_create(&self.share_dir())
+            .map(|secret| secret.public().to_string())
+            .ok()?;
+        Some((self.our_name.clone(), id))
+    }
+
+    fn kickstart_reachability(&self) {
+        self.share.kickstart();
+    }
+
     fn set_friends_sink(&self, sink: crate::share::FriendsSink) {
         self.share.set_sink(sink);
     }
@@ -649,6 +750,14 @@ impl Backend for WakuBackend {
 
     fn set_friend_session_sink(&self, sink: crate::share::FriendSessionSink) {
         self.share.set_friend_session_sink(sink);
+    }
+
+    fn trigger_automation_webhook(
+        &self,
+        automation_id: Uuid,
+        key: &str,
+    ) -> anyhow::Result<Option<waku_protocol::automations::AutomationRun>> {
+        self.automations.trigger_webhook(automation_id, key)
     }
 
     fn handle(
@@ -686,6 +795,17 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Friends {
                     state: self.share.state(),
                 })
+            }
+            Command::GetPairing => Ok(ResponsePayload::Pairing {
+                state: self.pairing.state(),
+            }),
+            Command::RespondPairRequest { request_id, accept } => {
+                self.pairing.respond(request_id, accept)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RevokePairedClient { client_id } => {
+                self.pairing.revoke(client_id)?;
+                Ok(ResponsePayload::Ack)
             }
             Command::GetAutomations => Ok(ResponsePayload::Automations {
                 state: self.automations.document(),
@@ -1706,15 +1826,10 @@ impl Backend for WakuBackend {
                 provider,
             } => self.agent_read_session(task_id, thread_id, provider),
             command => {
-                // Quarantined transfer sessions hold received files that the
-                // user hasn't trusted yet — the composer shows a trust card
-                // instead of a prompt field, and the daemon refuses anything
-                // that could start the agent on them.
-                if matches!(command, Command::Prompt { .. } | Command::Steer { .. })
-                    && self.session_quarantined(session_id)
-                {
-                    bail!("received files are quarantined until trusted");
-                }
+                // Quarantined transfer sessions still take interactive
+                // prompts — the sandbox is the boundary, and the quarantine
+                // flag only keeps unattended senders (agent prompts,
+                // automations) out until the user trusts the transfer.
                 let driver = {
                     let sessions = self.sessions.lock();
                     let (active_runtime_id, driver) = sessions
@@ -3725,6 +3840,9 @@ fn handle_driver_command(
         | Command::DisconnectIntegration { .. }
         | Command::StartIntegrationAuth { .. }
         | Command::GetFriends
+        | Command::GetPairing
+        | Command::RespondPairRequest { .. }
+        | Command::RevokePairedClient { .. }
         | Command::SendFriendRequest { .. }
         | Command::RespondFriendRequest { .. }
         | Command::WithdrawFriendRequest { .. }

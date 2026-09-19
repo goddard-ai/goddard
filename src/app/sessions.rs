@@ -397,10 +397,20 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id && session.status == SessionStatus::Waiting);
         if had_unseen {
-            self.transcript_new_content_dot = Some(NewContentDot {
-                armed_at: Instant::now(),
-                fading: false,
-            });
+            self.transcript_new_content_dot = self
+                .selected_session()
+                .and_then(|session| {
+                    session
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| message.role == MessageRole::Assistant)
+                })
+                .map(|message| NewContentDot {
+                    message_id: message.id,
+                    armed_at: Instant::now(),
+                    fade_started: None,
+                });
         } else if session_changed {
             self.transcript_new_content_dot = None;
         }
@@ -2705,8 +2715,9 @@ impl Waku {
     /// the composer is focused, and a focused control that activates on Enter
     /// — a transcript button, a rail item — stops it earlier in the bubble.
     /// What arrives here is a keystroke nobody wanted, so when the submit
-    /// affordance is the stopped-turn Continue, Enter fires it exactly like
-    /// the play button. A draft keeps Enter dead: the affordance would be
+    /// affordance is Continue — a stopped turn or an unstarted quarantined
+    /// transfer — Enter fires it exactly like the play button. A draft
+    /// keeps Enter dead: the affordance would be
     /// Send, and submitting a draft the user may not be looking at is the
     /// one thing this keystroke must not do.
     pub(super) fn enter_to_continue(
@@ -2765,7 +2776,7 @@ impl Waku {
                 .borrow()
                 .items
                 .is_empty();
-        if composer::composer_submit_action(session, preparing, has_draft)
+        if self.composer_submit_action_for(session, preparing, has_draft)
             != composer::ComposerSubmitAction::Continue
         {
             return;

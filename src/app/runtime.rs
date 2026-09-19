@@ -1306,6 +1306,7 @@ impl Waku {
         let results = self.task_state_sync_tx.clone();
         let settings_updates = self.daemon_settings_tx.clone();
         let friends_updates = self.friends_tx.clone();
+        let pairing_updates = self.pairing_tx.clone();
         let automations_updates = self.automations_tx.clone();
         let review_updates = self.review_tx.clone();
         let closed_updates = self.friend_session_closed_tx.clone();
@@ -1323,6 +1324,7 @@ impl Waku {
                     let revisions = client.subscribe_task_state();
                     let settings = client.subscribe_settings();
                     let friends = client.subscribe_friends();
+                    let pairing = client.subscribe_pairing();
                     let automations = client.subscribe_automations();
                     let review = client.subscribe_review();
                     let session_closed = client.subscribe_friend_session_closed();
@@ -1333,6 +1335,13 @@ impl Waku {
                         client.request(Uuid::nil(), Uuid::nil(), waku_client::Command::GetFriends)
                     {
                         if friends_updates.send(state).is_err() {
+                            return;
+                        }
+                    }
+                    if let Ok(waku_client::ResponsePayload::Pairing { state }) =
+                        client.request(Uuid::nil(), Uuid::nil(), waku_client::Command::GetPairing)
+                    {
+                        if pairing_updates.send(state).is_err() {
                             return;
                         }
                     }
@@ -1406,6 +1415,18 @@ impl Waku {
                                     break replacement;
                                 };
                                 if friends_updates.send(state).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
+                            recv(pairing) -> pairing => {
+                                let Ok(state) = pairing else {
+                                    let Ok(replacement) = clients.recv() else {
+                                        return;
+                                    };
+                                    break replacement;
+                                };
+                                if pairing_updates.send(state).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1583,6 +1604,56 @@ impl Waku {
         }
         cx.notify();
         true
+    }
+
+    /// Fold `pairingChanged` broadcasts into the pairing document — pair
+    /// requests arriving and the paired-device roster.
+    fn drain_pairing_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut latest = None;
+        while let Ok(state) = self.pairing_events.try_recv() {
+            latest = Some(state);
+        }
+        let Some(state) = latest else {
+            return false;
+        };
+        self.pairing_state = state;
+        cx.notify();
+        true
+    }
+
+    /// Fold LAN discovery updates into `nearby_daemons` — the browser's
+    /// `Found`/`Gone` feed keyed by endpoint id.
+    fn drain_discovery_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(discovery) = &self.daemon_discovery else {
+            return false;
+        };
+        let mut changed = false;
+        while let Ok(update) = discovery.updates.try_recv() {
+            match update {
+                waku_client::discover::DiscoveryUpdate::Found(daemon) => {
+                    // Our own endpoint announces itself on the same
+                    // multicast domain — pairing with ourselves is noise.
+                    let own = self
+                        .friends_state
+                        .friend_code
+                        .strip_prefix("gfr-")
+                        .unwrap_or("");
+                    if daemon.endpoint_id.to_string() == own {
+                        continue;
+                    }
+                    self.nearby_daemons
+                        .insert(daemon.endpoint_id.to_string(), daemon);
+                }
+                waku_client::discover::DiscoveryUpdate::Gone(endpoint_id) => {
+                    self.nearby_daemons.remove(&endpoint_id.to_string());
+                }
+            }
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     /// Fold `automationsChanged` broadcasts into the per-daemon mirrors;
@@ -4612,14 +4683,28 @@ impl Waku {
         handle
     }
 
-    /// Continue an interrupted turn with no typed prompt. The provider still
-    /// gets text — [`CONTINUE_PROMPT`] — but the message is `hidden`, so no
-    /// transcript row, title, or restored draft comes of it.
+    /// The composer's Continue affordance with no typed prompt. A stopped
+    /// turn gets the hidden nudge — [`CONTINUE_PROMPT`] reaches the provider
+    /// but no transcript row, title, or restored draft comes of it — while a
+    /// quarantined transfer session that hasn't run yet gets the hand-off:
+    /// the sender's note plus where the files landed.
     pub(super) fn continue_interrupted_session(&mut self, cx: &mut Context<Self>) {
         let Some(session) = self.composer_session() else {
             return;
         };
-        if !composer::session_awaits_continue(session) || self.model_picker_has_no_providers() {
+        if self.model_picker_has_no_providers() {
+            return;
+        }
+        if let Some(submission) = self.quarantine_handoff_submission(session) {
+            let session_id = session.id;
+            if self.big_picture.is_open() {
+                self.submit_composer_submission_to(session_id, submission, cx);
+            } else {
+                self.submit_composer_submission(submission, cx);
+            }
+            return;
+        }
+        if !composer::session_awaits_continue(session) {
             return;
         }
         let session_id = session.id;
@@ -4971,12 +5056,6 @@ impl Waku {
         else {
             return;
         };
-        // Quarantined transfer sessions can't start turns — the trust card
-        // replaces the composer, so reaching this means a path bypassed the
-        // UI. The daemon refuses too; drop the submission here as well.
-        if session.quarantined {
-            return;
-        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
@@ -5554,6 +5633,8 @@ impl Waku {
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)
+            | self.drain_pairing_events(cx)
+            | self.drain_discovery_events(cx)
             | self.drain_automations_events(cx)
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)

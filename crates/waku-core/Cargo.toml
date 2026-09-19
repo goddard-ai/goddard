@@ -46,6 +46,7 @@ tree-sitter-rust = "0.24.2"
 tree-sitter-go = "0.25.0"
 tree-sitter-swift = "0.7.3"
 ignore = "0.4.33"
+mdns-sd = "0.21.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

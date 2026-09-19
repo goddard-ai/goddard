@@ -11,7 +11,8 @@ export type Evaluation = {
  */
 model: string, answers: { [key in string]: EvalAnswer }, usage: EvalUsage,
 /**
- * Client-observed round trip in milliseconds.
+ * Client-observed round trip in milliseconds; backends don't report it,
+ * so callers fill it in after parsing.
  */
 latencyMs: number,
 /**

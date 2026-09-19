@@ -95,6 +95,9 @@ impl Waku {
             self.probe_friends(cx);
             self.start_friends_presence_loop(cx);
         }
+        if page == SettingsPage::Daemon {
+            self.ensure_daemon_discovery();
+        }
         if page == SettingsPage::Jev {
             // The page renders from the daemon's settings mirror and the
             // fetched policy view — both may be missing on a first visit, so

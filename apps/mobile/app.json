@@ -13,6 +13,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Goddard connects directly to daemon hosts you add on your local or private network.",
+        "NSBonjourServices": [
+          "_waku._tcp."
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -20,7 +23,10 @@
     },
     "android": {
       "package": "org.goddardai.app.mobile",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CHANGE_WIFI_MULTICAST_STATE"
+      ]
     },
     "web": {
       "output": "static",

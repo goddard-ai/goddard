@@ -2134,6 +2134,63 @@ impl Waku {
         cx.notify();
     }
 
+    /// Bind the LAN browser the first time the Daemon page opens. It then
+    /// runs for the rest of the session — cheap (one dormant iroh endpoint)
+    /// and it keeps the nearby rows' Found/Gone history warm.
+    pub(super) fn ensure_daemon_discovery(&mut self) {
+        if self.daemon_discovery.is_none() {
+            self.daemon_discovery = Some(Arc::new(waku_client::DaemonDiscovery::start()));
+        }
+    }
+
+    /// Send an encrypted pair request over the `waku-link` ALPN. On grant
+    /// the returned token becomes a normal remote host record — the other
+    /// machine's user already approved, so no editor round-trip is needed.
+    fn pair_with_daemon(
+        &mut self,
+        daemon: waku_client::discover::DiscoveredDaemon,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(discovery) = self.daemon_discovery.clone() else {
+            return;
+        };
+        let endpoint_id = daemon.endpoint_id.to_string();
+        if !self.pair_requests_in_flight.insert(endpoint_id.clone()) {
+            return;
+        }
+        let name = daemon.info.name.clone();
+        let address = daemon.ws_url.clone();
+        let device_name = self.daemon_hostname.clone();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { discovery.request_pair(&daemon, &device_name) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.pair_requests_in_flight.remove(&endpoint_id);
+                match outcome {
+                    Ok(waku_client::discover::PairOutcome::Granted { token }) => {
+                        if let Some(address) = address {
+                            this.add_remote_host(name.clone(), address, token, None, cx);
+                            this.show_success_toast(tr!("daemon.pair_added", name = name));
+                        } else {
+                            this.show_toast(tr!("daemon.pair_no_address", name = name));
+                        }
+                    }
+                    Ok(waku_client::discover::PairOutcome::Declined) => {
+                        this.show_toast(tr!("daemon.pair_declined", name = name));
+                    }
+                    Err(error) => {
+                        this.show_toast(tr!("daemon.pair_failed", error = format!("{error:#}")));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn render_commands_settings(
         &self,
         search: &SettingSearch,
@@ -3573,6 +3630,126 @@ impl Waku {
             card = card.when(!self.state.remote_hosts.is_empty(), |card| {
                 card.child(div().mt(px(6.0)).child(rows))
             });
+        }
+        // Daemons discovered on the LAN — skip ones already saved, and
+        // ones with no exposed WebSocket since there'd be nothing to
+        // connect the granted token to.
+        let nearby: Vec<_> = self
+            .nearby_daemons
+            .values()
+            .filter(|daemon| {
+                daemon.ws_url.as_ref().is_some_and(|url| {
+                    !self
+                        .state
+                        .remote_hosts
+                        .iter()
+                        .any(|host| host.address == *url)
+                })
+            })
+            .collect();
+        if !search.active() && self.remote_host_editor.is_none() && !nearby.is_empty() {
+            let mut nearby_rows = div().flex().flex_col();
+            for (index, daemon) in nearby.iter().enumerate() {
+                let daemon = (*daemon).clone();
+                let endpoint_id = daemon.endpoint_id.to_string();
+                let action = if self.pair_requests_in_flight.contains(&endpoint_id) {
+                    div()
+                        .flex_none()
+                        .px(px(6.0))
+                        .py(px(1.0))
+                        .rounded_full()
+                        .text_size(sp(11.5))
+                        .text_color(theme.warning)
+                        .bg(theme.overlay)
+                        .child(tr!("daemon.pair_waiting"))
+                        .into_any_element()
+                } else {
+                    div()
+                        .id(SharedString::from(format!("nearby-pair-{endpoint_id}")))
+                        .tab_index(0)
+                        .h(px(27.0))
+                        .px(px(10.0))
+                        .rounded(px(8.0))
+                        .border(hairline())
+                        .border_color(theme.border_strong)
+                        .flex()
+                        .items_center()
+                        .cursor_default()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .hover(|element| element.bg(theme.overlay))
+                        .focus_visible(|element| element.border_color(theme.accent))
+                        .child(tr!("daemon.pair"))
+                        .on_click(cx.listener({
+                            let daemon = daemon.clone();
+                            move |this, _, _, cx| this.pair_with_daemon(daemon.clone(), cx)
+                        }))
+                        .on_key_down(cx.listener({
+                            let daemon = daemon.clone();
+                            move |this, event: &KeyDownEvent, _, cx| {
+                                if !event.keystroke.modifiers.modified()
+                                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                {
+                                    this.pair_with_daemon(daemon.clone(), cx);
+                                    cx.stop_propagation();
+                                }
+                            }
+                        }))
+                        .into_any_element()
+                };
+                nearby_rows = nearby_rows.child(
+                    div()
+                        .when(index > 0, |element| {
+                            element.border_t(hairline()).border_color(theme.separator)
+                        })
+                        .py(px(9.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(icon("icons/server.svg", 14.0, theme.text_secondary))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(13.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(SharedString::from(daemon.info.name.clone())),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(1.0))
+                                        .truncate()
+                                        .font_family(crate::fonts::current(cx).code)
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(SharedString::from(
+                                            daemon.ws_url.clone().unwrap_or_default(),
+                                        )),
+                                ),
+                        )
+                        .child(action),
+                );
+            }
+            card = card.child(
+                div()
+                    .mt(px(12.0))
+                    .pt(px(10.0))
+                    .border_t(hairline())
+                    .border_color(theme.separator)
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(tr!("daemon.nearby_title")),
+                    )
+                    .child(nearby_rows),
+            );
         }
         Some(card.into_any_element())
     }

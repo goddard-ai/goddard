@@ -1,20 +1,23 @@
 //! Rust transport and lifecycle support for clients of `goddard-daemon`.
 //!
-//! This crate intentionally depends only on [`waku_protocol`], so GUI and CLI
-//! clients cannot accidentally reach daemon-owned filesystem, Git, database,
-//! or provider implementations.
+//! This crate intentionally depends on [`waku_protocol`] and [`waku_share`]
+//! (for LAN discovery) only, so GUI and CLI clients cannot accidentally
+//! reach daemon-owned filesystem, Git, database, or provider
+//! implementations.
 
 mod client;
 pub mod command_env;
 pub mod composer_complete;
 pub mod computer_use;
 mod daemons;
+pub mod discover;
 pub mod driver;
 pub mod persistence;
 mod process;
 mod workspace_client;
 
-pub use client::DaemonClient;
+pub use client::{DaemonClient, PairReply, pair};
+pub use discover::DaemonDiscovery;
 pub use daemons::{DaemonKey, DaemonMap};
 pub use process::{
     DEFAULT_EXPOSED_DAEMON_PORT, DaemonExposureSettings, DaemonProcess, DaemonStatus,

@@ -69,6 +69,15 @@ pub enum ClientMessage {
         resume_from: Vec<ReplayCursor>,
     },
     Request(Request),
+    /// The only message legal before `Hello`: ask the daemon for a client
+    /// token. The request parks until a connected client approves or
+    /// declines it; the reply is `PairPending`, then `PairGranted` or
+    /// `PairDeclined` — never `Hello`.
+    PairRequest {
+        protocol_version: u32,
+        /// Self-reported device name shown on the approval prompt.
+        device_name: String,
+    },
     Shutdown,
 }
 
@@ -624,6 +633,18 @@ pub enum Command {
     UnwatchFriendSession {
         session_id: Uuid,
     },
+    /// Read the pairing document — pending pair requests and paired
+    /// clients. Global command — nil session id.
+    GetPairing,
+    /// Approve or decline a pending pair request.
+    RespondPairRequest {
+        request_id: Uuid,
+        accept: bool,
+    },
+    /// Drop a paired client's minted token — it can no longer authenticate.
+    RevokePairedClient {
+        client_id: Uuid,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -774,6 +795,23 @@ pub enum ServerMessage {
         session_id: Uuid,
         revoked: bool,
     },
+    /// The pairing document changed — a pair request arrived or resolved,
+    /// or a paired client was revoked. Carries the whole document.
+    PairingChanged {
+        state: crate::pairing::PairingState,
+    },
+    /// Sent to a `PairRequest` connection once the request is registered —
+    /// the client should render "waiting for approval" until the terminal
+    /// `PairGranted`/`PairDeclined` arrives.
+    PairPending,
+    /// The pair request was approved; `token` is a bearer for `Hello`.
+    PairGranted {
+        token: String,
+        daemon_name: String,
+    },
+    PairDeclined {
+        message: String,
+    },
     ShuttingDown,
 }
 
@@ -860,6 +898,10 @@ pub enum ResponsePayload {
     /// The daemon-owned automations document, as read for `getAutomations`.
     Automations {
         state: AutomationsState,
+    },
+    /// The daemon-owned pairing document, as read for `getPairing`.
+    Pairing {
+        state: crate::pairing::PairingState,
     },
     /// The automation record after an `upsertAutomation`.
     Automation {

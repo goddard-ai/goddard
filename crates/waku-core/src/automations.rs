@@ -21,6 +21,7 @@ use anyhow::{Context as _, anyhow, bail};
 use chrono::{DateTime, TimeZone, Utc};
 use cron::Schedule;
 use parking_lot::Mutex;
+use subtle::ConstantTimeEq as _;
 use uuid::Uuid;
 
 use waku_protocol::AgentWorkspace;
@@ -200,6 +201,12 @@ impl AutomationService {
                 existing.base_branch = input.base_branch;
                 existing.session_id = input.session_id;
                 existing.schedule = input.schedule;
+                existing.webhook_secret = input.webhook.then(|| {
+                    existing
+                        .webhook_secret
+                        .clone()
+                        .unwrap_or_else(new_webhook_secret)
+                });
                 existing.timezone = input.timezone;
                 existing.enabled = input.enabled;
                 existing.precheck = input.precheck;
@@ -222,6 +229,7 @@ impl AutomationService {
                     base_branch: input.base_branch,
                     session_id: input.session_id,
                     schedule: input.schedule,
+                    webhook_secret: input.webhook.then(new_webhook_secret),
                     timezone: input.timezone,
                     enabled: input.enabled,
                     precheck: input.precheck,
@@ -298,6 +306,49 @@ impl AutomationService {
         let run = self.record_run(&automation, unix_time(), AutomationTrigger::Manual);
         self.spawn_dispatch(automation, run.id);
         Ok(run)
+    }
+
+    /// Fire a run from the automation's webhook URL. `Ok(None)` covers both
+    /// an unknown id and a wrong key so the endpoint cannot tell them
+    /// apart; a disabled automation records a refusal like a refused
+    /// schedule would and errors instead.
+    pub fn trigger_webhook(
+        self: &Arc<Self>,
+        automation_id: Uuid,
+        key: &str,
+    ) -> anyhow::Result<Option<AutomationRun>> {
+        let automation = {
+            let document = self.document.lock();
+            document
+                .automations
+                .iter()
+                .find(|automation| automation.id == automation_id)
+                .cloned()
+        };
+        let Some(automation) = automation else {
+            return Ok(None);
+        };
+        let armed = automation
+            .webhook_secret
+            .as_deref()
+            .is_some_and(|secret| secret.as_bytes().ct_eq(key.as_bytes()).into());
+        if !armed {
+            return Ok(None);
+        }
+        if !automation.enabled {
+            self.record_refusal(
+                &automation,
+                unix_time(),
+                AutomationTrigger::Webhook,
+                AutomationRunStatus::SkippedUnavailable,
+                "unavailable:disabled",
+                Some("the automation is disabled".to_owned()),
+            );
+            bail!("automation {automation_id} is disabled");
+        }
+        let run = self.record_run(&automation, unix_time(), AutomationTrigger::Webhook);
+        self.spawn_dispatch(automation, run.id);
+        Ok(Some(run))
     }
 
     /// Begin the scheduler: reconcile runs a previous daemon left open,
@@ -928,6 +979,12 @@ impl Drop for EvaluationGuard<'_> {
     }
 }
 
+/// The key in a webhook URL — 32 hex chars, ~122 bits, enough that the URL
+/// alone is the credential.
+fn new_webhook_secret() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
 /// Field validation shared by create and edit: reject a definition that
 /// could never run.
 fn validate_input(input: &AutomationInput) -> anyhow::Result<()> {
@@ -951,8 +1008,8 @@ fn validate_input(input: &AutomationInput) -> anyhow::Result<()> {
     {
         bail!("worktree automations require a base branch");
     }
-    if input.enabled && input.schedule.is_none() {
-        bail!("an enabled automation requires a schedule");
+    if input.enabled && input.schedule.is_none() && !input.webhook {
+        bail!("an enabled automation requires a schedule or a webhook");
     }
     if let Some(schedule) = &input.schedule {
         let compiled = compile_schedule(schedule)?;
@@ -1184,8 +1241,38 @@ fn format_missed_duration(seconds: u64) -> String {
 mod tests {
     use super::*;
 
+    use waku_protocol::model::ProviderKind;
+
     fn daily_at(hour: u8, minute: u8) -> AutomationSchedule {
         AutomationSchedule::Daily { hour, minute }
+    }
+
+    fn service() -> Arc<AutomationService> {
+        let directory =
+            std::env::temp_dir().join(format!("waku-automations-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        Arc::new(AutomationService::open(directory.join("automations.json")).unwrap())
+    }
+
+    fn input(name: &str) -> AutomationInput {
+        AutomationInput {
+            id: None,
+            name: name.to_owned(),
+            prompt: "do the thing".to_owned(),
+            provider: ProviderKind::Claude,
+            model: None,
+            project_path: PathBuf::from("/tmp"),
+            workspace: AutomationWorkspace::Local,
+            base_branch: None,
+            session_id: None,
+            schedule: Some(daily_at(9, 0)),
+            webhook: false,
+            timezone: None,
+            enabled: true,
+            precheck: None,
+            missed_run_grace_minutes: None,
+            reuse_session: false,
+        }
     }
 
     fn compile(schedule: &AutomationSchedule) -> Schedule {
@@ -1310,5 +1397,90 @@ mod tests {
             next_occurrence(&schedule, &zone, exactly),
             Some(utc(2024, 1, 3, 9, 0, 0).timestamp() as u64)
         );
+    }
+
+    #[test]
+    fn enabled_automation_needs_a_schedule_or_webhook() {
+        let service = service();
+        let mut input = input("bare");
+        input.schedule = None;
+        assert!(service.upsert(input.clone()).is_err());
+        input.webhook = true;
+        assert!(service.upsert(input).is_ok());
+    }
+
+    #[test]
+    fn upsert_mints_preserves_and_disarms_the_webhook_secret() {
+        let service = service();
+        let mut create = input("hooked");
+        create.schedule = None;
+        create.webhook = true;
+        let automation = service.upsert(create).unwrap();
+        let secret = automation.webhook_secret.clone().expect("webhook armed");
+        assert_eq!(secret.len(), 32);
+
+        let mut edit = input("renamed");
+        edit.id = Some(automation.id);
+        edit.schedule = None;
+        edit.webhook = true;
+        let edited = service.upsert(edit.clone()).unwrap();
+        assert_eq!(edited.webhook_secret.as_deref(), Some(secret.as_str()));
+
+        // Disarming while the automation stays enabled means switching it
+        // back to a schedule — an enabled trigger-less automation is invalid.
+        edit.webhook = false;
+        edit.schedule = Some(daily_at(9, 0));
+        let disarmed = service.upsert(edit).unwrap();
+        assert_eq!(disarmed.webhook_secret, None);
+    }
+
+    #[test]
+    fn webhook_trigger_checks_the_key() {
+        let service = service();
+        let mut create = input("hooked");
+        create.schedule = None;
+        create.webhook = true;
+        let automation = service.upsert(create).unwrap();
+        let secret = automation.webhook_secret.clone().unwrap();
+
+        assert!(
+            service
+                .trigger_webhook(automation.id, "wrong")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            service
+                .trigger_webhook(Uuid::new_v4(), &secret)
+                .unwrap()
+                .is_none()
+        );
+        let run = service
+            .trigger_webhook(automation.id, &secret)
+            .unwrap()
+            .expect("armed webhook fires");
+        assert_eq!(run.trigger, AutomationTrigger::Webhook);
+        assert_eq!(run.automation_id, automation.id);
+    }
+
+    #[test]
+    fn webhook_on_a_disabled_automation_records_a_refusal() {
+        let service = service();
+        let mut create = input("hooked");
+        create.schedule = None;
+        create.webhook = true;
+        create.enabled = false;
+        let automation = service.upsert(create).unwrap();
+        let secret = automation.webhook_secret.clone().unwrap();
+
+        assert!(service.trigger_webhook(automation.id, &secret).is_err());
+        let document = service.document();
+        let run = document
+            .runs
+            .iter()
+            .find(|run| run.automation_id == automation.id)
+            .expect("the refusal is recorded");
+        assert_eq!(run.trigger, AutomationTrigger::Webhook);
+        assert_eq!(run.status, AutomationRunStatus::SkippedUnavailable);
     }
 }
