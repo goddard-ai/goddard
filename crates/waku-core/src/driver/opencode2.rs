@@ -427,6 +427,7 @@ impl OpenCode2Driver {
             computer_use_enabled,
             agent: agent_env,
             subagents,
+            integrations,
             provider_cursor,
             eval,
         } = options;
@@ -520,6 +521,30 @@ impl OpenCode2Driver {
             && session.model.as_ref() != Some(model)
         {
             let _ = opencode2_api::switch_model(&endpoint, &session_id, model);
+        }
+
+        // Connected integrations register on the service scoped to this
+        // directory — runtime-only, never written to its config files. A
+        // failed registration degrades that integration, not the session.
+        for integration in &integrations {
+            if let Err(error) = opencode2_api::add_mcp(
+                &endpoint,
+                &directory,
+                &integration.name,
+                &json!({
+                    "type": "remote",
+                    "url": integration.url,
+                    "enabled": true,
+                    "headers": {
+                        "Authorization": format!("Bearer {}", integration.token),
+                    },
+                }),
+            ) {
+                eprintln!(
+                    "goddard-mcp: could not register {} with OpenCode 2: {error:#}",
+                    integration.name
+                );
+            }
         }
 
         let computer_use = if computer_use_enabled {
@@ -3438,6 +3463,7 @@ mod tests {
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -3506,6 +3532,7 @@ mod tests {
                     computer_use_enabled: true,
                     agent: None,
                     subagents: None,
+                    integrations: Vec::new(),
                     provider_cursor: None,
                 },
                 events,

@@ -761,15 +761,27 @@ impl Backend for WakuBackend {
             } => {
                 self.integrations
                     .connect(&id, &variant_id, providers, api_key, &events)?;
+                crate::integrations::deliver::sync_file_providers(
+                    &self.settings.get(),
+                    &self.integrations,
+                );
                 Ok(ResponsePayload::Ack)
             }
             Command::SetIntegrationProviders { id, providers } => {
                 self.integrations.set_providers(&id, providers)?;
+                crate::integrations::deliver::sync_file_providers(
+                    &self.settings.get(),
+                    &self.integrations,
+                );
                 events.settings_changed(self.settings.get());
                 Ok(ResponsePayload::Ack)
             }
             Command::DisconnectIntegration { id } => {
                 self.integrations.disconnect(&id)?;
+                crate::integrations::deliver::sync_file_providers(
+                    &self.settings.get(),
+                    &self.integrations,
+                );
                 events.settings_changed(self.settings.get());
                 Ok(ResponsePayload::Ack)
             }
@@ -1504,6 +1516,9 @@ impl Backend for WakuBackend {
                     computer_use_enabled: options.computer_use_enabled,
                     agent: None,
                     subagents: None,
+                    // Filled in by `spawn_runtime` — the daemon owns the
+                    // catalog, never the wire.
+                    integrations: Vec::new(),
                     provider_cursor: options
                         .provider_cursor
                         .map(serde_json::from_value)
@@ -2234,6 +2249,7 @@ impl WakuBackend {
                 // task's live runtime; it never receives a scoped token.
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
             },
@@ -2472,6 +2488,7 @@ impl WakuBackend {
                 computer_use_enabled: false,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
             },
@@ -2666,6 +2683,10 @@ impl WakuBackend {
                 let _ = events.send_ephemeral(wire);
             }
         }
+        // Connected integrations ride the launch too; drivers that take file
+        // delivery instead see nothing here because their entries were
+        // written at connect time.
+        options.integrations = self.integrations.launch_integrations(provider);
         // A launch that never came up keeps no credential.
         let handle = match driver::start_local(provider, options, event_sender) {
             Ok(handle) => handle,
@@ -2803,6 +2824,7 @@ impl WakuBackend {
                 computer_use_enabled: self.settings.get().computer_use_enabled,
                 agent: None,
                 subagents: None,
+                integrations: Vec::new(),
                 provider_cursor: session.provider_cursor.clone(),
                 eval: None,
             };

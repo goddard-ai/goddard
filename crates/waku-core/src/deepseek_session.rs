@@ -387,24 +387,27 @@ pub(crate) struct DeepSeekServer {
 
 impl DeepSeekServer {
     pub(crate) fn start(binary: &Path) -> anyhow::Result<Self> {
-        Self::start_with_dsh_home(binary, None, None)
+        Self::start_with_dsh_home(binary, None, None, &[])
     }
 
-    /// Starts a host carrying the session's scoped agent surface. Callers use
-    /// it only for a dedicated (unpooled) host: a pooled host serves many
-    /// sessions and must never bake one session's credential into its
-    /// environment.
-    pub(crate) fn start_with_agent_env(
+    /// Starts a dedicated host carrying optional launch overrides: the
+    /// session's scoped agent surface in the environment and/or extra
+    /// `dsh web` arguments such as the MCP integrations Cordis patch.
+    /// Callers use it only for an unpooled host: a pooled host serves many
+    /// sessions and must never bake one session's launch into its own.
+    pub(crate) fn start_with_overrides(
         binary: &Path,
-        agent: &crate::agent::AgentLaunchEnv,
+        agent: Option<&crate::agent::AgentLaunchEnv>,
+        extra_args: &[String],
     ) -> anyhow::Result<Self> {
-        Self::start_with_dsh_home(binary, None, Some(agent))
+        Self::start_with_dsh_home(binary, None, agent, extra_args)
     }
 
     fn start_with_dsh_home(
         binary: &Path,
         dsh_home: Option<&Path>,
         agent: Option<&crate::agent::AgentLaunchEnv>,
+        extra_args: &[String],
     ) -> anyhow::Result<Self> {
         let supports_no_open = web_supports_no_open(binary, dsh_home);
         let catalog_cwd = crate::acp_session::catalog_working_directory()?;
@@ -418,6 +421,7 @@ impl DeepSeekServer {
             if supports_no_open {
                 command.arg("--no-open");
             }
+            command.args(extra_args);
             command
         };
         #[cfg(not(unix))]
@@ -427,6 +431,7 @@ impl DeepSeekServer {
             if supports_no_open {
                 command.arg("--no-open");
             }
+            command.args(extra_args);
             command
         };
         command
@@ -1100,7 +1105,7 @@ mod tests {
             TempHarnessHome(std::env::temp_dir().join(format!("waku-dsh-test-{}", Uuid::new_v4())));
         std::fs::create_dir_all(&root.0).unwrap();
         {
-            let server = DeepSeekServer::start_with_dsh_home(&binary, Some(&root.0), None)
+            let server = DeepSeekServer::start_with_dsh_home(&binary, Some(&root.0), None, &[])
                 .expect("Harness Host should start");
             let session_id = format!("waku-test-{}", Uuid::new_v4());
             let events = server.subscribe(&session_id);

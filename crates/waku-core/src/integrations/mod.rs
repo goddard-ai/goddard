@@ -3,6 +3,7 @@
 //! delivery that points agents at it.
 
 pub mod catalog;
+pub mod deliver;
 mod http;
 mod oauth;
 mod proxy;

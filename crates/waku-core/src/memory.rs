@@ -835,6 +835,7 @@ fn headless_prompt(
         computer_use_enabled: false,
         agent: None,
         subagents: None,
+        integrations: Vec::new(),
         provider_cursor: None,
         eval: None,
     };

@@ -227,6 +227,7 @@ impl CodexDriver {
             computer_use_enabled,
             agent,
             subagents,
+            integrations,
             provider_cursor,
             eval: _,
         } = options;
@@ -257,6 +258,16 @@ impl CodexDriver {
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
         configure_computer_use_command(&mut command, computer_use.as_ref());
+        // Connected integrations arrive as `mcp_servers.goddard_<id>` remote
+        // entries; the bearer travels in the environment, never argv.
+        if !integrations.is_empty() {
+            if let Some(token) = integrations.first().map(|i| i.token.clone()) {
+                command.env("GODDARD_MCP_PROXY_TOKEN", token);
+            }
+            for integration in &integrations {
+                command.args(crate::integrations::deliver::codex_config_args(integration));
+            }
+        }
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
@@ -2625,6 +2636,7 @@ mod tests {
                     computer_use_enabled: false,
                     agent: None,
                     subagents: None,
+                    integrations: Vec::new(),
                     provider_cursor: Some(cursor),
                 },
                 events,
@@ -2713,6 +2725,7 @@ mod tests {
                     computer_use_enabled: false,
                     agent: None,
                     subagents: None,
+                    integrations: Vec::new(),
                     provider_cursor: cursor,
                 },
                 events,
