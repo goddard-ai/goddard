@@ -1192,13 +1192,20 @@ impl Waku {
             .map(|session| session.provider);
         let picker_enabled = session.is_some_and(|session| session.can_choose_model(provider));
 
-        if !picker_enabled {
-            return MenuChip::new("composer-provider-model")
-                .provider(&theme, provider, theme.text_tertiary)
+        // Auto routes through Jev, not the provider the draft would land on —
+        // brand the chip with the router's mark instead of that provider's.
+        let chip = MenuChip::new("composer-provider-model");
+        let chip = if auto_route {
+            chip.icon("icons/provider-typesafe.svg", theme.text_tertiary)
                 .label(selected_model_name)
-                .caret(false)
-                .disabled(true)
-                .into_any_element();
+                .suffix("Jev")
+        } else {
+            chip.provider(&theme, provider, theme.text_tertiary)
+                .label(selected_model_name)
+        };
+
+        if !picker_enabled {
+            return chip.caret(false).disabled(true).into_any_element();
         }
 
         let search_query = self.model_search.read(cx).content().to_owned();
@@ -1329,10 +1336,7 @@ impl Waku {
                 .icon("icons/alert.svg", theme.warning)
                 .label(tr!("models.no_providers"))
         } else {
-            MenuChip::new("composer-provider-model")
-                .provider(&theme, provider, theme.text_tertiary)
-                .label(selected_model_name)
-                .tooltip(tr!("command_palette.choose_model"))
+            chip.tooltip(tr!("command_palette.choose_model"))
                 .shortcut_action(&ToggleModelPicker)
         };
 
