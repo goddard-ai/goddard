@@ -785,7 +785,7 @@ impl Waku {
             // The dock has no trigger zone on this page; it renders only while
             // the pointer it was raised under is still on it, and drops on the
             // first hover-off.
-            .when_some(self.render_sidebar_dock(cx), |sidebar, dock| {
+            .when_some(self.render_sidebar_dock(window, cx), |sidebar, dock| {
                 sidebar.child(dock)
             })
     }

@@ -820,6 +820,17 @@ enum SidebarDockItem {
     Settings,
 }
 
+/// The quick-action dock's rise-and-fall slide. While `Moving`, `progress`
+/// is the raw risen fraction integrated per frame — direction comes from the
+/// hover flags each frame, so a pointer that re-enters mid-flight reverses
+/// the slide instead of restarting it.
+#[derive(Clone, Copy)]
+enum SidebarDockMotion {
+    Hidden,
+    Moving { progress: f32, last_frame: Instant },
+    Shown,
+}
+
 /// A turn whose checkpoint still has to be captured.
 struct PendingCheckpointCapture {
     session_id: Uuid,
@@ -2338,6 +2349,10 @@ pub struct Waku {
     /// Pointer x in window coordinates while inside the dock's zone or the
     /// dock itself — the center of the magnification bump.
     sidebar_dock_mouse_x: Option<f32>,
+    /// The dock's slide up from (and back down off) the window's bottom
+    /// edge. A `Cell` because the sidebar renders through `&self` paths —
+    /// the pane's content delegate included.
+    sidebar_dock_motion: Cell<SidebarDockMotion>,
     /// The right-panel surface currently maximized over the window, if any —
     /// runtime-only; the docked layout it covers comes back exactly as it
     /// was. The path of the file shown at entry rides alongside so a
@@ -5289,6 +5304,7 @@ impl Waku {
                 sidebar_dock_hovered: false,
                 sidebar_dock_hover_item: None,
                 sidebar_dock_mouse_x: None,
+                sidebar_dock_motion: Cell::new(SidebarDockMotion::Hidden),
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {
