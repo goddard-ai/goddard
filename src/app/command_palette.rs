@@ -3417,7 +3417,7 @@ impl Waku {
                                     &theme,
                                     provider,
                                     13.0,
-                                    provider_color(&theme, provider),
+                                    theme.text_secondary,
                                 ))
                                 .child(
                                     div()
@@ -3448,7 +3448,7 @@ impl Waku {
                                     &theme,
                                     provider,
                                     13.0,
-                                    provider_color(&theme, provider),
+                                    theme.text_secondary,
                                 ))
                                 .child(
                                     div()
@@ -3487,10 +3487,7 @@ impl Waku {
                 }
 
                 let highlighted = index == selected;
-                let icon_color = match item.icon {
-                    PaletteIcon::Asset(_) => theme.text_secondary,
-                    PaletteIcon::Provider(provider) => provider_color(&theme, provider),
-                };
+                let icon_color = theme.text_secondary;
                 // A provider row renders through `provider_mark` so OpenCode 2
                 // keeps its badge; an asset row stays a plain tinted icon.
                 let row_mark = match item.icon {

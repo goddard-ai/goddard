@@ -6129,7 +6129,7 @@ impl Waku {
                             &theme,
                             kind,
                             16.0,
-                            provider_color(&theme, kind).opacity(if installed { 1.0 } else { 0.5 }),
+                            theme.text_secondary.opacity(if installed { 1.0 } else { 0.5 }),
                         ))
                         .child(
                             div()
@@ -7773,23 +7773,12 @@ impl RouteClassRow {
                 (*target).to_owned(),
             ),
             RouteClassRow::ProviderDefault(provider) => (
-                provider_mark(
-                    theme,
-                    *provider,
-                    14.0,
-                    provider_color(theme, *provider).opacity(0.9),
-                )
-                .into_any_element(),
+                provider_mark(theme, *provider, 14.0, theme.text_secondary).into_any_element(),
                 provider.short_name().to_owned(),
                 tr!("routing.provider_default"),
             ),
             RouteClassRow::Model(provider, model) => (
-                provider_mark(
-                    theme,
-                    *provider,
-                    14.0,
-                    provider_color(theme, *provider).opacity(0.9),
-                )
+                provider_mark(theme, *provider, 14.0, theme.text_secondary)
                 .into_any_element(),
                 model
                     .name_i18n

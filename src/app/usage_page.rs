@@ -594,7 +594,7 @@ impl Waku {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(provider_mark(theme, kind, 14.0, color))
+                            .child(provider_mark(theme, kind, 14.0, theme.text_tertiary))
                             .child(
                                 div()
                                     .flex_1()
@@ -1640,7 +1640,7 @@ fn usage_chart_readout(
                     theme,
                     kind,
                     11.0,
-                    provider_color(theme, kind),
+                    theme.text_tertiary,
                 ))
                 .child(
                     div()
@@ -1888,7 +1888,7 @@ fn usage_model_table(
                             theme,
                             kind,
                             12.0,
-                            provider_color(theme, kind),
+                            theme.text_tertiary,
                         ))
                         .child(
                             div()
@@ -2395,7 +2395,7 @@ fn usage_provider_values(theme: &Theme, by_provider: &[ProviderDay; 2], by_cost:
                     theme,
                     kind,
                     11.0,
-                    provider_color(theme, kind),
+                    theme.text_tertiary,
                 ))
                 .child(
                     div()

@@ -356,7 +356,8 @@ where
     }
 }
 
-/// Brand hue for each provider's official mark.
+/// Brand hue for each provider — a series color key where the chart needs
+/// one. Provider marks themselves tint neutral; see [`provider_mark`].
 pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
     match provider {
         ProviderKind::Amp => rgb(0xF34E3F).into(),

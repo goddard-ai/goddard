@@ -1163,11 +1163,7 @@ impl Waku {
 
         if !picker_enabled {
             return MenuChip::new("composer-provider-model")
-                .provider(
-                    &theme,
-                    provider,
-                    provider_color(&theme, provider).opacity(0.9),
-                )
+                .provider(&theme, provider, theme.text_tertiary)
                 .label(selected_model_name)
                 .caret(false)
                 .disabled(true)
@@ -1303,11 +1299,7 @@ impl Waku {
                 .label(tr!("models.no_providers"))
         } else {
             MenuChip::new("composer-provider-model")
-                .provider(
-                    &theme,
-                    provider,
-                    provider_color(&theme, provider).opacity(0.9),
-                )
+                .provider(&theme, provider, theme.text_tertiary)
                 .label(selected_model_name)
                 .tooltip(tr!("command_palette.choose_model"))
                 .shortcut_action(&ToggleModelPicker)
@@ -1389,12 +1381,7 @@ impl Waku {
                             SharedString::from(format!("model-rail-{}", kind.id())),
                             ModelPickerSection::Provider(kind),
                         )
-                        .child(provider_mark(
-                            &theme,
-                            kind,
-                            18.0,
-                            provider_color(&theme, kind).opacity(0.82),
-                        )),
+                        .child(provider_mark(&theme, kind, 18.0, theme.text_tertiary)),
                     );
                 }
 
@@ -1693,7 +1680,7 @@ impl Waku {
                                                     &theme,
                                                     kind,
                                                     12.0,
-                                                    provider_color(&theme, kind).opacity(0.82),
+                                                    theme.text_tertiary,
                                                 ))
                                                 .child(
                                                     div()
