@@ -617,6 +617,10 @@ experiments.status_markers_title:
   en: Turn status markers
 experiments.status_markers_description:
   en: When an assistant turn ends, the evaluation model scores it against a fixed marker set — complete, awaiting input, unverified, partial, blocked, failed, drifted — and markers that clear their threshold appear as chips under the response.
+experiments.memory_title:
+  en: Project memory
+experiments.memory_description:
+  en: Give each project a persistent memory. Finished sessions are distilled into a .goddard/memory store the next session's first prompt carries — decisions, preferences, and failed approaches included.
 status_markers.complete:
   en: Complete
 status_markers.awaiting_input:

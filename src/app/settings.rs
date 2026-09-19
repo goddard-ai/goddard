@@ -3819,6 +3819,16 @@ impl Waku {
                         search,
                         cx,
                         |this, enabled, cx| this.set_status_markers_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "memory-experiment-toggle",
+                        "experiments.memory_title",
+                        "experiments.memory_description",
+                        self.state.memory_experiment_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_memory_experiment_enabled(enabled, cx),
                     )),
             )
             .when(self.state.model_router_enabled, |element| {
@@ -3950,6 +3960,12 @@ impl Waku {
             self.clear_status_markers();
         }
         self.state.status_markers_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_memory_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.memory_experiment_enabled = enabled;
         self.save();
         cx.notify();
     }
