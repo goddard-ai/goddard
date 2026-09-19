@@ -18,7 +18,13 @@ use serde_json::{Map, Value as JsonValue, json};
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 30_000;
+const MAX_EXECUTION_TIMEOUT_MS: u64 = 300_000;
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+// Goddard writes this file into the session's process directory to cancel the
+// kernel's in-flight `js` call; the name is a wire contract with waku-core's
+// `stop_registered_processes`, which lives outside this crate.
+const KERNEL_CANCEL_FILE: &str = "cancel-kernel";
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 // Instructions for Goddard's persistent QuickJS runtime and its jsRepl helpers.
 const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `goddard_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `jsRepl.cwd`, `jsRepl.homeDir`, `jsRepl.tmpDir`, `jsRepl.requestMeta`, `jsRepl.setResponseMeta(...)`, and `await jsRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
@@ -303,7 +309,8 @@ fn tool_definitions() -> Vec<JsonValue> {
                     "timeout_ms": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted."
+                        "maximum": 300000,
+                        "description": "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted. Values above 300000 (5 minutes) are clamped."
                     },
                     "title": {
                         "type": "string",
@@ -362,7 +369,8 @@ fn call_tool(repl: &mut JavaScriptRepl, params: &JsonValue) -> anyhow::Result<Js
                         .ok_or_else(|| anyhow!("timeout_ms must be a positive integer"))
                 })
                 .transpose()?
-                .unwrap_or(DEFAULT_EXECUTION_TIMEOUT_MS);
+                .unwrap_or(DEFAULT_EXECUTION_TIMEOUT_MS)
+                .min(MAX_EXECUTION_TIMEOUT_MS);
             let timeout = Duration::from_millis(timeout_ms);
             if Instant::now().checked_add(timeout).is_none() {
                 bail!("timeout_ms is too large");
@@ -399,6 +407,8 @@ struct JavaScriptRepl {
     call_output: Arc<Mutex<Option<CallOutput>>>,
     deadline: Arc<Mutex<Option<Instant>>>,
     timed_out: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+    cancel_path: Option<PathBuf>,
 }
 
 impl JavaScriptRepl {
@@ -407,15 +417,29 @@ impl JavaScriptRepl {
     }
 
     fn with_bridge(bridge: NativeComputerUseClient) -> anyhow::Result<Self> {
+        // A session registration names its own process directory; the single
+        // shared-kernel host reads it from the environment Goddard launched
+        // it with.
+        let cancel_path = bridge
+            .config
+            .as_ref()
+            .map(|config| config.process_directory.join(KERNEL_CANCEL_FILE))
+            .or_else(|| {
+                std::env::var_os("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY")
+                    .map(|directory| PathBuf::from(directory).join(KERNEL_CANCEL_FILE))
+            });
         let bridge = Arc::new(Mutex::new(bridge));
         let call_output = Arc::new(Mutex::new(None));
         let deadline = Arc::new(Mutex::new(None));
         let timed_out = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::new(AtomicBool::new(false));
         let kernel = create_kernel(
             bridge.clone(),
             call_output.clone(),
             deadline.clone(),
             timed_out.clone(),
+            cancelled.clone(),
+            cancel_path.clone(),
         )?;
         Ok(Self {
             kernel,
@@ -423,6 +447,8 @@ impl JavaScriptRepl {
             call_output,
             deadline,
             timed_out,
+            cancelled,
+            cancel_path,
         })
     }
 
@@ -433,6 +459,8 @@ impl JavaScriptRepl {
             self.call_output.clone(),
             self.deadline.clone(),
             self.timed_out.clone(),
+            self.cancelled.clone(),
+            self.cancel_path.clone(),
         )?;
         Ok(())
     }
@@ -440,6 +468,12 @@ impl JavaScriptRepl {
     fn execute(&mut self, code: &str, timeout: Duration, request_meta: JsonValue) -> JsonValue {
         let call_deadline = Instant::now() + timeout;
         self.timed_out.store(false, Ordering::Release);
+        self.cancelled.store(false, Ordering::Release);
+        // A marker left by an earlier cancel must not kill this call; one
+        // written while it runs is picked up by the interrupt poll.
+        if let Some(path) = &self.cancel_path {
+            let _ = fs::remove_file(path);
+        }
         *self.deadline.lock() = Some(call_deadline);
         *self.call_output.lock() = Some(CallOutput {
             request_meta,
@@ -475,6 +509,8 @@ impl JavaScriptRepl {
                         &self.kernel.timers,
                         call_deadline,
                         &self.timed_out,
+                        &self.cancelled,
+                        self.cancel_path.as_deref(),
                     )
                     .map(|_| ())
                     .map_err(|error| {
@@ -491,7 +527,9 @@ impl JavaScriptRepl {
         match execution {
             Ok(()) => tool_result(&output.text, false, output.images, output.response_meta),
             Err((_error, mut message)) => {
-                if self.timed_out.load(Ordering::Acquire) {
+                if self.cancelled.load(Ordering::Acquire) {
+                    message = "JavaScript execution cancelled".to_owned();
+                } else if self.timed_out.load(Ordering::Acquire) {
                     message = format!(
                         "JavaScript execution timed out after {} ms",
                         timeout.as_millis()
@@ -531,7 +569,12 @@ fn finish_promise_with_timers<'js>(
     timers: &Arc<Mutex<TimerQueue>>,
     deadline: Instant,
     timed_out: &AtomicBool,
+    cancelled: &AtomicBool,
+    cancel_path: Option<&Path>,
 ) -> rquickjs::Result<Value<'js>> {
+    // A promise suspended on a timer executes no bytecode, so the runtime's
+    // interrupt handler cannot see the cancel marker — poll it here too.
+    let mut next_cancel_check = Instant::now();
     loop {
         while ctx.execute_pending_job() {}
         if let Some(result) = promise.result::<Value<'js>>() {
@@ -545,6 +588,15 @@ fn finish_promise_with_timers<'js>(
             timed_out.store(true, Ordering::Release);
             return Err(rquickjs::Error::WouldBlock);
         }
+        if let Some(path) = cancel_path
+            && now >= next_cancel_check
+        {
+            next_cancel_check = now + CANCEL_POLL_INTERVAL;
+            if path.exists() {
+                cancelled.store(true, Ordering::Release);
+                return Err(rquickjs::Error::WouldBlock);
+            }
+        }
 
         run_due_timers(ctx, timer_dispatch, timers)?;
         while ctx.execute_pending_job() {}
@@ -555,7 +607,10 @@ fn finish_promise_with_timers<'js>(
         let Some(timer_deadline) = timers.lock().next_deadline() else {
             return Err(rquickjs::Error::WouldBlock);
         };
-        let wake_at = timer_deadline.min(deadline);
+        let mut wake_at = timer_deadline.min(deadline);
+        if cancel_path.is_some() {
+            wake_at = wake_at.min(next_cancel_check);
+        }
         let now = Instant::now();
         if wake_at > now {
             thread::sleep(wake_at - now);
@@ -568,19 +623,36 @@ fn create_kernel(
     call_output: Arc<Mutex<Option<CallOutput>>>,
     deadline: Arc<Mutex<Option<Instant>>>,
     timed_out: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+    cancel_path: Option<PathBuf>,
 ) -> anyhow::Result<Kernel> {
     let runtime = Runtime::new().context("could not create the QuickJS runtime")?;
     let timers = Arc::new(Mutex::new(TimerQueue::new()));
     let interrupt_deadline = deadline.clone();
     let interrupt_timed_out = timed_out.clone();
+    let interrupt_cancelled = cancelled.clone();
+    let mut next_cancel_check = Instant::now();
     runtime.set_interrupt_handler(Some(Box::new(move || {
-        let expired = interrupt_deadline
+        let now = Instant::now();
+        if interrupt_deadline
             .lock()
-            .is_some_and(|deadline| Instant::now() >= deadline);
-        if expired {
+            .is_some_and(|deadline| now >= deadline)
+        {
             interrupt_timed_out.store(true, Ordering::Release);
+            return true;
         }
-        expired
+        // The serve loop is blocked inside this call, so cancellation
+        // arrives as a file the poll stats rather than a stream message.
+        if let Some(path) = &cancel_path
+            && now >= next_cancel_check
+        {
+            next_cancel_check = now + CANCEL_POLL_INTERVAL;
+            if path.exists() {
+                interrupt_cancelled.store(true, Ordering::Release);
+                return true;
+            }
+        }
+        false
     })));
     runtime.set_memory_limit(256 * 1024 * 1024);
     runtime.set_max_stack_size(2 * 1024 * 1024);
@@ -1410,6 +1482,55 @@ mod tests {
                 .unwrap()
                 .contains("timed out")
         );
+    }
+
+    #[test]
+    fn cancel_marker_interrupts_running_and_suspended_javascript() {
+        let directory =
+            std::env::temp_dir().join(format!("waku-repl-cancel-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut repl = JavaScriptRepl::with_bridge(NativeComputerUseClient {
+            connection: None,
+            config: Some(SessionConfig {
+                server_path: PathBuf::from("unused-in-this-test"),
+                process_directory: directory.clone(),
+                cwd: directory.clone(),
+            }),
+        })
+        .unwrap();
+        let marker = directory.join(KERNEL_CANCEL_FILE);
+        let spawn_marker = |delay: Duration| {
+            let marker = marker.clone();
+            thread::spawn(move || {
+                thread::sleep(delay);
+                fs::write(&marker, b"").unwrap();
+            })
+        };
+
+        let writer = spawn_marker(Duration::from_millis(150));
+        let result = call(&mut repl, "while (true) {}");
+        writer.join().unwrap();
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["content"][0]["text"],
+            "JavaScript execution cancelled"
+        );
+
+        // The next call clears the stale marker on entry, then dies to a
+        // fresh one even while suspended on a timer with no bytecode running.
+        let writer = spawn_marker(Duration::from_millis(150));
+        let result = call(
+            &mut repl,
+            "await new Promise((resolve) => setTimeout(resolve, 30000));",
+        );
+        writer.join().unwrap();
+        assert_eq!(
+            result["content"][0]["text"],
+            "JavaScript execution cancelled"
+        );
+
+        drop(repl);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

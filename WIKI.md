@@ -314,8 +314,9 @@ Every turn in a Git-backed task leaves a conversation-aware checkpoint:
 ### Stopping and background work
 
 - **Stop** (or Escape, pressed twice) interrupts the turn. For providers with
-  a real interrupt the session stays alive; for Codex and Amp, stopping ends
-  the provider process and the next prompt resumes the native thread.
+  a real interrupt the session stays alive; only for Amp, which has no stream
+  interrupt, does stopping end the provider process — the next prompt resumes
+  the native thread.
 - **Background work**: long-running commands the agent detaches and subagents
   it spawns appear in the Background panel with live output, status, and stop
   controls. A turn that finishes while background work is still going shows
