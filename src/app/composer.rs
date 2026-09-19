@@ -4267,20 +4267,6 @@ impl Waku {
             )
     }
 
-    /// Per-render push of the composer card's native glass surface — the
-    /// counterpart of `sync_browser_webviews`; see
-    /// [`crate::platform::sync_composer_glass`] for the probe-generation
-    /// scheme that keeps it from outliving the card.
-    pub(super) fn sync_composer_glass(&self, window: &Window, cx: &mut Context<Self>) {
-        let theme = Theme::current(cx);
-        crate::platform::sync_composer_glass(
-            window,
-            theme.composer,
-            self.sidebar_transparency_amount(),
-            crate::platform::composer_glass_enabled(self.sidebar_transparency()),
-        );
-    }
-
     pub(super) fn render_composer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let session = self.composer_session();
@@ -4334,10 +4320,6 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
-        // With transparent chrome on, the card's fill is the liquid-glass
-        // surface sitting behind the Metal layer — the probe below keeps its
-        // frame pinned to these bounds.
-        let composer_glass = crate::platform::composer_glass_enabled(self.sidebar_transparency());
         div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
             div()
                 .w_full()
@@ -4346,11 +4328,7 @@ impl Waku {
                 .rounded(px(18.0))
                 .border(hairline())
                 .border_color(theme.border_subtle)
-                .bg(if composer_glass {
-                    gpui::transparent_black()
-                } else {
-                    theme.composer
-                })
+                .bg(theme.composer)
                 // Horizontal insets live on each row (and inside the field's
                 // scroll viewport, via `padding_x`) rather than on the card,
                 // so the field's overlay scrollbar can hug the card's edge.
@@ -4380,19 +4358,6 @@ impl Waku {
                 .child(super::autocomplete::composer_card_bounds_probe(
                     self.composer_autocomplete.card_bounds_cell(),
                 ))
-                // The liquid-glass surface behind the card follows these
-                // bounds every paint; unmounting the card starves the probe
-                // and the per-render sync hides it.
-                .child(
-                    canvas(
-                        move |bounds: Bounds<Pixels>, window, _| {
-                            crate::platform::report_composer_glass_bounds(window, bounds);
-                        },
-                        |_, _, _, _| (),
-                    )
-                    .absolute()
-                    .inset_0(),
-                )
                 // Only while the popup has selectable rows: the key context
                 // routes arrows, `enter`, `tab` and `escape` here as actions,
                 // out from under the focused field. The loading state takes
