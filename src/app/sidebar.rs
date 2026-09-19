@@ -1582,9 +1582,11 @@ impl Waku {
         let (id, path, label) = match item {
             SidebarDockItem::Friends => ("friends", "icons/friends.svg", tr!("settings.friends")),
             SidebarDockItem::Inbox => ("inbox", "icons/inbox.svg", tr!("sidebar.inbox")),
-            SidebarDockItem::Archive => ("archive", "icons/archive.svg", tr!("settings.archived")),
+            SidebarDockItem::Archive => {
+                ("archive", "icons/dock-archive.svg", tr!("settings.archived"))
+            }
             SidebarDockItem::Shortcuts => {
-                ("shortcuts", "icons/keyboard.svg", tr!("shortcuts.title"))
+                ("shortcuts", "icons/dock-keyboard.svg", tr!("shortcuts.title"))
             }
             SidebarDockItem::Settings => (
                 "settings",
