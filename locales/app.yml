@@ -3894,6 +3894,8 @@ keybind.conflicts:
   en: "%{n} conflicts"
 keybind.stage.collapsed:
   en: Keyboard hidden
+keybind.stage.hover_hint:
+  en: Hover to view keybinding…
 keybind.capture.waiting:
   en: Press keys…
 keybind.capture.hint:
