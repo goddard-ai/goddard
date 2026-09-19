@@ -781,6 +781,10 @@ mode.auto_accept_edits_description: 自动批准文件修改，执行其他操�
 mode.auto_description: 由 AI 审核并批准常规操作；高风险操作仍会询问
 mode.full_access_description: 无需确认即可执行命令和修改文件
 mode.choose: 选择模式
+full_access.confirm_title: 启用完全访问？
+full_access.confirm_description: 代理将可以在不征求许可的情况下读取、编辑文件并运行命令。
+full_access.confirm_effect: 此更改会立即应用于当前任务，并成为新任务的默认模式。
+full_access.confirm_enable: 启用完全访问
 sandbox.environment: 环境
 sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑

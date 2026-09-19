@@ -19,6 +19,17 @@ fn new_task_sandboxed(current: Option<&AgentSession>, remembered: bool) -> bool 
         .unwrap_or(remembered)
 }
 
+/// Whether picking `mode` must pause on the one-time Full access
+/// confirmation. A no-op re-pick of the already-active mode skips it — the
+/// gate is on the change, not the menu item.
+fn full_access_pick_needs_confirmation(
+    mode: RuntimeMode,
+    acknowledged: bool,
+    changes_anything: bool,
+) -> bool {
+    mode == RuntimeMode::FullAccess && !acknowledged && changes_anything
+}
+
 /// The text an unclaimed keystroke should send to the composer, if any:
 /// printable characters typed without command-level modifiers. `key_char`
 /// carries the layout-resolved character, so Option digraphs and shifted
@@ -2480,6 +2491,7 @@ impl Waku {
             || self.project_switcher.is_open()
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
+            || self.full_access_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()
             || self.image_preview.is_some()
@@ -2537,6 +2549,7 @@ impl Waku {
             || self.project_switcher.is_open()
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
+            || self.full_access_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()
             || self.image_preview.is_some()
@@ -3413,7 +3426,12 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn set_runtime_mode(&mut self, mode: RuntimeMode, cx: &mut Context<Self>) {
+    pub(super) fn set_runtime_mode(
+        &mut self,
+        mode: RuntimeMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((session_id, session_changed)) = self
             .composer_session()
             .map(|session| (session.id, session.runtime_mode != mode))
@@ -3421,6 +3439,17 @@ impl Waku {
             return;
         };
         let remembered_changed = self.state.last_runtime_mode != mode;
+        // The first Full access pick goes through the one-time confirmation;
+        // its confirm calls back into this method once acknowledged.
+        if full_access_pick_needs_confirmation(
+            mode,
+            self.state.full_access_acknowledged,
+            session_changed || remembered_changed,
+        ) {
+            let focus = self.open_full_access_dialog(cx);
+            window.focus(&focus, cx);
+            return;
+        }
         if session_changed {
             self.composer_session_mut()
                 .expect("composer session still exists")
@@ -4181,6 +4210,34 @@ mod tests {
             new_task_runtime_mode(None, RuntimeMode::AutoAcceptEdits),
             RuntimeMode::AutoAcceptEdits
         );
+    }
+
+    #[test]
+    fn full_access_pick_confirms_only_once_and_only_when_it_changes() {
+        // Unacknowledged Full access picks that would change state gate.
+        assert!(full_access_pick_needs_confirmation(
+            RuntimeMode::FullAccess,
+            false,
+            true
+        ));
+        // Other modes never do.
+        assert!(!full_access_pick_needs_confirmation(
+            RuntimeMode::Ask,
+            false,
+            true
+        ));
+        // Acknowledged once, never again.
+        assert!(!full_access_pick_needs_confirmation(
+            RuntimeMode::FullAccess,
+            true,
+            true
+        ));
+        // A no-op re-pick of the current mode doesn't prompt.
+        assert!(!full_access_pick_needs_confirmation(
+            RuntimeMode::FullAccess,
+            false,
+            false
+        ));
     }
 
     #[test]
