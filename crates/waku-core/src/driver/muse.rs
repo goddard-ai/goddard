@@ -1999,6 +1999,7 @@ mod tests {
             pasted_text_preview: None,
             blob_reference: None,
             session_id: None,
+            pasted_text_preview: None,
         }
     }
 
