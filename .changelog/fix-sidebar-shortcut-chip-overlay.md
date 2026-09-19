@@ -1,0 +1,1 @@
+- Holding ⌘ for the ⌘1–9 sidebar chips no longer hides a session row's status icon, pin/archive controls, worktree and PR badges, or timestamp — the chip is now a pure overlay and the row underneath stays put

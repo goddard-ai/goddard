@@ -3447,9 +3447,6 @@ impl Waku {
         );
         let multi_selected = self.sidebar_multi_selection.contains(&session_id);
         let pinned = session.pinned_at.is_some();
-        // While a ⌘n chip overlays the row, its trailing elements hide so
-        // nothing competes with the chip; the gradient fades the rest.
-        let shortcut_hint = shortcut_index.is_some();
         // The Pinned group mixes projects, so its rows keep the flat layout
         // and project-name detail even while Project grouping is active.
         let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
@@ -3495,7 +3492,7 @@ impl Waku {
                     theme.sidebar_item_background
                 })
             })
-            .child(self.render_session_row_body(session_id, grouped_by_project, shortcut_hint, cx))
+            .child(self.render_session_row_body(session_id, grouped_by_project, cx))
             .when(!renaming, |element| {
                 let drag_title = SharedString::from(localized_session_title(session));
                 element
@@ -3758,13 +3755,11 @@ impl Waku {
     /// The two-line body a session row shares between the sidebar and a Big
     /// Picture card header: title plus status/archive on top, project or
     /// branch detail below. `grouped_by_project` swaps the detail line into
-    /// branch mode the way a project-grouped sidebar does; `shortcut_hint`
-    /// hides the trailing controls while a ⌘n chip overlays the row.
+    /// branch mode the way a project-grouped sidebar does.
     pub(super) fn render_session_row_body(
         &self,
         session_id: Uuid,
         grouped_by_project: bool,
-        shortcut_hint: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -3906,9 +3901,7 @@ impl Waku {
                     .iter()
                     .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
             });
-        let status_indicator: Option<AnyElement> = if shortcut_hint {
-            None
-        } else if working {
+        let status_indicator: Option<AnyElement> = if working {
             Some(motion::spin_slow(icon(
                 "icons/loader-circle.svg",
                 12.0,
@@ -4092,9 +4085,8 @@ impl Waku {
                                 .child(indicator),
                         )
                     })
-                    .when(!shortcut_hint, |element| {
-                        element.child(pin_button).child(archive_button)
-                    }),
+                    .child(pin_button)
+                    .child(archive_button),
             )
             .child(
                 div()
@@ -4154,12 +4146,11 @@ impl Waku {
                             .child(div().flex_1())
                     })
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when(
-                        session.workspace.is_worktree() && !shortcut_hint,
-                        |element| element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary)),
-                    )
+                    .when(session.workspace.is_worktree(), |element| {
+                        element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
+                    })
                     .when_some(
-                        pull_request_badge.filter(|_| !shortcut_hint),
+                        pull_request_badge,
                         |element, badge| {
                             let color = sidebar_pull_request_color(&theme, badge.state);
                             element.child(
@@ -4213,7 +4204,7 @@ impl Waku {
                         },
                     )
                     .when_some(
-                        session_time_label(session, unix_time()).filter(|_| !shortcut_hint),
+                        session_time_label(session, unix_time()),
                         |element, label| {
                             element.child(
                                 div()
