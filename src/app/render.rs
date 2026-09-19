@@ -1282,11 +1282,7 @@ impl Waku {
             .with_animation(
                 SharedString::from(format!("toast-enter-{generation}")),
                 Animation::new(TOAST_ANIMATION_DURATION).with_easing(ease_out_quint()),
-                |element, delta| {
-                    element
-                        .top(px(48.0 + 8.0 * delta))
-                        .opacity(0.4 + 0.6 * delta)
-                },
+                |element, delta| element.opacity(delta),
             )
     }
 

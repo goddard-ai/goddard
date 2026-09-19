@@ -12,10 +12,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Animation, AnimationElement, AnimationExt, AnyElement, App, Bounds, ContentMask, Element,
-    ElementId, EntityId, Global, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    Pixels, Point, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage,
-    point, px, size,
+    Animation, AnimationElement, AnimationExt, AnyElement, App, ElementId, EntityId, Global,
+    IntoElement, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage,
 };
 
 /// Repeat-tick interval, rounded up so spinner ticks never exceed 60 fps.
@@ -254,101 +252,33 @@ fn width_at(from: f32, target: f32, elapsed: Duration) -> Option<f32> {
     (progress < 1.0).then(|| from + (target - from) * ease_out_quint()(progress.max(0.0)))
 }
 
-/// How long a menu or popover takes to grow in from its anchor — short enough
-/// to read as instant, long enough to see where it came from.
+/// How long a menu or popover takes to fade in — short enough to read as
+/// instant.
 pub const SURFACE_ENTER: Duration = Duration::from_millis(140);
 
-/// The window-modal equivalent: the card is larger and grows from its own
-/// center, so the reveal runs a touch longer.
+/// The window-modal equivalent: the card is larger, so its fade runs a touch
+/// longer.
 pub const MODAL_ENTER: Duration = Duration::from_millis(160);
 
 /// The scrim behind a modal fades on its own, quicker clock.
 pub const SCRIM_ENTER: Duration = Duration::from_millis(120);
 
-/// How far a surface drifts toward its anchor while the reveal opens, as a
-/// fraction of the anchor's distance from the card's center — a few px for a
-/// menu, nothing for a card anchored at its own center.
-const ENTER_DRIFT: f32 = 0.05;
-
-/// The extra downward settle for a center-anchored (modal) entrance.
-const MODAL_SETTLE: Pixels = px(5.0);
-
-/// How far past a surface's bounds its drop shadow can reach — `shadow_xl`'s
-/// offset plus a 3× blur tail. The reveal targets the dilated bounds so the
-/// shadow lands inside the clip and is revealed with the card; a clip that
-/// stops at the card's edge hides it until the last frame, where it pops in.
-const SHADOW_BLEED: Pixels = px(100.0);
-
-/// A one-shot entrance for a floating surface — menu, popover, or dialog.
-///
-/// GPUI transforms only SVG subtrees, so the "grow" is painted as a clip: the
-/// visible region eases from a zero-size rect at the anchor out to the
-/// shadow-dilated bounds while the child fades in and drifts a few px toward
-/// the anchor. At these durations it reads as a small scale. Drive it with
-/// `with_animation`; under reduce-motion the oneshot delta is 1 and it renders
-/// settled.
-///
-/// The fade depends on the shadow shader clipping its silhouette to outside
-/// the element: GPUI applies opacity per primitive rather than compositing the
-/// group, so if the silhouette covered the interior a translucent card would
-/// show it as a dark cast that vanishes on the last frame — a dark-to-light
-/// sweep on light themes.
-pub struct SurfaceReveal<E> {
-    child: Option<E>,
-    /// The window-space point the surface grows out of — the click for a
-    /// context menu, the trigger's attach corner for a dropdown. `None`
-    /// grows from the element's own center while settling downward.
-    anchor: Option<Point<Pixels>>,
-    progress: f32,
-}
-
-impl<E: Styled + IntoElement + 'static> SurfaceReveal<E> {
-    /// The eased animation delta for this frame, supplied by `with_animation`.
-    pub fn progress(mut self, progress: f32) -> Self {
-        self.progress = progress;
-        self
-    }
-}
-
-/// The shared entrance for a surface anchored to a point: the reveal grows
-/// out of `anchor` — a context menu's click point, a dropdown's attach
-/// corner on its trigger.
-pub fn surface_enter<E>(
-    id: impl Into<ElementId>,
-    child: E,
-    anchor: Point<Pixels>,
-) -> AnimationElement<SurfaceReveal<E>>
+/// The shared entrance for a floating surface — menu, popover, or dropdown:
+/// a bare fade with no movement or resize. Driven by `with_animation`, so
+/// under reduce-motion the oneshot delta is 1 and it renders settled.
+pub fn surface_enter<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
 where
     E: Styled + IntoElement + 'static,
 {
-    SurfaceReveal {
-        child: Some(child),
-        anchor: Some(anchor),
-        progress: 0.0,
-    }
-    .with_animation(
-        id,
-        Animation::new(SURFACE_ENTER).with_easing(ease_out_quint()),
-        |element, delta| element.progress(delta),
-    )
+    fade(id, element, SURFACE_ENTER)
 }
 
-/// The window-modal entrance: grow from the card's own center, settle a few
-/// px downward, fade in.
-pub fn modal_enter<E>(id: impl Into<ElementId>, child: E) -> AnimationElement<SurfaceReveal<E>>
+/// The window-modal entrance: the same fade on a slightly longer clock.
+pub fn modal_enter<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
 where
     E: Styled + IntoElement + 'static,
 {
-    SurfaceReveal {
-        child: Some(child),
-        anchor: None,
-        progress: 0.0,
-    }
-    .with_animation(
-        id,
-        Animation::new(MODAL_ENTER).with_easing(ease_out_quint()),
-        |element, delta| element.progress(delta),
-    )
+    fade(id, element, MODAL_ENTER)
 }
 
 /// A bare one-shot fade, for the scrim under a modal.
@@ -356,123 +286,16 @@ pub fn fade_in<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
 where
     E: Styled + IntoElement + 'static,
 {
-    element.with_animation(id, Animation::new(SCRIM_ENTER), |element, delta| {
+    fade(id, element, SCRIM_ENTER)
+}
+
+fn fade<E>(id: impl Into<ElementId>, element: E, duration: Duration) -> AnimationElement<E>
+where
+    E: Styled + IntoElement + 'static,
+{
+    element.with_animation(id, Animation::new(duration), |element, delta| {
         element.opacity(delta)
     })
-}
-
-/// The clip rect for `progress`: a zero-size rect at `anchor` growing out to
-/// `bounds`, keeping the anchor fixed so near-anchor content appears first.
-fn reveal_bounds(anchor: Point<Pixels>, bounds: Bounds<Pixels>, progress: f32) -> Bounds<Pixels> {
-    Bounds::new(
-        anchor + (bounds.origin - anchor) * progress,
-        size(bounds.size.width * progress, bounds.size.height * progress),
-    )
-}
-
-fn clamp_into(position: Point<Pixels>, bounds: Bounds<Pixels>) -> Point<Pixels> {
-    Point::new(
-        position.x.max(bounds.left()).min(bounds.right()),
-        position.y.max(bounds.top()).min(bounds.bottom()),
-    )
-}
-
-impl<E> Element for SurfaceReveal<E>
-where
-    E: Styled + IntoElement + 'static,
-{
-    type RequestLayoutState = AnyElement;
-    type PrepaintState = Option<ContentMask<Pixels>>;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut child = self
-            .child
-            .take()
-            .expect("request_layout runs once per frame");
-        if self.progress < 1.0 {
-            child = child.opacity(self.progress.max(0.0));
-        }
-        let mut child = child.into_any_element();
-        let layout_id = child.request_layout(window, cx);
-        (layout_id, child)
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        child: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        let progress = self.progress.clamp(0.0, 1.0);
-        if progress >= 1.0 {
-            child.prepaint(window, cx);
-            return None;
-        }
-        let anchor = self
-            .anchor
-            .map(|anchor| clamp_into(anchor, bounds))
-            .unwrap_or_else(|| bounds.center());
-        // Drift toward the anchor as the clip opens — the arrival direction a
-        // real scale would imply. A center-anchored card has no direction, so
-        // it only settles downward.
-        let drift = if self.anchor.is_some() {
-            (anchor - bounds.center()) * ENTER_DRIFT * (1.0 - progress)
-        } else {
-            point(px(0.0), -MODAL_SETTLE * (1.0 - progress))
-        };
-        // Reveal toward the shadow-dilated bounds: scaling the dilation with
-        // progress keeps the grow-from-anchor read while keeping the shadow
-        // inside the clip, so it sweeps out with the card instead of popping
-        // in on the last frame.
-        let mask = ContentMask {
-            bounds: reveal_bounds(anchor, bounds.dilate(SHADOW_BLEED), progress),
-        };
-        window.with_element_offset(drift, |window| {
-            window.with_content_mask(Some(mask), |window| child.prepaint(window, cx));
-        });
-        Some(mask)
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
-        child: &mut Self::RequestLayoutState,
-        mask: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        window.with_content_mask(*mask, |window| child.paint(window, cx));
-    }
-}
-
-impl<E> IntoElement for SurfaceReveal<E>
-where
-    E: Styled + IntoElement + 'static,
-{
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 #[cfg(test)]
@@ -505,41 +328,5 @@ mod tests {
             (reversed - interrupted).abs() < 0.01,
             "the reversed slide starts at the interrupted width"
         );
-    }
-
-    #[test]
-    fn a_reveal_grows_from_the_anchor_out_to_the_full_bounds() {
-        let bounds = Bounds::new(point(px(100.0), px(50.0)), size(px(200.0), px(100.0)));
-        let anchor = point(px(100.0), px(50.0));
-
-        let start = reveal_bounds(anchor, bounds, 0.0);
-        assert_eq!(start.size, size(px(0.0), px(0.0)));
-        assert_eq!(
-            start.origin, anchor,
-            "a fresh reveal is a point at the anchor"
-        );
-
-        let half = reveal_bounds(anchor, bounds, 0.5);
-        assert_eq!(half.size, size(px(100.0), px(50.0)));
-        assert_eq!(half.origin, anchor, "the corner anchor stays pinned");
-
-        assert_eq!(reveal_bounds(anchor, bounds, 1.0), bounds);
-    }
-
-    #[test]
-    fn a_reveal_from_center_grows_symmetrically() {
-        let bounds = Bounds::new(point(px(100.0), px(50.0)), size(px(200.0), px(100.0)));
-        let half = reveal_bounds(bounds.center(), bounds, 0.5);
-        assert_eq!(half.origin, point(px(150.0), px(75.0)));
-        assert_eq!(half.size, size(px(100.0), px(50.0)));
-    }
-
-    #[test]
-    fn an_out_of_bounds_anchor_is_clamped_into_the_card() {
-        // A context menu snapped back inside the window leaves the click point
-        // outside the card; the reveal grows from the nearest edge instead.
-        let bounds = Bounds::new(point(px(100.0), px(50.0)), size(px(200.0), px(100.0)));
-        let anchor = clamp_into(point(px(400.0), px(70.0)), bounds);
-        assert_eq!(anchor, point(px(300.0), px(70.0)));
     }
 }
