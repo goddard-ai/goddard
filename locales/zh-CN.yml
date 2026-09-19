@@ -404,6 +404,7 @@ common.copy: 复制
 common.delete: 删除
 common.remove: 移除
 common.unarchive: 取消归档
+common.undo: 撤销
 common.rename: 重命名
 session.new_task: 新任务
 session.copy_working_directory: 复制工作目录
@@ -1072,7 +1073,10 @@ session.pre_turn_checkpoint_missing: 缺少该消息发送前的 Git 检查点
 session.rewind_title: "%{title}（回退）"
 session.rewound: 已回退到第 %{turn} 轮任务之前
 session.rewound_with_stale_refs: "已回退到第 %{turn} 轮任务之前，但仍有过期引用：%{error}"
+session.archived: 任务已归档
+session.archived_many: "已归档 %{count} 个任务"
 session.unarchived: 任务已取消归档
+session.unarchived_many: "已取消归档 %{count} 个任务"
 session.view_now: 立即查看
 session.worktree_recreated: 工作树缺失，已重新创建——未提交的更改可能已丢失
 session.moved_to_worktree: "已移动到工作树 %{name}"
