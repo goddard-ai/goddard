@@ -16,4 +16,9 @@ matchedPath: string | null, matchedProjectName: string | null,
 /**
  * We already opted in — the `sync_links` row is authoritative.
  */
-syncEnabled: boolean, receivedAtMs: number, };
+syncEnabled: boolean,
+/**
+ * The friend lets us watch this project's sessions — read-only, live.
+ * `false` for shares offered before session sharing existed.
+ */
+shareSessions: boolean, receivedAtMs: number, };

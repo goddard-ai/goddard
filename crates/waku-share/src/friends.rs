@@ -10,18 +10,30 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
-use iroh::{Endpoint, EndpointAddr, EndpointId};
 use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler};
-use serde::{Deserialize, Serialize};
+use iroh::{Endpoint, EndpointAddr, EndpointId};
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use waku_protocol::friends::SharedSessionSummary;
+use waku_protocol::model::AgentSession;
+use waku_protocol::{ReplayCursor, SequencedEvent};
 
 /// ALPN for the friends control channel (friend requests, transfer offers,
 /// project shares). Bumped on breaking wire changes; v1 adds
-/// `ShareProjects`/`SyncEnabled`/`SyncDisabled`/`PushNotice`.
+/// `ShareProjects`/`SyncEnabled`/`SyncDisabled`/`PushNotice`. Session
+/// sharing is additive: peers that predate it never advertise
+/// `share_sessions`, so we never send them `Session*` messages.
 pub const ALPN_FRIENDS: &[u8] = b"goddard/friends/1";
 
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+/// Session list replies stay small — summaries only.
+const MAX_SESSION_LIST_BYTES: usize = 4 * 1024 * 1024;
+/// Frames on a session subscription. Snapshots carry a whole transcript,
+/// which can be megabytes; events are small but share the framing.
+const MAX_SESSION_STREAM_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Friend {
@@ -192,6 +204,41 @@ pub enum FriendsMessage {
         origin_url: String,
         refs: Vec<String>,
     },
+    /// "List the sessions you expose on this shared project." Answers
+    /// `SessionListReply` or `SessionDenied`.
+    SessionList {
+        origin_url: String,
+    },
+    /// Slim session rows for the viewer's session list — empty when the
+    /// project has no sessions yet.
+    SessionListReply {
+        sessions: Vec<SharedSessionSummary>,
+    },
+    /// Open a live read-only tail of one shared session. The reply stream
+    /// is a `SessionSnapshot` frame followed by `SessionEvent` frames until
+    /// the stream ends or `SharingRevoked` lands.
+    SessionSubscribe {
+        origin_url: String,
+        session_id: Uuid,
+        /// Resume cursor from a previous subscription — the journal skips
+        /// events at or below it. `None` replays everything retained.
+        resume: Option<ReplayCursor>,
+    },
+    /// First frame of a subscription: the full session as it stands.
+    SessionSnapshot {
+        session: Box<AgentSession>,
+    },
+    /// A live event on the watched session — the daemon's own
+    /// `SequencedEvent`, forwarded verbatim.
+    SessionEvent {
+        event: Box<SequencedEvent>,
+    },
+    /// The project was unshared or session sharing was turned off while a
+    /// subscription was open — the terminal frame of that stream.
+    SharingRevoked,
+    /// Refusal for `SessionList`/`SessionSubscribe`: the project isn't
+    /// shared with the requester, or session sharing is off.
+    SessionDenied,
 }
 
 /// What the local user decided about an incoming request.
@@ -244,6 +291,28 @@ pub type PushHandler = Arc<dyn Fn(EndpointId, String, Vec<String>) + Send + Sync
 /// them and refreshes any surface that reads them.
 pub type RefHandler = Arc<dyn Fn(EndpointId, String, Vec<String>) + Send + Sync>;
 
+/// Answers a friend's `SessionList` — `None` declines: the project isn't
+/// shared with them, or session sharing is off. The handler owns the
+/// authorization check; the protocol just relays the verdict.
+pub type SessionListHandler =
+    Arc<dyn Fn(EndpointId, String) -> Option<Vec<SharedSessionSummary>> + Send + Sync>;
+
+/// What an authorized `SessionSubscribe` pumps onto the wire: the session
+/// snapshot frame first, then whatever the channel yields — `SessionEvent`s
+/// for live updates, `SharingRevoked` as the terminal frame. Closing the
+/// sender ends the stream.
+pub struct SessionFeed {
+    pub session: AgentSession,
+    pub events: tokio::sync::mpsc::Receiver<FriendsMessage>,
+}
+
+/// Opens a friend subscription — `None` declines like
+/// [`SessionListHandler`]. `resume` is the viewer's last-seen cursor from
+/// an earlier subscription.
+pub type SessionSubscribeHandler = Arc<
+    dyn Fn(EndpointId, String, Uuid, Option<ReplayCursor>) -> Option<SessionFeed> + Send + Sync,
+>;
+
 /// Acceptor for [`ALPN_FRIENDS`]: reads one message, dispatches to the
 /// installed handler, replies. Offers from non-friends are declined;
 /// offers from friends are auto-accepted (per the product decision) and the
@@ -257,6 +326,8 @@ pub struct FriendsProtocol {
     on_sync_state: Option<SyncStateHandler>,
     on_push: Option<PushHandler>,
     on_refs: Option<RefHandler>,
+    on_session_list: Option<SessionListHandler>,
+    on_session_subscribe: Option<SessionSubscribeHandler>,
     store: Arc<Mutex<FriendStore>>,
 }
 
@@ -285,6 +356,8 @@ impl FriendsProtocol {
             on_sync_state: None,
             on_push: None,
             on_refs: None,
+            on_session_list: None,
+            on_session_subscribe: None,
             store,
         }
     }
@@ -302,6 +375,19 @@ impl FriendsProtocol {
         self.on_sync_state = Some(on_sync_state);
         self.on_push = Some(on_push);
         self.on_refs = Some(on_refs);
+        self
+    }
+
+    /// Install the session-sharing handlers. The closures own all
+    /// authorization — they return `None` for anything the peer may not
+    /// see and the protocol answers `SessionDenied`.
+    pub fn with_session_handlers(
+        mut self,
+        on_session_list: SessionListHandler,
+        on_session_subscribe: SessionSubscribeHandler,
+    ) -> Self {
+        self.on_session_list = Some(on_session_list);
+        self.on_session_subscribe = Some(on_session_subscribe);
         self
     }
 
@@ -466,7 +552,89 @@ impl ProtocolHandler for FriendsProtocol {
                 }
                 send.finish()?;
             }
-            _ => send.finish()?,
+            FriendsMessage::SessionList { origin_url } => {
+                if self.touch_friend(&remote) {
+                    let sessions = self
+                        .on_session_list
+                        .as_ref()
+                        .and_then(|handler| handler(remote, origin_url));
+                    let reply = match sessions {
+                        Some(sessions) => FriendsMessage::SessionListReply { sessions },
+                        None => FriendsMessage::SessionDenied,
+                    };
+                    write_frame(&mut send, &reply, MAX_SESSION_LIST_BYTES)
+                        .await
+                        .map_err(accept_err)?;
+                }
+                send.finish()?;
+            }
+            FriendsMessage::SessionSubscribe {
+                origin_url,
+                session_id,
+                resume,
+            } => {
+                if !self.touch_friend(&remote) {
+                    send.finish()?;
+                } else {
+                    let feed = self
+                        .on_session_subscribe
+                        .as_ref()
+                        .and_then(|handler| handler(remote, origin_url, session_id, resume));
+                    match feed {
+                        None => {
+                            write_frame(
+                                &mut send,
+                                &FriendsMessage::SessionDenied,
+                                MAX_MESSAGE_BYTES,
+                            )
+                            .await
+                            .map_err(accept_err)?;
+                            send.finish()?;
+                        }
+                        Some(feed) => {
+                            write_frame(
+                                &mut send,
+                                &FriendsMessage::SessionSnapshot {
+                                    session: Box::new(feed.session),
+                                },
+                                MAX_SESSION_STREAM_BYTES,
+                            )
+                            .await
+                            .map_err(accept_err)?;
+                            let mut events = feed.events;
+                            loop {
+                                let frame = tokio::select! {
+                                    frame = events.recv() => frame,
+                                    // The peer hanging up ends the pump even
+                                    // if a live session keeps producing.
+                                    _ = conn.closed() => break,
+                                };
+                                let Some(frame) = frame else { break };
+                                if write_frame(&mut send, &frame, MAX_SESSION_STREAM_BYTES)
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                                if matches!(frame, FriendsMessage::SharingRevoked) {
+                                    break;
+                                }
+                            }
+                            send.finish()?;
+                        }
+                    }
+                }
+            }
+            FriendsMessage::SessionListReply { .. }
+            | FriendsMessage::SessionSnapshot { .. }
+            | FriendsMessage::SessionEvent { .. }
+            | FriendsMessage::SharingRevoked
+            | FriendsMessage::SessionDenied
+            | FriendsMessage::FriendAccept { .. }
+            | FriendsMessage::FriendDecline
+            | FriendsMessage::OfferAccept
+            | FriendsMessage::OfferDecline
+            | FriendsMessage::Ack => send.finish()?,
         }
         // Returning from accept lets the router close the connection, which
         // would discard our reply before the requester reads it. Wait for the
@@ -695,23 +863,109 @@ pub async fn send_ref_notice(
     .await
 }
 
+/// Fetch the sessions a friend exposes on their shared project — `Err`
+/// on denial or transport failure. Callers check the incoming share's
+/// `share_sessions` flag before dialing; a peer that predates session
+/// sharing just fails here.
+pub async fn fetch_session_list(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    origin_url: &str,
+) -> anyhow::Result<Vec<SharedSessionSummary>> {
+    let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
+    write_message(
+        &mut send,
+        &FriendsMessage::SessionList {
+            origin_url: origin_url.to_string(),
+        },
+    )
+    .await?;
+    send.finish()?;
+    let reply = read_frame(&mut recv, MAX_SESSION_LIST_BYTES).await;
+    conn.close(0u32.into(), b"done");
+    match reply? {
+        FriendsMessage::SessionListReply { sessions } => Ok(sessions),
+        FriendsMessage::SessionDenied => bail!("session sharing is off for that project"),
+        _ => bail!("unexpected reply to session list"),
+    }
+}
+
+/// Open a live tail of a friend's shared session. Returns the snapshot
+/// plus the open stream — the caller reads frames until `SharingRevoked`
+/// or EOF. `resume` skips journal events at or below the cursor.
+pub async fn subscribe_session(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    origin_url: &str,
+    session_id: Uuid,
+    resume: Option<ReplayCursor>,
+) -> anyhow::Result<(AgentSession, Connection, iroh::endpoint::RecvStream)> {
+    let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
+    write_message(
+        &mut send,
+        &FriendsMessage::SessionSubscribe {
+            origin_url: origin_url.to_string(),
+            session_id,
+            resume,
+        },
+    )
+    .await?;
+    send.finish()?;
+    match read_frame(&mut recv, MAX_SESSION_STREAM_BYTES).await? {
+        FriendsMessage::SessionSnapshot { session } => Ok((*session, conn, recv)),
+        FriendsMessage::SessionDenied => {
+            conn.close(0u32.into(), b"denied");
+            bail!("session sharing is off for that project")
+        }
+        _ => {
+            conn.close(0u32.into(), b"bad-reply");
+            bail!("unexpected reply to session subscribe")
+        }
+    }
+}
+
+/// Read the next frame of an open session subscription.
+pub async fn read_session_frame(
+    recv: &mut iroh::endpoint::RecvStream,
+) -> anyhow::Result<FriendsMessage> {
+    read_frame(recv, MAX_SESSION_STREAM_BYTES).await
+}
+
 async fn write_message(
     send: &mut iroh::endpoint::SendStream,
     msg: &FriendsMessage,
 ) -> anyhow::Result<()> {
+    write_frame(send, msg, MAX_MESSAGE_BYTES).await
+}
+
+async fn write_frame(
+    send: &mut iroh::endpoint::SendStream,
+    msg: &FriendsMessage,
+    max_bytes: usize,
+) -> anyhow::Result<()> {
     let data = serde_json::to_vec(msg)?;
+    if data.len() > max_bytes {
+        bail!("friends message too large to send: {}", data.len());
+    }
     send.write_all(&(data.len() as u32).to_be_bytes()).await?;
     send.write_all(&data).await?;
     Ok(())
 }
 
-async fn read_message(
+async fn read_message(recv: &mut iroh::endpoint::RecvStream) -> anyhow::Result<FriendsMessage> {
+    read_frame(recv, MAX_MESSAGE_BYTES).await
+}
+
+async fn read_frame(
     recv: &mut iroh::endpoint::RecvStream,
+    max_bytes: usize,
 ) -> anyhow::Result<FriendsMessage> {
     let mut len = [0u8; 4];
     recv.read_exact(&mut len).await?;
     let len = u32::from_be_bytes(len) as usize;
-    if len > MAX_MESSAGE_BYTES {
+    if len > max_bytes {
         bail!("friends message too large: {len}");
     }
     let mut buf = vec![0u8; len];

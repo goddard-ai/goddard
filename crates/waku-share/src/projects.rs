@@ -17,6 +17,10 @@ pub struct SharedRepo {
     pub name: String,
     /// Fetch URL of its `origin` remote; matching normalizes it.
     pub origin_url: String,
+    /// The sender lets us watch this project's sessions — read-only,
+    /// live. `false` when the share predates session sharing.
+    #[serde(default)]
+    pub share_sessions: bool,
 }
 
 /// A repo we share with `peer`. `repo_path` lets the sync loop find the
@@ -31,6 +35,10 @@ pub struct OutgoingShare {
     /// The peer told us they enabled sync on this share.
     #[serde(default)]
     pub peer_sync_enabled: bool,
+    /// We let the peer watch this project's sessions — read-only, live.
+    /// Independent of sync; `false` for shares predating the flag.
+    #[serde(default)]
+    pub share_sessions: bool,
     pub shared_at_ms: u64,
 }
 
@@ -49,6 +57,10 @@ pub struct IncomingShare {
     pub matched_path: Option<PathBuf>,
     #[serde(default)]
     pub matched_name: Option<String>,
+    /// The peer lets us watch this project's sessions — learned from the
+    /// `share_sessions` flag on their `SharedRepo` entries.
+    #[serde(default)]
+    pub share_sessions: bool,
     pub received_at_ms: u64,
 }
 
@@ -244,6 +256,7 @@ mod tests {
             origin_url: "git@github.com:org/repo.git".into(),
             repo_path: PathBuf::from("/tmp/proj"),
             peer_sync_enabled: false,
+            share_sessions: false,
             shared_at_ms: now_ms(),
         });
         store.save().unwrap();

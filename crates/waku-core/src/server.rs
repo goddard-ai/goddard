@@ -111,6 +111,14 @@ pub trait Backend: Send + Sync + 'static {
     /// Where the share layer reports QA review state moving — here or on
     /// a friend's machine.
     fn set_review_notifier(&self, _notifier: crate::share::ReviewNotifier) {}
+
+    /// Where the hub registers per-session event streams for friends
+    /// watching shared sessions — installed by `serve` once the hub exists.
+    fn set_session_streamer(&self, _streamer: crate::share::SessionStreamer) {}
+
+    /// Where friend-session updates arriving from peer subscriptions are
+    /// published — the hub turns them into `ServerMessage`s for clients.
+    fn set_friend_session_sink(&self, _sink: crate::share::FriendSessionSink) {}
 }
 
 #[derive(Clone)]
@@ -200,12 +208,38 @@ struct Subscriber {
     /// the hub. The connection polls it and closes, letting the client
     /// reconnect and resume from its last replayed cursor.
     kicked: Sender<()>,
+    /// When set, only `Event`s for this session reach the subscriber —
+    /// friend session feeds subscribe to one session, not the journal.
+    session_filter: Option<Uuid>,
 }
 
 impl Subscriber {
     fn new(messages: Sender<ServerMessage>) -> (Self, Receiver<()>) {
         let (kicked, kicked_rx) = unbounded();
-        (Self { messages, kicked }, kicked_rx)
+        (
+            Self {
+                messages,
+                kicked,
+                session_filter: None,
+            },
+            kicked_rx,
+        )
+    }
+
+    fn for_session(messages: Sender<ServerMessage>, session_id: Uuid) -> (Self, Receiver<()>) {
+        let (mut subscriber, kicked_rx) = Self::new(messages);
+        subscriber.session_filter = Some(session_id);
+        (subscriber, kicked_rx)
+    }
+
+    /// Whether `message` is deliverable to this subscriber.
+    fn accepts(&self, message: &ServerMessage) -> bool {
+        match self.session_filter {
+            Some(session_id) => {
+                matches!(message, ServerMessage::Event(event) if event.session_id == session_id)
+            }
+            None => true,
+        }
     }
 }
 
@@ -277,6 +311,26 @@ impl Default for Hub {
         Self {
             epoch: Uuid::new_v4(),
             state: Mutex::new(HubState::default()),
+        }
+    }
+}
+
+/// One filtered session subscription owned by the share layer — the
+/// receiver yields only `ServerMessage::Event`s for its session, replayed
+/// journal first. Drop unsubscribes.
+pub struct SessionStream {
+    pub events: Receiver<ServerMessage>,
+    /// Fires if the hub drops the subscription for lagging — the feed
+    /// ends so the viewer resubscribes with a fresh snapshot.
+    pub kicked: Receiver<()>,
+    hub: Weak<Hub>,
+    subscriber_id: u64,
+}
+
+impl Drop for SessionStream {
+    fn drop(&mut self) {
+        if let Some(hub) = self.hub.upgrade() {
+            hub.unsubscribe(self.subscriber_id);
         }
     }
 }
@@ -381,8 +435,12 @@ impl Hub {
         // the journal's own rollover semantics; clients reconcile any gap
         // from session state.
         let messages = subscriber.messages.clone();
+        let session_filter = subscriber.session_filter;
         state.subscribers.insert(id, subscriber);
         for (&(session_id, runtime_id), events) in &state.journal {
+            if session_filter.is_some_and(|filter| filter != session_id) {
+                continue;
+            }
             let sequence = resume_from
                 .iter()
                 .find(|cursor| {
@@ -417,7 +475,7 @@ impl Hub {
     fn broadcast(state: &mut HubState, message: &ServerMessage, skip: Option<u64>) {
         let mut overwhelmed = Vec::new();
         for (&subscriber_id, subscriber) in &state.subscribers {
-            if Some(subscriber_id) == skip {
+            if Some(subscriber_id) == skip || !subscriber.accepts(message) {
                 continue;
             }
             if subscriber.messages.len() >= MAX_QUEUED_MESSAGES_PER_SUBSCRIBER
@@ -525,6 +583,70 @@ impl Hub {
         Self::broadcast(
             &mut hub_state,
             &ServerMessage::ReviewChanged { origin_url },
+            None,
+        );
+    }
+
+    /// A filtered subscription to one session's events, for the share
+    /// layer pumping a friend's watch stream. Dropping the returned
+    /// stream unsubscribes.
+    fn session_stream(
+        self: &Arc<Self>,
+        session_id: Uuid,
+        resume: Option<ReplayCursor>,
+    ) -> SessionStream {
+        let (messages, events) = bounded(MAX_QUEUED_MESSAGES_PER_SUBSCRIBER);
+        let (subscriber, kicked) = Subscriber::for_session(messages, session_id);
+        let resume_from: Vec<ReplayCursor> = resume.into_iter().collect();
+        let subscriber_id = self.subscribe(&resume_from, subscriber);
+        SessionStream {
+            events,
+            kicked,
+            hub: Arc::downgrade(self),
+            subscriber_id,
+        }
+    }
+
+    /// Push an event arriving from a friend's daemon. Ids, epoch, and
+    /// sequence are the sharer's and stay verbatim so a viewer resuming
+    /// after a reconnect passes a cursor the sharer's journal understands.
+    fn emit_external(&self, event: SequencedEvent) {
+        let mut state = self.state.lock();
+        if state.active_runtimes.get(&event.session_id) != Some(&event.runtime_id) {
+            // A runtime boundary on the sharer's side starts a fresh
+            // journal here, same as `begin_runtime` for local runtimes.
+            state
+                .active_runtimes
+                .insert(event.session_id, event.runtime_id);
+            state
+                .next_sequences
+                .retain(|(session, _), _| *session != event.session_id);
+            state
+                .journal
+                .retain(|(session, _), _| *session != event.session_id);
+        }
+        let journal = state
+            .journal
+            .entry((event.session_id, event.runtime_id))
+            .or_default();
+        journal.push_back(event.clone());
+        while journal.len() > MAX_REPLAY_EVENTS_PER_SESSION {
+            journal.pop_front();
+        }
+        Self::broadcast(&mut state, &ServerMessage::Event(event), None);
+    }
+
+    /// A watched friend session's stream ended — clear its runtime and
+    /// tell clients whether the friend revoked sharing or just went away.
+    fn friend_session_closed(&self, session_id: Uuid, revoked: bool) {
+        self.end_runtime(session_id, None);
+        let mut state = self.state.lock();
+        Self::broadcast(
+            &mut state,
+            &ServerMessage::FriendSessionClosed {
+                session_id,
+                revoked,
+            },
             None,
         );
     }
@@ -727,6 +849,22 @@ pub fn serve(
         let hub = hub.clone();
         backend.set_review_notifier(Arc::new(move |origin_url| {
             hub.review_changed(origin_url)
+        }));
+    }
+    {
+        let hub = hub.clone();
+        backend.set_session_streamer(Arc::new(move |session_id, resume| {
+            hub.session_stream(session_id, resume)
+        }));
+    }
+    {
+        let hub = hub.clone();
+        backend.set_friend_session_sink(Arc::new(move |update| match update {
+            crate::share::FriendSessionUpdate::Event(event) => hub.emit_external(event),
+            crate::share::FriendSessionUpdate::Closed {
+                session_id,
+                revoked,
+            } => hub.friend_session_closed(session_id, revoked),
         }));
     }
     let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
@@ -1424,6 +1562,95 @@ mod tests {
             observer_rx.recv_timeout(Duration::from_secs(1)),
             Ok(ServerMessage::TaskStateChanged { revision: 1 })
         ));
+    }
+
+    /// A friend session feed subscribes through `session_stream`: it sees
+    /// only its session's events, replays journal entries, and its drop
+    /// unsubscribes without touching other subscribers.
+    #[test]
+    fn session_stream_filters_and_replays() {
+        let hub = Arc::new(Hub::default());
+        let session_a = Uuid::new_v4();
+        let session_b = Uuid::new_v4();
+        let runtime = Uuid::new_v4();
+        let delta = |sequence| WireDriverEvent::new("textDelta", json!(sequence));
+
+        hub.begin_runtime(session_a, runtime);
+        hub.begin_runtime(session_b, runtime);
+        hub.emit(session_a, runtime, delta(1), true);
+        hub.emit(session_b, runtime, delta(1), true);
+
+        let stream = hub.session_stream(session_a, None);
+        let replayed = stream.events.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(matches!(
+            replayed,
+            ServerMessage::Event(SequencedEvent {
+                session_id: got,
+                sequence: 1,
+                ..
+            }) if got == session_a
+        ));
+        // session_b's event is not replayed to a filtered stream.
+        assert!(stream.events.try_recv().is_err());
+
+        hub.emit(session_b, runtime, delta(2), true);
+        hub.emit(session_a, runtime, delta(2), true);
+        let live = stream.events.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(matches!(
+            live,
+            ServerMessage::Event(SequencedEvent { sequence: 2, .. })
+        ));
+        assert!(stream.events.try_recv().is_err());
+    }
+
+    /// `emit_external` injects a friend's events under their own ids and
+    /// sequences; `friend_session_closed` clears the runtime and
+    /// broadcasts the close notice.
+    #[test]
+    fn friend_session_events_reach_subscribers() {
+        let hub = Hub::default();
+        let (tx, rx) = unbounded();
+        hub.subscribe(&[], Subscriber::new(tx).0);
+
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let epoch = Uuid::new_v4();
+        hub.emit_external(SequencedEvent {
+            session_id,
+            runtime_id,
+            epoch,
+            sequence: 7,
+            event: WireDriverEvent::new("textDelta", json!("hi")),
+        });
+        match rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+            ServerMessage::Event(event) => {
+                assert_eq!(event.session_id, session_id);
+                assert_eq!(event.sequence, 7);
+            }
+            other => panic!("expected Event, got {other:?}"),
+        }
+
+        hub.friend_session_closed(session_id, true);
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ServerMessage::FriendSessionClosed {
+                session_id: got,
+                revoked: true,
+            } if got == session_id
+        ));
+        // The runtime was retired — another emit under it restarts the
+        // journal rather than appending to a dead runtime's stream.
+        hub.emit_external(SequencedEvent {
+            session_id,
+            runtime_id,
+            epoch,
+            sequence: 8,
+            event: WireDriverEvent::new("textDelta", json!("late")),
+        });
+        match rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+            ServerMessage::Event(event) => assert_eq!(event.sequence, 8),
+            other => panic!("expected Event, got {other:?}"),
+        }
     }
 
     #[test]

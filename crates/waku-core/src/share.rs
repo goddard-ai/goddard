@@ -15,16 +15,18 @@ use uuid::Uuid;
 
 use waku_protocol::friends::{
     FriendInfo, FriendRequestInfo, FriendSyncAlertAction, FriendsState, IncomingShareInfo,
-    SharedProjectInfo, SyncAlertInfo, SyncAlertKind, SyncLinkInfo, TransferDirection,
-    TransferInfo, TransferStatus,
+    SharedProjectInfo, SharedSessionSummary, SyncAlertInfo, SyncAlertKind, SyncLinkInfo,
+    TransferDirection, TransferInfo, TransferStatus,
 };
 use waku_protocol::git::SyncInProgress;
+use waku_protocol::model::AgentSession;
+use waku_protocol::{ReplayCursor, SequencedEvent, ServerMessage};
 use waku_share::friends::{
-    self, Friend, FriendStore, FriendsProtocol, OfferInfo, PendingRequest, RequestDecision,
+    self, Friend, FriendStore, FriendsMessage, FriendsProtocol, OfferInfo, PendingRequest,
+    RequestDecision, SessionFeed,
 };
 use waku_share::projects::{
-    IncomingShare, Integration, OutgoingShare, ShareStore, SharedRepo, SyncLink,
-    normalize_origin,
+    IncomingShare, Integration, OutgoingShare, ShareStore, SharedRepo, SyncLink, normalize_origin,
 };
 use waku_share::{EndpointId, RelayMode, ShareNode, TempTag};
 
@@ -150,6 +152,14 @@ enum SyncJob {
         link_id: String,
         reply: Sender<anyhow::Result<(Vec<String>, Option<String>)>>,
     },
+    /// Flip `share_sessions` on an outgoing share — re-sends the shared
+    /// set so the friend's incoming row picks up the flag.
+    SetSessionSharing {
+        peer: EndpointId,
+        origin_url: String,
+        enabled: bool,
+        reply: Sender<anyhow::Result<()>>,
+    },
 }
 
 /// Peer messages the worker wants sent — it owns no async context, so
@@ -188,6 +198,47 @@ pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
 /// origin — locally or on a friend's machine. The hub broadcasts a
 /// `ReviewChanged` with the origin URL so review surfaces re-read.
 pub type ReviewNotifier = Arc<dyn Fn(String) + Send + Sync>;
+
+/// The daemon's session catalog as the share layer needs it — installed
+/// by `WakuBackend` like `RepoResolver`. Called on the share runtime and
+/// worker threads only.
+#[derive(Clone)]
+pub struct SessionSource {
+    /// Sessions belonging to the project at `repo_path`, slimmed to the
+    /// rows a friend's session list renders. Archived sessions and side
+    /// chats stay hidden, matching task-list semantics.
+    pub list: Arc<dyn Fn(&std::path::Path) -> Vec<SharedSessionSummary> + Send + Sync>,
+    /// Full snapshot for a subscription's first frame.
+    pub snapshot: Arc<dyn Fn(Uuid) -> Option<AgentSession> + Send + Sync>,
+}
+
+/// A hub-provided live event stream for one session — what the share
+/// layer pumps onto a friend's `SessionSubscribe` stream.
+pub type SessionStreamer =
+    Arc<dyn Fn(Uuid, Option<ReplayCursor>) -> crate::server::SessionStream + Send + Sync>;
+
+/// What a peer subscription delivers back to this daemon — the hub sink
+/// in `serve` turns these into client broadcasts.
+pub enum FriendSessionUpdate {
+    Event(SequencedEvent),
+    /// The stream ended: `revoked` when the friend turned sharing off or
+    /// unshared the project, `false` for disconnects and gone sessions.
+    Closed {
+        session_id: Uuid,
+        revoked: bool,
+    },
+}
+
+/// Installed by the server so peer session events reach subscribed
+/// clients, like `FriendsSink` for the friends document.
+pub type FriendSessionSink = Arc<dyn Fn(FriendSessionUpdate) + Send + Sync>;
+
+/// An open `SessionSubscribe` stream we serve to a peer — the worker
+/// revokes by pushing `SharingRevoked` then dropping the sender.
+struct SessionFeedHandle {
+    origin_url: String,
+    sender: tokio::sync::mpsc::Sender<FriendsMessage>,
+}
 
 enum ShareCommand {
     SendRequest {
@@ -253,6 +304,33 @@ enum ShareCommand {
         link_id: String,
         reply: Sender<anyhow::Result<(Vec<String>, Option<String>)>>,
     },
+    /// Toggle session sharing on a shared project — the worker owns the
+    /// flag and the re-send.
+    SetSessionSharing {
+        node_id: String,
+        origin_url: String,
+        enabled: bool,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    /// List the sessions a friend exposes on their shared project.
+    FriendSessions {
+        node_id: String,
+        origin_url: String,
+        reply: Sender<anyhow::Result<Vec<SharedSessionSummary>>>,
+    },
+    /// Open a live, read-only tail of a friend's session — the reply
+    /// carries the snapshot; events then arrive on the session sink.
+    WatchFriendSession {
+        node_id: String,
+        origin_url: String,
+        session_id: Uuid,
+        reply: Sender<anyhow::Result<AgentSession>>,
+    },
+    /// Close a watch's pump task.
+    UnwatchFriendSession {
+        session_id: Uuid,
+        reply: Sender<anyhow::Result<()>>,
+    },
     /// A workspace op landed commits or moved refs — poll promptly
     /// instead of waiting out the interval.
     KickPoll,
@@ -292,6 +370,16 @@ struct ShareInner {
     transfer_hook: Option<TransferHook>,
     task_notifier: Option<TaskNotifier>,
     review_notifier: Option<ReviewNotifier>,
+    /// Session summaries/snapshots for friends we share with.
+    session_source: Option<SessionSource>,
+    /// Per-session event streams from the hub — the serving side of a
+    /// friend's subscription.
+    session_streamer: Option<SessionStreamer>,
+    /// Where inbound friend-session events get published — installed by
+    /// the server once the hub exists.
+    session_sink: Option<FriendSessionSink>,
+    /// Open session feeds we serve to peers, keyed `(peer, session)`.
+    session_feeds: HashMap<(EndpointId, Uuid), SessionFeedHandle>,
     friend_code: String,
 }
 
@@ -345,6 +433,7 @@ impl ShareInner {
                     origin_url: share.origin_url.clone(),
                     repo_path: share.repo_path.clone(),
                     peer_sync_enabled: share.peer_sync_enabled,
+                    share_sessions: share.share_sessions,
                     shared_at_ms: share.shared_at_ms,
                 })
                 .collect(),
@@ -361,6 +450,7 @@ impl ShareInner {
                     sync_enabled: share_store
                         .link_for(&share.peer, &share.origin_url)
                         .is_some(),
+                    share_sessions: share.share_sessions,
                     received_at_ms: share.received_at_ms,
                 })
                 .collect(),
@@ -458,6 +548,10 @@ impl ShareService {
                 transfer_hook: None,
                 task_notifier: None,
                 review_notifier: None,
+                session_source: None,
+                session_streamer: None,
+                session_sink: None,
+                session_feeds: HashMap::new(),
                 friend_code: String::new(),
             })),
             sink: Arc::new(Mutex::new(None)),
@@ -483,6 +577,24 @@ impl ShareService {
     /// Where the server installs the `ReviewChanged` broadcast.
     pub fn set_review_notifier(&self, notifier: ReviewNotifier) {
         self.state.lock().review_notifier = Some(notifier);
+    }
+
+    /// Where the daemon installs the session catalog friends may list and
+    /// watch — installed once at construction like `set_repo_resolver`.
+    pub fn set_session_source(&self, source: SessionSource) {
+        self.state.lock().session_source = Some(source);
+    }
+
+    /// Where the server installs hub-backed event streams for the serving
+    /// side of friend subscriptions.
+    pub fn set_session_streamer(&self, streamer: SessionStreamer) {
+        self.state.lock().session_streamer = Some(streamer);
+    }
+
+    /// Where the server installs the broadcast path for events arriving
+    /// from peer session subscriptions.
+    pub fn set_friend_session_sink(&self, sink: FriendSessionSink) {
+        self.state.lock().session_sink = Some(sink);
     }
 
     /// Latest wire snapshot for `GetFriends`. Cheap — no runtime required,
@@ -632,6 +744,8 @@ impl ShareService {
             }
             let _ = store.save();
         }
+        // Their session feeds die with the friendship.
+        revoke_session_feeds(&self.state, &id, None);
         publish(&self.state, &self.sink);
         Ok(())
     }
@@ -739,6 +853,65 @@ impl ShareService {
         reply_rx.recv_timeout(COMMAND_TIMEOUT)?
     }
 
+    /// Toggle whether `node_id` may watch sessions in the shared project
+    /// `origin_url`. Independent of sync — a friend can watch sessions
+    /// without syncing the repo.
+    pub fn set_session_sharing(
+        &self,
+        node_id: String,
+        origin_url: String,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::SetSessionSharing {
+            node_id,
+            origin_url,
+            enabled,
+            reply,
+        })
+    }
+
+    /// The sessions a friend exposes on their shared project — dials the
+    /// friend over the friends channel.
+    pub fn friend_sessions(
+        &self,
+        node_id: String,
+        origin_url: String,
+    ) -> anyhow::Result<Vec<SharedSessionSummary>> {
+        let tx = self.ensure_started()?;
+        let (reply_tx, reply_rx) = bounded(1);
+        tx.send(ShareCommand::FriendSessions {
+            node_id,
+            origin_url,
+            reply: reply_tx,
+        })?;
+        reply_rx.recv_timeout(COMMAND_TIMEOUT)?
+    }
+
+    /// Open a live read-only tail of a friend's session. The returned
+    /// snapshot is the current state; updates arrive on the session sink
+    /// as `ServerMessage::Event`s under the friend's session/runtime ids.
+    pub fn watch_friend_session(
+        &self,
+        node_id: String,
+        origin_url: String,
+        session_id: Uuid,
+    ) -> anyhow::Result<AgentSession> {
+        let tx = self.ensure_started()?;
+        let (reply_tx, reply_rx) = bounded(1);
+        tx.send(ShareCommand::WatchFriendSession {
+            node_id,
+            origin_url,
+            session_id,
+            reply: reply_tx,
+        })?;
+        reply_rx.recv_timeout(COMMAND_TIMEOUT)?
+    }
+
+    /// Stop watching a friend's session — closes the peer subscription.
+    pub fn unwatch_friend_session(&self, session_id: Uuid) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::UnwatchFriendSession { session_id, reply })
+    }
+
     /// A workspace op landed commits or moved refs — prompt the poll
     /// instead of waiting out the interval. No-op before the runtime
     /// starts.
@@ -805,6 +978,56 @@ fn peers_for_origin(store: &ShareStore, origin_url: &str) -> Vec<EndpointId> {
         }
     }
     peers.into_iter().collect()
+}
+
+/// The authorization check both session handlers share: `peer` must hold
+/// an outgoing share on `origin_url` with `share_sessions` on. Returns
+/// the share's local checkout and the session catalog.
+fn shared_repo_for_sessions(
+    state: &Arc<Mutex<ShareInner>>,
+    peer: &EndpointId,
+    origin_url: &str,
+) -> Option<(PathBuf, SessionSource)> {
+    let inner = state.lock();
+    let share_store = inner.share_store.lock();
+    let share = share_store.outgoing.iter().find(|s| {
+        s.peer == *peer
+            && s.share_sessions
+            && normalize_origin(&s.origin_url) == normalize_origin(origin_url)
+    })?;
+    let repo_path = share.repo_path.clone();
+    let source = inner.session_source.clone()?;
+    Some((repo_path, source))
+}
+
+/// Close session feeds we serve to `peer` — `None` origin revokes all of
+/// them (friend removed), `Some` just that project's (unshare or the
+/// session-sharing toggle going off). `SharingRevoked` lands as the
+/// terminal frame when the feed's queue has room; either way dropping the
+/// sender ends the stream.
+fn revoke_session_feeds(
+    state: &Arc<Mutex<ShareInner>>,
+    peer: &EndpointId,
+    origin_url: Option<&str>,
+) {
+    let mut inner = state.lock();
+    let normalized = origin_url.map(normalize_origin);
+    let keys: Vec<(EndpointId, Uuid)> = inner
+        .session_feeds
+        .iter()
+        .filter(|((p, _), feed)| {
+            *p == *peer
+                && normalized
+                    .as_ref()
+                    .is_none_or(|n| normalize_origin(&feed.origin_url) == *n)
+        })
+        .map(|(key, _)| *key)
+        .collect();
+    for key in keys {
+        if let Some(feed) = inner.session_feeds.remove(&key) {
+            let _ = feed.sender.try_send(FriendsMessage::SharingRevoked);
+        }
+    }
 }
 
 /// Publish the current snapshot to every subscriber.
@@ -998,6 +1221,7 @@ impl SyncWorker {
                     origin_url: repo.origin_url,
                     matched_path: matched.map(|r| r.path.clone()),
                     matched_name: matched.map(|r| r.name.clone()),
+                    share_sessions: repo.share_sessions,
                     received_at_ms: now_ms(),
                 });
             }
@@ -1045,6 +1269,7 @@ impl SyncWorker {
             .map(|s| SharedRepo {
                 name: s.name.clone(),
                 origin_url: s.origin_url.clone(),
+                share_sessions: s.share_sessions,
             })
             .collect()
     }
@@ -1080,6 +1305,7 @@ impl SyncWorker {
                     origin_url,
                     repo_path: project_path,
                     peer_sync_enabled: false,
+                    share_sessions: false,
                     shared_at_ms: now_ms(),
                 });
                 let _ = store.save();
@@ -1124,14 +1350,14 @@ impl SyncWorker {
             return;
         }
         self.publish();
+        self.revoke_session_feeds_for(&peer, &origin_url);
         let projects = self.shared_set(&peer);
         let _ = self
             .effect_tx
             .send(RuntimeEffect::ShareProjects { peer, projects });
         // The link survives only while an incoming share justifies it.
         let justified = self.store().incoming.iter().any(|s| {
-            s.peer == peer
-                && normalize_origin(&s.origin_url) == normalize_origin(&origin_url)
+            s.peer == peer && normalize_origin(&s.origin_url) == normalize_origin(&origin_url)
         });
         if !justified {
             let link_id = self
@@ -1144,13 +1370,55 @@ impl SyncWorker {
         }
     }
 
+    fn revoke_session_feeds_for(&self, peer: &EndpointId, origin_url: &str) {
+        revoke_session_feeds(&self.state, peer, Some(origin_url));
+    }
+
+    /// Toggle session sharing on an outgoing share. Independent of sync
+    /// — the flag rides the shared set like `peer_sync_enabled` does.
+    fn set_session_sharing(
+        &self,
+        peer: EndpointId,
+        origin_url: String,
+        enabled: bool,
+        reply: Sender<anyhow::Result<()>>,
+    ) {
+        let result = (|| {
+            let mut store = self.store();
+            let Some(share) = store.outgoing.iter_mut().find(|s| {
+                s.peer == peer && normalize_origin(&s.origin_url) == normalize_origin(&origin_url)
+            }) else {
+                anyhow::bail!("not shared with them");
+            };
+            share.share_sessions = enabled;
+            let _ = store.save();
+            Ok(())
+        })();
+        let ok = result.is_ok();
+        let _ = reply.send(result);
+        if !ok {
+            return;
+        }
+        self.publish();
+        if !enabled {
+            self.revoke_session_feeds_for(&peer, &origin_url);
+        }
+        let projects = self.shared_set(&peer);
+        let _ = self
+            .effect_tx
+            .send(RuntimeEffect::ShareProjects { peer, projects });
+    }
+
     /// Fetch + integrate a link's branches, recording alerts on
     /// conflict/refusal and clearing them on success.
     fn integrate_link(&self, link_id: &str, branches: &[String], fetch_first: bool) {
         let link = self.store().links.iter().find(|l| l.id == link_id).cloned();
         let Some(link) = link else { return };
         if fetch_first && let Err(error) = crate::sync::fetch(&link.repo_path) {
-            eprintln!("share sync: fetch {} failed: {error:#}", link.repo_path.display());
+            eprintln!(
+                "share sync: fetch {} failed: {error:#}",
+                link.repo_path.display()
+            );
             return;
         }
         let mut changed = false;
@@ -1698,6 +1966,14 @@ impl SyncWorker {
                 SyncJob::UpdateIncoming { peer, projects } => {
                     self.update_incoming(peer, projects);
                 }
+                SyncJob::SetSessionSharing {
+                    peer,
+                    origin_url,
+                    enabled,
+                    reply,
+                } => {
+                    self.set_session_sharing(peer, origin_url, enabled, reply);
+                }
                 SyncJob::QueryBranches { link_id, reply } => {
                     let link = self.store().links.iter().find(|l| l.id == link_id).cloned();
                     let result = match link {
@@ -2029,6 +2305,88 @@ fn run_runtime(
                     let _ = job_tx.send(SyncJob::RefNotice { origin_url, refs });
                 })
             },
+        )
+        .with_session_handlers(
+            // on_session_list: the share itself authorizes — `None`
+            // answers `SessionDenied`. The session catalog is the
+            // daemon-installed `SessionSource`.
+            {
+                let state = state.clone();
+                Arc::new(move |peer: EndpointId, origin_url: String| {
+                    let (repo_path, source) = shared_repo_for_sessions(&state, &peer, &origin_url)?;
+                    Some((source.list)(&repo_path))
+                })
+            },
+            // on_session_subscribe: same authorization plus a membership
+            // check — the session must be one `SessionList` would name.
+            {
+                let state = state.clone();
+                Arc::new(
+                    move |peer: EndpointId,
+                          origin_url: String,
+                          session_id: Uuid,
+                          resume: Option<ReplayCursor>| {
+                        let (repo_path, source, streamer) = {
+                            let (repo_path, source) =
+                                shared_repo_for_sessions(&state, &peer, &origin_url)?;
+                            let streamer = state.lock().session_streamer.clone()?;
+                            (repo_path, source, streamer)
+                        };
+                        if !(source.list)(&repo_path)
+                            .iter()
+                            .any(|s| s.session_id == session_id)
+                        {
+                            return None;
+                        }
+                        let session = (source.snapshot)(session_id)?;
+                        let stream = streamer(session_id, resume);
+                        let (tx, rx) = tokio::sync::mpsc::channel(256);
+                        state.lock().session_feeds.insert(
+                            (peer, session_id),
+                            SessionFeedHandle {
+                                origin_url: origin_url.clone(),
+                                sender: tx.clone(),
+                            },
+                        );
+                        // The hub's stream is a blocking crossbeam
+                        // receiver; bridge it onto the feed's async
+                        // channel on a dedicated thread so the runtime's
+                        // acceptor never blocks on the journal.
+                        let state = state.clone();
+                        std::thread::Builder::new()
+                            .name(format!("goddard-session-feed-{session_id}"))
+                            .spawn(move || {
+                                loop {
+                                    crossbeam_channel::select! {
+                                        recv(stream.events) -> msg => match msg {
+                                            Ok(ServerMessage::Event(event)) => {
+                                                if tx.blocking_send(FriendsMessage::SessionEvent {
+                                                    event: Box::new(event),
+                                                }).is_err() {
+                                                    break;
+                                                }
+                                            }
+                                            // A filtered stream carries
+                                            // only events for its session.
+                                            Ok(_) => {}
+                                            Err(_) => break,
+                                        },
+                                        // The hub dropped us for lagging —
+                                        // end the feed; the viewer
+                                        // resubscribes with a fresh cursor.
+                                        recv(stream.kicked) -> _ => break,
+                                    }
+                                }
+                                state.lock().session_feeds.remove(&(peer, session_id));
+                            })
+                            .ok()?;
+                        Some(SessionFeed {
+                            session,
+                            events: rx,
+                        })
+                    },
+                )
+            },
         );
 
         let share_node = match ShareNode::spawn(&dir, secret, RelayMode::Default, proto).await {
@@ -2040,6 +2398,11 @@ fn run_runtime(
         };
         drop(ready_tx.send(Ok(())));
         *node.lock().await = Some(share_node.clone());
+
+        // Open friend watches: session id → the pump task's abort handle.
+        // `UnwatchFriendSession` aborts; the task removes itself on exit.
+        let watches: Arc<Mutex<HashMap<Uuid, tokio::task::AbortHandle>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         let mut poll_tick = tokio::time::interval(SYNC_POLL_INTERVAL);
         poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -2571,6 +2934,145 @@ fn run_runtime(
                         });
                     let _ = reply.send(result);
                 }
+                ShareCommand::SetSessionSharing {
+                    node_id,
+                    origin_url,
+                    enabled,
+                    reply,
+                } => {
+                    let result = node_id
+                        .parse::<EndpointId>()
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .and_then(|peer| {
+                            if !state.lock().store.lock().is_friend(&peer) {
+                                anyhow::bail!("no friend with that code");
+                            }
+                            job_tx
+                                .send(SyncJob::SetSessionSharing {
+                                    peer,
+                                    origin_url,
+                                    enabled,
+                                    reply: reply.clone(),
+                                })
+                                .map_err(|e| anyhow::anyhow!("{e}"))
+                        });
+                    if let Err(error) = result {
+                        let _ = reply.send(Err(error));
+                    }
+                }
+                ShareCommand::FriendSessions {
+                    node_id,
+                    origin_url,
+                    reply,
+                } => {
+                    let result = node_id
+                        .parse::<EndpointId>()
+                        .map_err(|e| anyhow::anyhow!("{e}"));
+                    match result {
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                        }
+                        Ok(peer) => {
+                            let endpoint = share_node.endpoint().clone();
+                            tokio::spawn(async move {
+                                let _ = reply.send(
+                                    friends::fetch_session_list(&endpoint, peer, &origin_url)
+                                        .await,
+                                );
+                            });
+                        }
+                    }
+                }
+                ShareCommand::WatchFriendSession {
+                    node_id,
+                    origin_url,
+                    session_id,
+                    reply,
+                } => {
+                    let result = node_id
+                        .parse::<EndpointId>()
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .and_then(|peer| {
+                            if watches.lock().contains_key(&session_id) {
+                                anyhow::bail!("already watching that session");
+                            }
+                            Ok(peer)
+                        });
+                    match result {
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                        }
+                        Ok(peer) => {
+                            let endpoint = share_node.endpoint().clone();
+                            let state = state.clone();
+                            let task_watches = watches.clone();
+                            let task = tokio::spawn(async move {
+                                match friends::subscribe_session(
+                                    &endpoint,
+                                    peer,
+                                    &origin_url,
+                                    session_id,
+                                    None,
+                                )
+                                .await
+                                {
+                                    Err(error) => {
+                                        let _ = reply.send(Err(error));
+                                    }
+                                    Ok((session, conn, mut recv)) => {
+                                        let _ = reply.send(Ok(session));
+                                        let sink =
+                                            state.lock().session_sink.clone();
+                                        let mut revoked = false;
+                                        loop {
+                                            match friends::read_session_frame(&mut recv)
+                                                .await
+                                            {
+                                                Ok(FriendsMessage::SessionEvent {
+                                                    event,
+                                                }) => {
+                                                    if let Some(sink) = &sink {
+                                                        sink(FriendSessionUpdate::Event(
+                                                            *event,
+                                                        ));
+                                                    }
+                                                }
+                                                Ok(FriendsMessage::SharingRevoked) => {
+                                                    revoked = true;
+                                                    break;
+                                                }
+                                                _ => break,
+                                            }
+                                        }
+                                        if let Some(sink) = &sink {
+                                            sink(FriendSessionUpdate::Closed {
+                                                session_id,
+                                                revoked,
+                                            });
+                                        }
+                                        drop(conn);
+                                        task_watches.lock().remove(&session_id);
+                                    }
+                                }
+                            });
+                            watches
+                                .lock()
+                                .insert(session_id, task.abort_handle());
+                        }
+                    }
+                }
+                ShareCommand::UnwatchFriendSession { session_id, reply } => {
+                    if let Some(handle) = watches.lock().remove(&session_id) {
+                        handle.abort();
+                    }
+                    if let Some(sink) = state.lock().session_sink.clone() {
+                        sink(FriendSessionUpdate::Closed {
+                            session_id,
+                            revoked: false,
+                        });
+                    }
+                    let _ = reply.send(Ok(()));
+                }
                 ShareCommand::KickPoll => {
                     let _ = job_tx.send(SyncJob::Poll);
                 }
@@ -2614,4 +3116,186 @@ fn run_runtime(
         }
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("goddard-share-{tag}-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn new_peer(dir: &std::path::Path) -> EndpointId {
+        waku_share::identity::load_or_create(dir).unwrap().public()
+    }
+
+    fn service(dir: &std::path::Path) -> ShareService {
+        ShareService::new(dir.to_path_buf(), "tester".to_owned())
+    }
+
+    fn stub_session_source() -> SessionSource {
+        SessionSource {
+            list: Arc::new(|_| {
+                vec![SharedSessionSummary {
+                    session_id: Uuid::new_v4(),
+                    title: "session".to_owned(),
+                    auto_title: None,
+                    status: waku_protocol::model::SessionStatus::Idle,
+                    created_at: 0,
+                    last_reply_at: None,
+                }]
+            }),
+            snapshot: Arc::new(|_| None),
+        }
+    }
+
+    fn outgoing(dir: &std::path::Path, share_sessions: bool) -> OutgoingShare {
+        OutgoingShare {
+            peer: new_peer(dir),
+            name: "repo".to_owned(),
+            origin_url: "git@github.com:org/repo.git".to_owned(),
+            repo_path: dir.join("checkout"),
+            peer_sync_enabled: false,
+            share_sessions,
+            shared_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn session_access_requires_opted_in_share() {
+        let dir = temp_dir("authz");
+        let peer_dir = temp_dir("authz-peer");
+        let service = service(&dir);
+        let share = OutgoingShare {
+            peer: new_peer(&peer_dir),
+            ..outgoing(&dir, false)
+        };
+        let peer = share.peer;
+        service.state.lock().share_store.lock().outgoing.push(share);
+        service.state.lock().session_source = Some(stub_session_source());
+
+        // Off by default: the flag is the only gate.
+        assert!(
+            shared_repo_for_sessions(&service.state, &peer, "git@github.com:org/repo.git")
+                .is_none()
+        );
+        // A stranger is denied even with the flag on.
+        service
+            .state
+            .lock()
+            .share_store
+            .lock()
+            .outgoing
+            .iter_mut()
+            .for_each(|s| s.share_sessions = true);
+        assert!(
+            shared_repo_for_sessions(
+                &service.state,
+                &new_peer(&temp_dir("stranger")),
+                "git@github.com:org/repo.git"
+            )
+            .is_none()
+        );
+        // The real peer passes, with origin matching normalized.
+        let (repo_path, source) =
+            shared_repo_for_sessions(&service.state, &peer, "https://github.com/org/repo")
+                .expect("authorized share");
+        assert_eq!(repo_path, dir.join("checkout"));
+        assert_eq!((source.list)(&repo_path).len(), 1);
+    }
+
+    #[test]
+    fn revocation_closes_matching_feeds() {
+        let dir = temp_dir("revoke");
+        let service = service(&dir);
+        let owner = new_peer(&temp_dir("owner"));
+        let other = new_peer(&temp_dir("other"));
+        let session_a = Uuid::new_v4();
+        let session_b = Uuid::new_v4();
+        let session_c = Uuid::new_v4();
+
+        let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(4);
+        let (tx_b, mut rx_b) = tokio::sync::mpsc::channel(4);
+        let (tx_c, mut rx_c) = tokio::sync::mpsc::channel(4);
+        {
+            let mut inner = service.state.lock();
+            inner.session_feeds.insert(
+                (owner, session_a),
+                SessionFeedHandle {
+                    origin_url: "https://github.com/org/repo".to_owned(),
+                    sender: tx_a,
+                },
+            );
+            inner.session_feeds.insert(
+                (owner, session_b),
+                SessionFeedHandle {
+                    origin_url: "https://github.com/org/other".to_owned(),
+                    sender: tx_b,
+                },
+            );
+            inner.session_feeds.insert(
+                (other, session_c),
+                SessionFeedHandle {
+                    origin_url: "https://github.com/org/repo".to_owned(),
+                    sender: tx_c,
+                },
+            );
+        }
+
+        // Revoking one project hits only that peer's feeds on that origin.
+        revoke_session_feeds(&service.state, &owner, Some("git@github.com:org/repo.git"));
+        assert!(matches!(
+            rx_a.try_recv(),
+            Ok(FriendsMessage::SharingRevoked)
+        ));
+        assert!(rx_a.try_recv().is_err());
+        assert!(rx_b.try_recv().is_err());
+        assert!(rx_c.try_recv().is_err());
+        assert_eq!(service.state.lock().session_feeds.len(), 2);
+
+        // Revoking the peer entirely hits their remaining feeds.
+        revoke_session_feeds(&service.state, &owner, None);
+        assert!(matches!(
+            rx_b.try_recv(),
+            Ok(FriendsMessage::SharingRevoked)
+        ));
+        assert!(rx_c.try_recv().is_err());
+        assert!(service.state.lock().session_feeds.len() == 1);
+    }
+
+    #[test]
+    fn persisted_shares_default_session_sharing_off() {
+        // Data written before session sharing existed must deserialize
+        // with the flag off — sharing is opt-in, never implied.
+        let outgoing: OutgoingShare = serde_json::from_value(serde_json::json!({
+            "peer": "0000000000000000000000000000000000000000000000000000000000000000",
+            "name": "repo",
+            "origin_url": "git@github.com:org/repo.git",
+            "repo_path": "/tmp/repo",
+            "shared_at_ms": 0
+        }))
+        .unwrap();
+        assert!(!outgoing.share_sessions);
+        assert!(!outgoing.peer_sync_enabled);
+
+        let repo: SharedRepo = serde_json::from_value(serde_json::json!({
+            "name": "repo",
+            "origin_url": "git@github.com:org/repo.git"
+        }))
+        .unwrap();
+        assert!(!repo.share_sessions);
+
+        let incoming: IncomingShare = serde_json::from_value(serde_json::json!({
+            "peer": "0000000000000000000000000000000000000000000000000000000000000000",
+            "peer_name": "alice",
+            "name": "repo",
+            "origin_url": "git@github.com:org/repo.git",
+            "received_at_ms": 0
+        }))
+        .unwrap();
+        assert!(!incoming.share_sessions);
+    }
 }
