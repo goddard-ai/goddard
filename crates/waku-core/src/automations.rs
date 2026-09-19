@@ -106,6 +106,10 @@ pub struct AutomationService {
     /// Root sink the server installs so scheduler-initiated sessions emit
     /// events to subscribers the way request-initiated ones do.
     event_source: Mutex<Option<EventSink>>,
+    /// The `TaskStateChanged` bump — daemon-initiated task mutations bypass
+    /// the request dispatcher's per-command bump, so dispatch rings it
+    /// itself or clients never learn the run's task exists.
+    task_notifier: Mutex<Option<crate::share::TaskNotifier>>,
     /// Re-entry guard: a slow dispatch (precheck timeout, worktree create)
     /// must not let the next tick re-evaluate the same due occurrence.
     evaluating: AtomicBool,
@@ -122,6 +126,7 @@ impl AutomationService {
             sink: Mutex::new(None),
             backend: Mutex::new(Weak::new()),
             event_source: Mutex::new(None),
+            task_notifier: Mutex::new(None),
             evaluating: AtomicBool::new(false),
             started: AtomicBool::new(false),
             stop: Arc::new((StdMutex::new(false), Condvar::new())),
@@ -140,6 +145,21 @@ impl AutomationService {
     /// Install the root event sink for scheduler-initiated dispatches.
     pub fn set_event_source(&self, events: EventSink) {
         *self.event_source.lock() = Some(events);
+    }
+
+    /// Install the `TaskStateChanged` notifier `serve` wires to the hub.
+    pub fn set_task_notifier(&self, notifier: crate::share::TaskNotifier) {
+        *self.task_notifier.lock() = Some(notifier);
+    }
+
+    /// Tell subscribers task state changed. Without it a dispatched run's
+    /// task never appears in a client's sidebar and its transcript stays
+    /// unreachable until the next client-driven reload.
+    fn notify_tasks_changed(&self) {
+        let notifier = self.task_notifier.lock().clone();
+        if let Some(notifier) = notifier {
+            notifier();
+        }
     }
 
     /// Push the current document to every subscriber.
@@ -600,7 +620,7 @@ impl AutomationService {
                     AutomationWorkspace::Worktree => AgentWorkspace::Worktree,
                     AutomationWorkspace::Existing => unreachable!(),
                 };
-                match backend.create_agent_task(
+                let result = backend.create_agent_task(
                     None,
                     automation.provider,
                     automation.model.clone().unwrap_or_default(),
@@ -609,7 +629,11 @@ impl AutomationService {
                     automation.base_branch.clone(),
                     automation.prompt.clone(),
                     &events,
-                ) {
+                );
+                // A failed launch can still have persisted the session — bump
+                // either way so clients reload and the task appears.
+                self.notify_tasks_changed();
+                match result {
                     Ok(session_id) => self.begin_run(run_id, automation.id, session_id),
                     Err(error) => self.finish_run(
                         run_id,
@@ -654,7 +678,10 @@ impl AutomationService {
             return;
         }
         match backend.queue_agent_prompt(target, automation.prompt.clone(), None, events) {
-            Ok(()) => self.begin_run(run_id, automation.id, target),
+            Ok(()) => {
+                self.notify_tasks_changed();
+                self.begin_run(run_id, automation.id, target)
+            }
             Err(error) => self.finish_run(
                 run_id,
                 AutomationRunStatus::Failed,
