@@ -1743,53 +1743,52 @@ impl Waku {
                 .child(label)
         };
 
-        let mut schedule_row = div().flex().items_center().gap(px(6.0)).child(
-            div()
-                .h(px(26.0))
-                .px(px(3.0))
-                .rounded(px(7.0))
-                .bg(theme.sidebar_item_background)
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                .child(preset_chip(
-                    SchedulePreset::Hourly,
-                    tr!("automations.preset_hourly"),
-                    "preset-hourly",
-                ))
-                .child(preset_chip(
-                    SchedulePreset::Daily,
-                    tr!("automations.preset_daily"),
-                    "preset-daily",
-                ))
-                .child(preset_chip(
-                    SchedulePreset::Weekdays,
-                    tr!("automations.preset_weekdays"),
-                    "preset-weekdays",
-                ))
-                .child(preset_chip(
-                    SchedulePreset::Weekly,
-                    tr!("automations.preset_weekly"),
-                    "preset-weekly",
-                ))
-                .child(preset_chip(
-                    SchedulePreset::Cron,
-                    tr!("automations.preset_cron"),
-                    "preset-cron",
-                )),
-        );
-        schedule_row = match editor.preset {
+        let preset_segment = div()
+            .h(px(26.0))
+            .px(px(3.0))
+            .rounded(px(7.0))
+            .bg(theme.sidebar_item_background)
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .child(preset_chip(
+                SchedulePreset::Hourly,
+                tr!("automations.preset_hourly"),
+                "preset-hourly",
+            ))
+            .child(preset_chip(
+                SchedulePreset::Daily,
+                tr!("automations.preset_daily"),
+                "preset-daily",
+            ))
+            .child(preset_chip(
+                SchedulePreset::Weekdays,
+                tr!("automations.preset_weekdays"),
+                "preset-weekdays",
+            ))
+            .child(preset_chip(
+                SchedulePreset::Weekly,
+                tr!("automations.preset_weekly"),
+                "preset-weekly",
+            ))
+            .child(preset_chip(
+                SchedulePreset::Cron,
+                tr!("automations.preset_cron"),
+                "preset-cron",
+            ));
+        let mut schedule_controls = div().flex().items_center().flex_wrap().gap(px(6.0));
+        schedule_controls = match editor.preset {
             SchedulePreset::Cron => {
-                schedule_row.child(div().w(px(150.0)).child(input_shell(&editor.cron)))
+                schedule_controls.child(div().w(px(150.0)).child(input_shell(&editor.cron)))
             }
-            _ => schedule_row.child(div().w(px(70.0)).child(input_shell(&editor.time))),
+            _ => schedule_controls.child(div().w(px(70.0)).child(input_shell(&editor.time))),
         };
         if editor.preset == SchedulePreset::Weekly {
             let handle = self.menu_handle("automation-editor-weekday", cx);
             let day_of_week = editor.day_of_week;
             let current = weekday_label(day_of_week);
             let weak = cx.entity().downgrade();
-            schedule_row = schedule_row.child(dropdown_menu(
+            schedule_controls = schedule_controls.child(dropdown_menu(
                 MenuChip::new("automation-editor-weekday")
                     .label(current)
                     .outlined()
@@ -1816,7 +1815,14 @@ impl Waku {
                 },
             ));
         }
-        schedule_row = schedule_row.child(div().w(px(130.0)).child(input_shell(&editor.timezone)));
+        schedule_controls =
+            schedule_controls.child(div().w(px(130.0)).child(input_shell(&editor.timezone)));
+        let schedule_row = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(preset_segment)
+            .child(schedule_controls);
 
         // Provider picker.
         let provider_handle = self.menu_handle("automation-editor-provider", cx);
@@ -2100,6 +2106,7 @@ impl Waku {
                         div()
                             .flex()
                             .items_center()
+                            .flex_wrap()
                             .gap(px(6.0))
                             .child(provider_menu)
                             .child(div().w(px(140.0)).child(input_shell(&editor.model)))
@@ -2114,6 +2121,7 @@ impl Waku {
                         div()
                             .flex()
                             .items_center()
+                            .flex_wrap()
                             .gap(px(6.0))
                             .child(workspace_menu)
                             .when(
