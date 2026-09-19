@@ -1,0 +1,1 @@
+- The composer's access-mode rows now read but can't be picked while a turn is running — previously switching the mode mid-turn restarted the driver and silently cancelled the turn

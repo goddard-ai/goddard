@@ -2534,6 +2534,9 @@ impl Waku {
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
         let started = session.is_some_and(AgentSession::has_started);
+        // Switching access posture restarts the driver, so the mode rows read
+        // but don't pick while a turn is live — same gate as the model picker.
+        let busy = session.is_some_and(AgentSession::is_busy);
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle(RUNTIME_MODE_MENU_ID, cx);
         // One row shape for both sections: leading icon, label over a
@@ -2618,20 +2621,26 @@ impl Waku {
                         let weak = weak.clone();
                         let choice_row = choice_row.clone();
                         let selected = option == selected_mode;
-                        MenuItem::custom(move |_, _| {
+                        let row = MenuItem::custom(move |_, _| {
                             choice_row(
                                 option.icon(),
                                 option.label(),
                                 option.description(),
                                 selected,
-                                true,
+                                !busy,
                             )
-                        })
-                        .on_click(move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_runtime_mode(option, window, cx)
-                            });
-                        })
+                        });
+                        // No `on_click` while a turn runs — switching posture
+                        // would restart the driver and cancel the turn.
+                        if busy {
+                            row
+                        } else {
+                            row.on_click(move |window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_runtime_mode(option, window, cx)
+                                });
+                            })
+                        }
                     })
                     .collect();
                 items.push(MenuItem::Separator);

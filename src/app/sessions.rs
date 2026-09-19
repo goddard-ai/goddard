@@ -3619,8 +3619,12 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A mode change restarts the driver — providers refuse to retune a
+        // running session's permission posture — so while a turn is live the
+        // pick waits for it to settle rather than cancelling it.
         let Some((session_id, session_changed)) = self
             .composer_session()
+            .filter(|session| !session.is_busy())
             .map(|session| (session.id, session.runtime_mode != mode))
         else {
             return;
