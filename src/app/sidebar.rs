@@ -1593,13 +1593,7 @@ impl Waku {
             ),
         };
         let hovered = self.sidebar_dock_hover_item == Some(item);
-        // Sketch "Dock": white buttons cooling to pale blue at the bottom, a
-        // soft blue shadow, a 12% black hairline, and solid black glyphs.
-        let surface = linear_gradient(
-            180.0,
-            linear_color_stop(rgb(0xFFFFFF), 0.0),
-            linear_color_stop(rgb(0xC4DCFC), 1.0),
-        );
+        // Sketch "Dock": solid white buttons with solid black glyphs.
         let pill_surface = linear_gradient(
             180.0,
             linear_color_stop(rgb(0xFFFFFF), 0.0),
@@ -1658,10 +1652,7 @@ impl Waku {
                 div()
                     .size(px(44.0))
                     .rounded_full()
-                    .bg(surface)
-                    .border(hairline())
-                    .border_color(surface_border)
-                    .shadow(surface_shadow)
+                    .bg(rgb(0xFFFFFF))
                     .flex()
                     .items_center()
                     .justify_center()
