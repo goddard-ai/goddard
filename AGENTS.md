@@ -153,6 +153,29 @@
   `Cargo.toml`, run `bun run changelog` first and commit the folded
   `CHANGELOG.md` and consumed fragments in the same commit as the bump.
 
+## QA branch workflow
+
+- Proposed work lands on the `qa` branch unreviewed and is promoted to
+  `main` in order once approved. History is immutable up to and
+  including the newest `qa` commit carrying an approval — approvals bind
+  to commit SHAs, so rewriting them orphans the approvals. The
+  unreviewed tail past that commit may be rebased or amended.
+- Squash-merge feature work so each `qa` commit is one reviewable unit.
+- Add one or more `Test-Plan:` trailers to the commit message when a
+  human should verify the change. Each trailer is one executable check a
+  reviewer can run — e.g. `Test-Plan: send a file to an offline friend;
+  the transfer fails with a logged cause`.
+- Required for: changes to observable behavior (UI, protocol semantics,
+  persisted formats); bug fixes (repro before, verify gone after);
+  security-sensitive or destructive paths (auth, credentials, deletion,
+  migration); concurrency, timing, and shared-state changes; config or
+  build changes that alter what ships.
+- Not required for: formatting, lint, and typo/comment/doc-only edits;
+  behavior-preserving refactors; test-only changes; changelog fragments;
+  build or dependency changes that cannot alter shipped behavior.
+- When in doubt, write the test plan — a missing trailer skips human
+  review entirely.
+
 <!-- graft:start -->
 ## Graft — repo context graph
 
