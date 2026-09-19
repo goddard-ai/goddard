@@ -508,6 +508,9 @@ pub struct MenuChip {
     /// Overrides the label's `text_secondary` default — trait chips sit a
     /// step dimmer than the model name they qualify.
     label_color: Option<Hsla>,
+    /// A dimmer tail after the label — "Auto" names the mode and the suffix
+    /// the model behind it, so the qualifier sits a step below the name.
+    suffix: Option<SharedString>,
     tooltip: Option<SharedString>,
     /// A shortcut rendered dim inside the tooltip.
     shortcut: Option<ShortcutHint>,
@@ -529,6 +532,7 @@ impl MenuChip {
             badge: None,
             label: SharedString::default(),
             label_color: None,
+            suffix: None,
             tooltip: None,
             shortcut: None,
             caret: true,
@@ -584,6 +588,12 @@ impl MenuChip {
     /// trait labels dim a step below the model name beside them.
     pub fn label_color(mut self, color: Hsla) -> Self {
         self.label_color = Some(color);
+        self
+    }
+
+    /// A dimmer tail rendered after the label.
+    pub fn suffix(mut self, suffix: impl Into<SharedString>) -> Self {
+        self.suffix = Some(suffix.into());
         self
     }
 
@@ -699,9 +709,25 @@ impl RenderOnce for MenuChip {
             .child(
                 div()
                     .min_w_0()
-                    .truncate()
-                    .text_color(self.label_color.unwrap_or(theme.text_secondary))
-                    .child(self.label),
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(self.label_color.unwrap_or(theme.text_secondary))
+                            .child(self.label),
+                    )
+                    .when_some(self.suffix, |element, suffix| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .truncate()
+                                .text_color(theme.text_tertiary)
+                                .child(suffix),
+                        )
+                    }),
             )
             .when(self.caret, |element| {
                 element.child(icon("icons/chevron-down.svg", 10.5, theme.text_tertiary))
