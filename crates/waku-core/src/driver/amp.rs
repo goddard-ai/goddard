@@ -100,6 +100,7 @@ impl AmpDriver {
             agent,
             subagents: _,
             provider_cursor,
+            eval: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
             return Err(anyhow!("Amp currently supports Full access only"));
@@ -582,6 +583,7 @@ mod tests {
         let (events, event_rx) = crate::driver::test_event_channel();
         let driver = AmpDriver::start(
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -642,6 +644,7 @@ mod tests {
         let (events, event_rx) = crate::driver::test_event_channel();
         let driver = AmpDriver::start(
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

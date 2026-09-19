@@ -394,6 +394,10 @@ pub(super) struct OpenCodePermissionState {
     pub(super) pending: HashMap<String, OpenCodePermissionRequest>,
     pub(super) responding: HashSet<String>,
     pub(super) approved: HashSet<OpenCodePermissionRule>,
+    /// The evaluation backend answering `Auto`-mode requests, snapshotted at
+    /// session start. `None` means requests that reach this state go to the
+    /// user — set only for modes that review.
+    pub(super) eval: Option<std::sync::Arc<waku_protocol::eval::EvalSettings>>,
 }
 
 impl OpenCodePermissionState {

@@ -15,6 +15,7 @@
 //! `disposition` — a queued submission starts when `turn/started` arrives.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -95,6 +96,9 @@ struct ItemState {
 struct WorkerState {
     session_id: String,
     mode: RuntimeMode,
+    /// The evaluation backend answering `Auto`-mode approval requests,
+    /// snapshotted at session start.
+    eval: Option<Arc<waku_protocol::eval::EvalSettings>>,
     model: Option<String>,
     reasoning_effort: Option<String>,
     active_turn: Option<String>,
@@ -145,6 +149,7 @@ impl MuseDriver {
             agent: _,
             subagents: _,
             provider_cursor,
+            eval,
         } = options;
 
         let (resumed_id, resume_cursor) = match provider_cursor {
@@ -209,6 +214,7 @@ impl MuseDriver {
         let mut state = WorkerState {
             session_id: session_id.clone(),
             mode,
+            eval: eval.map(Arc::new),
             model,
             reasoning_effort,
             active_turn: session
@@ -954,7 +960,7 @@ fn handle_event(
             }
         }
         "item/delta" => handle_item_delta(events, state, params),
-        "approval/requested" | "approval/request" => {
+        "approval/requested" | "approval/request" | "approval/updated" => {
             let approval_id = params
                 .get("approvalId")
                 .and_then(Value::as_str)
@@ -970,25 +976,54 @@ fn handle_event(
             state
                 .approvals
                 .insert(approval_id.clone(), PendingApproval { requirement_id });
-            emit_permission(events, params, &approval_id);
-        }
-        "approval/updated" => {
-            let approval_id = params
-                .get("approvalId")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            if approval_id.is_empty() {
-                return;
+            // `Auto` never answers blindly: the review replies when a backend
+            // is configured and the user does when it is not.
+            if state.mode == RuntimeMode::Auto
+                && let (Some(service), Some(eval)) = (service, state.eval.clone())
+            {
+                let allow_choice = approval_allow_choice(params);
+                let action = crate::permission_review::PendingAction {
+                    provider: "muse",
+                    tool: params
+                        .get("toolName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool")
+                        .to_owned(),
+                    arguments: params.to_string(),
+                    call_id: approval_id.clone(),
+                    detail: params
+                        .get("rawArgs")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                };
+                let events = events.clone();
+                let service = service.clone();
+                let session_id = state.session_id.clone();
+                let params = params.clone();
+                crate::permission_review::review_on_thread(eval, action, move |verdict| {
+                    let decided = verdict == crate::permission_review::ReviewVerdict::Allow
+                        && allow_choice.is_some();
+                    if decided {
+                        let _ = service.call(
+                            "approval/decide",
+                            json!({
+                                "commandId": service.mint_command_id(),
+                                "sessionId": session_id,
+                                "approvalId": approval_id,
+                                "choiceId": allow_choice.unwrap_or_default(),
+                                "requirementId": params
+                                    .get("currentRequirementId")
+                                    .cloned()
+                                    .unwrap_or(Value::Null),
+                            }),
+                        );
+                    } else {
+                        emit_permission(&events, &params, &approval_id);
+                    }
+                });
+            } else {
+                emit_permission(events, params, &approval_id);
             }
-            let requirement_id = params
-                .get("currentRequirementId")
-                .cloned()
-                .unwrap_or(Value::Null);
-            state
-                .approvals
-                .insert(approval_id.clone(), PendingApproval { requirement_id });
-            emit_permission(events, params, &approval_id);
         }
         "approval/resolved" => {
             if let Some(id) = params.get("approvalId").and_then(Value::as_str) {
@@ -1316,6 +1351,24 @@ fn handle_item_delta(events: &DriverEventSender, state: &mut WorkerState, params
         }
         _ => {}
     }
+}
+
+/// The review's grant is at most allow-once — it picks the host's own
+/// approved choice and never asks for a durable grant.
+fn approval_allow_choice(params: &Value) -> Option<String> {
+    params
+        .get("availableChoices")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|choice| {
+            choice
+                .get("decision")
+                .and_then(Value::as_str)
+                .is_some_and(|decision| decision.starts_with("approved"))
+        })?
+        .get("choiceId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 fn emit_permission(events: &DriverEventSender, params: &Value, approval_id: &str) {
@@ -1730,6 +1783,7 @@ mod tests {
 
     fn options(cwd: &Path) -> DriverStartOptions {
         DriverStartOptions {
+            eval: None,
             binary: PathBuf::new(),
             cwd: cwd.to_path_buf(),
             mode: RuntimeMode::Ask,
@@ -2146,6 +2200,7 @@ mod tests {
         let mut state = WorkerState {
             session_id: "0198f0aa-1111-7000-8000-0000000000aa".to_owned(),
             mode: RuntimeMode::Ask,
+            eval: None,
             model: None,
             reasoning_effort: None,
             active_turn: None,

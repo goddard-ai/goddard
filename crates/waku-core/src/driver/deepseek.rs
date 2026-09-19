@@ -35,6 +35,9 @@ enum CommandMessage {
         request_id: String,
         option_id: String,
     },
+    /// A driver event the review verdict resolved to — emitted through the
+    /// command channel so the send stays on the worker's own ordering.
+    Emit(DriverEvent),
     RespondUserInput {
         request_id: String,
         answers: Vec<UserInputAnswer>,
@@ -111,6 +114,7 @@ impl DeepSeekDriver {
             agent,
             subagents: _,
             provider_cursor,
+            eval,
         } = options;
         let (requested_session_id, resuming) = match provider_cursor {
             Some(ProviderResumeCursor::DeepSeek { session_id }) if !session_id.is_empty() => {
@@ -212,7 +216,10 @@ impl DeepSeekDriver {
 
         let completed_turn_seqs = Arc::new(Mutex::new(history.completed_turn_seqs));
         let mode = Arc::new(Mutex::new(mode));
+        let eval = eval.map(Arc::new);
         let (commands, command_rx) = unbounded();
+        let worker_commands = commands.clone();
+        let worker_eval = eval.clone();
         let worker_server = server.clone();
         let worker_session_id = session_id.clone();
         let worker_events = events;
@@ -252,6 +259,8 @@ impl DeepSeekDriver {
                                 &worker_server,
                                 &worker_session_id,
                                 &worker_events,
+                                &worker_commands,
+                                &worker_eval,
                                 &worker_mode,
                                 &mut state,
                             ) {
@@ -489,6 +498,9 @@ fn handle_command(
                 )));
             }
         }
+        CommandMessage::Emit(event) => {
+            let _ = events.send(event);
+        }
         CommandMessage::RespondUserInput {
             request_id,
             answers,
@@ -566,6 +578,8 @@ fn handle_envelope(
     server: &PooledDeepSeekServer,
     session_id: &str,
     events: &impl DriverEventSink,
+    commands: &Sender<CommandMessage>,
+    eval: &Option<Arc<waku_protocol::eval::EvalSettings>>,
     mode: &Mutex<RuntimeMode>,
     state: &mut StreamState,
 ) -> bool {
@@ -599,7 +613,9 @@ fn handle_envelope(
             }
         }
         Some("approval/requested") => {
-            handle_approval_request(envelope, payload, server, session_id, events, mode, state);
+            handle_approval_request(
+                envelope, payload, server, session_id, events, commands, eval, mode, state,
+            );
         }
         Some("approval/resolved") => {
             if let Some(approval_id) = payload.get("approvalId").and_then(Value::as_str) {
@@ -918,12 +934,15 @@ fn presented_activity_kind(view: &Value) -> Option<ActivityKind> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_approval_request(
     envelope: &Value,
     payload: &Value,
     server: &PooledDeepSeekServer,
     session_id: &str,
     events: &impl DriverEventSink,
+    commands: &Sender<CommandMessage>,
+    eval: &Option<Arc<waku_protocol::eval::EvalSettings>>,
     mode: &Mutex<RuntimeMode>,
     state: &mut StreamState,
 ) {
@@ -933,29 +952,6 @@ fn handle_approval_request(
     let Some(approval_id) = payload.get("approvalId").and_then(Value::as_str) else {
         return;
     };
-    if *mode.lock() != RuntimeMode::Ask {
-        if let Err(error) = server.respond(
-            rpc_id,
-            json!({
-                "sessionId": session_id,
-                "approvalId": approval_id,
-                "outcome": "allowed-once",
-            }),
-        ) {
-            let _ = events.send(DriverEvent::Error(format!(
-                "DeepSeek Harness rejected an automatic approval: {error}"
-            )));
-        }
-        return;
-    }
-
-    state.pending.insert(
-        rpc_id.to_owned(),
-        PendingInteraction::Approval {
-            rpc_id: rpc_id.to_owned(),
-            approval_id: approval_id.to_owned(),
-        },
-    );
     let tool_name = payload
         .get("toolName")
         .and_then(Value::as_str)
@@ -964,7 +960,7 @@ fn handle_approval_request(
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or("DeepSeek Harness is asking for permission to continue");
-    let _ = events.send(DriverEvent::Permission {
+    let event = DriverEvent::Permission {
         request_id: rpc_id.to_owned(),
         title: format!("Allow {tool_name}?"),
         detail: reason.to_owned(),
@@ -982,7 +978,73 @@ fn handle_approval_request(
         ],
         title_i18n: None,
         detail_i18n: None,
-    });
+    };
+    match *mode.lock() {
+        RuntimeMode::FullAccess | RuntimeMode::AutoAcceptEdits => {
+            if let Err(error) = server.respond(
+                rpc_id,
+                json!({
+                    "sessionId": session_id,
+                    "approvalId": approval_id,
+                    "outcome": "allowed-once",
+                }),
+            ) {
+                let _ = events.send(DriverEvent::Error(format!(
+                    "DeepSeek Harness rejected an automatic approval: {error}"
+                )));
+            }
+        }
+        RuntimeMode::Auto if eval.is_some() => {
+            // Park the interaction like a user prompt — an escalation reuses
+            // the same pending entry — then let the review answer: `clear`
+            // replies allowed-once through the existing respond path and
+            // anything else escalates through the permission event.
+            state.pending.insert(
+                rpc_id.to_owned(),
+                PendingInteraction::Approval {
+                    rpc_id: rpc_id.to_owned(),
+                    approval_id: approval_id.to_owned(),
+                },
+            );
+            let action = crate::permission_review::PendingAction {
+                provider: "deepseek",
+                tool: tool_name.to_owned(),
+                arguments: payload.to_string(),
+                call_id: rpc_id.to_owned(),
+                detail: Some(reason.to_owned()),
+            };
+            let commands = commands.clone();
+            let rpc_id = rpc_id.to_owned();
+            crate::permission_review::review_on_thread(
+                eval.clone().unwrap(),
+                action,
+                move |verdict| {
+                    let message = match verdict {
+                        crate::permission_review::ReviewVerdict::Allow => {
+                            CommandMessage::Respond {
+                                request_id: rpc_id,
+                                option_id: "allow".into(),
+                            }
+                        }
+                        crate::permission_review::ReviewVerdict::Escalate => {
+                            CommandMessage::Emit(event)
+                        }
+                    };
+                    let _ = commands.send(message);
+                },
+            );
+        }
+        RuntimeMode::Ask | RuntimeMode::Auto => {
+            state.pending.insert(
+                rpc_id.to_owned(),
+                PendingInteraction::Approval {
+                    rpc_id: rpc_id.to_owned(),
+                    approval_id: approval_id.to_owned(),
+                },
+            );
+            let _ = events.send(event);
+        }
+    }
 }
 
 fn handle_question_request(

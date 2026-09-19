@@ -1268,6 +1268,7 @@ impl Backend for WakuBackend {
                         .map(serde_json::from_value)
                         .transpose()
                         .context("daemon received an invalid provider cursor")?,
+                    eval: None,
                 };
                 let handle =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
@@ -1960,6 +1961,7 @@ impl WakuBackend {
                 agent: None,
                 subagents: None,
                 provider_cursor: source.provider_cursor.clone(),
+                eval: None,
             },
             event_sender,
         )?;
@@ -2196,6 +2198,7 @@ impl WakuBackend {
                 agent: None,
                 subagents: None,
                 provider_cursor: source.provider_cursor.clone(),
+                eval: None,
             },
             event_sender,
         )?;
@@ -2356,6 +2359,9 @@ impl WakuBackend {
                 &crate::usage_history::load_cached_rate_table(&self.usage_rates_dir),
             ));
         }
+        // Auto-mode permission review rides the same BYOK evaluation backend
+        // as routing. Unconfigured leaves each driver's ask-the-user path.
+        options.eval = daemon_settings.eval.clone();
         // A launch that never came up keeps no credential.
         let handle = match driver::start_local(provider, options, event_sender) {
             Ok(handle) => handle,
@@ -2480,6 +2486,7 @@ impl WakuBackend {
                 agent: None,
                 subagents: None,
                 provider_cursor: session.provider_cursor.clone(),
+                eval: None,
             };
             (provider, options)
         };
