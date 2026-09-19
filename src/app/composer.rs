@@ -2581,8 +2581,10 @@ impl Waku {
                                 true,
                             )
                         })
-                        .on_click(move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| this.set_runtime_mode(option, cx));
+                        .on_click(move |window, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_runtime_mode(option, window, cx)
+                            });
                         })
                     })
                     .collect();

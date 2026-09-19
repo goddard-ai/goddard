@@ -922,6 +922,10 @@ struct AppState {
     last_auto_route: bool,
     #[serde(default)]
     last_runtime_mode: RuntimeMode,
+    /// Whether the user has confirmed the one-time Full access warning. Gates
+    /// the modal, not the mode — the mode itself is `last_runtime_mode`.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    full_access_acknowledged: bool,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     last_sandboxed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1009,6 +1013,10 @@ pub struct PersistedState {
     pub last_auto_route: bool,
     #[serde(default)]
     pub last_runtime_mode: RuntimeMode,
+    /// Whether the user has confirmed the one-time Full access warning. Gates
+    /// the modal, not the mode — the mode itself is `last_runtime_mode`.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub full_access_acknowledged: bool,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub last_sandboxed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1285,6 +1293,7 @@ impl PersistedState {
             last_provider: ProviderKind::Codex,
             last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
+            full_access_acknowledged: false,
             last_sandboxed: false,
             last_model: None,
             last_reasoning_effort: None,
@@ -1648,6 +1657,7 @@ impl PersistedState {
             last_provider: self.last_provider,
             last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
+            full_access_acknowledged: self.full_access_acknowledged,
             last_sandboxed: self.last_sandboxed,
             last_model: self.last_model.clone(),
             last_reasoning_effort: self.last_reasoning_effort.clone(),
@@ -1738,6 +1748,7 @@ impl PersistedState {
         self.last_provider = app_state.last_provider;
         self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
+        self.full_access_acknowledged = app_state.full_access_acknowledged;
         self.last_sandboxed = app_state.last_sandboxed;
         self.last_model = app_state.last_model;
         self.last_reasoning_effort = app_state.last_reasoning_effort;

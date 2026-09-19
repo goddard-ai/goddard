@@ -792,6 +792,10 @@ mode.auto_accept_edits_description: 編集は自動承認し、その他の操�
 mode.auto_description: 通常の操作は AI レビュアーが承認し、リスクのある操作は事前に確認します
 mode.full_access_description: 確認なしでコマンドの実行と編集を許可します
 mode.choose: モードを選択
+full_access.confirm_title: フルアクセスを有効にしますか？
+full_access.confirm_description: エージェントは承認を求めずにファイルの読み取り・編集とコマンドの実行を行えます。
+full_access.confirm_effect: この変更は現在のタスクにすぐ適用され、新しいタスクのデフォルトになります。
+full_access.confirm_enable: フルアクセスを有効にする
 sandbox.environment: 環境
 sandbox.this_mac: この Mac
 sandbox.this_mac_description: この Mac でコマンドと編集を実行

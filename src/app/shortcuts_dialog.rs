@@ -8,6 +8,7 @@
 use gpui::{Action, KeyBinding, actions};
 
 use super::archive_dialog::{ConfirmArchiveDialog, DismissArchiveDialog};
+use super::full_access_dialog::{ConfirmFullAccessDialog, DismissFullAccessDialog};
 use super::command_palette::{
     Confirm, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown, SelectPageUp,
     SelectPrevious,
@@ -729,6 +730,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 ),
                 bound(
                     tr!("shortcuts.confirm_dialog"),
+                    ConfirmFullAccessDialog,
+                    Some("FullAccessDialog"),
+                ),
+                bound(
+                    tr!("shortcuts.confirm_dialog"),
                     git_panel::ConfirmGitPanelModal,
                     Some("GitPanelModal"),
                 ),
@@ -746,6 +752,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     tr!("shortcuts.dismiss_dialog"),
                     DismissArchiveDialog,
                     Some("ArchiveDialog"),
+                ),
+                bound(
+                    tr!("shortcuts.dismiss_dialog"),
+                    DismissFullAccessDialog,
+                    Some("FullAccessDialog"),
                 ),
                 bound(
                     tr!("shortcuts.dismiss_dialog"),
@@ -1153,6 +1164,7 @@ mod tests {
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
+            crate::app::init_full_access_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);

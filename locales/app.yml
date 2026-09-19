@@ -1954,6 +1954,14 @@ mode.full_access_description:
   en: Allow commands and edits without prompts
 mode.choose:
   en: Choose a mode
+full_access.confirm_title:
+  en: Enable Full access?
+full_access.confirm_description:
+  en: The agent can read and edit files and run commands without asking for approval first.
+full_access.confirm_effect:
+  en: The change applies to this task right away and becomes the default for new tasks.
+full_access.confirm_enable:
+  en: Enable Full access
 sandbox.environment:
   en: Environment
 sandbox.this_mac:

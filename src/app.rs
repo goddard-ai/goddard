@@ -1952,6 +1952,9 @@ pub struct Waku {
     /// background inspection that decides whether it opens.
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
+    /// The one-time confirmation gating the first switch to Full access;
+    /// `state.full_access_acknowledged` records that it was accepted.
+    full_access_dialog: Option<full_access_dialog::FullAccessDialogState>,
     /// The keyboard-shortcut cheatsheet opened from the sidebar footer.
     shortcuts_dialog: Option<shortcuts_dialog::ShortcutsDialogState>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
@@ -2899,6 +2902,7 @@ mod element_inspector;
 mod file_finder;
 mod file_search;
 mod friends;
+mod full_access_dialog;
 mod git_panel;
 mod github;
 mod github_media;
@@ -2946,6 +2950,7 @@ use background_work::{
 pub use big_picture::init as init_big_picture_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
+pub use full_access_dialog::init as init_full_access_dialog_keys;
 use components::*;
 pub use element_inspector::init as init_element_inspector;
 pub use file_finder::init as init_file_finder;
@@ -5058,6 +5063,7 @@ impl Waku {
                 last_created_issue: None,
                 archive_dialog: None,
                 archive_preview_pending: HashSet::new(),
+                full_access_dialog: None,
                 shortcuts_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,

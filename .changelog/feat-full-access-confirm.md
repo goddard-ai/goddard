@@ -1,0 +1,1 @@
+- Switching to Full access for the first time now shows a one-time confirmation explaining that the agent can run commands and edit files without approval prompts

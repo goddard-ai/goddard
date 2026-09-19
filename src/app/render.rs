@@ -495,6 +495,7 @@ impl Render for Waku {
             let commit_dialog = self.render_commit_dialog(cx);
             let issue_dialog = self.render_issue_dialog(cx);
             let archive_dialog = self.render_archive_dialog(cx);
+            let full_access_dialog = self.render_full_access_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
             let send_file_dialog = self.render_send_file_dialog(cx);
@@ -542,6 +543,7 @@ impl Render for Waku {
                 .children(commit_dialog)
                 .children(issue_dialog)
                 .children(archive_dialog)
+                .children(full_access_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
                 .children(send_file_dialog)
@@ -572,6 +574,7 @@ impl Render for Waku {
         let commit_dialog = self.render_commit_dialog(cx);
         let issue_dialog = self.render_issue_dialog(cx);
         let archive_dialog = self.render_archive_dialog(cx);
+        let full_access_dialog = self.render_full_access_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let send_file_dialog = self.render_send_file_dialog(cx);
@@ -942,6 +945,7 @@ impl Render for Waku {
             .children(commit_dialog)
             .children(issue_dialog)
             .children(archive_dialog)
+            .children(full_access_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(send_file_dialog)
