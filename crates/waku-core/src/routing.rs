@@ -386,8 +386,8 @@ fn tier_model(
         .tiers
         .get(&candidate.provider)
         .and_then(|table| table.get(&tier))
-        .filter(|model| is_eligible(candidate, Some(model.as_str())))
-        .cloned()
+        .filter(|entry| is_eligible(candidate, Some(entry.model.as_str())))
+        .map(|entry| entry.model.clone())
 }
 
 /// Resolve a policy target to an eligible concrete route, returning the
