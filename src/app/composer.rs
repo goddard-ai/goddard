@@ -1507,11 +1507,6 @@ impl Waku {
                                                         .flex()
                                                         .items_center()
                                                         .gap(px(8.0))
-                                                        .child(icon(
-                                                            "icons/provider-typesafe.svg",
-                                                            14.0,
-                                                            theme.accent.opacity(0.9),
-                                                        ))
                                                         .child(
                                                             div()
                                                                 .min_w_0()
@@ -1522,6 +1517,16 @@ impl Waku {
                                                                 .child(SharedString::from(tr!(
                                                                     "models.auto"
                                                                 ))),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .flex_none()
+                                                                .truncate()
+                                                                .text_size(sp(12.5))
+                                                                .text_color(theme.text_tertiary)
+                                                                .child(SharedString::from(tr!(
+                                                                    "models.auto_hint"
+                                                                ))),
                                                         ),
                                                 )
                                                 .child(
@@ -1529,20 +1534,19 @@ impl Waku {
                                                         .mt(px(4.0))
                                                         .flex()
                                                         .items_center()
-                                                        .gap(px(6.0))
+                                                        .gap(px(8.0))
                                                         .child(icon(
-                                                            "icons/sparkle.svg",
-                                                            10.5,
-                                                            theme.accent,
+                                                            "icons/provider-typesafe.svg",
+                                                            12.0,
+                                                            theme.text_tertiary,
                                                         ))
                                                         .child(
                                                             div()
+                                                                .min_w_0()
                                                                 .truncate()
                                                                 .text_size(sp(12.5))
                                                                 .text_color(theme.text_tertiary)
-                                                                .child(SharedString::from(tr!(
-                                                                    "models.auto_subtitle"
-                                                                ))),
+                                                                .child("Jev"),
                                                         ),
                                                 ),
                                         )

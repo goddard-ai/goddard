@@ -349,6 +349,7 @@ impl Waku {
         if let Some((
             project_id,
             provider,
+            auto_route,
             runtime_mode,
             sandboxed,
             model,
@@ -359,6 +360,7 @@ impl Waku {
             (
                 session.project_id,
                 session.provider,
+                session.auto_route,
                 session.runtime_mode,
                 session.sandboxed,
                 session.model.clone(),
@@ -369,6 +371,7 @@ impl Waku {
         }) {
             self.state.selected_project = Some(project_id);
             self.state.last_provider = provider;
+            self.state.last_auto_route = auto_route;
             self.state.last_runtime_mode = runtime_mode;
             self.state.last_sandboxed = sandboxed;
             self.state.last_model = model;
@@ -2589,6 +2592,7 @@ impl Waku {
             session.service_tier.clone_from(&service_tier);
             session.context_window.clone_from(&context_window);
             self.state.last_provider = provider;
+            self.state.last_auto_route = false;
             self.state.last_model = Some(model.clone());
             self.state.last_reasoning_effort.clone_from(&effort);
             self.state.last_service_tier = service_tier;
@@ -2629,6 +2633,7 @@ impl Waku {
         }
         session.auto_route = true;
         session.updated_at = unix_time();
+        self.state.last_auto_route = true;
         self.save();
         cx.notify();
     }

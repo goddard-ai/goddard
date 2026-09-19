@@ -869,6 +869,10 @@ struct AppState {
     unseen_completions: HashMap<Uuid, u64>,
     #[serde(default = "default_provider")]
     last_provider: ProviderKind,
+    /// The last model pick was the router's Auto row — the next draft keeps
+    /// Auto selected instead of inheriting the routed provider/model.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    last_auto_route: bool,
     #[serde(default)]
     last_runtime_mode: RuntimeMode,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
@@ -952,6 +956,10 @@ pub struct PersistedState {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub unseen_completions: HashMap<Uuid, u64>,
     pub last_provider: ProviderKind,
+    /// The last model pick was the router's Auto row — the next draft keeps
+    /// Auto selected instead of inheriting the routed provider/model.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub last_auto_route: bool,
     #[serde(default)]
     pub last_runtime_mode: RuntimeMode,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
@@ -1202,6 +1210,7 @@ impl PersistedState {
             selected_session: None,
             unseen_completions: HashMap::new(),
             last_provider: ProviderKind::Codex,
+            last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
             last_sandboxed: false,
             last_model: None,
@@ -1298,6 +1307,9 @@ impl PersistedState {
         let mut session = AgentSession::new(project_id, provider);
         session.runtime_mode = self.last_runtime_mode;
         session.sandboxed = self.last_sandboxed;
+        // An Auto pick carries to the next draft like the provider/model do;
+        // the seeded provider/model stay as the route's last-used hint.
+        session.auto_route = self.last_auto_route && self.model_router_enabled;
         if provider == self.last_provider {
             session.model.clone_from(&self.last_model);
             session
@@ -1545,6 +1557,7 @@ impl PersistedState {
             selected_session: self.persistable_selected_session(),
             unseen_completions: self.unseen_completions.clone(),
             last_provider: self.last_provider,
+            last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
             last_sandboxed: self.last_sandboxed,
             last_model: self.last_model.clone(),
@@ -1629,6 +1642,7 @@ impl PersistedState {
         self.selected_session = app_state.selected_session;
         self.unseen_completions = app_state.unseen_completions;
         self.last_provider = app_state.last_provider;
+        self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
         self.last_sandboxed = app_state.last_sandboxed;
         self.last_model = app_state.last_model;
@@ -2856,6 +2870,30 @@ mod tests {
         restore_task_state_skeletons(&mut sessions);
         assert!(!sessions[0].detail_loaded);
         assert!(sessions[0].has_started());
+    }
+
+    #[test]
+    fn auto_route_pick_seeds_the_next_draft() {
+        let mut state = PersistedState::empty();
+        state.model_router_enabled = true;
+        state.last_auto_route = true;
+
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.model_router_enabled = true;
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        assert!(restored.last_auto_route);
+
+        // The routed provider/model stay the draft's carryover hint; the
+        // Auto flag is what the picker selection restores.
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(session.auto_route);
+        assert_eq!(session.provider, ProviderKind::Claude);
+
+        // Without the experiment the remembered flag cannot arm a draft.
+        restored.model_router_enabled = false;
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(!session.auto_route);
     }
 }
 
