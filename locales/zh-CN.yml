@@ -82,6 +82,20 @@ command_palette.no_issue_templates_hint: 请改为创建空白 Issue
 command_palette.open_on_github: 在 GitHub 上打开
 command_palette.land_changes: 合入更改
 command_palette.new_custom_command: 新建自定义命令…
+command_palette.prompts: 提示词
+command_palette.save_prompt: 保存为提示词模板…
+command_palette.save_prompt_named: "保存 /%{name}"
+command_palette.save_prompt_name_hint: 输入名称 — 它将成为 /命令
+command_palette.save_prompt_path_hint: "保存到 %{path}"
+command_palette.save_prompt_placeholder: 为此提示词命名…
+command_palette.open_prompts_folder: 打开提示词文件夹
+prompt_templates.nothing_to_save: 没有可保存的内容 — 输入框为空
+prompt_templates.name_required: 请先为提示词命名
+prompt_templates.exists: "/%{name} 已存在 — 请换个名称或直接编辑文件"
+prompt_templates.saved: "已保存 /%{name} — 在输入框中输入 / 即可使用"
+prompt_templates.save_failed: "无法保存提示词：%{error}"
+prompt_templates.open_failed: "无法打开提示词文件夹：%{error}"
+prompt_templates.no_home: 找不到用户主目录
 command_palette.choose_model: 选择模型…
 command_palette.copy_task_id: 复制任务 ID
 command_palette.copy_agent_cli_thread_id: 复制智能体 CLI 线程 ID

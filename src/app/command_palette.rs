@@ -83,6 +83,7 @@ enum PaletteSection {
     Providers,
     Commands,
     CustomCommands,
+    Prompts,
     Settings,
     // Drill-in sections; they never appear in Commands view.
     Projects,
@@ -101,6 +102,7 @@ impl PaletteSection {
             Self::Providers => "command_palette.providers",
             Self::Commands => "command_palette.commands",
             Self::CustomCommands => "command_palette.custom_commands",
+            Self::Prompts => "command_palette.prompts",
             Self::Settings => "command_palette.settings",
             Self::Projects => "command_palette.projects",
             Self::Scripts => "command_palette.scripts",
@@ -112,7 +114,7 @@ impl PaletteSection {
     fn query_rank(self) -> usize {
         match self {
             Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
-            Self::CustomCommands => 1,
+            Self::CustomCommands | Self::Prompts => 1,
             Self::Tasks => 2,
             Self::Settings => 3,
             Self::Projects | Self::Scripts | Self::Directories | Self::Templates => 4,
@@ -199,6 +201,10 @@ enum PaletteAction {
     SelectTask(Uuid),
     RunCustomCommand(Uuid),
     NewCustomCommand,
+    InsertPromptTemplate(SlashCommand),
+    OpenSavePrompt,
+    SavePromptAs(String),
+    RevealPromptTemplates,
     InspectElements,
     InspectColors,
     ToggleAutoRestart,
@@ -226,6 +232,9 @@ enum CommandPaletteView {
     NewTaskIn,
     IssueProjects,
     IssueTemplates,
+    /// The "Save as prompt template" step: the query field is the file's
+    /// command name, confirmed with Enter.
+    SavePrompt,
 }
 
 /// What a resolved template fetch does next: a repo with templates shows
@@ -308,6 +317,31 @@ fn order_sections_by_best_score(scored_results: &mut [ScoredPaletteItem]) {
             .position(|(section, _)| *section == scored.item.section)
             .unwrap_or(usize::MAX)
     });
+}
+
+/// The user-level template directory — scanned into the composer's command
+/// index by `assemble_slash_commands` alongside the project's `.goddard`.
+fn prompt_templates_dir(home: &Path) -> PathBuf {
+    home.join(".config/goddard/commands")
+}
+
+/// A typed name to the file stem it saves as and the `/` command it becomes:
+/// lowercase alphanumeric runs joined by single dashes.
+fn slugify_prompt_name(name: &str) -> String {
+    let mut slug = String::new();
+    for ch in name.trim().chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.trim_matches('-')
+        .chars()
+        .take(48)
+        .collect::<String>()
+        .trim_end_matches('-')
+        .to_owned()
 }
 
 pub(super) fn next_selection_index(selected: usize, len: usize, delta: isize) -> Option<usize> {
@@ -481,6 +515,10 @@ pub(super) struct CommandPaletteUi {
     issue_templates_pending: bool,
     issue_blank_enabled: bool,
     issue_generation: u64,
+    /// The composer text the "Save as prompt template" step parks on entry —
+    /// captured up front so a composer draft change mid-pick can't alter
+    /// what lands in the file.
+    save_prompt_body: Option<String>,
     selected: usize,
     scroll: ScrollHandle,
     matcher: Matcher,
@@ -519,6 +557,7 @@ impl CommandPaletteUi {
             issue_templates_pending: false,
             issue_blank_enabled: true,
             issue_generation: 0,
+            save_prompt_body: None,
             selected: 0,
             scroll: ScrollHandle::new(),
             // Plain config: `match_paths` biases toward path basenames, which
@@ -657,10 +696,14 @@ impl Waku {
         self.command_palette.issue_blank_enabled = true;
         self.command_palette.issue_generation =
             self.command_palette.issue_generation.wrapping_add(1);
+        self.command_palette.save_prompt_body = None;
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
             .update(cx, |input, cx| input.clear(cx));
+        // The Prompts section draws from the composer's command index —
+        // kick discovery now so a cold open doesn't show an empty library.
+        self.refresh_composer_sources(cx);
         self.refresh_command_palette_results("", false, cx);
 
         // Closing an open GPUI menu can call its toggle observers back into
@@ -827,6 +870,136 @@ impl Waku {
         });
         self.refresh_command_palette_results("", false, cx);
         cx.notify();
+    }
+
+    /// "Save as prompt template" parks the composer's text and switches the
+    /// field to naming — the query becomes the command's file stem.
+    fn open_command_palette_save_prompt_view(&mut self, cx: &mut Context<Self>) {
+        let body = self.composer.read(cx).content(cx).trim().to_owned();
+        if body.is_empty() {
+            self.show_toast(tr!("prompt_templates.nothing_to_save"));
+            cx.notify();
+            return;
+        }
+        self.command_palette.save_prompt_body = Some(body);
+        self.command_palette.view = CommandPaletteView::SavePrompt;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.save_prompt_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    /// One row whose label tracks the typed name — the slug the file and the
+    /// `/` command will share — so Enter always confirms the visible choice.
+    fn refresh_command_palette_save_prompt_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let slug = slugify_prompt_name(query);
+        let (label, detail) = if slug.is_empty() {
+            (
+                tr!("command_palette.save_prompt"),
+                tr!("command_palette.save_prompt_name_hint"),
+            )
+        } else {
+            let detail = self
+                .home_directory
+                .as_deref()
+                .map(|home| prompt_templates_dir(home).join(format!("{slug}.md")))
+                .map(|path| {
+                    tr!(
+                        "command_palette.save_prompt_path_hint",
+                        path = settings::abbreviate_home_path(
+                            &path,
+                            self.home_directory.as_deref()
+                        )
+                    )
+                })
+                .unwrap_or_else(|| tr!("command_palette.save_prompt_name_hint"));
+            (tr!("command_palette.save_prompt_named", name = slug.clone()), detail)
+        };
+        self.command_palette.results = vec![CommandPaletteItem {
+            section: PaletteSection::Prompts,
+            label,
+            detail: Some(detail),
+            icon: PaletteIcon::Asset("icons/plus.svg"),
+            shortcut: None,
+            action: PaletteAction::SavePromptAs(slug),
+            content_match: None,
+            search_text: String::new(),
+            order: 0,
+            recency: 0,
+        }];
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
+    /// Write the parked composer text as `<slug>.md` under the user commands
+    /// directory. Validation failures keep the naming step open so the typed
+    /// name — and the parked draft — survive the toast.
+    fn save_prompt_template(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(home) = self.home_directory.clone() else {
+            self.close_command_palette(window, cx);
+            self.show_toast(tr!("prompt_templates.no_home"));
+            cx.notify();
+            return;
+        };
+        if slug.is_empty() {
+            self.show_toast(tr!("prompt_templates.name_required"));
+            cx.notify();
+            return;
+        }
+        let Some(body) = self.command_palette.save_prompt_body.clone() else {
+            self.close_command_palette(window, cx);
+            self.show_toast(tr!("prompt_templates.nothing_to_save"));
+            cx.notify();
+            return;
+        };
+        let dir = prompt_templates_dir(&home);
+        let path = dir.join(format!("{slug}.md"));
+        if path.exists() {
+            self.show_toast(tr!("prompt_templates.exists", name = slug.to_owned()));
+            cx.notify();
+            return;
+        }
+        self.close_command_palette(window, cx);
+        let slug = slug.to_owned();
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    std::fs::create_dir_all(&dir)?;
+                    std::fs::write(&path, body)
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                match result {
+                    Ok(()) => {
+                        waku.invalidate_composer_sources(cx);
+                        waku.show_success_toast(tr!(
+                            "prompt_templates.saved",
+                            name = slug.clone()
+                        ));
+                    }
+                    Err(error) => {
+                        waku.show_toast(tr!(
+                            "prompt_templates.save_failed",
+                            error = error.to_string()
+                        ));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Entering "New task in…" starts one directory scan — the daemon walks
@@ -1202,6 +1375,7 @@ impl Waku {
             CommandPaletteView::IssueTemplates => {
                 self.open_command_palette_issue_projects_view(cx)
             }
+            CommandPaletteView::SavePrompt => self.leave_command_palette_drill_in_view(cx),
         }
     }
 
@@ -1223,6 +1397,7 @@ impl Waku {
             CommandPaletteView::IssueTemplates => {
                 tr!("command_palette.issue_template_placeholder")
             }
+            CommandPaletteView::SavePrompt => tr!("command_palette.save_prompt_placeholder"),
         };
         self.command_palette.search.update(cx, |input, cx| {
             input.set_accessibility_label(tr!("a11y.command_palette"), cx);
@@ -1247,6 +1422,7 @@ impl Waku {
                 | CommandPaletteView::NewTaskIn
                 | CommandPaletteView::IssueProjects
                 | CommandPaletteView::IssueTemplates
+                | CommandPaletteView::SavePrompt
         ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
@@ -1772,6 +1948,56 @@ impl Waku {
                 shortcut: None,
                 action: PaletteAction::RunCustomCommand(command.id),
                 content_match: None,
+                order: next(),
+                recency: 0,
+            });
+        }
+
+        // The prompt library: the same file-backed templates the composer
+        // expands on `/name` submission, offered here so they're browsable
+        // and insertable without memorizing names.
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Prompts,
+            tr!("command_palette.save_prompt"),
+            "icons/plus.svg",
+            None,
+            PaletteAction::OpenSavePrompt,
+            "save create add prompt template composer draft reusable",
+            next(),
+        ));
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Prompts,
+            tr!("command_palette.open_prompts_folder"),
+            "icons/folder-open.svg",
+            None,
+            PaletteAction::RevealPromptTemplates,
+            "open reveal prompts templates folder commands files edit",
+            next(),
+        ));
+        for command in self
+            .slash_command_index
+            .iter()
+            .filter(|command| command.template.is_some())
+        {
+            let mut detail = command.scope.label();
+            if !command.description.is_empty() {
+                detail = format!("{detail} · {}", command.description);
+            }
+            if let Some(hint) = &command.argument_hint {
+                detail = format!("{detail} · {hint}");
+            }
+            commands.push(CommandPaletteItem {
+                section: PaletteSection::Prompts,
+                label: format!("/{}", command.name),
+                detail: Some(detail),
+                icon: PaletteIcon::Asset("icons/slash.svg"),
+                shortcut: None,
+                action: PaletteAction::InsertPromptTemplate(command.clone()),
+                content_match: None,
+                search_text: format!(
+                    "/{} {} {} prompt template slash saved reusable",
+                    command.name, command.description, command.scope.label()
+                ),
                 order: next(),
                 recency: 0,
             });
@@ -2567,6 +2793,22 @@ impl Waku {
             .scroll_to_item(self.command_palette_scroll_index(self.command_palette.selected));
     }
 
+    /// Re-run the open palette's current query. The Prompts section reads
+    /// the composer's command index, so a late-arriving discovery refresh
+    /// calls this to keep the drawn rows honest. A no-op while closed.
+    pub(super) fn refresh_open_command_palette(&mut self, cx: &mut Context<Self>) {
+        if !self.command_palette.open {
+            return;
+        }
+        let query = self
+            .command_palette
+            .search
+            .read(cx)
+            .content()
+            .to_owned();
+        self.refresh_command_palette_results(&query, true, cx);
+    }
+
     fn refresh_command_palette_results(
         &mut self,
         query: &str,
@@ -2600,6 +2842,10 @@ impl Waku {
             }
             CommandPaletteView::IssueTemplates => {
                 self.refresh_command_palette_issue_template_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::SavePrompt => {
+                self.refresh_command_palette_save_prompt_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::Commands => {}
@@ -3044,6 +3290,16 @@ impl Waku {
                 }
                 return;
             }
+            PaletteAction::OpenSavePrompt => {
+                self.open_command_palette_save_prompt_view(cx);
+                return;
+            }
+            PaletteAction::SavePromptAs(slug) => {
+                // The helper decides whether the naming step stays open —
+                // a validation failure keeps the typed name editable.
+                self.save_prompt_template(&slug, window, cx);
+                return;
+            }
             _ => {}
         }
 
@@ -3139,6 +3395,40 @@ impl Waku {
                     self.run_custom_command(command, cx);
                 }
             }
+            PaletteAction::InsertPromptTemplate(command) => {
+                self.settings_page = None;
+                let text = if command.argument_hint.is_some() {
+                    // Keep the `/name ` spelling so the template's argument
+                    // flow still applies at submit.
+                    format!("/{} ", command.name)
+                } else {
+                    // Landing the expanded body turns the pick into
+                    // "browse → adapt → send" — the prompt text is visible
+                    // in the composer instead of expanded invisibly at send.
+                    crate::composer_complete::expand_command_template(
+                        command.template.as_deref().unwrap_or_default(),
+                        "",
+                    )
+                };
+                self.composer.update(cx, |input, cx| input.insert_text(&text, cx));
+                let focus = self.composer_focus(cx);
+                window.focus(&focus, cx);
+            }
+            PaletteAction::RevealPromptTemplates => {
+                if let Some(home) = self.home_directory.clone() {
+                    let dir = prompt_templates_dir(&home);
+                    // Reveal needs the folder to exist; creating it beats a
+                    // Finder error on a fresh install.
+                    match std::fs::create_dir_all(&dir) {
+                        Ok(()) => crate::platform::reveal_in_file_manager(&dir, cx),
+                        Err(error) => self.show_toast(tr!(
+                            "prompt_templates.open_failed",
+                            error = error.to_string()
+                        )),
+                    }
+                    cx.notify();
+                }
+            }
             PaletteAction::ChooseModel | PaletteAction::ToggleUsage => {
                 // These popovers are rendered by the composer. If the command
                 // came from Settings, reveal one normal app frame first so its
@@ -3197,7 +3487,9 @@ impl Waku {
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::NewTaskIn
             | PaletteAction::CreateGitHubIssue
-            | PaletteAction::ChooseIssueProject(_) => {
+            | PaletteAction::ChooseIssueProject(_)
+            | PaletteAction::OpenSavePrompt
+            | PaletteAction::SavePromptAs(_) => {
                 unreachable!("view-navigation actions are handled before closing the palette")
             }
         }
@@ -3266,7 +3558,8 @@ impl Waku {
             }
             CommandPaletteView::ResumeProviders
             | CommandPaletteView::RunScriptProjects
-            | CommandPaletteView::IssueProjects => false,
+            | CommandPaletteView::IssueProjects
+            | CommandPaletteView::SavePrompt => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
             if resume_view {
@@ -3855,6 +4148,16 @@ mod tests {
         assert_eq!(next_selection_index(2, 5, isize::MIN), Some(0));
         assert_eq!(next_selection_index(2, 5, isize::MAX), Some(4));
         assert_eq!(next_selection_index(0, 0, 1), None);
+    }
+
+    #[test]
+    fn prompt_names_slugify_to_command_stems() {
+        assert_eq!(slugify_prompt_name("Review Diff"), "review-diff");
+        assert_eq!(slugify_prompt_name("  tidy  up  "), "tidy-up");
+        assert_eq!(slugify_prompt_name("fix: lint!"), "fix-lint");
+        assert_eq!(slugify_prompt_name("--leading--"), "leading");
+        assert_eq!(slugify_prompt_name("日本語"), "");
+        assert_eq!(slugify_prompt_name(""), "");
     }
 
     #[test]

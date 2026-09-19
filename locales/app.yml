@@ -190,6 +190,34 @@ command_palette.sync_branch:
   en: Sync branch…
 command_palette.new_custom_command:
   en: New custom command…
+command_palette.prompts:
+  en: Prompts
+command_palette.save_prompt:
+  en: Save as prompt template…
+command_palette.save_prompt_named:
+  en: "Save /%{name}"
+command_palette.save_prompt_name_hint:
+  en: Type a name — it becomes the /command
+command_palette.save_prompt_path_hint:
+  en: "Saves to %{path}"
+command_palette.save_prompt_placeholder:
+  en: Name this prompt…
+command_palette.open_prompts_folder:
+  en: Open prompts folder
+prompt_templates.nothing_to_save:
+  en: Nothing to save — the composer is empty
+prompt_templates.name_required:
+  en: Name the prompt first
+prompt_templates.exists:
+  en: "/%{name} already exists — pick another name or edit the file"
+prompt_templates.saved:
+  en: "Saved /%{name} — type / in the composer to use it"
+prompt_templates.save_failed:
+  en: "Couldn't save the prompt: %{error}"
+prompt_templates.open_failed:
+  en: "Couldn't open the prompts folder: %{error}"
+prompt_templates.no_home:
+  en: Couldn't find your home folder
 command_palette.choose_model:
   en: Choose model…
 command_palette.copy_task_id:

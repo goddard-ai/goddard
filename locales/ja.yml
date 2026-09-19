@@ -84,6 +84,20 @@ command_palette.no_issue_templates_hint: 代わりに空の Issue を作成し�
 command_palette.open_on_github: GitHub で開く
 command_palette.land_changes: 変更を取り込む
 command_palette.new_custom_command: 新規カスタムコマンド…
+command_palette.prompts: プロンプト
+command_palette.save_prompt: プロンプトテンプレートとして保存…
+command_palette.save_prompt_named: "/%{name} を保存"
+command_palette.save_prompt_name_hint: 名前を入力 — /コマンドになります
+command_palette.save_prompt_path_hint: "%{path} に保存"
+command_palette.save_prompt_placeholder: プロンプト名…
+command_palette.open_prompts_folder: プロンプトフォルダを開く
+prompt_templates.nothing_to_save: 保存するものがありません — コンポーザーが空です
+prompt_templates.name_required: 先にプロンプト名を入力してください
+prompt_templates.exists: "/%{name} は既に存在します — 別の名前を選ぶかファイルを編集してください"
+prompt_templates.saved: "/%{name} を保存しました — コンポーザーで / と入力して使えます"
+prompt_templates.save_failed: "プロンプトを保存できませんでした: %{error}"
+prompt_templates.open_failed: "プロンプトフォルダを開けませんでした: %{error}"
+prompt_templates.no_home: ホームフォルダが見つかりませんでした
 command_palette.choose_model: モデルを選択…
 command_palette.copy_task_id: タスク ID をコピー
 command_palette.copy_agent_cli_thread_id: エージェント CLI スレッド ID をコピー
