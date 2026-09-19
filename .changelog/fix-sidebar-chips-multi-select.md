@@ -1,0 +1,1 @@
+- Holding ⌘ no longer shows the ⌘1–⌘9 row chips while a sidebar multi-selection exists, so the hints don't advertise a single-task jump over an active batch

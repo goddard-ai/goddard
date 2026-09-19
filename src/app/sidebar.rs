@@ -2497,7 +2497,9 @@ impl Waku {
         if !event.modifiers.secondary() {
             self.sidebar_shortcut_hint_chord_used = false;
         }
-        if event.modifiers != gpui::Modifiers::secondary_key() || !self.state.sidebar_shortcut_tags
+        if event.modifiers != gpui::Modifiers::secondary_key()
+            || !self.state.sidebar_shortcut_tags
+            || !self.sidebar_multi_selection.is_empty()
         {
             if self.sidebar_shortcut_hints {
                 self.sidebar_shortcut_hints = false;
@@ -3069,14 +3071,14 @@ impl Waku {
                     .into_any_element()
             }
             SidebarRow::Session(session_id) => {
-                let shortcut_index = self
-                    .sidebar_shortcut_hints
-                    .then(|| {
-                        sidebar_shortcut_target_ids(rows)
-                            .take(SIDEBAR_SHORTCUT_TARGET_COUNT)
-                            .position(|candidate| candidate == session_id)
-                    })
-                    .flatten();
+                let shortcut_index = (self.sidebar_shortcut_hints
+                    && self.sidebar_multi_selection.is_empty())
+                .then(|| {
+                    sidebar_shortcut_target_ids(rows)
+                        .take(SIDEBAR_SHORTCUT_TARGET_COUNT)
+                        .position(|candidate| candidate == session_id)
+                })
+                .flatten();
                 self.render_sidebar_session_item(session_id, shortcut_index, cx)
                     .into_any_element()
             }
