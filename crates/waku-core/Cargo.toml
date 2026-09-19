@@ -16,7 +16,9 @@ chrono = { version = "0.4", features = ["serde"] }
 crossbeam-channel = "0.5"
 dirs = "6.0"
 dunce = "1"
-github-copilot-sdk = "1.0.14"
+# bundled-cli (default) embeds the ~118 MB Copilot CLI archive in the binary;
+# the driver always launches the installed `copilot` via CliProgram::Path.
+github-copilot-sdk = { version = "1.0.14", default-features = false }
 nucleo-matcher = "0.3"
 parking_lot = "0.12"
 rust-i18n = "4"
