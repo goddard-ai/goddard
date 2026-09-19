@@ -30,6 +30,8 @@ enum Outgoing {
 
 struct ClientInner {
     outgoing: Sender<Outgoing>,
+    daemon_version: String,
+    daemon_commit: Option<String>,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     pending_events: Mutex<HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>>,
@@ -91,10 +93,12 @@ impl DaemonClient {
             },
         )?;
         let hello = read_server_message(&mut socket)?;
-        match hello {
+        let (daemon_version, daemon_commit) = match hello {
             ServerMessage::Hello {
-                protocol_version, ..
-            } if protocol_version == PROTOCOL_VERSION => {}
+                protocol_version,
+                daemon_version,
+                daemon_commit,
+            } if protocol_version == PROTOCOL_VERSION => (daemon_version, daemon_commit),
             ServerMessage::Hello {
                 protocol_version, ..
             } => bail!(
@@ -102,12 +106,14 @@ impl DaemonClient {
             ),
             ServerMessage::Rejected { message } => bail!("daemon rejected connection: {message}"),
             other => bail!("daemon sent an invalid handshake response: {other:?}"),
-        }
+        };
         set_client_read_timeout(&mut socket, Some(READ_POLL_INTERVAL))?;
 
         let (outgoing, outgoing_rx) = unbounded();
         let inner = Arc::new(ClientInner {
             outgoing,
+            daemon_version,
+            daemon_commit,
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             pending_events: Mutex::new(HashMap::new()),
@@ -123,6 +129,16 @@ impl DaemonClient {
             .spawn(move || run_client(socket, outgoing_rx, thread_inner))
             .context("could not start Goddard daemon client thread")?;
         Ok(Self { inner })
+    }
+
+    /// The version the connected daemon reported in the hello handshake.
+    pub fn daemon_version(&self) -> &str {
+        &self.inner.daemon_version
+    }
+
+    /// The commit the connected daemon was built from, when it reported one.
+    pub fn daemon_commit(&self) -> Option<&str> {
+        self.inner.daemon_commit.as_deref()
     }
 
     pub fn subscribe(&self, session_id: Uuid, runtime_id: Uuid) -> Receiver<SequencedEvent> {

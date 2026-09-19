@@ -543,6 +543,14 @@ daemon.agent_settings_title:
   en: Agent settings
 daemon.agent_settings_description:
   en: Let agents create and edit custom commands for you. On by default; commands an agent adds are marked, and the daemon records which task made each change.
+daemon.build_title:
+  en: Build
+daemon.build_description:
+  en: The commits this app and the connected daemon were built from.
+daemon.build_app:
+  en: App
+daemon.build_daemon:
+  en: Daemon
 experiments.big_picture_title:
   en: Big Picture
 experiments.big_picture_description:

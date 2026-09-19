@@ -59,6 +59,9 @@ pub struct ServerOptions {
     /// shutdown control message. Service-managed daemons keep running when an
     /// authenticated client disconnects.
     pub allow_shutdown: bool,
+    /// Commit the daemon binary was built from, reported in the hello so a
+    /// connected client can show exactly which source is serving it.
+    pub build_commit: Option<String>,
 }
 
 struct ConnectionPermit(Arc<AtomicUsize>);
@@ -776,6 +779,7 @@ fn handle_connection(
         &ServerMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").into(),
+            daemon_commit: options.build_commit.clone(),
         },
     )?;
     socket.set_config(|config| {
@@ -1475,6 +1479,35 @@ mod tests {
         assert!(sessions.iter().any(|session| session.id == second_id));
 
         source.shutdown();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn hello_reports_the_daemon_build_commit() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TaskStateBackend::default()),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    build_commit: Some("abc1234".into()),
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        assert_eq!(client.daemon_commit(), Some("abc1234"));
+        assert_eq!(client.daemon_version(), env!("CARGO_PKG_VERSION"));
+
+        client.shutdown();
         server.join().unwrap();
     }
 

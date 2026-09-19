@@ -564,6 +564,9 @@ pub enum ServerMessage {
     Hello {
         protocol_version: u32,
         daemon_version: String,
+        /// The commit the daemon binary was built from, when its build had a
+        /// git checkout to stamp. Dev builds surface it beside the app's own.
+        daemon_commit: Option<String>,
     },
     Rejected {
         message: String,
