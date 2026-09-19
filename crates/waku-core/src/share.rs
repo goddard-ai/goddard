@@ -1069,20 +1069,32 @@ fn sanitize_link_component(raw: &str, fallback: &str) -> String {
     }
 }
 
-/// Ensure `base` has a `<peer>-<title>` symlink to the transfer's
-/// `dest_dir` — suffixing with the transfer id on a name collision and
-/// removing stale links to the same folder left by an older name.
+/// Ensure `base` has a `<peer>-<title>` symlink to the received file —
+/// `dest_dir` is the per-transfer `transfers/<uuid>` folder, but the link
+/// should open the payload itself. Falls back to the folder when the
+/// title doesn't resolve to an entry inside it. Suffixes the transfer id
+/// on a name collision and removes stale links left by an older name.
 fn sync_transfer_link(base: &std::path::Path, peer: &str, transfer: &TransferInfo) {
-    let Some(dest) = &transfer.dest_dir else { return };
+    let Some(dest_dir) = &transfer.dest_dir else { return };
+    let payload = dest_dir.join(&transfer.title);
+    let dest = if payload.symlink_metadata().is_ok() {
+        payload
+    } else {
+        dest_dir.clone()
+    };
     let peer = sanitize_link_component(peer, "friend");
     let title = sanitize_link_component(&transfer.title, "files");
     let mut name = format!("{peer}-{title}");
+    // A link is "ours" when it points at the payload or its containing
+    // folder — links written before the link target moved inside
+    // `dest_dir` still name the folder.
+    let ours = |target: &std::path::Path| target == dest || target == *dest_dir;
     // True when `name` is already taken by something that isn't this
     // transfer's destination — a real file or a link to another folder.
     let occupied = |name: &str| {
         let path = base.join(name);
         match std::fs::read_link(&path) {
-            Ok(target) => target != *dest,
+            Ok(target) => !ours(&target),
             Err(_) => path.symlink_metadata().is_ok(),
         }
     };
@@ -1101,16 +1113,21 @@ fn sync_transfer_link(base: &std::path::Path, peer: &str, transfer: &TransferInf
             if entry.file_name() == name.as_str() {
                 continue;
             }
-            if std::fs::read_link(&path).is_ok_and(|t| t == *dest) {
+            if std::fs::read_link(&path).is_ok_and(|t| ours(&t)) {
                 let _ = std::fs::remove_file(&path);
             }
         }
     }
     let link = base.join(&name);
-    if std::fs::read_link(&link).is_ok_and(|t| t == *dest) {
-        return;
+    match std::fs::read_link(&link) {
+        Ok(target) if target == dest => return,
+        // Re-point links that still name the folder (or anything stale).
+        Ok(_) => {
+            let _ = std::fs::remove_file(&link);
+        }
+        Err(_) => {}
     }
-    let _ = crate::fs_ext::symlink(dest, &link);
+    let _ = crate::fs_ext::symlink(&dest, &link);
 }
 
 /// The name this install renders for `peer_id`: nickname, else the

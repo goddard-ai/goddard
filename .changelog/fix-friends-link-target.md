@@ -1,0 +1,1 @@
+- Fixed `~/Documents/Goddard/From Friends` symlinks pointing at the `transfers/<uuid>` folder instead of the received file itself.
