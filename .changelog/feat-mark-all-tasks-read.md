@@ -1,1 +1,0 @@
-- Add a "Mark all tasks as read" command-palette action that clears every unseen-completion dot at once

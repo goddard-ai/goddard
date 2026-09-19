@@ -1,1 +1,0 @@
-- "New task in…" (⌘⇧N, also in the File menu and command palette) fuzzy-searches directories on disk and starts a task in the pick — the directory becomes a temporary project that appears in the sidebar with a clock-folder icon and leaves the project list once its last task is removed; workspace toggle moves to ⌘⌥N and the branch picker to ⌘⇧⌥N
