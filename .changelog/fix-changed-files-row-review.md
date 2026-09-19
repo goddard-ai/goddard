@@ -1,0 +1,1 @@
+- Clicking a file row in a changed-files card now opens that file in the Review panel's turn diff instead of the file viewer, matching the Review button's destination

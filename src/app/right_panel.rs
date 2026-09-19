@@ -2370,7 +2370,12 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn open_turn_diff(&mut self, turn_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn open_turn_diff(
+        &mut self,
+        turn_id: Uuid,
+        file: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some((session_id, turn_count)) = self.selected_session().and_then(|session| {
             session
                 .turns
@@ -2380,6 +2385,9 @@ impl Waku {
         }) else {
             return;
         };
+        // A file row hands its path to the snapshot landing, which selects it
+        // the same way a Git panel row does.
+        self.right_panel_pending_diff_file = file;
         self.right_panel_diff_source = ReviewDiffSource::LastTurn {
             session_id,
             turn_id,
