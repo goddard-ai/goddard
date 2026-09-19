@@ -310,6 +310,31 @@ pub enum Command {
         session_id: Uuid,
         target: RouteTarget,
     },
+    /// Read the MCP integrations catalog plus the user's configuration for
+    /// each entry. Global command — nil session id.
+    ListIntegrations,
+    /// Connect one integration: records the variant and provider set, stores
+    /// `api_key` in the daemon's secret store when supplied, and — for
+    /// OAuth-backed services — starts the browser flow in the background.
+    /// Completion arrives through `SettingsChanged` as `auth` flips.
+    ConnectIntegration {
+        id: String,
+        variant_id: String,
+        providers: Vec<ProviderKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_key: Option<String>,
+    },
+    /// Change which providers receive an already-connected integration.
+    SetIntegrationProviders {
+        id: String,
+        providers: Vec<ProviderKind>,
+    },
+    /// Remove one integration: drops the provider config entries it wrote
+    /// and deletes the stored credential.
+    DisconnectIntegration { id: String },
+    /// Re-run the OAuth browser flow for an integration whose credential is
+    /// missing or was revoked.
+    StartIntegrationAuth { id: String },
     /// Read the effective routing policy for the settings surface.
     GetRoutePolicy,
     /// Update one class-level target in the user's routing policy document,
@@ -753,6 +778,10 @@ pub enum ResponsePayload {
     },
     Settings {
         settings: DaemonSettings,
+    },
+    /// The integrations catalog joined with the user's configuration.
+    Integrations {
+        snapshots: Vec<crate::integrations::IntegrationSnapshot>,
     },
     /// The daemon-owned custom command list after the change — or as read,
     /// for `listCustomCommands`.

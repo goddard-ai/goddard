@@ -1242,6 +1242,19 @@ pub struct PersistedState {
     /// `settings.json`.
     #[serde(skip)]
     pub eval: Option<waku_protocol::eval::EvalSettings>,
+    /// Experimental opt-in for MCP integrations. Daemon-owned; mirrored here
+    /// so clients can render the pane.
+    #[serde(default = "default_experiment_enabled")]
+    pub integrations_enabled: bool,
+    /// Connected integrations. Daemon-owned; mirrored in memory so a client
+    /// `UpdateSettings` round-trips them instead of wiping the list. Writes
+    /// go through the integration commands.
+    #[serde(skip)]
+    pub integrations: Vec<waku_protocol::integrations::IntegrationSetting>,
+    /// The local proxy bearer. Daemon-owned; mirrored only so it survives a
+    /// client `UpdateSettings` round-trip.
+    #[serde(skip)]
+    pub integrations_proxy_token: String,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -1363,6 +1376,9 @@ impl PersistedState {
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
             eval: None,
+            integrations_enabled: default_experiment_enabled(),
+            integrations: Vec::new(),
+            integrations_proxy_token: String::new(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -1561,6 +1577,9 @@ impl PersistedState {
             project_map_enabled: self.project_map_enabled,
             custom_commands: self.custom_commands.clone(),
             eval: self.eval.clone(),
+            integrations_enabled: self.integrations_enabled,
+            integrations: self.integrations.clone(),
+            integrations_proxy_token: self.integrations_proxy_token.clone(),
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -1582,6 +1601,9 @@ impl PersistedState {
         self.project_map_enabled = settings.project_map_enabled;
         self.custom_commands = settings.custom_commands;
         self.eval = settings.eval;
+        self.integrations_enabled = settings.integrations_enabled;
+        self.integrations = settings.integrations;
+        self.integrations_proxy_token = settings.integrations_proxy_token;
         self.daemon_settings_extra = settings.extra;
     }
 

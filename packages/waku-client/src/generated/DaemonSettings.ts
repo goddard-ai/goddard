@@ -2,6 +2,7 @@
 import type { ComputerAppGrant } from "./ComputerAppGrant";
 import type { CustomCommand } from "./CustomCommand";
 import type { EvalSettings } from "./EvalSettings";
+import type { IntegrationSetting } from "./IntegrationSetting";
 import type { ProviderKind } from "./ProviderKind";
 import type { JsonValue } from "./serde_json/JsonValue";
 
@@ -58,4 +59,20 @@ eval?: EvalSettings | null,
  * in the background, and injects it into each session's first prompt.
  * Defaults on in development builds, opt-in in release builds.
  */
-memory_experiment_enabled: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+memory_experiment_enabled: boolean,
+/**
+ * Experimental opt-in for the MCP integrations pane and the daemon's
+ * local MCP proxy. Defaults on in development builds, opt-in in release.
+ */
+integrations_enabled: boolean,
+/**
+ * Connected integrations: which services are set up, on which variant,
+ * and which providers receive them. Credentials never live here — the
+ * daemon's secret store owns them; `auth` only records the state.
+ */
+integrations?: Array<IntegrationSetting>,
+/**
+ * Bearer that agents present to the daemon's local MCP proxy. Minted
+ * lazily; local-only, it authorizes proxy access and nothing upstream.
+ */
+integrations_proxy_token?: string, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
