@@ -1621,19 +1621,38 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let (id, path, label) = match item {
-            SidebarDockItem::Friends => ("friends", "icons/friends.svg", tr!("settings.friends")),
-            SidebarDockItem::Inbox => ("inbox", "icons/inbox.svg", tr!("sidebar.inbox")),
-            SidebarDockItem::Archive => {
-                ("archive", "icons/dock-archive.svg", tr!("settings.archived"))
-            }
-            SidebarDockItem::Shortcuts => {
-                ("shortcuts", "icons/dock-keyboard.svg", tr!("shortcuts.title"))
-            }
+        // Each glyph keeps its Sketch-authored size; the SVGs were exported at
+        // 2x, so the render size is half the authored pixel dimensions.
+        let (id, path, label, glyph_size) = match item {
+            SidebarDockItem::Friends => (
+                "friends",
+                "icons/friends.svg",
+                tr!("settings.friends"),
+                size(px(23.0), px(23.5)),
+            ),
+            SidebarDockItem::Inbox => (
+                "inbox",
+                "icons/inbox.svg",
+                tr!("sidebar.inbox"),
+                size(px(21.0), px(21.0)),
+            ),
+            SidebarDockItem::Archive => (
+                "archive",
+                "icons/dock-archive.svg",
+                tr!("settings.archived"),
+                size(px(23.0), px(23.0)),
+            ),
+            SidebarDockItem::Shortcuts => (
+                "shortcuts",
+                "icons/dock-keyboard.svg",
+                tr!("shortcuts.title"),
+                size(px(24.0), px(24.0)),
+            ),
             SidebarDockItem::Settings => (
                 "settings",
                 "icons/settings-hexagon.svg",
                 tr!("common.settings"),
+                size(px(24.0), px(24.0)),
             ),
         };
         let hovered = self.sidebar_dock_hover_item == Some(item);
@@ -1709,7 +1728,7 @@ impl Waku {
                     )
                     // img() keeps the SVG's authored colors and blur-filtered
                     // shadows; icon() would flatten it to a tinted alpha mask.
-                    .child(img(path).size(px(22.0)).flex_none()),
+                    .child(img(path).w(glyph_size.width).h(glyph_size.height).flex_none()),
             )
             .focus_visible(|style| {
                 style
