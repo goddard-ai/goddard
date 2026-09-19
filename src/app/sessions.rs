@@ -2727,6 +2727,18 @@ impl Waku {
         fast: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.model_picker_target == composer::ModelPickerTarget::AutomationEditor {
+            // The editor stores a bare provider/model pair — effort and tier
+            // rows don't exist at its granularity.
+            if let Some(editor) = self.automations_editor.as_mut() {
+                editor.provider = provider;
+                editor
+                    .model
+                    .update(cx, |input, cx| input.set_content(model, cx));
+                cx.notify();
+            }
+            return;
+        }
         let service_tier = fast.then(|| "fast".to_owned());
         // Picking a concrete model exits an Auto draft even when provider and
         // model happen to match the draft's last-used carryover.
@@ -2797,7 +2809,9 @@ impl Waku {
     /// runs. Only drafts reach here — a started session's picker does not
     /// offer the row.
     pub(super) fn choose_auto_route(&mut self, cx: &mut Context<Self>) {
-        if !self.auto_route_available() {
+        if self.model_picker_target != composer::ModelPickerTarget::Composer
+            || !self.auto_route_available()
+        {
             return;
         }
         let Some(session) = self.composer_session_mut() else {
@@ -2821,6 +2835,15 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
+            return;
+        }
+        if self.automations_editor.is_some() {
+            self.defer_menu_toggle(
+                AUTOMATION_MODEL_PICKER_MENU_ID,
+                crate::ui::menu::toggle_popover,
+                window,
+                cx,
+            );
             return;
         }
         if !self

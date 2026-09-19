@@ -96,8 +96,11 @@ pub(super) struct AutomationEditor {
     day_of_week: u8,
     cron: Entity<TextInput>,
     timezone: Entity<TextInput>,
-    provider: ProviderKind,
-    model: Entity<TextInput>,
+    pub(super) provider: ProviderKind,
+    /// Model id, or blank for the provider default. The shared model picker
+    /// writes this via `sessions::choose_model`; it stays a `TextInput` so
+    /// the row can also accept a pasted id the catalog does not know.
+    pub(super) model: Entity<TextInput>,
     project_path: Option<PathBuf>,
     workspace: AutomationWorkspace,
     base_branch: Entity<TextInput>,
@@ -628,6 +631,8 @@ impl Waku {
         if self.automations_editor.take().is_none() {
             return;
         }
+        // The picker's target is only meaningful while the editor exists.
+        self.model_picker_target = composer::ModelPickerTarget::Composer;
         let focus = self.automations_search.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
@@ -1845,7 +1850,14 @@ impl Waku {
                         MenuItem::new(kind.display_name(), move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
                                 if let Some(editor) = this.automations_editor.as_mut() {
-                                    editor.provider = *kind;
+                                    if editor.provider != *kind {
+                                        editor.provider = *kind;
+                                        // Model ids are provider-scoped — a
+                                        // stale pick would fail at dispatch.
+                                        editor.model.update(cx, |input, cx| {
+                                            input.set_content("", cx)
+                                        });
+                                    }
                                     cx.notify();
                                 }
                             });
@@ -1949,6 +1961,91 @@ impl Waku {
                     .selected(mode == workspace)
                 })
                 .collect()
+            },
+        );
+
+        // Model picker: the composer's own panel, retargeted at the editor's
+        // provider/model pair — one row per model, no effort or tier.
+        let model_handle = {
+            let weak = cx.entity().downgrade();
+            let search = self.model_search.clone();
+            let search_focus = self.model_search.read(cx).focus_handle(cx);
+            let empty_focus = self.model_picker_empty_focus.clone();
+            self.menu_handle_with(
+                AUTOMATION_MODEL_PICKER_MENU_ID,
+                cx,
+                move |open, window, cx| {
+                    let mut empty = false;
+                    let _ = weak.update(cx, |this, cx| {
+                        if open {
+                            this.model_picker_target =
+                                composer::ModelPickerTarget::AutomationEditor;
+                            empty = this.model_picker_has_no_providers();
+                            for kind in ProviderKind::ALL {
+                                if composer::picker_lists_provider(
+                                    &this.probes,
+                                    &this.state.disabled_providers,
+                                    None,
+                                    this.daemon.is_remote(),
+                                    kind,
+                                ) {
+                                    this.refresh_provider_model_discovery(kind);
+                                }
+                            }
+                            this.model_picker_highlight = None;
+                            search.update(cx, |search, cx| search.clear(cx));
+                            this.reveal_selected_picker_model(cx);
+                        } else {
+                            this.model_picker_target = composer::ModelPickerTarget::Composer;
+                            if let Some(editor) = this.automations_editor.as_ref() {
+                                let focus = editor.name.read(cx).focus_handle(cx);
+                                window.focus(&focus, cx);
+                            }
+                        }
+                        cx.notify();
+                    });
+                    if open {
+                        // Same two-frame wait the composer picker needs: the
+                        // deferred panel's input only joins the dispatch tree
+                        // after its first draw.
+                        let picker_focus = if empty {
+                            empty_focus.clone()
+                        } else {
+                            search_focus.clone()
+                        };
+                        let reveal_weak = weak.clone();
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| {
+                                window.focus(&picker_focus, cx);
+                                let _ = reveal_weak.update(cx, |this, cx| {
+                                    this.reveal_selected_picker_model(cx);
+                                });
+                            });
+                        });
+                    }
+                },
+            )
+        };
+        let model_text = editor.model.read(cx).content().trim().to_owned();
+        let model_label = if model_text.is_empty() {
+            tr!("automations.model_default")
+        } else {
+            self.model_display_name(editor.provider, Some(model_text.as_str()))
+        };
+        let entity = cx.entity();
+        let model_menu = popover(
+            MenuChip::new("automation-editor-model")
+                .label(model_label)
+                .outlined()
+                .background(theme.raised)
+                .selected(model_handle.is_open()),
+            &model_handle,
+            MenuAlign::BelowRight,
+            move |popover, _window, cx| {
+                let weak = entity.downgrade();
+                entity.read_with(cx, move |this, cx| {
+                    this.render_model_picker_panel(&weak, popover, cx)
+                })
             },
         );
 
@@ -2109,7 +2206,7 @@ impl Waku {
                             .flex_wrap()
                             .gap(px(6.0))
                             .child(provider_menu)
-                            .child(div().w(px(140.0)).child(input_shell(&editor.model)))
+                            .child(model_menu)
                             .into_any_element(),
                     ))
                     .child(row(

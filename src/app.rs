@@ -110,6 +110,9 @@ const COMPOSER_OVERHANG: f32 = 12.0;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
+/// The automation editor's model picker — the same panel as the composer's,
+/// with picks landing on the editor's provider/model fields instead.
+const AUTOMATION_MODEL_PICKER_MENU_ID: &str = "automation-model-picker";
 const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
 const RUNTIME_MODE_MENU_ID: &str = "runtime-mode";
 const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
@@ -1875,6 +1878,9 @@ pub struct Waku {
     /// Keyboard cursor over the model picker's filtered rows. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
     model_picker_highlight: Option<usize>,
+    /// Which surface a picker pick lands on — the composer session or the
+    /// automation editor's provider/model fields.
+    model_picker_target: composer::ModelPickerTarget,
     model_picker_list: ListState,
     model_picker_scrollbar: Rc<ScrollbarState>,
     /// The class-target picker's drawn selection and list state — same shape
@@ -4479,7 +4485,7 @@ impl Waku {
                     if matches!(event, InputEvent::Edited) {
                         if search.read(cx).content().trim().is_empty() {
                             this.model_picker_highlight = None;
-                            this.reveal_selected_picker_model();
+                            this.reveal_selected_picker_model(cx);
                         } else {
                             this.model_picker_highlight = Some(0);
                             this.model_picker_list.scroll_to(ListOffset {
@@ -4986,6 +4992,7 @@ impl Waku {
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
                 model_picker_highlight: None,
+                model_picker_target: composer::ModelPickerTarget::Composer,
                 model_picker_list: ListState::new(0, ListAlignment::Top, px(512.0))
                     .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 model_picker_scrollbar: ScrollbarState::new(),

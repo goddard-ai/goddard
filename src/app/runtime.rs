@@ -2825,10 +2825,13 @@ impl Waku {
     /// composer's trigger, the picker panel, and the send button all swap to
     /// their unavailable state.
     pub(super) fn model_picker_has_no_providers(&self) -> bool {
-        let locked_provider = self
-            .selected_session()
-            .filter(|session| !session.messages.is_empty())
-            .map(|session| session.provider);
+        let locked_provider = match self.model_picker_target {
+            composer::ModelPickerTarget::Composer => self
+                .selected_session()
+                .filter(|session| !session.messages.is_empty())
+                .map(|session| session.provider),
+            composer::ModelPickerTarget::AutomationEditor => None,
+        };
         super::composer::picker_has_no_providers(
             &self.probes,
             &self.state.disabled_providers,
