@@ -191,7 +191,10 @@ impl Waku {
         let panel_fullscreen = slide_width(
             &mut self.panel_fullscreen_slide,
             if self.fullscreen_surface.is_some() {
-                f32::from(window.viewport_size().width)
+                // The layer grows over the session column only: a visible
+                // sidebar keeps its slot, and toggling it while fullscreen
+                // widens or narrows the layer to match.
+                f32::from(window.viewport_size().width) - sidebar
             } else {
                 right_panel_content
             },

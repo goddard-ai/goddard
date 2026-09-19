@@ -3684,6 +3684,10 @@ impl Waku {
         tabs = tabs.child(div().w(px(TAB_SCROLL_FADE_WIDTH)).h(px(1.0)).flex_none());
 
         let fullscreen = self.panel_fullscreen_active();
+        // The maximized layer only reaches the window's left edge — and runs
+        // under the traffic lights — once the sidebar is fully hidden; while
+        // the sidebar holds the edge it owns the clearance instead.
+        let covers_window_chrome = fullscreen && self.sidebar_rendered_width <= 0.0;
         let mut header = div()
             .id("right-panel-header")
             .h(px(48.0))
@@ -3691,10 +3695,10 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(6.0))
-            // Maximized, the layer spans the window and the strip's leading
-            // edge runs under the traffic lights; the same clearance the
-            // sidebar reserves keeps the tabs clickable.
-            .pl(px(if fullscreen {
+            // Maximized over a hidden sidebar, the strip's leading edge runs
+            // under the traffic lights; the same clearance the sidebar
+            // reserves keeps the tabs clickable.
+            .pl(px(if covers_window_chrome {
                 TRAFFIC_LIGHT_CLEARANCE
             } else {
                 10.0
@@ -3703,7 +3707,7 @@ impl Waku {
             // On client-decorated platforms the maximized layer also covers
             // the sidebar's window controls, so the header hosts them while
             // it owns the window's top edge. A no-op where the OS draws them.
-            .when(fullscreen, |header| {
+            .when(covers_window_chrome, |header| {
                 header.children(self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Left,
                     window,

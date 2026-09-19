@@ -1,0 +1,1 @@
+- Keep the sidebar visible when the right panel is maximized — the layer now covers only the session column, and toggling the sidebar resizes the layer to match
