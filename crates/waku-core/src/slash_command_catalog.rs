@@ -51,6 +51,7 @@ pub(crate) fn discover(
         | ProviderKind::Devin
         | ProviderKind::Droid
         | ProviderKind::Fx
+        | ProviderKind::Goose
         | ProviderKind::Grok
         | ProviderKind::Kimi
         // Muse owns its skills and commands inside the serve host; MSP has

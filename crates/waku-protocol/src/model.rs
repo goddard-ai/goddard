@@ -28,6 +28,7 @@ pub enum ProviderKind {
     Fx,
     OpenCode,
     OpenCode2,
+    Goose,
     Grok,
     Kimi,
     Muse,
@@ -36,7 +37,7 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Antigravity,
         Self::Amp,
         Self::Claude,
@@ -49,6 +50,7 @@ impl ProviderKind {
         Self::Fx,
         Self::OpenCode,
         Self::OpenCode2,
+        Self::Goose,
         Self::Grok,
         Self::Kimi,
         Self::Muse,
@@ -70,6 +72,7 @@ impl ProviderKind {
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
             Self::OpenCode2 => "opencode2",
+            Self::Goose => "goose",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
             Self::Muse => "muse",
@@ -92,6 +95,7 @@ impl ProviderKind {
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
             Self::OpenCode2 => "OpenCode 2",
+            Self::Goose => "Goose",
             Self::Grok => "Grok Build",
             Self::Kimi => "Kimi Code",
             Self::Muse => "Muse Code",
@@ -114,6 +118,7 @@ impl ProviderKind {
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
             Self::OpenCode2 => "OpenCode 2",
+            Self::Goose => "Goose",
             Self::Grok => "Grok",
             Self::Kimi => "Kimi",
             Self::Muse => "Muse",
@@ -138,6 +143,7 @@ impl ProviderKind {
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
             Self::OpenCode2 => "opencode2",
+            Self::Goose => "goose",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
             Self::Muse => "muse",
@@ -234,6 +240,14 @@ impl ProviderKind {
                 api_key_env: None,
                 docs_url: "https://opencode.ai/v2/docs",
             },
+            // Goose is multi-provider; `goose configure` interactively picks
+            // the provider and model and stores credentials in its own config.
+            Self::Goose => ProviderSetup {
+                install: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash",
+                sign_in: Some("goose configure"),
+                api_key_env: None,
+                docs_url: "https://aaif-goose.github.io/goose/",
+            },
             Self::Grok => ProviderSetup {
                 install: "curl -fsSL https://x.ai/cli/install.sh | bash",
                 sign_in: Some("grok login"),
@@ -271,10 +285,11 @@ impl ProviderKind {
         }
     }
 
-    /// Kimi Code, Fx, Devin, Droid, and Antigravity are deliberately absent
-    /// from this list and from [`Self::supports_conversation_fork`]. Kimi's
-    /// ACP `session/fork` copies a whole session and takes no turn count, and
-    /// Fx, Devin, and Droid expose no turn-aware fork or truncation method.
+    /// Kimi Code, Fx, Devin, Droid, Goose, and Antigravity are deliberately
+    /// absent from this list and from [`Self::supports_conversation_fork`].
+    /// Kimi's ACP `session/fork` copies a whole session and takes no turn
+    /// count, and Fx, Devin, Droid, and Goose expose no turn-aware fork or
+    /// truncation method.
     /// Antigravity is terminal-backed: its sessions are its own TUI, not
     /// Goddard turns. None of them can reproduce Goddard's "drop the last N
     /// turns" semantics without corrupting history.
@@ -416,6 +431,9 @@ pub enum ProviderResumeCursor {
     Fx {
         session_id: String,
     },
+    Goose {
+        session_id: String,
+    },
     Grok {
         session_id: String,
     },
@@ -470,6 +488,7 @@ impl ProviderResumeCursor {
                 session_id: id,
                 directory: None,
             },
+            ProviderKind::Goose => Self::Goose { session_id: id },
             ProviderKind::Grok => Self::Grok { session_id: id },
             ProviderKind::Kimi => Self::Kimi { session_id: id },
             ProviderKind::Muse => Self::Muse {
@@ -501,6 +520,7 @@ impl ProviderResumeCursor {
             Self::Fx { .. } => ProviderKind::Fx,
             Self::OpenCode { .. } => ProviderKind::OpenCode,
             Self::OpenCode2 { .. } => ProviderKind::OpenCode2,
+            Self::Goose { .. } => ProviderKind::Goose,
             Self::Grok { .. } => ProviderKind::Grok,
             Self::Kimi { .. } => ProviderKind::Kimi,
             Self::Muse { .. } => ProviderKind::Muse,
@@ -522,6 +542,7 @@ impl ProviderResumeCursor {
             | Self::Fx { session_id }
             | Self::OpenCode { session_id }
             | Self::OpenCode2 { session_id, .. }
+            | Self::Goose { session_id }
             | Self::Grok { session_id }
             | Self::Kimi { session_id }
             | Self::Muse { session_id, .. }
@@ -5053,6 +5074,7 @@ mod tests {
                     | ProviderKind::Devin
                     | ProviderKind::Droid
                     | ProviderKind::Fx
+                    | ProviderKind::Goose
                     | ProviderKind::Kimi
             );
             assert_eq!(provider.supports_conversation_fork(), supported);
@@ -5072,6 +5094,7 @@ mod tests {
         assert!(ProviderKind::Devin.supports_model_discovery());
         assert!(ProviderKind::Droid.supports_model_discovery());
         assert!(ProviderKind::Fx.supports_model_discovery());
+        assert!(!ProviderKind::Goose.supports_model_discovery());
         assert!(ProviderKind::OpenCode.supports_model_discovery());
         assert!(ProviderKind::OpenCode2.supports_model_discovery());
         assert!(ProviderKind::Grok.supports_model_discovery());
@@ -5139,7 +5162,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 17);
+        assert_eq!(ProviderKind::ALL.len(), 18);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

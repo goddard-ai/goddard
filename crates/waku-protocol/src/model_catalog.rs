@@ -74,6 +74,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         | ProviderKind::Devin
         | ProviderKind::DeepSeek
         | ProviderKind::Fx
+        | ProviderKind::Goose
         | ProviderKind::Grok
         | ProviderKind::Kimi
         | ProviderKind::Muse
