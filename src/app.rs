@@ -17,6 +17,7 @@ use gpui::{
     Stateful, StyleRefinement,
     TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div, ease_out_quint, fill, font,
     img, linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
+    size,
 };
 use uuid::Uuid;
 
