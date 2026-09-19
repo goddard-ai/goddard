@@ -199,11 +199,15 @@ impl Waku {
         };
         crate::persistence::ComposerDraft {
             // Collapsed paste blocks have no draft slot of their own — the
-            // shared schema is just text — so they fold in here and come back
-            // as ordinary inline text on restore.
-            text: super::composer::prompt_with_pasted_blocks(
+            // shared schema is just text — so they splice in here and come
+            // back as ordinary inline text on restore.
+            text: super::composer::splice_pasted_blocks(
                 self.composer.read(cx).content(cx),
-                &self.composer_pasted_blocks,
+                &self
+                    .composer_pasted_blocks
+                    .iter()
+                    .map(|block| block.text.clone())
+                    .collect::<Vec<_>>(),
             ),
             attachments: self
                 .composer_attachments
