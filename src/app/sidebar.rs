@@ -256,10 +256,10 @@ const SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH: f32 = 28.0;
 /// rerun on this cadence in addition to path-set fingerprint changes.
 const SIDEBAR_CHECKOUT_STATUS_RESCAN: Duration = Duration::from_secs(10);
 
-/// Resting diameter of a dock button. The Sketch row is drawn at the peak.
-const DOCK_ITEM_REST: f32 = 36.0;
-/// Magnified diameter — the Sketch-authored 45px is the largest reached.
-const DOCK_ITEM_PEAK: f32 = 45.0;
+/// Resting diameter of a dock button.
+const DOCK_ITEM_REST: f32 = 66.0;
+/// Magnified diameter — the largest a button reaches under the pointer.
+const DOCK_ITEM_PEAK: f32 = 90.0;
 /// Horizontal reach of the magnification bump, in px from the pointer.
 const DOCK_MAGNIFY_RADIUS: f32 = 90.0;
 /// The row's leading inset from the sidebar edge, and its button spacing.
@@ -268,8 +268,9 @@ const DOCK_ITEM_GAP: f32 = 2.0;
 /// The dock's resting bottom inset — the Sketch placement.
 const DOCK_BOTTOM_INSET: f32 = 3.5;
 /// How far below its resting spot the dock parks while hidden: enough to
-/// drop its top edge (label slot included) under the window's bottom edge.
-const DOCK_HIDDEN_DEPTH: f32 = 80.0;
+/// drop its top edge under the window's bottom edge at peak diameter —
+/// 90 circle + 20.5 label slot + the 3.5 inset, rounded up.
+const DOCK_HIDDEN_DEPTH: f32 = 120.0;
 /// Rise on hover; the drop is quicker so the dock clears promptly.
 const DOCK_RISE: Duration = Duration::from_millis(180);
 const DOCK_DROP: Duration = Duration::from_millis(140);
