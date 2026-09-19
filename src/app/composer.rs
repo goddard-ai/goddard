@@ -1388,8 +1388,8 @@ impl Waku {
             .iter()
             .any(|row| picker_row_section(row) == ModelPickerSection::Recents);
 
-        // The rail jumps rather than filters: a button drops the
-        // query and brings its section's first row into view.
+        // The favorites and recents rail buttons jump: a click drops
+        // the query and brings the section's first row into view.
         let rail_target = |id: SharedString, section: ModelPickerSection| {
             let rail_weak = weak.clone();
             div()
@@ -1447,21 +1447,43 @@ impl Waku {
             if !picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, kind) {
                 continue;
             }
-            // No provider block in the merged list means no scroll
-            // target — a locked session's other providers land here,
-            // as does one whose combos are all favorites or recents.
+            // No provider block in the merged list means nothing to
+            // filter to — a locked session's other providers land
+            // here, as does one whose combos are all favorites or
+            // recents.
             if !section_rows
                 .iter()
                 .any(|row| picker_row_section(row) == ModelPickerSection::Provider(kind))
             {
                 continue;
             }
+            // Provider buttons filter rather than jump: a click
+            // toggles a `provider:<id>` token in the query. The wash
+            // on the button mirrors the token's presence.
+            let provider_active = normalized_query.split_whitespace().any(|token| {
+                token
+                    .strip_prefix("provider:")
+                    .is_some_and(|value| value == kind.id())
+            });
+            let provider_weak = weak.clone();
             rail = rail.child(
-                rail_target(
-                    SharedString::from(format!("model-rail-{}", kind.id())),
-                    ModelPickerSection::Provider(kind),
-                )
-                .child(provider_mark(&theme, kind, 18.0, theme.text_tertiary)),
+                div()
+                    .id(SharedString::from(format!("model-rail-{}", kind.id())))
+                    .w(px(38.0))
+                    .h(px(38.0))
+                    .rounded(px(9.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .when(provider_active, |element| element.bg(theme.overlay))
+                    .hover(|element| element.bg(theme.overlay))
+                    .on_click(move |_, _, cx| {
+                        let _ = provider_weak.update(cx, |this, cx| {
+                            this.toggle_model_picker_provider(kind, cx);
+                        });
+                    })
+                    .child(provider_mark(&theme, kind, 18.0, theme.text_tertiary)),
             );
         }
 
@@ -2141,6 +2163,19 @@ impl Waku {
             });
         }
         cx.notify();
+    }
+
+    /// A provider rail button's filter: write a `provider:<id>` token into
+    /// the query, replacing the provider token already there, or removing it
+    /// when the same provider is clicked again. Other tokens and free text
+    /// survive, so the rail composes with a hand-typed query. The edit emits
+    /// through the search subscription, which pins the cursor to the first
+    /// match the same way a keystroke would.
+    fn toggle_model_picker_provider(&mut self, kind: ProviderKind, cx: &mut Context<Self>) {
+        let content = self.model_search.read(cx).content().to_owned();
+        let query = picker_provider_query(&content, kind.id());
+        self.model_search
+            .update(cx, |search, cx| search.set_content(query, cx));
     }
 
     /// Step the rail to the adjacent section, wrapping at both ends.
@@ -6620,6 +6655,89 @@ pub(super) enum ModelPickerTarget {
     AutomationEditor,
 }
 
+/// The query after a provider rail click. The provider's token replaces any
+/// `provider:*` token already present — two provider filters can never both
+/// match — and clicking the provider already filtered on drops the token
+/// instead. Everything else the user typed is preserved, in place when a
+/// token is replaced and appended when none exists.
+pub(super) fn picker_provider_query(content: &str, id: &str) -> String {
+    let is_provider_token =
+        |token: &str| matches!(token.split_once(':'), Some((key, _)) if key.eq_ignore_ascii_case("provider"));
+    let active = content.split_whitespace().any(|token| {
+        is_provider_token(token) && token.split_once(':').unwrap().1.eq_ignore_ascii_case(id)
+    });
+    let mut query = String::new();
+    let mut inserted = false;
+    for token in content.split_whitespace() {
+        if is_provider_token(token) {
+            if !active && !inserted {
+                inserted = true;
+                if !query.is_empty() {
+                    query.push(' ');
+                }
+                query.push_str("provider:");
+                query.push_str(id);
+            }
+            continue;
+        }
+        if !query.is_empty() {
+            query.push(' ');
+        }
+        query.push_str(token);
+    }
+    if !active && !inserted {
+        if !query.is_empty() {
+            query.push(' ');
+        }
+        query.push_str("provider:");
+        query.push_str(id);
+    }
+    query
+}
+
+/// Byte ranges of the *recognized* values in structured query tokens — the
+/// `pi` in `provider:pi` — so the search field can wash them and a working
+/// token reads differently from a mistyped one. Only the value half paints;
+/// the key, unknown keys, and unrecognized values stay plain.
+pub(super) fn picker_query_annotations(
+    content: &str,
+    probes: &[ProviderProbe],
+) -> Vec<(Range<usize>, bool)> {
+    let mut ranges = Vec::new();
+    let mut base = 0;
+    let mut rest = content;
+    while !rest.is_empty() {
+        let skipped = rest.len() - rest.trim_start().len();
+        base += skipped;
+        rest = &rest[skipped..];
+        let len = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let token = &rest[..len];
+        if let Some((key, value)) = token.split_once(':') {
+            let recognized = !value.is_empty()
+                && if key.eq_ignore_ascii_case("provider") {
+                    ProviderKind::ALL
+                        .iter()
+                        .any(|kind| kind.id().eq_ignore_ascii_case(value))
+                } else if key.eq_ignore_ascii_case("effort") {
+                    probes
+                        .iter()
+                        .filter(|probe| probe.installed)
+                        .flat_map(|probe| &probe.models)
+                        .flat_map(|model| &model.reasoning_efforts)
+                        .any(|option| option.id.eq_ignore_ascii_case(value))
+                } else {
+                    false
+                };
+            if recognized {
+                ranges.push((base + key.len() + 1..base + len, true));
+            }
+        }
+        base += len;
+        rest = &rest[len..];
+    }
+    ranges
+}
+
 /// Every (effort, tier) combination a catalog model expands into: one row per
 /// advertised effort — a single row when the model has none — crossed with
 /// the standard/fast pair when the provider offers a fast tier.
@@ -6726,19 +6844,33 @@ pub(super) fn visible_picker_rows(
             if !searching {
                 return true;
             }
-            let searchable = format!(
-                "{} {} {} {} {} {}",
-                row.model.name,
-                row.model.id,
-                row.provider.short_name(),
-                row.model.sub_provider.as_deref().unwrap_or(""),
-                row.effort.as_deref().unwrap_or(""),
-                if row.fast { "fast" } else { "" },
-            )
-            .to_ascii_lowercase();
-            normalized_query
-                .split_whitespace()
-                .all(|token| searchable.contains(token))
+            let mut searchable = None;
+            normalized_query.split_whitespace().all(|token| {
+                match token.split_once(':') {
+                    // A recognized key filters on the row's fields rather than
+                    // the searchable text; an unrecognized value simply
+                    // matches nothing. Unknown keys stay literal text.
+                    Some(("provider", value)) => row.provider.id().eq_ignore_ascii_case(value),
+                    Some(("effort", value)) => row
+                        .effort
+                        .as_deref()
+                        .is_some_and(|effort| effort.eq_ignore_ascii_case(value)),
+                    _ => searchable
+                        .get_or_insert_with(|| {
+                            format!(
+                                "{} {} {} {} {} {}",
+                                row.model.name,
+                                row.model.id,
+                                row.provider.short_name(),
+                                row.model.sub_provider.as_deref().unwrap_or(""),
+                                row.effort.as_deref().unwrap_or(""),
+                                if row.fast { "fast" } else { "" },
+                            )
+                            .to_ascii_lowercase()
+                        })
+                        .contains(token),
+                }
+            })
         })
         .collect();
 

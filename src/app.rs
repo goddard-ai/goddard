@@ -4576,6 +4576,16 @@ impl Waku {
                 &model_search,
                 |this: &mut Self, search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
+                        // Wash the recognized values in structured tokens —
+                        // `provider:pi`'s `pi` — so a working filter reads
+                        // differently from a mistyped one.
+                        let annotations = composer::picker_query_annotations(
+                            search.read(cx).content(),
+                            &this.probes,
+                        );
+                        search.update(cx, |search, cx| {
+                            search.set_annotation_ranges(annotations, cx);
+                        });
                         if search.read(cx).content().trim().is_empty() {
                             this.model_picker_highlight = None;
                             this.reveal_selected_picker_model(cx);
