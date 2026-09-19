@@ -11,6 +11,7 @@
 //! the prompt, and blocks reading the answer — which the app supplies after
 //! showing a native prompt dialog.
 
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::OpenOptionsExt;
@@ -136,7 +137,7 @@ install_daemon() {
 }
 
 ready_protocol() {
-  sed -n 's/.*"protocol_version":\([0-9][0-9]*\).*/\1/p' "$ready_file" 2>/dev/null | head -1
+  sed -n 's/.*"protocolVersion":\([0-9][0-9]*\).*/\1/p' "$ready_file" 2>/dev/null | head -1
 }
 
 stop_daemon() {
@@ -302,11 +303,12 @@ impl SshTransport {
     /// invocation goes through this so a prompt can never fall back to a
     /// terminal that does not exist.
     fn command(&self) -> Command {
+        let mut control_path = OsString::from("ControlPath=");
+        control_path.push(self.control_path());
         let mut command = Command::new("ssh");
         command
             .arg("-o")
-            .arg("ControlPath")
-            .arg(self.control_path())
+            .arg(control_path)
             .arg("-o")
             .arg("ControlPersist=600")
             .arg("-o")
@@ -320,9 +322,12 @@ impl SshTransport {
         command
     }
 
-    /// Establish or reuse the master connection. `-MNf` daemonizes the
+    /// Establish or reuse the master connection. `-Nf` daemonizes the
     /// master after authentication succeeds, so a non-zero exit here means
-    /// auth or reachability failed and stderr carries why.
+    /// auth or reachability failed and stderr carries why. `ControlMaster`
+    /// is set through `-o` only: adding `-M` on top of it promotes the
+    /// master to confirmation mode, where every later session and forward
+    /// is refused with "Permission denied".
     fn ensure_master(&self) -> anyhow::Result<()> {
         if self.master_alive() {
             return Ok(());
@@ -331,7 +336,7 @@ impl SshTransport {
             .command()
             .arg("-o")
             .arg("ControlMaster=yes")
-            .arg("-MNf")
+            .arg("-Nf")
             .arg(&self.destination)
             .output()
             .context("could not run ssh")?;
@@ -459,12 +464,14 @@ impl SshTransport {
         let mut child = self
             .command()
             .arg(&self.destination)
-            .arg(
+            .arg(format!(
                 "mkdir -p \"$HOME/.goddard/bin\" \
                  && cat >\"$HOME/.goddard/bin/goddard-daemon.new\" \
                  && chmod 755 \"$HOME/.goddard/bin/goddard-daemon.new\" \
-                 && mv \"$HOME/.goddard/bin/goddard-daemon.new\" \"$HOME/.goddard/bin/goddard-daemon\"",
-            )
+                 && mv \"$HOME/.goddard/bin/goddard-daemon.new\" \"$HOME/.goddard/bin/goddard-daemon\" \
+                 && printf '%s' '{}' >\"$HOME/.goddard/bin/.version\"",
+                env!("CARGO_PKG_VERSION")
+            ))
             .stdin(Stdio::piped())
             .spawn()
             .context("could not upload goddard-daemon over ssh")?;
