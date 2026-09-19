@@ -189,7 +189,6 @@ const COMMAND_RUN_TAIL_LINES: usize = 3;
 /// terminal every 24ms poll, and each publish costs a full-window frame.
 const COMMAND_RUN_TAIL_INTERVAL: Duration = Duration::from_millis(125);
 const MINIMUM_TOAST_RESUME_DURATION: Duration = Duration::from_millis(800);
-const TOAST_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 const TASK_NOTIFICATION_TAG_PREFIX: &str = "waku-task:";
 
 pub(crate) fn task_notification_tag(session_id: Uuid) -> String {

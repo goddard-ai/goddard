@@ -1248,7 +1248,9 @@ impl Waku {
             .px(px(20.0))
             .flex()
             .justify_center()
-            .child(
+            // Keep the toast top-centered just beneath Goddard's 48px header.
+            .child(motion::surface_enter(
+                SharedString::from(format!("toast-enter-{generation}")),
                 div()
                     .id(SharedString::from(format!("toast-{generation}")))
                     .occlude()
@@ -1287,15 +1289,7 @@ impl Waku {
                     )
                     .children(detail_block)
                     .child(self.toast_selection_input()),
-            )
-            // Keep the toast top-centered just beneath Goddard's 48px header.
-            // GPUI's animation path honors the system reduce-motion preference
-            // and resolves immediately.
-            .with_animation(
-                SharedString::from(format!("toast-enter-{generation}")),
-                Animation::new(TOAST_ANIMATION_DURATION).with_easing(ease_out_quint()),
-                |element, delta| element.opacity(delta),
-            )
+            ))
     }
 
     /// The modal an ssh askpass request becomes. The prompt text is whatever

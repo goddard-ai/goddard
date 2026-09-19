@@ -12,8 +12,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Animation, AnimationElement, AnimationExt, AnyElement, App, ElementId, EntityId, Global,
-    IntoElement, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage,
+    Animation, AnimationElement, AnimationExt, AnyElement, App, Bounds, ContentMask, Element,
+    ElementId, EntityId, Global, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
+    Pixels, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage,
 };
 
 /// Repeat-tick interval, rounded up so spinner ticks never exceed 60 fps.
@@ -254,31 +255,52 @@ fn width_at(from: f32, target: f32, elapsed: Duration) -> Option<f32> {
 
 /// How long a menu or popover takes to fade in — short enough to read as
 /// instant.
-pub const SURFACE_ENTER: Duration = Duration::from_millis(140);
+pub const SURFACE_ENTER: Duration = Duration::from_millis(120);
 
 /// The window-modal equivalent: the card is larger, so its fade runs a touch
 /// longer.
-pub const MODAL_ENTER: Duration = Duration::from_millis(160);
+pub const MODAL_ENTER: Duration = Duration::from_millis(140);
 
 /// The scrim behind a modal fades on its own, quicker clock.
 pub const SCRIM_ENTER: Duration = Duration::from_millis(120);
 
-/// The shared entrance for a floating surface — menu, popover, or dropdown:
-/// a bare fade with no movement or resize. Driven by `with_animation`, so
-/// under reduce-motion the oneshot delta is 1 and it renders settled.
-pub fn surface_enter<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
+/// A one-shot entrance for a floating surface — menu, popover, or dialog.
+///
+/// The child fades in while a clip at its own bounds holds back the drop
+/// shadow: GPUI multiplies opacity into each primitive's alpha rather than
+/// compositing the group, so a translucent surface would let the shadow ring
+/// read through it for the whole fade. The clip keeps the silhouette clean;
+/// when the card is opaque the shadow lands with it. Drive it with
+/// `with_animation`; under reduce-motion the oneshot delta is 1 and it renders
+/// settled.
+pub struct SurfaceFade<E> {
+    child: Option<E>,
+    progress: f32,
+}
+
+impl<E: Styled + IntoElement + 'static> SurfaceFade<E> {
+    /// The eased animation delta for this frame, supplied by `with_animation`.
+    pub fn progress(mut self, progress: f32) -> Self {
+        self.progress = progress;
+        self
+    }
+}
+
+/// The shared entrance for a floating surface: a bare fade with no movement
+/// or resize, the drop shadow clipped away until the card is opaque.
+pub fn surface_enter<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<SurfaceFade<E>>
 where
     E: Styled + IntoElement + 'static,
 {
-    fade(id, element, SURFACE_ENTER)
+    fade_surface(id, element, SURFACE_ENTER)
 }
 
 /// The window-modal entrance: the same fade on a slightly longer clock.
-pub fn modal_enter<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
+pub fn modal_enter<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<SurfaceFade<E>>
 where
     E: Styled + IntoElement + 'static,
 {
-    fade(id, element, MODAL_ENTER)
+    fade_surface(id, element, MODAL_ENTER)
 }
 
 /// A bare one-shot fade, for the scrim under a modal.
@@ -286,16 +308,108 @@ pub fn fade_in<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
 where
     E: Styled + IntoElement + 'static,
 {
-    fade(id, element, SCRIM_ENTER)
+    element.with_animation(id, Animation::new(SCRIM_ENTER), |element, delta| {
+        element.opacity(delta)
+    })
 }
 
-fn fade<E>(id: impl Into<ElementId>, element: E, duration: Duration) -> AnimationElement<E>
+fn fade_surface<E>(
+    id: impl Into<ElementId>,
+    element: E,
+    duration: Duration,
+) -> AnimationElement<SurfaceFade<E>>
 where
     E: Styled + IntoElement + 'static,
 {
-    element.with_animation(id, Animation::new(duration), |element, delta| {
-        element.opacity(delta)
-    })
+    SurfaceFade {
+        child: Some(element),
+        progress: 0.0,
+    }
+    // The ease spends most of the span near opaque, so the deep-translucency
+    // phase is only the first frames.
+    .with_animation(
+        id,
+        Animation::new(duration).with_easing(ease_out_quint()),
+        |element, delta| element.progress(delta),
+    )
+}
+
+impl<E> Element for SurfaceFade<E>
+where
+    E: Styled + IntoElement + 'static,
+{
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = Option<ContentMask<Pixels>>;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut child = self
+            .child
+            .take()
+            .expect("request_layout runs once per frame");
+        if self.progress < 1.0 {
+            child = child.opacity(self.progress.max(0.0));
+        }
+        let mut child = child.into_any_element();
+        let layout_id = child.request_layout(window, cx);
+        (layout_id, child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let progress = self.progress.clamp(0.0, 1.0);
+        if progress >= 1.0 {
+            child.prepaint(window, cx);
+            return None;
+        }
+        let mask = ContentMask { bounds };
+        window.with_content_mask(Some(mask), |window| child.prepaint(window, cx));
+        Some(mask)
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        mask: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_content_mask(*mask, |window| child.paint(window, cx));
+    }
+}
+
+impl<E> IntoElement for SurfaceFade<E>
+where
+    E: Styled + IntoElement + 'static,
+{
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
 }
 
 #[cfg(test)]

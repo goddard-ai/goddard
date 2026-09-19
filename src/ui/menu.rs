@@ -1367,7 +1367,7 @@ impl RenderOnce for MenuCard {
                     cx,
                 ));
             }
-            surface = surface.child(motion::fade_in(
+            surface = surface.child(motion::surface_enter(
                 SharedString::from(format!("submenu-{parent_index}-enter")),
                 submenu_card,
             ));
