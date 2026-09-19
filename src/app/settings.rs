@@ -123,7 +123,7 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 14] = [
     (
         SettingsPage::Jev,
         "settings.jev",
-        "icons/provider-typesafe.svg",
+        "icons/provider-typesafe-padded.svg",
         "settings.jev_keywords",
     ),
     (
