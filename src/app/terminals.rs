@@ -704,6 +704,15 @@ impl Waku {
             self.state.projects_page_enabled,
             &mut self.session_navigation.back,
         );
+        // Switching terminals stacks each one on the history; fold them
+        // all away so closing lands on the chat behind them, not the
+        // previous terminal.
+        while matches!(
+            self.session_navigation.back_target(),
+            Some(NavigationLocation::Terminal(_))
+        ) {
+            self.session_navigation.back.pop();
+        }
         match self.session_navigation.back_target() {
             Some(NavigationLocation::Task(target)) => {
                 self.request_session_activation(
