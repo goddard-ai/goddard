@@ -1707,7 +1707,9 @@ impl Waku {
                             .inset_0()
                             .size_full(),
                     )
-                    .child(icon(path, 22.0, glyph)),
+                    // img() keeps the SVG's authored colors and blur-filtered
+                    // shadows; icon() would flatten it to a tinted alpha mask.
+                    .child(img(path).size(px(22.0)).flex_none()),
             )
             .focus_visible(|style| {
                 style
