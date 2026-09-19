@@ -342,6 +342,10 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default = "default_experiment_enabled")]
     pub subagents_enabled: bool,
+    /// Named subagent tiers injected into every session's harness, mirrored
+    /// from the settings document.
+    #[serde(default)]
+    pub subagent_tiers: BTreeMap<String, waku_protocol::settings::SubagentTier>,
     /// Experimental: whether the daemon maintains project memory, mirrored
     /// from the settings document.
     #[serde(default = "default_experiment_enabled")]
@@ -466,6 +470,7 @@ impl PersistedState {
             agent_settings_enabled: true,
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
+            subagent_tiers: BTreeMap::new(),
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
             eval: None,
@@ -617,6 +622,7 @@ impl PersistedState {
             agent_settings_enabled: self.agent_settings_enabled,
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
+            subagent_tiers: self.subagent_tiers.clone(),
             memory_experiment_enabled: self.memory_experiment_enabled,
             project_map_enabled: self.project_map_enabled,
             eval: self.eval.clone(),
@@ -661,6 +667,7 @@ impl PersistedState {
         self.agent_settings_enabled = settings.agent_settings_enabled;
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
+        self.subagent_tiers = settings.subagent_tiers;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.project_map_enabled = settings.project_map_enabled;
         self.eval = settings.eval;
