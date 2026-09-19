@@ -478,7 +478,7 @@ pub fn upstream_commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result
     log_commits(cwd, &revs, skip, limit)
 }
 
-fn log_commits(
+pub(crate) fn log_commits(
     cwd: &Path,
     revs: &[String],
     skip: usize,

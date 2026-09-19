@@ -39,6 +39,8 @@ struct ClientInner {
     settings_subscribers: Mutex<Vec<Sender<DaemonSettings>>>,
     friends_subscribers: Mutex<Vec<Sender<waku_protocol::friends::FriendsState>>>,
     automations_subscribers: Mutex<Vec<Sender<waku_protocol::automations::AutomationsState>>>,
+    /// `ReviewChanged` broadcasts — the origin URL whose QA state moved.
+    review_subscribers: Mutex<Vec<Sender<String>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -122,6 +124,7 @@ impl DaemonClient {
             settings_subscribers: Mutex::new(Vec::new()),
             friends_subscribers: Mutex::new(Vec::new()),
             automations_subscribers: Mutex::new(Vec::new()),
+            review_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -246,6 +249,15 @@ impl DaemonClient {
     pub fn subscribe_automations(&self) -> Receiver<waku_protocol::automations::AutomationsState> {
         let (events, receiver) = unbounded();
         self.inner.automations_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// Every `reviewChanged` the daemon broadcasts — an origin URL whose
+    /// QA review state moved, here or on a friend's machine. Review
+    /// surfaces re-read their queue on receipt.
+    pub fn subscribe_review(&self) -> Receiver<String> {
+        let (events, receiver) = unbounded();
+        self.inner.review_subscribers.lock().push(events);
         receiver
     }
 
@@ -437,6 +449,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(state.clone()).is_ok());
                     }
+                    ServerMessage::ReviewChanged { origin_url } => {
+                        inner
+                            .review_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send(origin_url.clone()).is_ok());
+                    }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
                 }
@@ -474,6 +492,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.settings_subscribers.lock().clear();
     inner.friends_subscribers.lock().clear();
     inner.automations_subscribers.lock().clear();
+    inner.review_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

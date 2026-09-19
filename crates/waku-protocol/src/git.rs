@@ -156,6 +156,65 @@ pub enum PullStrategy {
     Merge,
 }
 
+/// A reviewer's recorded verdict on a `qa` commit — one line of the
+/// commit's `refs/notes/qa` note.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewDecision {
+    Approved,
+    Rejected,
+}
+
+/// One line of a commit's `refs/notes/qa` note. `reviewer` is the pusher's
+/// git identity (`user.name <user.email>`) — the note itself is trusted via
+/// the `origin` push, not a signature.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRecord {
+    pub reviewer: String,
+    pub decision: ReviewDecision,
+    /// Unix seconds.
+    pub at: u64,
+}
+
+/// One proposed commit on `qa` and its review state, for the Projects
+/// page's Review tab.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewEntry {
+    pub commit: CommitEntry,
+    /// `Test-Plan:` trailer lines — the checklist a human verifies.
+    pub test_plans: Vec<String>,
+    /// Policy verdict: a trailer or a sensitive path means a human must
+    /// approve before this can promote. Otherwise it counts as approved
+    /// without a note.
+    pub needs_review: bool,
+    /// Latest decision per reviewer, one record each.
+    pub reviews: Vec<ReviewRecord>,
+    /// Some reviewer's latest decision is `Rejected`.
+    pub rejected: bool,
+    /// A `git revert` of this commit sits later on `qa` — its changes are
+    /// undone, so it can't block the frontier.
+    pub reverted: bool,
+    /// Promotable: no pending rejection, and either policy auto-approves it
+    /// or a reviewer approved it.
+    pub approved: bool,
+}
+
+/// The `qa` branch's proposed commits (oldest first) and how far `main`
+/// may fast-forward — the longest prefix where every entry is approved.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewQueue {
+    /// The promotion target — `origin/<default branch>`, typically `main`.
+    pub base_branch: Option<String>,
+    /// Oldest first. Empty when the repo has no `origin/qa`.
+    pub entries: Vec<ReviewEntry>,
+    /// Commit `main` can fast-forward to — the last entry of the approved
+    /// prefix. `None` when nothing is promotable.
+    pub frontier: Option<String>,
+}
+
 /// Which integration left the checkout conflicted — decides whether abort
 /// runs `git rebase --abort` or `git merge --abort`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

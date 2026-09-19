@@ -185,6 +185,13 @@ pub enum FriendsMessage {
         origin_url: String,
         branches: Vec<String>,
     },
+    /// Sender moved refs that aren't branches — `refs/notes/qa` for QA
+    /// review state. The recipient fetches them so review surfaces stay
+    /// fresh; a hint, same as `PushNotice`.
+    RefNotice {
+        origin_url: String,
+        refs: Vec<String>,
+    },
 }
 
 /// What the local user decided about an incoming request.
@@ -232,6 +239,11 @@ pub type SyncStateHandler = Arc<dyn Fn(EndpointId, String, bool) + Send + Sync>;
 /// fetches and integrates its enabled branches.
 pub type PushHandler = Arc<dyn Fn(EndpointId, String, Vec<String>) + Send + Sync>;
 
+/// Fired when a friend reports moving non-branch refs on a shared
+/// origin — e.g. `refs/notes/qa` review records. The receiver fetches
+/// them and refreshes any surface that reads them.
+pub type RefHandler = Arc<dyn Fn(EndpointId, String, Vec<String>) + Send + Sync>;
+
 /// Acceptor for [`ALPN_FRIENDS`]: reads one message, dispatches to the
 /// installed handler, replies. Offers from non-friends are declined;
 /// offers from friends are auto-accepted (per the product decision) and the
@@ -244,6 +256,7 @@ pub struct FriendsProtocol {
     on_share: Option<ShareListHandler>,
     on_sync_state: Option<SyncStateHandler>,
     on_push: Option<PushHandler>,
+    on_refs: Option<RefHandler>,
     store: Arc<Mutex<FriendStore>>,
 }
 
@@ -271,6 +284,7 @@ impl FriendsProtocol {
             on_share: None,
             on_sync_state: None,
             on_push: None,
+            on_refs: None,
             store,
         }
     }
@@ -282,10 +296,12 @@ impl FriendsProtocol {
         on_share: ShareListHandler,
         on_sync_state: SyncStateHandler,
         on_push: PushHandler,
+        on_refs: RefHandler,
     ) -> Self {
         self.on_share = Some(on_share);
         self.on_sync_state = Some(on_sync_state);
         self.on_push = Some(on_push);
+        self.on_refs = Some(on_refs);
         self
     }
 
@@ -432,6 +448,17 @@ impl ProtocolHandler for FriendsProtocol {
                 if self.touch_friend(&remote) {
                     if let Some(on_push) = &self.on_push {
                         on_push(remote, origin_url, branches);
+                    }
+                    write_message(&mut send, &FriendsMessage::Ack)
+                        .await
+                        .map_err(accept_err)?;
+                }
+                send.finish()?;
+            }
+            FriendsMessage::RefNotice { origin_url, refs } => {
+                if self.touch_friend(&remote) {
+                    if let Some(on_refs) = &self.on_refs {
+                        on_refs(remote, origin_url, refs);
                     }
                     write_message(&mut send, &FriendsMessage::Ack)
                         .await
@@ -644,6 +671,25 @@ pub async fn send_push_notice(
         &FriendsMessage::PushNotice {
             origin_url: origin_url.to_string(),
             branches: branches.to_vec(),
+        },
+    )
+    .await
+}
+
+/// Tell a friend non-branch refs moved on a shared origin — they fetch
+/// them and refresh surfaces that read them.
+pub async fn send_ref_notice(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    origin_url: &str,
+    refs: &[String],
+) -> anyhow::Result<()> {
+    send_acked(
+        endpoint,
+        addr,
+        &FriendsMessage::RefNotice {
+            origin_url: origin_url.to_string(),
+            refs: refs.to_vec(),
         },
     )
     .await

@@ -107,6 +107,10 @@ pub trait Backend: Send + Sync + 'static {
     /// Root event sink for work the backend initiates without a client
     /// request — a scheduled automation dispatching a run.
     fn set_event_source(&self, _events: EventSink) {}
+
+    /// Where the share layer reports QA review state moving — here or on
+    /// a friend's machine.
+    fn set_review_notifier(&self, _notifier: crate::share::ReviewNotifier) {}
 }
 
 #[derive(Clone)]
@@ -513,6 +517,18 @@ impl Hub {
         );
     }
 
+    /// QA review state moved for `origin_url` — a local approve/reject/
+    /// promote, or a friend's ref notice. Review surfaces re-read their
+    /// queue rather than trusting this hint's payload.
+    fn review_changed(&self, origin_url: String) {
+        let mut hub_state = self.state.lock();
+        Self::broadcast(
+            &mut hub_state,
+            &ServerMessage::ReviewChanged { origin_url },
+            None,
+        );
+    }
+
     fn cached_response(&self, request_id: Uuid) -> Option<ResponseOutcome> {
         self.state
             .lock()
@@ -707,6 +723,12 @@ pub fn serve(
         backend.set_automations_sink(Arc::new(move |state| hub.automations_changed(state)));
     }
     backend.set_event_source(hub.event_sink(Uuid::nil(), Uuid::nil()));
+    {
+        let hub = hub.clone();
+        backend.set_review_notifier(Arc::new(move |origin_url| {
+            hub.review_changed(origin_url)
+        }));
+    }
     let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
     let options = Arc::new(options);
     let active_connections = Arc::new(AtomicUsize::new(0));

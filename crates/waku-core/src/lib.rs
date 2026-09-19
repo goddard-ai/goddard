@@ -96,6 +96,7 @@ pub mod projectless;
 pub mod pull_requests;
 pub mod repo;
 pub mod repo_map;
+pub mod review;
 pub mod route_policy;
 pub mod routing;
 pub mod settings;

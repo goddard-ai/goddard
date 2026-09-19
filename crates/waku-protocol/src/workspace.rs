@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
     AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot,
-    CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy,
+    CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy, ReviewQueue,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -844,6 +844,35 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         sha: String,
     },
+    /// The QA review queue: `origin/qa` commits not yet on the base
+    /// branch, oldest first, each with its approval state from
+    /// `refs/notes/qa`. Fetches `origin` first so the view is fresh;
+    /// `None` outside a repository.
+    ReviewQueue {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Record an approval note for `sha` on `refs/notes/qa` and push it.
+    /// Returns the refreshed queue.
+    ReviewApprove {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        sha: String,
+    },
+    /// Record a rejection note for `sha`, revert it on `qa`, and push
+    /// both. Returns the refreshed queue.
+    ReviewReject {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        sha: String,
+    },
+    /// Fast-forward the base branch to the approved frontier. Returns
+    /// the refreshed queue; errors when the push is rejected (`main`
+    /// moved without `qa` — a hotfix that `qa` must integrate first).
+    ReviewPromote {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
     CaptureTurnStart {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1106,6 +1135,10 @@ pub enum WorkspaceResult {
     },
     CommitEntry {
         entry: CommitEntry,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    ReviewQueue {
+        queue: Option<ReviewQueue>,
     },
     Checkpoint {
         checkpoint: Checkpoint,
