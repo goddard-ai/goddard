@@ -812,17 +812,40 @@ fn packed_self_strip(id: &str) -> Option<(&str, &str)> {
 }
 
 /// A synthesized base needs its own name: the alias label minus the trait
-/// words its suffix names, so "SWE-2 High Fast" becomes "SWE-2".
+/// words its suffix names, so "SWE-2 High Fast" becomes "SWE-2". Antigravity
+/// packs the same words parenthesized — "Gemini 3.1 Pro (High)" — so a
+/// trailing all-trait "(...)" group strips whole before the word walk.
 fn packed_stripped_name(label: &str, suffix: &str) -> String {
     let mut trait_words: Vec<String> = Vec::new();
     for token in suffix.split('-') {
         trait_words.push(token.to_ascii_lowercase());
         let (label, _) = reasoning_effort_pair(&normalize_reasoning_effort(token));
-        trait_words.extend(label.split_whitespace().map(|word| word.to_ascii_lowercase()));
+        trait_words.extend(
+            label
+                .split_whitespace()
+                .map(|word| word.to_ascii_lowercase()),
+        );
     }
-    let mut words: Vec<&str> = label.split_whitespace().collect();
+    let is_trait = |word: &str| {
+        trait_words
+            .iter()
+            .any(|trait_word| *trait_word == word.to_ascii_lowercase())
+    };
+    let mut text = label.trim().to_owned();
+    while text.ends_with(')') {
+        let Some(open) = text.rfind('(') else {
+            break;
+        };
+        let inner = &text[open + 1..text.len() - 1];
+        let mut words = inner.split_whitespace().peekable();
+        if words.peek().is_none() || !words.all(|word| is_trait(word)) {
+            break;
+        }
+        text = text[..open].trim_end().to_owned();
+    }
+    let mut words: Vec<&str> = text.split_whitespace().collect();
     while let Some(word) = words.last() {
-        if !trait_words.iter().any(|word_| *word_ == word.to_ascii_lowercase()) {
+        if !is_trait(word) {
             break;
         }
         words.pop();
@@ -881,8 +904,15 @@ fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
             .min_by_key(|(base, _, _, _)| base.len())
             .or_else(|| {
                 packed_self_strip(&listing.id).and_then(|(base, suffix)| {
-                    packed_suffix_traits(suffix)
-                        .map(|(effort, fast)| (base.to_owned(), effort, fast, true))
+                    packed_suffix_traits(suffix).and_then(|(effort, fast)| {
+                        // A synthesized base only exists in the picker — the
+                        // provider never listed it — so it is only safe when
+                        // the suffix folds into a trait the launch passes
+                        // separately. `x-thinking` carries none: agy rejects
+                        // `claude-opus-4-6` where `claude-opus-4-6-thinking`
+                        // is the whole id.
+                        (effort.is_some() || fast).then(|| (base.to_owned(), effort, fast, true))
+                    })
                 })
             });
         match resolved {
@@ -3059,6 +3089,43 @@ opencode/big-pickle
                 .collect::<Vec<_>>(),
             ["high", "max"]
         );
+    }
+
+    #[test]
+    fn folds_antigravity_packed_efforts_but_keeps_traitless_ids() {
+        // `agy models` spells effort variants as `base-effort` ids with the
+        // effort parenthesized in the label, while `-thinking` is part of the
+        // model id itself — the CLI rejects the stripped base.
+        let models = fold_packed_aliases(parse_antigravity_models(
+            "gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n\
+             gemini-3.1-pro-low\tGemini 3.1 Pro (Low)\n\
+             claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n\
+             claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\n",
+        ));
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "gemini-3.1-pro",
+                "claude-sonnet-4-6",
+                "claude-opus-4-6-thinking"
+            ]
+        );
+        let gemini = &models[0];
+        assert_eq!(gemini.name, "Gemini 3.1 Pro");
+        assert_eq!(
+            gemini
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "high"]
+        );
+        assert_eq!(gemini.default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(models[2].name, "Claude Opus 4.6 (Thinking)");
+        assert!(models[2].reasoning_efforts.is_empty());
     }
 
     #[test]
