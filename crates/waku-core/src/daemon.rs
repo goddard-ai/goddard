@@ -661,7 +661,14 @@ impl Backend for WakuBackend {
                 discover_models,
                 probe_version,
             } => {
-                ensure_shell_environment();
+                // Bare detection probes double as the manual-refresh path, so
+                // they may re-capture the shell environment; model discovery
+                // and version probes only ensure it exists.
+                if discover_models || probe_version {
+                    ensure_shell_environment();
+                } else {
+                    crate::command_env::refresh_shell_environment_if_stale();
+                }
                 let mut probe = match binary_override.as_deref() {
                     override_value if discover_models || probe_version => {
                         crate::model::provider_probe(provider, override_value)
