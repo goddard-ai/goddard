@@ -2059,6 +2059,8 @@ models.auto_hint:
   en: select the best provider
 models.auto_routed:
   en: "Auto (Jev) · %{model}"
+models.auto_missing_credential:
+  en: The selected Jev eval backend has no credential — routing falls back to the last used provider. Add one in Jev settings.
 models.favorite_hint:
   en: Star a model to keep it here
 models.loading:
