@@ -87,6 +87,7 @@ pub mod opencode2_service;
 pub mod opencode2_session;
 pub mod opencode_pool;
 pub mod opencode_session;
+pub mod permission_review;
 pub mod persistence;
 pub mod pi_session;
 pub mod projectless;

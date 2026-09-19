@@ -142,6 +142,9 @@ enum DriverCommand {
         request_id: String,
         option_id: String,
     },
+    /// A driver event the review verdict resolved to — emitted through the
+    /// command channel so the send stays on the worker's own ordering.
+    Emit(DriverEvent),
     RespondUserInput {
         request_id: String,
         answers: Vec<UserInputAnswer>,
@@ -425,6 +428,7 @@ impl OpenCode2Driver {
             agent: agent_env,
             subagents,
             provider_cursor,
+            eval,
         } = options;
 
         let resumed = match provider_cursor {
@@ -661,6 +665,13 @@ impl OpenCode2Driver {
         };
         let generation = service.generation();
         let mut state = StreamState::new(session_id.clone(), mode, session_model, generation);
+        // `Auto` never answers blindly: the review replies when a backend is
+        // configured and the user does when it is not.
+        state.permissions.eval = if mode == RuntimeMode::Auto {
+            eval.map(Arc::new)
+        } else {
+            None
+        };
         thread::Builder::new()
             .name(format!("waku-opencode2-{session_id}"))
             .spawn(move || {
@@ -1050,9 +1061,11 @@ fn stripped(value: Option<&Value>) -> Option<Value> {
 /// resolved agent's own rules mark `ask`; the mode only decides who answers.
 fn auto_replies(mode: RuntimeMode, action: &str) -> bool {
     match mode {
-        RuntimeMode::Ask => false,
+        // `Auto` never answers blindly: the evaluation reviewer replies when
+        // a backend is configured and the user does when it is not.
+        RuntimeMode::Ask | RuntimeMode::Auto => false,
         RuntimeMode::AutoAcceptEdits => matches!(action, "edit" | "write" | "patch"),
-        RuntimeMode::Auto | RuntimeMode::FullAccess => true,
+        RuntimeMode::FullAccess => true,
     }
 }
 
@@ -1220,6 +1233,9 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     )));
                 }
             }
+        }
+        DriverCommand::Emit(event) => {
+            let _ = events.send(event);
         }
         DriverCommand::RespondUserInput {
             request_id,
@@ -2461,11 +2477,6 @@ fn request_permission(
         return;
     }
 
-    state
-        .permissions
-        .pending
-        .insert(request_id.to_owned(), request.clone());
-
     let action = if request.permission.is_empty() {
         tr!("permission.run_a_tool_lower")
     } else {
@@ -2501,7 +2512,7 @@ fn request_permission(
             (pair.0, Some(pair.1))
         }
     };
-    let _ = events.send(DriverEvent::Permission {
+    let event = DriverEvent::Permission {
         request_id: request_id.to_owned(),
         title,
         title_i18n,
@@ -2524,7 +2535,49 @@ fn request_permission(
                 false,
             ),
         ],
-    });
+    };
+
+    if state.mode == RuntimeMode::Auto
+        && let Some(eval) = state.permissions.eval.clone()
+    {
+        // Park the request like a user prompt — an escalation reuses the
+        // same pending entry — then let the review answer: `clear` replies
+        // "once" through the existing respond path, anything else escalates.
+        state
+            .permissions
+            .pending
+            .insert(request_id.to_owned(), request.clone());
+        state.permissions.responding.insert(request_id.to_owned());
+        let action = crate::permission_review::PendingAction {
+            provider: "opencode2",
+            tool: request.permission.clone(),
+            arguments: data.to_string(),
+            call_id: request_id.to_owned(),
+            detail: data
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        };
+        let commands = commands.clone();
+        let request_id = request_id.to_owned();
+        crate::permission_review::review_on_thread(eval, action, move |verdict| {
+            let message = match verdict {
+                crate::permission_review::ReviewVerdict::Allow => DriverCommand::Respond {
+                    request_id,
+                    option_id: "once".into(),
+                },
+                crate::permission_review::ReviewVerdict::Escalate => DriverCommand::Emit(event),
+            };
+            let _ = commands.send(message);
+        });
+        return;
+    }
+
+    state
+        .permissions
+        .pending
+        .insert(request_id.to_owned(), request);
+    let _ = events.send(event);
 }
 
 #[cfg(test)]
@@ -2957,7 +3010,9 @@ mod tests {
             (RuntimeMode::Ask, "edit", true),
             (RuntimeMode::AutoAcceptEdits, "edit", false),
             (RuntimeMode::AutoAcceptEdits, "bash", true),
-            (RuntimeMode::Auto, "bash", false),
+            // Auto never answers blindly: the review replies when a backend
+            // is configured and the user — like here — does when it is not.
+            (RuntimeMode::Auto, "bash", true),
             (RuntimeMode::FullAccess, "bash", false),
         ] {
             let mut harness = Harness::new(mode);
@@ -3371,6 +3426,7 @@ mod tests {
         let (events, event_rx) = crate::driver::test_event_channel();
         let driver = OpenCode2Driver::start(
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -3438,6 +3494,7 @@ mod tests {
             let (events, received) = crate::driver::test_event_channel();
             let driver = OpenCode2Driver::start(
                 DriverStartOptions {
+                    eval: None,
                     binary: binary.clone(),
                     cwd: test_directory.clone(),
                     mode: RuntimeMode::FullAccess,

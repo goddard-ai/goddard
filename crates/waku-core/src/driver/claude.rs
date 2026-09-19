@@ -181,6 +181,7 @@ impl ClaudeDriver {
             agent,
             subagents,
             provider_cursor,
+            eval: _,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
             Some(ProviderResumeCursor::Claude {
@@ -261,7 +262,11 @@ impl ClaudeDriver {
         });
 
         let (commands, command_rx) = unbounded();
-        let auto_approve = mode != RuntimeMode::Ask;
+        // `--dangerously-skip-permissions` (FullAccess) keeps can_use_tool
+        // from ever firing, so anything that reaches it is an escalation the
+        // user must see — Claude's own permission mode already decided what
+        // it could resolve, and its escalations go to the user, not Jev.
+        let auto_approve = false;
         let turn_active = Arc::new(Mutex::new(false));
         let pending_task_stops = Arc::new(Mutex::new(HashMap::<String, BackgroundWorkKey>::new()));
         let pending_user_inputs = Arc::new(Mutex::new(HashMap::<String, Value>::new()));
@@ -1928,6 +1933,7 @@ mod tests {
         let (events, event_rx) = crate::driver::test_event_channel();
         let driver = ClaudeDriver::start(
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -1998,6 +2004,7 @@ mod tests {
         let (events, event_rx) = crate::driver::test_event_channel();
         let driver = ClaudeDriver::start(
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

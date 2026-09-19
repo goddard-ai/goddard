@@ -222,6 +222,7 @@ impl PiDriver {
             agent,
             subagents,
             provider_cursor,
+            eval: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
             return Err(anyhow!(
@@ -1855,6 +1856,7 @@ mod tests {
         let driver = PiDriver::start(
             PiFlavor::Pi,
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -2153,6 +2155,7 @@ mod tests {
         let driver = PiDriver::start(
             PiFlavor::OhMyPi,
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

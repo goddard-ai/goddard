@@ -139,6 +139,7 @@ impl AcpDriver {
             agent: agent_env,
             subagents: _,
             provider_cursor,
+            eval,
         } = options;
         let fork_context = match &provider_cursor {
             Some(ProviderResumeCursor::Cursor { fork_context, .. }) => fork_context.clone(),
@@ -202,6 +203,7 @@ impl AcpDriver {
                     resume_session_id,
                     fork_context,
                     grok_title_home,
+                    eval,
                     command_rx,
                     thread_events.clone(),
                 ));
@@ -433,6 +435,49 @@ impl PendingPrompts {
 
 type PendingPromptRequests = Arc<Mutex<PendingPrompts>>;
 
+/// How a permission request from the provider gets answered without the
+/// user. `Auto` routes through the evaluation review when the backend is
+/// configured and asks like `Ask` when it is not.
+#[derive(Clone)]
+enum PermissionDisposition {
+    /// Pick an allow option immediately.
+    AutoApprove,
+    /// Run the evaluation-model review first; a cleared request answers an
+    /// allow-once option and anything else escalates to the user.
+    Review(Arc<waku_protocol::eval::EvalSettings>),
+    /// Emit the permission prompt.
+    Prompt,
+}
+
+fn permission_disposition(
+    provider: ProviderKind,
+    mode: RuntimeMode,
+    eval: Option<waku_protocol::eval::EvalSettings>,
+) -> PermissionDisposition {
+    match mode {
+        RuntimeMode::FullAccess => PermissionDisposition::AutoApprove,
+        // Providers running their own review escalate held actions to the
+        // user; the rest keep the legacy blanket answer.
+        RuntimeMode::AutoAcceptEdits
+            if crate::permission_review::reviews_natively(provider) =>
+        {
+            PermissionDisposition::Prompt
+        }
+        RuntimeMode::AutoAcceptEdits => PermissionDisposition::AutoApprove,
+        RuntimeMode::Auto => {
+            if crate::permission_review::reviews_natively(provider) {
+                PermissionDisposition::Prompt
+            } else {
+                match eval {
+                    Some(eval) => PermissionDisposition::Review(Arc::new(eval)),
+                    None => PermissionDisposition::Prompt,
+                }
+            }
+        }
+        RuntimeMode::Ask => PermissionDisposition::Prompt,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_sdk_connection(
     agent: AcpAgent,
@@ -446,6 +491,7 @@ async fn run_sdk_connection(
     resume_session_id: Option<String>,
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
+    eval: Option<waku_protocol::eval::EvalSettings>,
     commands: smol::channel::Receiver<CommandMessage>,
     events: DriverEventSender,
 ) -> agent_client_protocol::Result<()> {
@@ -456,7 +502,7 @@ async fn run_sdk_connection(
     let prompt_requests = Arc::new(Mutex::new(PendingPrompts::default()));
     let title_refresh = super::title_refresh::NativeTitleRefresh::default();
     let first_prompt = Arc::new(Mutex::new(None::<String>));
-    let auto_approve = mode != RuntimeMode::Ask;
+    let disposition = permission_disposition(provider, mode, eval);
 
     Client
         .builder()
@@ -528,7 +574,8 @@ async fn run_sdk_connection(
                     handle_permission_request(
                         request,
                         responder,
-                        auto_approve,
+                        provider,
+                        &disposition,
                         &pending_permissions,
                         &events,
                     )
@@ -2064,9 +2111,10 @@ fn xai_user_input_response(params: &Value, submitted: &[UserInputAnswer]) -> Val
 fn handle_permission_request(
     request: RequestPermissionRequest,
     responder: PermissionResponder,
-    auto_approve: bool,
+    provider: ProviderKind,
+    disposition: &PermissionDisposition,
     pending: &PendingPermissions,
-    events: &impl DriverEventSink,
+    events: &DriverEventSender,
 ) -> agent_client_protocol::Result<()> {
     let request_id = responder.id().to_string();
     let params = serde_json::to_value(&request)?;
@@ -2084,7 +2132,7 @@ fn handle_permission_request(
         })
         .collect::<Vec<_>>();
 
-    if auto_approve {
+    if let PermissionDisposition::AutoApprove = disposition {
         let choice = request
             .options
             .iter()
@@ -2107,39 +2155,101 @@ fn handle_permission_request(
         };
     }
 
-    let (title, title_i18n) = match params
-        .pointer("/toolCall/title")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-    {
-        Some(title) => (title, None),
-        None => {
-            let pair = localized!("permission.run_a_tool");
-            (pair.0, Some(pair.1))
-        }
-    };
-    let (detail, detail_i18n) = match permission_reason(&params) {
-        Some(detail) => (detail, None),
-        None => {
-            let pair = params
+    let event = DriverEvent::Permission {
+        request_id: request_id.clone(),
+        title: params
+            .pointer("/toolCall/title")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| tr!("permission.run_a_tool")),
+        title_i18n: params
+            .pointer("/toolCall/title")
+            .and_then(Value::as_str)
+            .is_none()
+            .then(|| localized!("permission.run_a_tool").1),
+        detail: permission_reason(&params).unwrap_or_else(|| {
+            params
                 .pointer("/toolCall/kind")
                 .and_then(Value::as_str)
-                .map(|kind| localized!("permission.agent_wants_to", action = kind))
-                .unwrap_or_else(|| localized!("permission.agent_asks_for_permission"));
-            (pair.0, Some(pair.1))
-        }
+                .map(|kind| tr!("permission.agent_wants_to", action = kind))
+                .unwrap_or_else(|| tr!("permission.agent_asks_for_permission"))
+        }),
+        detail_i18n: (permission_reason(&params).is_none()).then(|| {
+            params
+                .pointer("/toolCall/kind")
+                .and_then(Value::as_str)
+                .map(|kind| localized!("permission.agent_wants_to", action = kind).1)
+                .unwrap_or_else(|| localized!("permission.agent_asks_for_permission").1)
+        }),
+        options,
     };
+
+    if let PermissionDisposition::Review(eval) = disposition {
+        // The review grants at most allow-once: a cleared answer picks the
+        // session's own once-option and never broadens future access.
+        let allow = request
+            .options
+            .iter()
+            .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+            .or_else(|| {
+                request
+                    .options
+                    .iter()
+                    .find(|option| option.kind == PermissionOptionKind::AllowAlways)
+            })
+            .map(|option| option.option_id.to_string());
+        let action = crate::permission_review::PendingAction {
+            provider: provider.id(),
+            tool: params
+                .pointer("/toolCall/kind")
+                .and_then(Value::as_str)
+                .or_else(|| params.pointer("/toolCall/title").and_then(Value::as_str))
+                .unwrap_or("tool")
+                .to_owned(),
+            arguments: params
+                .pointer("/toolCall/rawInput")
+                .or_else(|| params.get("toolCall"))
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| params.to_string()),
+            call_id: request_id.clone(),
+            detail: permission_reason(&params)
+                .or_else(|| params.pointer("/toolCall/title").and_then(Value::as_str).map(str::to_owned)),
+        };
+        pending.lock().insert(request_id.clone(), responder);
+        let pending = pending.clone();
+        let events = events.clone();
+        crate::permission_review::review_on_thread(
+            eval.clone(),
+            action,
+            move |verdict| match verdict {
+                crate::permission_review::ReviewVerdict::Allow => {
+                    let Some(responder) = pending.lock().remove(&request_id) else {
+                        return;
+                    };
+                    let outcome = match allow {
+                        Some(option_id) => RequestPermissionOutcome::Selected(
+                            SelectedPermissionOutcome::new(option_id),
+                        ),
+                        None => RequestPermissionOutcome::Cancelled,
+                    };
+                    let _ = responder.respond(RequestPermissionResponse::new(outcome));
+                }
+                crate::permission_review::ReviewVerdict::Escalate => {
+                    if events.send(event).is_err()
+                        && let Some(responder) = pending.lock().remove(&request_id)
+                    {
+                        let _ = responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ));
+                    }
+                }
+            },
+        );
+        return Ok(());
+    }
+
     pending.lock().insert(request_id.clone(), responder);
-    if events
-        .send(DriverEvent::Permission {
-            request_id: request_id.clone(),
-            title,
-            title_i18n,
-            detail,
-            detail_i18n,
-            options,
-        })
-        .is_err()
+    if events.send(event).is_err()
         && let Some(responder) = pending.lock().remove(&request_id)
     {
         let _ = responder.respond(RequestPermissionResponse::new(
@@ -3216,6 +3326,7 @@ mod tests {
         let driver = AcpDriver::start(
             ProviderKind::Grok,
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3271,6 +3382,7 @@ mod tests {
         let driver = AcpDriver::start(
             ProviderKind::Cursor,
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3331,6 +3443,7 @@ mod tests {
         let driver = AcpDriver::start(
             ProviderKind::Kimi,
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3402,6 +3515,7 @@ mod tests {
         let driver = AcpDriver::start(
             ProviderKind::Droid,
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,

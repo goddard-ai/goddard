@@ -228,6 +228,7 @@ impl CodexDriver {
             agent,
             subagents,
             provider_cursor,
+            eval: _,
         } = options;
         let provider_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Codex { thread_id }) => Some(thread_id),
@@ -2612,6 +2613,7 @@ mod tests {
             let (events, received) = crate::driver::test_event_channel();
             let driver = CodexDriver::start(
                 DriverStartOptions {
+                    eval: None,
                     binary: binary.clone(),
                     cwd: directory.clone(),
                     mode: RuntimeMode::Ask,
@@ -2699,6 +2701,7 @@ mod tests {
             let (events, received) = crate::driver::test_event_channel();
             let driver = CodexDriver::start(
                 DriverStartOptions {
+                    eval: None,
                     binary: binary.clone(),
                     cwd: cwd.clone(),
                     mode: RuntimeMode::Ask,

@@ -75,6 +75,9 @@ enum CommandMessage {
 #[derive(Default)]
 struct Shared {
     options: Option<SessionOptions>,
+    /// The evaluation backend answering `Auto`-mode permission requests,
+    /// snapshotted at session start.
+    eval: Option<Arc<waku_protocol::eval::EvalSettings>>,
     permissions: HashMap<String, oneshot::Sender<String>>,
     user_inputs: HashMap<String, oneshot::Sender<Vec<UserInputAnswer>>>,
 }
@@ -114,6 +117,7 @@ impl CopilotDriver {
             agent,
             subagents,
             provider_cursor,
+            eval,
         } = options;
         let resume_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Copilot { session_id }) => Some(session_id),
@@ -133,6 +137,7 @@ impl CopilotDriver {
                 service_tier,
                 context_window: context_window.clone(),
             }),
+            eval: eval.map(Arc::new),
             ..Default::default()
         }));
         // `UnboundedSender::send` is synchronous, so the `DriverControl`
@@ -641,16 +646,45 @@ impl PermissionHandler for CopilotHandler {
         if data.managed_settings_enabled {
             return PermissionResult::user_not_available();
         }
-        let interactive = {
+        let (mode, eval) = {
             let shared = self.shared.lock();
-            shared
-                .options
-                .as_ref()
-                .map(|options| options.mode == RuntimeMode::Ask)
-                .unwrap_or(true)
-        } || data.managed_approval_required == Some(true);
+            (
+                shared
+                    .options
+                    .as_ref()
+                    .map(|options| options.mode)
+                    .unwrap_or(RuntimeMode::Ask),
+                shared.eval.clone(),
+            )
+        };
+        // `Auto` never answers blindly: the review replies when a backend is
+        // configured and the user does when it is not.
+        let interactive = mode == RuntimeMode::Ask
+            || (mode == RuntimeMode::Auto && eval.is_none())
+            || data.managed_approval_required == Some(true);
         if !interactive {
-            return PermissionResult::approve_once();
+            match (mode, eval) {
+                (RuntimeMode::Auto, Some(eval)) => {
+                    let action = crate::permission_review::PendingAction {
+                        provider: "copilot",
+                        tool: permission_string(&data, "toolName")
+                            .or_else(|| permission_string(&data, "tool"))
+                            .unwrap_or_else(|| format!("{:?}", data.kind)),
+                        arguments: data.extra.to_string(),
+                        call_id: request_id.to_string(),
+                        detail: permission_string(&data, "description"),
+                    };
+                    let verdict = tokio::task::spawn_blocking(move || {
+                        crate::permission_review::review_action(&eval, &action)
+                    })
+                    .await
+                    .unwrap_or(crate::permission_review::ReviewVerdict::Escalate);
+                    if verdict == crate::permission_review::ReviewVerdict::Allow {
+                        return PermissionResult::approve_once();
+                    }
+                }
+                _ => return PermissionResult::approve_once(),
+            }
         }
 
         let key = request_id.to_string();
@@ -904,6 +938,7 @@ mod tests {
         let (events, event_rx) = crate::driver::test_event_channel();
         let driver = CopilotDriver::start(
             DriverStartOptions {
+                eval: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,

@@ -52,6 +52,9 @@ enum CommandMessage {
         request_id: String,
         option_id: String,
     },
+    /// A driver event the review verdict resolved to — emitted through the
+    /// command channel so the send stays on the worker's own ordering.
+    Emit(DriverEvent),
     RespondUserInput {
         request_id: String,
         answers: Vec<UserInputAnswer>,
@@ -171,11 +174,16 @@ fn opencode_permission_rules(mode: RuntimeMode) -> Value {
     };
 
     match mode {
-        RuntimeMode::Ask => Value::Array(vec![rule("bash", "ask"), rule("edit", "ask")]),
+        // `Auto` shares Ask's posture so every sensitive call reaches
+        // Goddard: the evaluation reviewer answers when configured and the
+        // user does when it is not.
+        RuntimeMode::Ask | RuntimeMode::Auto => {
+            Value::Array(vec![rule("bash", "ask"), rule("edit", "ask")])
+        }
         RuntimeMode::AutoAcceptEdits => {
             Value::Array(vec![rule("bash", "ask"), rule("edit", "allow")])
         }
-        RuntimeMode::Auto | RuntimeMode::FullAccess => Value::Array(vec![rule("*", "allow")]),
+        RuntimeMode::FullAccess => Value::Array(vec![rule("*", "allow")]),
     }
 }
 
@@ -206,6 +214,7 @@ impl OpenCodeDriver {
             agent: agent_env,
             subagents,
             provider_cursor,
+            eval,
         } = options;
         let resume_session_id = match provider_cursor {
             Some(ProviderResumeCursor::OpenCode { session_id }) => {
@@ -391,10 +400,18 @@ impl OpenCodeDriver {
                 }
             })?;
 
-        let auto_approve = matches!(mode, RuntimeMode::Auto | RuntimeMode::FullAccess);
+        let auto_approve = mode == RuntimeMode::FullAccess;
         let (commands, command_rx) = unbounded();
         let turn_active = Arc::new(Mutex::new(false));
         let permissions = Arc::new(Mutex::new(OpenCodePermissionState::default()));
+        // `Auto` asks like `Ask` and the review answers instead: configured
+        // credentials ride the permission state so the event stream and the
+        // reconnect snapshot share them.
+        permissions.lock().eval = if mode == RuntimeMode::Auto {
+            eval.map(Arc::new)
+        } else {
+            None
+        };
         let event_stream = Arc::new(StreamControl::default());
 
         // The reader holds only the port, never a server handle: the stream
@@ -681,6 +698,9 @@ impl OpenCodeDriver {
                                         error = error
                                     )));
                             }
+                        }
+                        CommandMessage::Emit(event) => {
+                            let _ = worker_events.send(event);
                         }
                         CommandMessage::RespondUserInput {
                             request_id,
@@ -1240,11 +1260,6 @@ fn request_permission(
         return;
     }
 
-    permission_state
-        .pending
-        .insert(request_id.to_owned(), permission_request.clone());
-    drop(permission_state);
-
     let permission = if permission_request.permission.is_empty() {
         tr!("permission.run_a_tool_lower")
     } else {
@@ -1270,7 +1285,7 @@ fn request_permission(
         ),
         None => localized!("permission.agent_asks_for_permission"),
     };
-    let _ = events.send(DriverEvent::Permission {
+    let event = DriverEvent::Permission {
         request_id: request_id.to_owned(),
         title,
         title_i18n,
@@ -1293,7 +1308,48 @@ fn request_permission(
                 false,
             ),
         ],
-    });
+    };
+
+    if let Some(eval) = permission_state.eval.clone() {
+        // Park the request like a user prompt — an escalation reuses the
+        // same pending entry — then let the review answer: `clear` replies
+        // "once" through the existing respond path, anything else escalates.
+        permission_state
+            .pending
+            .insert(request_id.to_owned(), permission_request.clone());
+        permission_state.responding.insert(request_id.to_owned());
+        drop(permission_state);
+        let action = crate::permission_review::PendingAction {
+            provider: "opencode",
+            tool: permission_request.permission.clone(),
+            arguments: request.to_string(),
+            call_id: request_id.to_owned(),
+            detail: request
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        };
+        let commands = commands.clone();
+        let request_id = request_id.to_owned();
+        crate::permission_review::review_on_thread(eval, action, move |verdict| {
+            let message = match verdict {
+                crate::permission_review::ReviewVerdict::Allow => CommandMessage::Respond {
+                    request_id,
+                    option_id: "once".into(),
+                },
+                crate::permission_review::ReviewVerdict::Escalate => CommandMessage::Emit(event),
+            };
+            let _ = commands.send(message);
+        });
+        return;
+    }
+
+    permission_state
+        .pending
+        .insert(request_id.to_owned(), permission_request.clone());
+    drop(permission_state);
+
+    let _ = events.send(event);
 }
 
 fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCodeStreamState) {
@@ -1716,6 +1772,7 @@ server.serve_forever()
                 agent: None,
                 subagents: None,
                 provider_cursor: None,
+                eval: None,
             },
             events,
         )
@@ -1770,6 +1827,12 @@ server.serve_forever()
 
         assert_eq!(
             opencode_permission_rules(RuntimeMode::Ask),
+            json!([rule("bash", "ask"), rule("edit", "ask")])
+        );
+        // Auto asks like Ask — the evaluation review (or the user, when no
+        // backend is configured) answers what the server sends up.
+        assert_eq!(
+            opencode_permission_rules(RuntimeMode::Auto),
             json!([rule("bash", "ask"), rule("edit", "ask")])
         );
         assert_eq!(
@@ -1838,6 +1901,7 @@ server.serve_forever()
                 agent: None,
                 subagents: None,
                 provider_cursor: None,
+                eval: None,
             },
             events,
         )
@@ -1928,6 +1992,7 @@ server.serve_forever()
                 agent: None,
                 subagents: None,
                 provider_cursor: None,
+                eval: None,
             },
             events,
         )

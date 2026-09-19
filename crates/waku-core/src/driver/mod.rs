@@ -253,6 +253,11 @@ pub struct DriverStartOptions {
     /// field.
     pub subagents: Option<waku_protocol::model::SubagentSpec>,
     pub provider_cursor: Option<ProviderResumeCursor>,
+    /// The configured evaluation backend, snapshotted at session start.
+    /// `Auto`-mode permission requests for providers without their own
+    /// reviewer route through it; `None` keeps the ask-the-user fallback.
+    /// Daemon-owned — never crosses the wire.
+    pub eval: Option<waku_protocol::eval::EvalSettings>,
 }
 
 /// The subset of `DriverStartOptions` a user can change without starting a new
