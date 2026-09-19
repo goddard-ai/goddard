@@ -270,11 +270,92 @@ fn row_matches(row: &CommandRow, query: &str) -> bool {
         || row
             .bindings
             .iter()
-            .any(|binding| binding.sequence.to_lowercase().contains(query))
+            .any(|binding| sequence_matches(&binding.sequence, query))
         || row
             .descriptor
             .builtin_label
-            .is_some_and(|label| label.to_lowercase().contains(query))
+            .is_some_and(|label| chord_label_matches(label, query))
+}
+
+/// Folds the spellings people type for a key into the canonical part a
+/// stored sequence uses (`stroke_parts` / `Keystroke::parse`):
+/// "command" → "cmd", "option" → "alt", "cntrl" → "ctrl". The glyphs
+/// rendered labels show fold too, so pasting "⌘" works. Anything else
+/// passes through so real key names ("tab", "f5", "p") match literally.
+fn key_term(term: &str) -> &str {
+    match term {
+        "cmd" | "command" | "meta" | "platform" | "super" | "win" | "⌘" => {
+            platform_modifier_name()
+        }
+        "opt" | "option" | "⌥" => "alt",
+        "cntrl" | "cntr" | "control" | "ctl" | "⌃" => "ctrl",
+        "shft" | "⇧" => "shift",
+        "function" => "fn",
+        "esc" | "⎋" => "escape",
+        "return" => "enter",
+        "del" => "delete",
+        "⌫" => "backspace",
+        "⇥" => "tab",
+        "↑" => "up",
+        "↓" => "down",
+        "←" => "left",
+        "→" => "right",
+        _ => term,
+    }
+}
+
+/// Query terms are whitespace- or dash-separated so both "command p"
+/// and "option-tab" parse.
+fn query_terms(query: &str) -> Vec<&str> {
+    query
+        .split(|c: char| c.is_whitespace() || c == '-')
+        .filter(|term| !term.is_empty())
+        .map(key_term)
+        .collect()
+}
+
+/// A stroke matches when every query term is one of its parts — so
+/// "shift" finds every `*-shift-*` binding and "command p" finds
+/// `cmd-p`, regardless of the order the user typed.
+fn stroke_matches_terms(stroke: &str, terms: &[&str]) -> bool {
+    let parts = match gpui::Keystroke::parse(stroke) {
+        Ok(keystroke) => stroke_parts(&keystroke),
+        Err(_) => vec![stroke.to_string()],
+    };
+    terms
+        .iter()
+        .all(|term| parts.iter().any(|part| key_term(part) == *term))
+}
+
+fn sequence_matches(sequence: &str, query: &str) -> bool {
+    let sequence = sequence.to_lowercase();
+    if sequence.contains(query) {
+        return true;
+    }
+    let terms = query_terms(query);
+    !terms.is_empty()
+        && sequence
+            .split_whitespace()
+            .any(|stroke| stroke_matches_terms(stroke, &terms))
+}
+
+/// `builtin_label` chords are glyph text like `"⇧⌘K"`, not keystroke
+/// syntax, so each char is a part.
+fn chord_label_matches(label: &str, query: &str) -> bool {
+    if label.to_lowercase().contains(query) {
+        return true;
+    }
+    let terms = query_terms(query);
+    if terms.is_empty() {
+        return false;
+    }
+    let parts: Vec<String> = label
+        .chars()
+        .map(|c| key_term(&c.to_lowercase().to_string()).to_string())
+        .collect();
+    terms
+        .iter()
+        .all(|term| parts.iter().any(|part| part == term))
 }
 
 /// Logical modifier name → the physical cap code it highlights.
@@ -1399,4 +1480,62 @@ fn render_row(
                 .child(category),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sequence_matches_modifier_aliases() {
+        for query in ["cmd", "command", "⌘"] {
+            assert!(sequence_matches("cmd-shift-p", query), "{query}");
+        }
+        for query in ["alt", "opt", "option", "⌥"] {
+            assert!(sequence_matches("alt-tab", query), "{query}");
+        }
+        for query in ["ctrl", "ctl", "cntrl", "cntr", "control", "⌃"] {
+            assert!(sequence_matches("ctrl-shift-delete", query), "{query}");
+        }
+        for query in ["shift", "shft", "⇧"] {
+            assert!(sequence_matches("cmd-shift-p", query), "{query}");
+        }
+        for query in ["fn", "function"] {
+            assert!(sequence_matches("fn-f1", query), "{query}");
+        }
+    }
+
+    #[test]
+    fn sequence_matches_keys_and_term_combinations() {
+        for query in ["p", "escape", "f5", "tab"] {
+            assert!(
+                sequence_matches(&format!("cmd-{query}"), query),
+                "{query}"
+            );
+        }
+        // Terms can combine and come in any order, but all must land on
+        // the same stroke.
+        assert!(sequence_matches("cmd-p", "command p"));
+        assert!(sequence_matches("cmd-p", "p cmd"));
+        assert!(sequence_matches("cmd-shift-p", "command-shift-p"));
+        assert!(sequence_matches("cmd-k cmd-s", "cmd s"));
+        assert!(!sequence_matches("cmd-k ctrl-s", "cmd s"));
+        assert!(!sequence_matches("cmd-shift-p", "option"));
+    }
+
+    #[test]
+    fn sequence_matches_bare_modifier_keys() {
+        // A keystroke that is just a modifier stores the modifier's key
+        // name ("platform" for ⌘, "control" for ctrl).
+        assert!(sequence_matches("platform", "command"));
+        assert!(sequence_matches("control", "ctrl"));
+        assert!(sequence_matches("function", "fn"));
+    }
+
+    #[test]
+    fn chord_label_matches_glyph_parts() {
+        assert!(chord_label_matches("⇧⌘K", "command"));
+        assert!(chord_label_matches("⇧⌘K", "shft k"));
+        assert!(!chord_label_matches("⇧⌘K", "ctrl"));
+    }
 }
