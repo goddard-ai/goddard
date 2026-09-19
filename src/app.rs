@@ -276,23 +276,26 @@ enum SettingsPage {
     Commands,
     Appearance,
     Git,
+    Jev,
     Experiments,
     Keybindings,
 }
 
 impl SettingsPage {
-    /// Computer Use and Friends are still experimental, so their navigation
-    /// entry points only appear once the Experiments opt-in is on. Keeping
-    /// this decision on the page itself makes the Settings sidebar and
-    /// command palette use the same gate.
+    /// Computer Use, Friends, and Jev are still experimental, so their
+    /// navigation entry points only appear once the Experiments opt-in is
+    /// on. Keeping this decision on the page itself makes the Settings
+    /// sidebar and command palette use the same gate.
     fn is_visible_in_navigation(
         self,
         computer_use_experiment_enabled: bool,
         friends_enabled: bool,
+        model_router_enabled: bool,
     ) -> bool {
         match self {
             Self::ComputerUse => computer_use_experiment_enabled,
             Self::Friends => friends_enabled,
+            Self::Jev => model_router_enabled,
             Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
         }
@@ -300,8 +303,17 @@ impl SettingsPage {
 
     /// A persisted page whose navigation gate closed falls back to General
     /// rather than rendering a surface the sidebar no longer lists.
-    fn into_visible(self, computer_use_experiment_enabled: bool, friends_enabled: bool) -> Self {
-        if self.is_visible_in_navigation(computer_use_experiment_enabled, friends_enabled) {
+    fn into_visible(
+        self,
+        computer_use_experiment_enabled: bool,
+        friends_enabled: bool,
+        model_router_enabled: bool,
+    ) -> Self {
+        if self.is_visible_in_navigation(
+            computer_use_experiment_enabled,
+            friends_enabled,
+            model_router_enabled,
+        ) {
             self
         } else {
             Self::General
@@ -1495,6 +1507,7 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
         SettingsPage::Commands => PersistedSettingsPage::Commands,
         SettingsPage::Appearance => PersistedSettingsPage::Appearance,
         SettingsPage::Git => PersistedSettingsPage::Git,
+        SettingsPage::Jev => PersistedSettingsPage::Jev,
         SettingsPage::Experiments => PersistedSettingsPage::Experiments,
         SettingsPage::Keybindings => PersistedSettingsPage::Keybindings,
     }
@@ -1513,6 +1526,7 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
         PersistedSettingsPage::Commands => SettingsPage::Commands,
         PersistedSettingsPage::Appearance => SettingsPage::Appearance,
         PersistedSettingsPage::Git => SettingsPage::Git,
+        PersistedSettingsPage::Jev => SettingsPage::Jev,
         PersistedSettingsPage::Experiments => SettingsPage::Experiments,
         PersistedSettingsPage::Keybindings => SettingsPage::Keybindings,
     }

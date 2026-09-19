@@ -411,6 +411,10 @@ settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
 settings.commands_keywords:
   en: commands custom command terminal shell script shortcut palette run
+settings.jev:
+  en: Jev
+settings.jev_keywords:
+  en: jev typesafe eval evaluation model auto routing router backend api key credential vercel gateway cloudflare policy
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:

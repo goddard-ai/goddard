@@ -2065,6 +2065,12 @@ impl Waku {
                 "settings preferences computer use accessibility screen recording",
             ),
             (
+                SettingsPage::Jev,
+                "settings.jev",
+                "icons/provider-typesafe.svg",
+                "settings preferences jev typesafe eval evaluation model auto routing router backend",
+            ),
+            (
                 SettingsPage::Experiments,
                 "settings.experiments",
                 "icons/beaker.svg",
@@ -2074,6 +2080,7 @@ impl Waku {
             if !page.is_visible_in_navigation(
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
+                self.state.model_router_enabled,
             ) {
                 continue;
             }

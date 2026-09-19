@@ -3041,7 +3041,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     use super::SettingsPage;
 
     let pages = |query: &str| {
-        visible_settings_pages(query, true, true)
+        visible_settings_pages(query, true, true, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };
@@ -3063,6 +3063,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Usage,
         SettingsPage::Daemon,
         SettingsPage::ComputerUse,
+        SettingsPage::Jev,
         SettingsPage::Experiments,
     ]);
     assert_eq!(pages(""), all_pages);
@@ -3082,8 +3083,11 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     assert_eq!(pages("no such setting"), vec![]);
     // Friends is experimental: with the opt-in off its row leaves the
     // navigation and the cycle skips it.
-    assert!(!visible_settings_pages("", true, false)
+    assert!(!visible_settings_pages("", true, false, true)
         .any(|(page, ..)| page == SettingsPage::Friends));
+    // Jev likewise leaves the navigation when its experiment is off.
+    assert!(!visible_settings_pages("", true, true, false)
+        .any(|(page, ..)| page == SettingsPage::Jev));
 }
 
 #[test]
@@ -3175,13 +3179,15 @@ fn archived_filter_matches_transcript_hits() {
 fn computer_use_navigation_follows_the_experiment_opt_in() {
     use super::SettingsPage;
 
-    assert!(SettingsPage::General.is_visible_in_navigation(false, false));
-    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false, false));
-    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true, false));
+    assert!(SettingsPage::General.is_visible_in_navigation(false, false, false));
+    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false, false, false));
+    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true, false, false));
+    assert!(!SettingsPage::Jev.is_visible_in_navigation(false, false, false));
+    assert!(SettingsPage::Jev.is_visible_in_navigation(false, false, true));
 
     // The experiment flag also removes the page from search results.
     let pages = |query: &str, enabled: bool| {
-        visible_settings_pages(query, enabled, true)
+        visible_settings_pages(query, enabled, true, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };

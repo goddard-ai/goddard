@@ -173,6 +173,8 @@ settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
 settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
+settings.jev: Jev
+settings.jev_keywords: jev typesafe 评估 模型 自动 路由 后端 API密钥 凭据 vercel cloudflare 策略 eval routing
 settings.commands_keywords: 命令 自定义命令 终端 shell 脚本 快捷键 命令面板 运行
 settings.archived: 已归档的聊天
 settings.archived_keywords: 已归档 聊天 对话 隐藏 历史 恢复 移除

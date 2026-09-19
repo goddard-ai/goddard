@@ -49,6 +49,9 @@ impl Waku {
         if page == SettingsPage::Friends && !self.state.friends_enabled {
             return;
         }
+        if page == SettingsPage::Jev && !self.state.model_router_enabled {
+            return;
+        }
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.
         self.daemon_token_revealed = false;
@@ -80,14 +83,12 @@ impl Waku {
             self.probe_friends(cx);
             self.start_friends_presence_loop(cx);
         }
-        if page == SettingsPage::Experiments {
-            // The routing section renders from the daemon's settings mirror
-            // and the fetched policy view — both may be missing on a first
-            // visit, so warm them here rather than mid-render.
+        if page == SettingsPage::Jev {
+            // The page renders from the daemon's settings mirror and the
+            // fetched policy view — both may be missing on a first visit, so
+            // warm them here rather than mid-render.
             self.seed_eval_inputs(cx);
-            if self.state.model_router_enabled {
-                self.request_route_policy(cx);
-            }
+            self.request_route_policy(cx);
         }
         // The sidebar's search field holds real focus for the whole settings
         // visit, so landing on any page — from the sidebar, the palette, or a

@@ -1493,6 +1493,7 @@ impl Waku {
             let list_popover = popover.clone();
             let list_selection = session_selection.clone();
             let list_auto = auto_route;
+            let jev_credential_missing = self.jev_credential_missing();
             rows = rows.child(
                 list(list_state.clone(), move |row_index, window, cx| {
                     let theme = Theme::current(cx);
@@ -1506,87 +1507,128 @@ impl Waku {
                     let is_highlighted = highlight == Some(row_index);
                     if row.auto {
                         // The router row: same hit target and highlight
-                        // treatment as a model row, but the star slot stays
-                        // empty — there is no concrete model to favorite.
+                        // treatment as a model row, but where a model
+                        // row carries its star this one carries a
+                        // shortcut to the Jev settings page — there is
+                        // no concrete model to favorite.
                         let select_weak = weak.clone();
                         let select_popover = popover.clone();
+                        let settings_weak = weak.clone();
+                        let settings_popover = popover.clone();
                         return div()
-                                .id("model-row-auto")
-                                .w_full()
-                                .h(MODEL_PICKER_ROW_HEIGHT)
-                                .px(px(12.0))
-                                .rounded(px(11.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .cursor_default()
-                                .border(hairline())
-                                .border_color(gpui::transparent_black())
-                                .when(auto_route, |element| element.bg(theme.overlay_strong))
-                                .when(is_highlighted, |element| {
-                                    element.bg(theme.overlay).border_color(theme.accent)
-                                })
-                                .hover(|element| element.bg(theme.overlay))
-                                .active(|element| element.opacity(0.85))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .flex_1()
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap(px(8.0))
-                                                .child(
-                                                    div()
-                                                        .min_w_0()
-                                                        .truncate()
-                                                        .text_size(sp(13.0))
-                                                        .font_weight(FontWeight::SEMIBOLD)
-                                                        .text_color(theme.text)
-                                                        .child(SharedString::from(tr!(
-                                                            "models.auto"
-                                                        ))),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_none()
-                                                        .truncate()
-                                                        .text_size(sp(12.5))
-                                                        .text_color(theme.text_tertiary)
-                                                        .child(SharedString::from(tr!(
-                                                            "models.auto_hint"
-                                                        ))),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .mt(px(4.0))
-                                                .flex()
-                                                .items_center()
-                                                .gap(px(8.0))
-                                                .child(icon(
-                                                    "icons/provider-typesafe.svg",
-                                                    12.0,
-                                                    theme.text_tertiary,
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .min_w_0()
-                                                        .truncate()
-                                                        .text_size(sp(12.5))
-                                                        .text_color(theme.text_tertiary)
-                                                        .child("Jev"),
-                                                ),
-                                        ),
-                                )
-                                .on_click(move |_, window, cx| {
-                                    let _ = select_weak.update(cx, |this, cx| {
-                                        this.choose_auto_route(cx);
-                                    });
-                                    select_popover.close(window, cx);
-                                })
-                                .into_any_element();
+                            .id("model-row-auto")
+                            .w_full()
+                            .h(MODEL_PICKER_ROW_HEIGHT)
+                            .px(px(12.0))
+                            .rounded(px(11.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .cursor_default()
+                            .border(hairline())
+                            .border_color(gpui::transparent_black())
+                            .when(auto_route, |element| element.bg(theme.overlay_strong))
+                            .when(is_highlighted, |element| {
+                                element.bg(theme.overlay).border_color(theme.accent)
+                            })
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.opacity(0.85))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_size(sp(13.0))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(theme.text)
+                                                    .child(SharedString::from(tr!(
+                                                        "models.auto"
+                                                    ))),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .truncate()
+                                                    .text_size(sp(12.5))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(SharedString::from(tr!(
+                                                        "models.auto_hint"
+                                                    ))),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(4.0))
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(icon(
+                                                "icons/provider-typesafe.svg",
+                                                12.0,
+                                                theme.text_tertiary,
+                                            ))
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_size(sp(12.5))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child("Jev"),
+                                            ),
+                                    ),
+                            )
+                            // The selected backend has no usable
+                            // credential — flag it beside the
+                            // settings shortcut that fixes it.
+                            .when(jev_credential_missing, |element| {
+                                element.child(icon(
+                                    "icons/alert.svg",
+                                    13.0,
+                                    theme.warning,
+                                ))
+                            })
+                            .child(
+                                div()
+                                    .id("jev-settings")
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .rounded(px(8.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|element| element.bg(theme.overlay_strong))
+                                    .tooltip(Tooltip::text(tr!("settings.jev")))
+                                    .child(icon(
+                                        "icons/settings.svg",
+                                        14.0,
+                                        theme.text_ghost,
+                                    ))
+                                    .on_click(move |_, window, cx| {
+                                        cx.stop_propagation();
+                                        open_settings_page_from_picker(
+                                            &settings_weak,
+                                            &settings_popover,
+                                            SettingsPage::Jev,
+                                            window,
+                                            cx,
+                                        );
+                                    }),
+                            )
+                            .on_click(move |_, window, cx| {
+                                let _ = select_weak.update(cx, |this, cx| {
+                                    this.choose_auto_route(cx);
+                                });
+                                select_popover.close(window, cx);
+                            })
+                            .into_any_element();
                     }
                     let kind = row.provider;
                     let model = &row.model;
@@ -6148,11 +6190,23 @@ fn model_picker_empty_state(
                 .child(icon("icons/settings.svg", 11.0, theme.text_tertiary))
                 .child(tr!("models.open_provider_settings"))
                 .on_click(move |_, window, cx| {
-                    open_provider_settings_from_picker(&click_waku, &click_popover, window, cx);
+                    open_settings_page_from_picker(
+                        &click_waku,
+                        &click_popover,
+                        SettingsPage::Providers,
+                        window,
+                        cx,
+                    );
                 })
                 .on_key_down(move |event: &KeyDownEvent, window, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        open_provider_settings_from_picker(&waku, &popover, window, cx);
+                        open_settings_page_from_picker(
+                            &waku,
+                            &popover,
+                            SettingsPage::Providers,
+                            window,
+                            cx,
+                        );
                         cx.stop_propagation();
                     }
                 }),
@@ -6160,20 +6214,21 @@ fn model_picker_empty_state(
         .into_any_element()
 }
 
-/// Dismiss the picker and land on the Providers page, for both the empty
-/// state's click and its keyboard activation. Closing first matters: the
-/// picker returns focus to the composer as it closes, which would otherwise
-/// pull focus straight back out of the settings view.
-fn open_provider_settings_from_picker(
+/// Dismiss the picker and land on the given settings page, for both the
+/// empty state's click and its keyboard activation. Closing first matters:
+/// the picker returns focus to the composer as it closes, which would
+/// otherwise pull focus straight back out of the settings view.
+fn open_settings_page_from_picker(
     waku: &WeakEntity<Waku>,
     popover: &ContextMenuHandle,
+    page: SettingsPage,
     window: &mut Window,
     cx: &mut App,
 ) {
     popover.close(window, cx);
     let _ = waku.update(cx, |this, cx| {
         this.open_settings_action(&OpenSettings, window, cx);
-        this.open_settings_page(SettingsPage::Providers, window, cx);
+        this.open_settings_page(page, window, cx);
     });
 }
 
