@@ -507,7 +507,9 @@ impl Waku {
     /// settling turn, an in-flight submission preparation, live detached
     /// work, and a queued ending-checkpoint capture — deleting the directory
     /// first would fail that capture into an error toast. Sessions that left
-    /// the archived set, or were never on a worktree, drop out here.
+    /// the archived set, or were never on a worktree, drop out here. A
+    /// worktree shared with an unarchived session also defers removal —
+    /// the last sibling to archive removes it.
     ///
     /// A projectless task has no worktree to retire; when its project's
     /// every session is archived and quiet, the daemon zips the workspace
@@ -539,7 +541,25 @@ impl Waku {
                 continue;
             }
             if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
-                ready.push((session_id, path.clone()));
+                // "New task in same worktree" clones the workspace into a
+                // second session; removing the directory while a sibling is
+                // still live would delete its uncommitted work. Defer until
+                // every session sharing the path is archived too — the last
+                // one's own cleanup performs the removal.
+                let shared = self.state.sessions.iter().any(|other| {
+                    other.id != session_id
+                        && other.archived_at.is_none()
+                        && matches!(
+                            &other.workspace,
+                            SessionWorkspace::Worktree { path: other_path, .. }
+                            if other_path == path
+                        )
+                });
+                if shared {
+                    deferred.insert(session_id);
+                } else {
+                    ready.push((session_id, path.clone()));
+                }
             } else if let Some(path) = self.archivable_projectless_workspace(session.project_id) {
                 projectless_ready.push((session_id, path));
             }
