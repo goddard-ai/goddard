@@ -643,7 +643,7 @@ fn log(message: &str) {
     eprintln!("waku-muse: {message}");
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod test_support {
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;

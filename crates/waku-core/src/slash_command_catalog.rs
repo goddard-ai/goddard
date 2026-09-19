@@ -166,7 +166,7 @@ fn discover_opencode(binary: &Path, project_root: &Path) -> Option<Vec<SlashComm
 fn discover_opencode2(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand>> {
     // These catalogues are directory-scoped, not session-scoped. Seed the
     // new-task composer too, without creating a disposable provider session.
-    let directory = std::fs::canonicalize(project_root).ok()?;
+    let directory = dunce::canonicalize(project_root).ok()?;
     let directory = directory.to_string_lossy();
     let service = crate::opencode2_service::shared(binary).ok()?;
     let endpoint = service.endpoint();
@@ -843,7 +843,7 @@ mod tests {
             "---\ndescription: Catalog test\n---\nReply OK",
         )
         .unwrap();
-        let root = std::fs::canonicalize(root).unwrap();
+        let root = dunce::canonicalize(root).unwrap();
         let commands = discover(ProviderKind::OpenCode2, &binary, &root).unwrap();
         for name in ["init", "review", "waku-catalog-smoke"] {
             assert!(

@@ -1725,6 +1725,7 @@ mod tests {
 
     use super::*;
     use crate::driver::test_event_channel;
+    #[cfg(unix)]
     use crate::muse_service::test_support::fake_muse;
 
     fn options(cwd: &Path) -> DriverStartOptions {
@@ -1766,6 +1767,7 @@ mod tests {
         seen
     }
 
+    #[cfg(unix)]
     #[test]
     fn muse_turn_streams_text_usage_and_completion() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
@@ -1812,6 +1814,7 @@ mod tests {
     /// A resume with no stored view cursor asks for the folded snapshot;
     /// `HistoryPreference` is a bare string on the wire, so the fake host
     /// logs a violation if the driver ever sends it as an object.
+    #[cfg(unix)]
     #[test]
     fn muse_resume_requests_snapshot_history_as_a_string() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
@@ -1845,6 +1848,7 @@ mod tests {
     /// Rewind forks the session and moves THIS driver onto the fork: the
     /// reply carries the fork cursor, a second Connected arrives, and a
     /// prompt after the rewind still runs against the new session.
+    #[cfg(unix)]
     #[test]
     fn muse_rollback_attaches_the_driver_to_the_fork() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
@@ -1891,6 +1895,7 @@ mod tests {
     /// A submit admitted with `disposition: "queued"` sits in the host's
     /// queue, invisible to `turn/interrupt`. Stop must reclaim it with
     /// `turn/unqueue` or it launches after the user thinks they stopped.
+    #[cfg(unix)]
     #[test]
     fn muse_cancel_reclaims_queued_turns() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
@@ -1936,6 +1941,7 @@ mod tests {
             is_dir: false,
             is_image,
             blob_reference: None,
+            pasted_text_preview: None,
             session_id: None,
         }
     }
@@ -1973,6 +1979,7 @@ mod tests {
     /// The fake host issues one `userInput/request` after `session/start`
     /// when its marker file exists; the driver settles it with a text
     /// clarification — the wire shape is validated by the host itself.
+    #[cfg(unix)]
     #[test]
     fn muse_clarify_settles_the_question() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
@@ -2002,6 +2009,7 @@ mod tests {
     }
 
     /// `userInput/cancel` dismisses the request unanswered.
+    #[cfg(unix)]
     #[test]
     fn muse_dismiss_cancels_the_question() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));
@@ -2050,6 +2058,7 @@ mod tests {
 
     /// The structured prompt path must reach the host: the fake binary
     /// validates the image part's wire shape itself.
+    #[cfg(unix)]
     #[test]
     fn muse_prompt_sends_image_parts_to_the_host() {
         let directory = std::env::temp_dir().join(format!("waku-muse-test-{}", Uuid::new_v4()));

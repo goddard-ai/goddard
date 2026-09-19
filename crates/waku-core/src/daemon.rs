@@ -2476,7 +2476,7 @@ impl WakuBackend {
         {
             bail!("worktree sessions require a base branch");
         }
-        let project = std::fs::canonicalize(&project)
+        let project = dunce::canonicalize(&project)
             .with_context(|| format!("project path {} does not exist", project.display()))?;
         let (project_id, project_path) = {
             let mut state = self.task_state.lock();
@@ -2484,7 +2484,7 @@ impl WakuBackend {
                 .projects
                 .iter()
                 .find(|existing| {
-                    std::fs::canonicalize(&existing.path).is_ok_and(|path| path == project)
+                    dunce::canonicalize(&existing.path).is_ok_and(|path| path == project)
                 })
                 .map(|existing| (existing.id, existing.path.clone()))
             {

@@ -52,13 +52,13 @@ pub fn migrate_data_directory() -> MigrationReport {
 
 fn migrate_data_pair(legacy: &Path, destination: &Path, report: &mut MigrationReport) {
     sweep_migration_artifacts(destination);
-    let Ok(legacy) = fs::canonicalize(legacy) else {
+    let Ok(legacy) = dunce::canonicalize(legacy) else {
         return;
     };
     if !legacy.is_dir() {
         return;
     }
-    let destination = fs::canonicalize(destination).unwrap_or_else(|_| destination.to_path_buf());
+    let destination = dunce::canonicalize(destination).unwrap_or_else(|_| destination.to_path_buf());
     if let Err(error) = fs::create_dir_all(&destination) {
         report.record_failure(legacy, destination, error);
         return;
@@ -83,7 +83,7 @@ fn migrate_data_pair(legacy: &Path, destination: &Path, report: &mut MigrationRe
             report.record_skipped(source);
             continue;
         };
-        let Ok(target) = fs::canonicalize(&source) else {
+        let Ok(target) = dunce::canonicalize(&source) else {
             report.record_skipped(source);
             continue;
         };
@@ -245,6 +245,7 @@ mod tests {
         assert!(second.migrated.is_empty());
         assert!(second.failures.is_empty());
 
+        drop(connection);
         fs::remove_dir_all(&root).unwrap();
     }
 

@@ -429,6 +429,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    #[cfg(unix)]
     use crate::muse_service::test_support::fake_muse;
 
     /// A cut snaps back to the last `completed` turn at or before the edge:
@@ -459,6 +460,7 @@ mod tests {
 
     /// `session/read` may refuse inline items; the fallback then pages the
     /// view — whose `cursor` param must be absent, not null, on page one.
+    #[cfg(unix)]
     #[test]
     fn history_falls_back_to_paging_the_view() {
         let directory =
@@ -480,6 +482,7 @@ mod tests {
 
     /// The cold fork pages `turn/completed` events to find the boundary and
     /// returns the forked session's resume cursor.
+    #[cfg(unix)]
     #[test]
     fn cold_fork_pages_the_view_for_a_boundary() {
         let directory =

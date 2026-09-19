@@ -3221,7 +3221,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn computer_use_cleanup_verifies_the_registered_executable() {
-        let current = fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        let current = dunce::canonicalize(std::env::current_exe().unwrap()).unwrap();
         assert_eq!(
             computer_use_runtime::process_executable(std::process::id() as i32),
             Some(current)

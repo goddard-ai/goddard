@@ -30,7 +30,7 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         },
         WorkspaceOperation::BrowseDirectory { path } => {
             let home = dirs::home_dir().ok_or_else(|| anyhow!("home directory is unavailable"))?;
-            let path = fs::canonicalize(path.as_deref().unwrap_or(&home)).with_context(|| {
+            let path = dunce::canonicalize(path.as_deref().unwrap_or(&home)).with_context(|| {
                 format!(
                     "could not open directory {}",
                     path.as_deref().unwrap_or(&home).display()
@@ -1009,7 +1009,7 @@ mod tests {
             panic!("unexpected workspace response")
         };
 
-        assert_eq!(path, fs::canonicalize(&directory).unwrap());
+        assert_eq!(path, dunce::canonicalize(&directory).unwrap());
         assert_eq!(parent, path.parent().map(Path::to_owned));
         assert_eq!(
             entries

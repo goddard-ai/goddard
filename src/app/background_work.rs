@@ -2273,7 +2273,7 @@ mod tests {
             .0;
 
         assert!(row.contains(".truncate()"));
-        assert!(row.contains(".child(single_line_label(&item.title))"));
+        assert!(row.contains(".child(single_line_label(&item.display_title()))"));
         assert!(!row.contains(".line_clamp(1)"));
         assert_eq!(
             single_line_label("/bin/zsh -lc 'set -euo pipefail\n  for n in one two'"),

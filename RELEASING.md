@@ -106,6 +106,8 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
 ## Cutting a release
 
 1. **Bump `version` in `Cargo.toml`** — the single source of truth.
+   Until v1.0, always bump the **minor** version for a release (patch versions
+   are reserved for hotfixes), so after `v0.2.x` the next release is `v0.3.0`.
    `CFBundleShortVersionString` is the version, and `CFBundleVersion` is
    derived from it (`major*1e6 + minor*1e3 + patch`, so `0.2.0` → `2000`),
    which keeps Sparkle's build-number comparison monotonic without a manual

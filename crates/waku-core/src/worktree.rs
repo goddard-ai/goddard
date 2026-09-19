@@ -121,7 +121,7 @@ pub fn is_linked_worktree(path: &Path) -> bool {
         } else {
             path.join(dir)
         };
-        fs::canonicalize(&dir).unwrap_or(dir)
+        dunce::canonicalize(&dir).unwrap_or(dir)
     };
     let (Ok(Some(git_dir)), Ok(Some(common_dir))) = (
         git_optional_stdout(path, &["rev-parse", "--git-dir"]),
@@ -205,11 +205,11 @@ pub fn create_from_checkout(
 /// Resolve `project_path` to its canonical form, its repository root, and the
 /// project's path relative to that root.
 fn resolve_repository(project_path: &Path) -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
-    let project_path = fs::canonicalize(project_path)
+    let project_path = dunce::canonicalize(project_path)
         .with_context(|| format!("could not open project {}", project_path.display()))?;
     let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
         .context("worktrees require a Git repository")?;
-    let repository = fs::canonicalize(PathBuf::from(repository.trim()))
+    let repository = dunce::canonicalize(PathBuf::from(repository.trim()))
         .context("could not resolve the Git repository root")?;
     let project_relative = project_path
         .strip_prefix(&repository)
@@ -301,11 +301,11 @@ fn add_named(
 /// a discardable copy, or whose state has been captured into a ref as
 /// archived-session cleanup does; never a session's own live checkout.
 pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
-    let path = fs::canonicalize(path)
+    let path = dunce::canonicalize(path)
         .with_context(|| format!("could not open worktree {}", path.display()))?;
     let worktree_root = git_stdout(&path, &["rev-parse", "--show-toplevel"])
         .context("the worktree is not a Git repository")?;
-    let worktree_root = fs::canonicalize(PathBuf::from(worktree_root.trim()))
+    let worktree_root = dunce::canonicalize(PathBuf::from(worktree_root.trim()))
         .context("could not resolve the Git worktree root")?;
     let common = git_stdout(
         &worktree_root,
@@ -334,7 +334,7 @@ pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
             .zip(repository.file_name())
             .map(|(root, name)| root.join("worktrees").join(name));
         let is_namespace =
-            namespace.is_some_and(|root| fs::canonicalize(&root).unwrap_or(root) == parent);
+            namespace.is_some_and(|root| dunce::canonicalize(&root).unwrap_or(root) == parent);
         if !is_namespace {
             let _ = fs::remove_dir(parent);
         }
@@ -363,11 +363,11 @@ pub fn ensure(
     if path.try_exists().unwrap_or(true) {
         return Ok(None);
     }
-    let project_path = fs::canonicalize(project_path)
+    let project_path = dunce::canonicalize(project_path)
         .with_context(|| format!("could not open project {}", project_path.display()))?;
     let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
         .context("worktrees require a Git repository")?;
-    let repository = fs::canonicalize(PathBuf::from(repository.trim()))
+    let repository = dunce::canonicalize(PathBuf::from(repository.trim()))
         .context("could not resolve the Git repository root")?;
     let project_relative = project_path
         .strip_prefix(&repository)
@@ -483,7 +483,7 @@ fn registered_worktree_paths(repository: &Path) -> anyhow::Result<Vec<PathBuf>> 
         .filter_map(|line| line.strip_prefix("worktree "))
         .map(|line| {
             let path = PathBuf::from(line.trim());
-            fs::canonicalize(&path).unwrap_or(path)
+            dunce::canonicalize(&path).unwrap_or(path)
         })
         .collect())
 }
@@ -798,7 +798,7 @@ mod tests {
         );
         // `create` reports canonicalized paths; match them on macOS, where
         // the temporary directory lives behind `/var` -> `/private/var`.
-        fs::canonicalize(&repository).unwrap()
+        dunce::canonicalize(&repository).unwrap()
     }
 
     #[test]
@@ -873,7 +873,10 @@ mod tests {
         let project = repository.join("packages/app");
         let root = repository.parent().unwrap().to_path_buf();
         let remote = root.join("remote.git");
-        run_git(&root, &["init", "--bare", remote.to_str().unwrap()]);
+        run_git(
+            &root,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
         run_git(
             &repository,
             &["remote", "add", "origin", remote.to_str().unwrap()],

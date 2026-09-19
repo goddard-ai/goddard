@@ -586,7 +586,7 @@ fn scan_skill_files(provider: ProviderKind, root: &Path, commands: &mut Vec<Slas
 /// a presence directory into the plugin checkout, so inspecting only the link
 /// location loses the catalog key Codex requires for explicit invocation.
 fn codex_plugin_name(skill_dir: &Path) -> Option<String> {
-    let canonical = std::fs::canonicalize(skill_dir).ok()?;
+    let canonical = dunce::canonicalize(skill_dir).ok()?;
     for ancestor in canonical.ancestors().take(WALK_MAX_DEPTH + 1) {
         for relative_manifest in [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"] {
             let Ok(contents) = std::fs::read_to_string(ancestor.join(relative_manifest)) else {

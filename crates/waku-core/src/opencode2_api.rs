@@ -2070,7 +2070,7 @@ mod tests {
         assert_eq!(health.pid, registration["pid"].as_u64().unwrap() as u32);
 
         let directory = std::env::current_dir().unwrap();
-        let directory = std::fs::canonicalize(directory).unwrap();
+        let directory = dunce::canonicalize(directory).unwrap();
         let directory = directory.to_str().unwrap();
         // The model catalogue is refreshed from models.dev in the background
         // and is briefly empty across a refresh, so only its decode is

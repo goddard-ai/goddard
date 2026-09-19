@@ -150,7 +150,7 @@ pub(super) fn create_process_directory() -> anyhow::Result<PathBuf> {
 
 pub(super) fn stop_registered_processes(directory: &Path, helper_executable: &Path) {
     let expected_executable =
-        fs::canonicalize(helper_executable).unwrap_or_else(|_| helper_executable.to_path_buf());
+        dunce::canonicalize(helper_executable).unwrap_or_else(|_| helper_executable.to_path_buf());
     for (pid, registration) in registered_processes(directory) {
         if process_executable(pid).as_deref() == Some(expected_executable.as_path()) {
             // macOS owns a Launch Services bridge; closing it interrupts the
@@ -223,7 +223,7 @@ pub(super) fn process_executable(pid: i32) -> Option<PathBuf> {
         CloseHandle(process);
         (success != 0)
             .then(|| PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len as usize])))
-            .and_then(|path| fs::canonicalize(path).ok())
+            .and_then(|path| dunce::canonicalize(path).ok())
     }
 }
 

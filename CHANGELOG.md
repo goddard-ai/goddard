@@ -25,6 +25,62 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.3.0]
+
+### Features
+
+- New "After archiving a task" setting (Settings → General) picks where selection lands: the next unread completion (default), the next non-busy session in sidebar order, or a fresh task composer
+- Add Antigravity as a provider: its sessions run the `agy` CLI's own TUI in a task-scoped terminal — the first prompt launches `agy -i`, reselecting a started session resumes with `agy --conversation`, and status and title come from agy's own store. The composer steps aside once the session starts so keystrokes belong to the TUI
+- Archived chats now show a green checkmark and "Landed" label when their work was landed onto the base branch with `/land`
+- New "Border intensity" slider (Settings → Appearance) fades borders and separators from invisible up to their original contrast — the default lands fainter than before
+- Collapsed sidebar groups now show the same unread dot sessions and terminals use when any hidden row has an unseen completion
+- Copying a selection from an agent message now puts markdown on the clipboard — `**bold**`, `` `code` ``, links, headings, list markers, quotes, and fenced code blocks — instead of flattened rendered text
+- ⌘⇧. flips a draft's environment between this Mac and the sandbox VM — the Environment section of the ⌘. mode menu, without opening it
+- The file viewer's image preview now pans on scroll and zooms around the cursor with ⌘-scroll
+- The Keybinding Manager's table now edits bindings in a capture modal with one slot per command, ordered by surface: the on-screen keyboard wears platform glyphs, a tooltipped conflict count cycles through the offending commands, and only true conflicts are marked
+- Landing a task now records a "Landed on `<base>`" card in its transcript listing the commits that landed — each SHA opens the commit diff — so where the work went stays visible in the session's record.
+- On macOS 26, transparent chrome renders as real Liquid Glass (`NSGlassEffectView`): the sidebar and the chat composer card float on glass that lenses the desktop, tinted by the active theme. Older macOS keeps the existing vibrancy path unchanged.
+- Add a "Mark all tasks as read" command-palette action that clears every unseen-completion dot at once
+- Menus support the native press-drag-release gesture: hold a menu trigger (or right-click for a context menu), drag onto an item, and release to pick it — releasing over nothing dismisses
+- Model picker is now one virtualized, filterable list with a jump rail instead of provider tabs: starred favorites lead (drag to reorder, ⌘⌥1–⌘⌥9 to apply), then recently used combos, then every provider's models — each row enumerates a model/effort/tier selection, with the provider mark on a second line and effort and fast mode drawn dimmer beside the name. Rail buttons clear the filter and scroll to that section, ⌘E / ⌘⇧E cycle reasoning effort for the current model in either direction, and packed CLI aliases (e.g. Cursor's `-high-fast` slugs) fold into their base model's effort and tier options
+- "New task in…" (⌘⇧N, also in the File menu and command palette) fuzzy-searches directories on disk and starts a task in the pick — the directory becomes a temporary project that appears in the sidebar with a clock-folder icon and leaves the project list once its last task is removed; workspace toggle moves to ⌘⌥N and the branch picker to ⌘⇧⌥N
+- Received-file sessions now default to the Sandbox VM environment, so once a transfer is trusted the agent still runs isolated from this Mac
+- Rename sidebar terminals inline — double-click the title or pick Rename from the row's menu, just like sessions
+- Tables can be resized by dragging a column boundary (or focusing it and using the arrow keys): markdown tables in the transcript, the Keybinding Manager, the Projects page's Worktrees and Branches lists, and the Usage breakdown tables
+- “Create draft” parks the composer’s contents — text, attachments, and annotations — as a saved draft tied to its chat or project; a count button beside the composer’s access control opens the new Drafts page, where drafts can be searched, edited inline, hidden, deleted, or dropped back into their composer (⌘Z restores a used draft)
+- Settings search now matches setting titles and descriptions across all pages: every section with a match renders in one scrollable list with the matching text highlighted, and the sidebar filters to those sections (clicking one scrolls to it)
+- Sidebar project groups now cap at seven chats; the "Show more" row reveals the rest in batches of thirty, so an active project can't grow its section without bound
+- Select multiple sidebar tasks with ⌘-click (⌘⇧-click extends the range) and act on them together — row menus and task shortcuts like pin, mark unread, archive, and copy working directory apply to the whole selection
+- Sidebar transparency gains an Amount slider (Settings → Appearance): dial how much of the desktop shows through the sidebar, 0–60%. The default moves from a barely-visible tint to 25%.
+- ⌘S now opens a "Sync branch…" picker outside the file editor (where ⌘S still saves). It lists the repository's checkouts that track an upstream — defaulting to the current branch in a session — and pulls with `git pull --rebase` (or merge, per the sync setting). Conflicts reuse the sync-conflict dialog, whose "Resolve in chat" now starts a new chat on the folder being synced. A new "Resolve sync conflicts in a chat" setting skips that dialog entirely: a pull or land that stops on conflicts starts a fresh chat on the checkout with the resolution steps already sent
+- The Appearance settings gain a collapsible Preview row showing a miniature transcript — user bubble, assistant reply, and syntax-highlighted code — that opens automatically while a theme selector is open, so palette options can be compared on real content
+- Closing the terminal you're viewing now selects a neighbor terminal instead of leaving a dead pane
+- The "Task unarchived" toast now advertises ⌘⌥O — pressing it jumps straight to the restored task
+
+### Experiments
+
+- **[Experimental]** Move Computer Use behind an Experiments opt-in: turning the experiment on reveals the Computer Use settings page and lets sessions drive the bundled Cua Driver helper, including in release builds
+- **[Experimental]** Move Friends — the friend-to-friend file transfer page — behind a Settings → Experiments toggle, off by default in release builds
+- Harden friend transfers against lost control messages: a missed done receipt no longer fails a completed download or hides the received file, sends dial with timeouts and stall to Failed instead of sitting at 0 B, and failures log their cause
+- Apply friend-request responses in one click — accepting mirrors the friend into the roster immediately instead of waiting for the protocol task, and repeat responds resolve as no-ops
+- Add a customizable display name (what friends see) and per-friend local nicknames; completed transfers now also get a readable `Name-file` symlink under `~/Documents/Goddard/From Friends/`
+- **[Experimental]** The GitHub integration moves behind a Settings → Experiments toggle — the inbox sidebar row, ⌘⇧I page, and notification polling all switch off until it's enabled — and gains two new surfaces: a "New GitHub Issue" command-palette action that scans `.github/ISSUE_TEMPLATE` and opens a native form for Markdown templates and blank issues (YAML forms hand off to the web), and `#`-completion in the composer that resolves issues and pull requests on the workspace's GitHub remote, drawing them as chips in the transcript
+- **[Experimental]** The Git panel's top region — the commit box, or an open commit's file tree — is now split from the commit log by a draggable divider whose position persists, so opening a commit no longer shifts the layout
+- **[Experimental]** Auto model routing: opt in under Settings → Experiments to add an Auto entry to the model picker. A task's first prompt is classified by the evaluation model and routed to a provider and model from your routing policy (~/.goddard/route-policy.json), with BYOK evaluation backends for TypeSafe, Vercel AI Gateway, and Cloudflare Workers AI and routine/general/demanding class-level target pickers. Class targets default to session-scoped tiers (`session:tier:*`), which upgrade or downgrade within the provider you already picked; global `tier:*` targets resolve through the policy's preferred-provider order instead.
+- **[Experimental]** New Projects page (⌘⇧P, or the sidebar row beneath Search): each project gets Worktrees, Branches, Issues, and Pull Requests tabs (⌘⌥1–4) backed by the local repo and `gh`. Remote-tracking branches group under collapsible remotes that fetch on expand, rows follow macOS multi-selection with right-click menus and a bulk action bar, and a docked composer chips the current project, tab, filter, and selection
+
+### Fixed
+
+- On Linux, provider sessions no longer die at launch: the daemon's process guardian handed spawned CLIs `/dev/null` for stdin because dash assigns it before applying `<&0`, so stdio-based providers exited immediately — the child now inherits stdin through a saved descriptor
+- `/land` no longer dead-ends on a plain local checkout — the command palette's "Land changes" only appears for worktree sessions, and running `/land` where it can't apply explains why instead of erroring
+- Large pastes collapse less eagerly (20 lines or 4 KB, up from 4 lines or 500 bytes), and collapsed pastes now show as a compact "Pasted text" chip that previews the leading characters on hover.
+- ⌘⇧N now reliably cycles the ⌘N project switcher backward — a fast press can no longer slip through to the draft's workspace toggle, and the chord opens the switcher in reverse on a draft too
+- The sidebar peek no longer dismisses when archiving, pinning, or renaming a session from the hover-revealed sidebar
+- Stopping a turn now stops its live background work at the provider too — a retained runtime no longer keeps running while the transcript claims it halted — and a steer sent just before Stop can no longer acknowledge into the settled session afterward
+- ⌘Enter now steers a composer draft that only contains comment annotations, instead of doing nothing
+- A global terminal now remembers its own right panel — switching away from a task no longer leaves the task's panel open over the terminal, and the panel's tabs and visibility return as they were left
+- A sidebar terminal no longer resets into the selected task's worktree after a `cd` — session terminals only respawn when the workspace itself moves, and terminals opened at a chosen directory keep it
+
 ## [0.2.1]
 
 ### Features
