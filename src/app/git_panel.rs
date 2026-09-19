@@ -2436,13 +2436,14 @@ impl Waku {
             column = column.child(self.render_git_panel_top(column_width, window, cx));
         }
         column = column.child(self.render_git_panel_body(column_width, cx));
-        if !commit_open {
-            column = column.child(self.render_panel_resize_handle(
-                "git-panel-resize-handle",
-                PanelResizeTarget::RightPanel,
-                cx,
-            ));
-        }
+        // With a commit open this handle lands on the divider between the
+        // diff column and the file tree instead of the slot's outer edge;
+        // either way it drags the same fitted panel width.
+        column = column.child(self.render_panel_resize_handle(
+            "git-panel-resize-handle",
+            PanelResizeTarget::RightPanel,
+            cx,
+        ));
         div()
             .id("git-panel")
             .key_context(PANEL_CONTEXT)
