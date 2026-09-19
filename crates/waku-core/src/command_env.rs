@@ -139,7 +139,7 @@ fn agent_environment_pairs(
         base_path.as_deref().unwrap_or(OsStr::new("")),
     )))
     .unwrap_or_default();
-    vec![
+    let mut pairs = vec![
         (
             waku_protocol::AGENT_TOKEN_ENV.to_owned(),
             agent.token.clone(),
@@ -153,7 +153,14 @@ fn agent_environment_pairs(
             agent.daemon_address.clone(),
         ),
         ("PATH".to_owned(), path.to_string_lossy().into_owned()),
-    ]
+    ];
+    if let Some(parent) = agent.parent_task_id {
+        pairs.push((
+            waku_protocol::AGENT_PARENT_TASK_ENV.to_owned(),
+            parent.to_string(),
+        ));
+    }
+    pairs
 }
 
 /// The `PATH` a provider CLI runs with: every directory Goddard itself searched,
@@ -1046,6 +1053,7 @@ mod tests {
         crate::agent::AgentLaunchEnv {
             token: token.to_owned(),
             task_id: uuid::Uuid::new_v4(),
+            parent_task_id: None,
             daemon_address: "127.0.0.1:7777".to_owned(),
             cli_path: PathBuf::from(if cfg!(windows) {
                 "C:\\waku\\bin\\goddard-agent.exe"

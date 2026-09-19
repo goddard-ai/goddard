@@ -2115,7 +2115,9 @@ impl Waku {
         self.state
             .sessions
             .iter()
-            .filter(|session| session.has_started() && session.archived_at.is_none())
+            .filter(|session| {
+                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+            })
             .enumerate()
             .map(|(order, session)| {
                 let (project, project_path) = projects

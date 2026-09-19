@@ -130,6 +130,23 @@ pub fn is_compact_submission(prompt: &str, commands: &[SlashCommand]) -> bool {
     prompt.trim() == "/compact" && has_compact_path(commands)
 }
 
+/// Parse the submitted text as a `/side` invocation: `None` when it is not
+/// the command, `Some(None)` for a bare `/side` — a fresh empty side chat —
+/// and `Some(Some(prompt))` when a prompt follows. Reserved like `/resume`
+/// and `/land`, so it never crosses into a provider transport.
+pub fn parse_side_submission(prompt: &str) -> Option<Option<String>> {
+    let invocation = prompt.trim().strip_prefix('/')?;
+    let (name, arguments) = invocation
+        .split_once(char::is_whitespace)
+        .map_or((invocation, ""), |(name, arguments)| {
+            (name, arguments.trim())
+        });
+    if name != "side" {
+        return None;
+    }
+    Some((!arguments.is_empty()).then(|| arguments.to_owned()))
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Goddard bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -612,6 +629,19 @@ pub fn highlight_byte_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn side_submission_distinguishes_bare_command_from_prompt() {
+        assert_eq!(parse_side_submission("/side"), Some(None));
+        assert_eq!(parse_side_submission("  /side  "), Some(None));
+        assert_eq!(
+            parse_side_submission("/side check the parent diff"),
+            Some(Some("check the parent diff".to_owned()))
+        );
+        assert_eq!(parse_side_submission("side"), None);
+        assert_eq!(parse_side_submission("/sidebar"), None);
+        assert_eq!(parse_side_submission("/other /side"), None);
+    }
 
     #[test]
     fn merged_command_picker_puts_builtins_first_and_skills_last() {

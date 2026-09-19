@@ -266,7 +266,9 @@ fn big_picture_order(
 ) -> Vec<Uuid> {
     let mut eligible = sessions
         .iter()
-        .filter(|session| session.has_started() && session.archived_at.is_none())
+        .filter(|session| {
+            session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+        })
         .collect::<Vec<_>>();
     eligible.sort_by_key(|session| {
         let recency = if session.status == SessionStatus::Waiting {
@@ -1441,8 +1443,9 @@ impl Waku {
     }
 
     /// A card's tool-activity block as one summary line — the disclosure's
-    /// collapsed header — with a spinner while the group is live.
-    fn render_card_activities_row(
+    /// collapsed header — with a spinner while the group is live. Side-chat
+    /// panels draw the same compact row.
+    pub(super) fn render_card_activities_row(
         &self,
         session: &AgentSession,
         block_index: usize,
@@ -1506,8 +1509,8 @@ impl Waku {
     }
 
     /// A card's "Worked for Ns" divider — the lane's fold row minus the
-    /// toggle, since cards are read-only.
-    fn render_card_turn_fold_row(
+    /// toggle, since cards are read-only. Side-chat panels draw it too.
+    pub(super) fn render_card_turn_fold_row(
         &self,
         session: &AgentSession,
         turn_id: Uuid,
@@ -1549,8 +1552,9 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The live turn's closing row, drawn from the card's own session.
-    fn render_card_working_indicator_row(
+    /// The live turn's closing row, drawn from the card's own session. A
+    /// side-chat panel shows the same indicator while its session works.
+    pub(super) fn render_card_working_indicator_row(
         &self,
         session: &AgentSession,
         theme: &Theme,

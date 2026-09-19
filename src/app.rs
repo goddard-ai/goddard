@@ -773,6 +773,18 @@ enum RightPanelSurface {
     /// A project's issue/pull-request detail. Which item it shows lives in
     /// `GitHubBrowser::detail`, so one tab serves every item in the repo.
     GitHub(Uuid),
+    /// A `/side` chat session rendered in its parent task's panel. Closing
+    /// the tab deletes the session; the panel's owner is the parent.
+    SideChat(Uuid),
+}
+
+/// One side-chat tab's render state — the same shape a Big Picture card
+/// carries: a bottom-pinned row list, its scrollbar, and the fingerprinted
+/// row-kind cache that keeps per-frame work proportional to what changed.
+struct SideChatView {
+    rows: ListState,
+    scrollbar: Rc<ScrollbarState>,
+    kinds: (u64, Rc<Vec<TranscriptRowKind>>),
 }
 
 /// The closed sidebar's left-edge hover peek: the real sidebar pane mounted
@@ -1363,6 +1375,7 @@ impl SessionNavigation {
                 session.id == *session_id
                     && session.project_id == current_project_id
                     && !session.has_started()
+                    && !session.is_side_chat()
             })
         })
     }
@@ -1439,6 +1452,9 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::GitHub(project_id) => {
             Some(PersistedRightPanelSurface::GitHub(*project_id))
         }
+        RightPanelSurface::SideChat(session_id) => {
+            Some(PersistedRightPanelSurface::SideChat(*session_id))
+        }
         RightPanelSurface::Browser(_)
         | RightPanelSurface::Terminal(_)
         | RightPanelSurface::BackgroundWork { .. } => None,
@@ -1454,6 +1470,9 @@ fn panel_surface_from_persisted(surface: &PersistedRightPanelSurface) -> RightPa
             RightPanelSurface::PullRequest { number: *number }
         }
         PersistedRightPanelSurface::GitHub(project_id) => RightPanelSurface::GitHub(*project_id),
+        PersistedRightPanelSurface::SideChat(session_id) => {
+            RightPanelSurface::SideChat(*session_id)
+        }
     }
 }
 
@@ -2301,6 +2320,14 @@ pub struct Waku {
     right_panel_detached_state: RightPanelSessionState,
     right_panel_surfaces: Vec<RightPanelSurface>,
     right_panel_active_surface: Option<usize>,
+    /// Per side-chat session: the transcript's virtualized rows, its row-kind
+    /// cache, and its composer. Keyed by the side chat's own session id;
+    /// entries die when the tab — and the session — is closed.
+    side_chat_views: HashMap<Uuid, SideChatView>,
+    side_chat_composers: HashMap<Uuid, Entity<ComposerInput>>,
+    /// A freshly opened side-chat tab's composer takes focus on its first
+    /// rendered frame, like the terminal and browser pending-focus flags.
+    right_panel_pending_side_chat_focus: Option<Uuid>,
     right_panel_tabs_scroll_handle: ScrollHandle,
     right_panel_files_scroll_handle: ScrollHandle,
     right_panel_files_scrollbar: Rc<ScrollbarState>,
@@ -3701,7 +3728,7 @@ impl Waku {
             task_count: state
                 .sessions
                 .iter()
-                .filter(|session| session.has_started())
+                .filter(|session| session.has_started() && !session.is_side_chat())
                 .count(),
             project_count: state
                 .projects
@@ -5209,6 +5236,9 @@ impl Waku {
                 right_panel_session_states: HashMap::new(),
                 right_panel_detached_state: RightPanelSessionState::empty(false),
                 right_panel_surfaces: Vec::new(),
+                side_chat_views: HashMap::new(),
+                side_chat_composers: HashMap::new(),
+                right_panel_pending_side_chat_focus: None,
                 right_panel_active_surface: None,
                 right_panel_tabs_scroll_handle: ScrollHandle::new(),
                 right_panel_files_scroll_handle: ScrollHandle::new(),

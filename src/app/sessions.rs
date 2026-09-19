@@ -174,12 +174,21 @@ impl Waku {
         transition: SessionActivationTransition,
         cx: &mut Context<Self>,
     ) {
-        if !self
+        let Some(session) = self
             .state
             .sessions
             .iter()
-            .any(|session| session.id == session_id)
-        {
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        // A side chat is panel content, not a selection: opening one selects
+        // its parent and reveals the chat's tab.
+        if let Some(parent_id) = session.side_chat_of {
+            if self.state.selected_session != Some(parent_id) {
+                self.request_session_activation(parent_id, transition, cx);
+            }
+            self.open_right_panel_surface(RightPanelSurface::SideChat(session_id), cx);
             return;
         }
         // Archived tasks stay reachable through explicit activation paths like
@@ -614,6 +623,21 @@ impl Waku {
             .filter(|(id, _)| task_exists(id))
             .map(|(id, state)| (*id, right_panel_state_from_persisted(state)))
             .collect();
+        // A side-chat tab outlives an unsent chat — those are never
+        // catalogued — and a chat deleted while the app was down.
+        let dead_side_chats: Vec<Uuid> = self
+            .right_panel_session_states
+            .values()
+            .flat_map(|state| state.surfaces.iter())
+            .filter_map(|surface| match surface {
+                RightPanelSurface::SideChat(id) => Some(*id),
+                _ => None,
+            })
+            .filter(|id| !task_exists(id))
+            .collect();
+        for id in dead_side_chats {
+            self.remove_side_chat_surface(id, cx);
+        }
         if let Some(session_id) = self.state.selected_session {
             let panel_state = RightPanelSessionState::take_or_closed(
                 &mut self.right_panel_session_states,
@@ -630,11 +654,20 @@ impl Waku {
         }
         // After `restore_right_panel_state`, which clears any fullscreen — a
         // surface swap starts docked — so a persisted one is reinstated here.
-        self.fullscreen_surface = self.state.fullscreen_surface.clone().map(|surface| {
-            (
-                panel_surface_from_persisted(&surface.surface),
-                surface.detail,
-            )
+        // A side chat that died with its parent restores nothing.
+        self.fullscreen_surface = self.state.fullscreen_surface.clone().and_then(|persisted| {
+            let surface = panel_surface_from_persisted(&persisted.surface);
+            if let RightPanelSurface::SideChat(id) = surface {
+                let alive = self
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == id && session.is_side_chat());
+                if !alive {
+                    return None;
+                }
+            }
+            Some((surface, persisted.detail))
         });
         if let Some(project_id) = projects_page {
             self.show_projects_page(project_id, window, cx);
@@ -702,7 +735,13 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .find(|session| session.project_id == project_id && !session.has_started())
+            // A side chat is never a reusable draft — an empty one still
+            // belongs to its parent's panel.
+            .find(|session| {
+                session.project_id == project_id
+                    && !session.has_started()
+                    && !session.is_side_chat()
+            })
             .map(|session| session.id)
         {
             self.select_session(draft_id, cx);
@@ -722,6 +761,67 @@ impl Waku {
             .claim_session(id, self.daemons.project_owner(project_id));
         self.state.push_session(session);
         self.select_session(id, cx);
+    }
+
+    /// A `/side` invocation's session: a fresh task that shares its parent's
+    /// workspace and launch configuration but owns none of its history — the
+    /// agent reaches the parent's transcript through `goddard-agent` instead.
+    pub(super) fn create_side_chat(
+        &mut self,
+        parent_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<Uuid> {
+        let parent = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == parent_id)?
+            .clone();
+        let mut session = AgentSession::new(parent.project_id, parent.provider);
+        session.model = parent.model.clone();
+        session.runtime_mode = parent.runtime_mode;
+        session.sandboxed = parent.sandboxed;
+        session.reasoning_effort = parent.reasoning_effort.clone();
+        session.service_tier = parent.service_tier.clone();
+        session.context_window = parent.context_window.clone();
+        session.agent_preset = parent.agent_preset.clone();
+        session.auto_route = parent.auto_route;
+        session.side_chat_of = Some(parent.id);
+        session.workspace = match &parent.workspace {
+            // A materialized or plain checkout is a place the chat can share.
+            // `NewWorktree` is only intent — it has no directory until the
+            // parent's first prompt materializes one — so the chat works in
+            // the project's ordinary checkout rather than minting a second.
+            SessionWorkspace::NewWorktree { .. } => SessionWorkspace::Local,
+            workspace => workspace.clone(),
+        };
+        let id = session.id;
+        self.daemons
+            .claim_session(id, self.daemons.project_owner(parent.project_id));
+        self.state.push_session(session);
+        self.save();
+        cx.notify();
+        Some(id)
+    }
+
+    /// Every side chat under `session_id`. Nested side chats are not offered,
+    /// but the walk is breadth-first so a stray one still dies with its root.
+    pub(super) fn side_chat_descendants(&self, session_id: Uuid) -> Vec<Uuid> {
+        let mut descendants = vec![session_id];
+        let mut cursor = 0;
+        while cursor < descendants.len() {
+            let parent = descendants[cursor];
+            cursor += 1;
+            descendants.extend(
+                self.state
+                    .sessions
+                    .iter()
+                    .filter(|session| session.side_chat_of == Some(parent))
+                    .map(|session| session.id),
+            );
+        }
+        descendants.remove(0);
+        descendants
     }
 
     /// The session a workspace choice from the composer lands on, resolving
@@ -910,10 +1010,31 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.remove_session_inner(session_id, Some(window), cx);
+    }
+
+    /// `remove_session` for a session that can never be selected — a side
+    /// chat closed through its tab. The selection fallback takes the window,
+    /// and a session that cannot be selected never reaches it.
+    pub(super) fn remove_side_chat_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.remove_session_inner(session_id, None, cx);
+    }
+
+    fn remove_session_inner(
+        &mut self,
+        session_id: Uuid,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         if self.response_fork_preparations.contains_key(&session_id) {
             self.show_toast(tr!("session.response_fork_in_progress"));
             cx.notify();
             return;
+        }
+        // A task's side chats are not independent sessions — closing or
+        // archiving their parent deletes them with it.
+        for child_id in self.side_chat_descendants(session_id) {
+            self.remove_session_inner(child_id, None, cx);
         }
         let Some(index) = self
             .state
@@ -958,9 +1079,12 @@ impl Waku {
             });
         // A draft's eagerly created worktree dies with it. Once a session has
         // started the worktree may hold the agent's work and stays on disk.
+        // A side chat never owns a worktree: it shares its parent's, so even
+        // an unstarted one must leave the directory alone.
         let draft_worktree = match &self.state.sessions[index].workspace {
             SessionWorkspace::Worktree { path, .. }
-                if !self.state.sessions[index].has_started() =>
+                if !self.state.sessions[index].has_started()
+                    && !self.state.sessions[index].is_side_chat() =>
             {
                 Some(path.clone())
             }
@@ -982,6 +1106,12 @@ impl Waku {
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         self.state.sessions.remove(index);
+        // A departing side chat's tab lives in its parent's strip — the
+        // active one, or whichever session parked it. It runs after the row
+        // is gone so the close path's own session removal finds nothing.
+        self.remove_side_chat_surface(session_id, cx);
+        self.side_chat_views.remove(&session_id);
+        self.side_chat_composers.remove(&session_id);
         if let Err(error) = self.store.remove_session(session_id) {
             self.show_toast(tr!("errors.save_local_state", error = error));
         }
@@ -1040,7 +1170,11 @@ impl Waku {
         self.invalidate_checkpoint_refs();
 
         if was_selected {
-            self.select_session_fallback(project_id, projectless || temporary, window, cx);
+            // `None` callers delete sessions that can never be selected —
+            // side chats — so the fallback always has its window here.
+            if let Some(window) = window {
+                self.select_session_fallback(project_id, projectless || temporary, window, cx);
+            }
         } else {
             self.save();
             cx.notify();
@@ -1140,7 +1274,11 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .filter(|session| session.has_started() && session.archived_at.is_none())
+            .filter(|session| {
+                // A side chat is delete-only: it hides in its parent's panel
+                // rather than an archive row.
+                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+            })
         else {
             return;
         };
@@ -1262,13 +1400,20 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .filter(|session| session.has_started() && session.archived_at.is_none())
+            .filter(|session| {
+                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+            })
             .map(|session| (session.project_id, session.is_busy()))
         else {
             return;
         };
         if is_busy {
             self.cancel_session_turn(session_id, cx);
+        }
+        // Side chats die with their parent rather than archiving: the
+        // workspace cleanup below removes the checkout they work in.
+        for child_id in self.side_chat_descendants(session_id) {
+            self.remove_session_inner(child_id, None, cx);
         }
         let projectless = self
             .state
@@ -4138,6 +4283,7 @@ impl Waku {
             .iter()
             .find(|session| {
                 !session.has_started()
+                    && !session.is_side_chat()
                     && self.state.projects.iter().any(|project| {
                         project.id == session.project_id
                             && project.is_projectless()

@@ -1333,6 +1333,12 @@ pub struct AgentSession {
     /// the old checkout's paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_moved_from: Option<PathBuf>,
+    /// When `Some`, this session is a side chat spawned from the named
+    /// parent task. Side chats are hidden from task lists, opened in the
+    /// parent's right panel, and deleted when the parent is archived or
+    /// removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_chat_of: Option<Uuid>,
     pub provider: ProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -1475,6 +1481,7 @@ impl AgentSession {
             project_id,
             workspace: SessionWorkspace::Local,
             workspace_moved_from: None,
+            side_chat_of: None,
             provider,
             model: None,
             runtime_mode: RuntimeMode::default(),
@@ -1524,6 +1531,9 @@ impl AgentSession {
             // branch labels from it before the session is ever opened.
             workspace: self.workspace.clone(),
             workspace_moved_from: None,
+            // List consumers need the link: it is how they know to keep the
+            // row out of the task list.
+            side_chat_of: self.side_chat_of,
             provider: self.provider,
             model: self.model.clone(),
             runtime_mode: RuntimeMode::default(),
@@ -1560,6 +1570,54 @@ impl AgentSession {
 
     pub fn is_busy(&self) -> bool {
         self.status.is_busy()
+    }
+
+    /// Whether this session is a side chat bound to a parent task — hidden
+    /// from task lists and deleted when the parent is archived or removed.
+    pub fn is_side_chat(&self) -> bool {
+        self.side_chat_of.is_some()
+    }
+
+    /// The provider-facing note a side chat prepends to its first outbound
+    /// prompt: it names the parent task and explains how to read — and, when
+    /// asked, message — it through `goddard-agent`. The transcript keeps the
+    /// user's text; this rides the driver's prompt like the workspace-move
+    /// notice. `None` once the first turn is behind it.
+    pub fn side_chat_intro(&self, parent: &AgentSession) -> Option<String> {
+        if self.side_chat_of != Some(parent.id) || self.turns.len() > 1 {
+            return None;
+        }
+        Some(format!(
+            "You are a side chat of the Goddard task \"{}\" (task id {}). \
+             Its transcript is not in your context. Read it with \
+             `goddard-agent read '{{\"task_id\":\"{}\"}}'` when you need it, \
+             and send it a message with `goddard-agent prompt` only when the \
+             user asks.",
+            parent.display_title(),
+            parent.id,
+            parent.id,
+        ))
+    }
+
+    /// The compact transcript `goddard-agent read` hands to a scoped agent
+    /// caller: visible message text in order, without transport or provider
+    /// internals. Hidden provider-facing nudges are omitted.
+    pub fn agent_transcript(&self) -> AgentSessionTranscript {
+        AgentSessionTranscript {
+            task_id: self.id,
+            title: self.display_title().to_owned(),
+            provider: self.provider,
+            status: self.status,
+            messages: self
+                .messages
+                .iter()
+                .filter(|message| !message.hidden)
+                .map(|message| AgentTranscriptMessage {
+                    role: message.role,
+                    content: message.visible_content().to_owned(),
+                })
+                .collect(),
+        }
     }
 
     /// Derives [`Self::last_reply_at`] from the turn history when it is not
@@ -2280,6 +2338,27 @@ impl Message {
     pub fn visible_content(&self) -> &str {
         self.display_content.as_deref().unwrap_or(&self.content)
     }
+}
+
+/// The compact transcript view [`crate::Command::AgentReadSession`] returns
+/// to a scoped agent caller: enough of another task to answer questions
+/// about it, with transport fields and provider internals stripped.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionTranscript {
+    pub task_id: Uuid,
+    pub title: String,
+    pub provider: ProviderKind,
+    pub status: SessionStatus,
+    pub messages: Vec<AgentTranscriptMessage>,
+}
+
+/// One message in an [`AgentSessionTranscript`].
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTranscriptMessage {
+    pub role: MessageRole,
+    pub content: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

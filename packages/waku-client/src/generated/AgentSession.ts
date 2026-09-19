@@ -35,7 +35,14 @@ workspace?: SessionWorkspace,
  * working directory changed — the resumed thread's context still names
  * the old checkout's paths.
  */
-workspace_moved_from?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode,
+workspace_moved_from?: string | null,
+/**
+ * When `Some`, this session is a side chat spawned from the named
+ * parent task. Side chats are hidden from task lists, opened in the
+ * parent's right panel, and deleted when the parent is archived or
+ * removed.
+ */
+side_chat_of?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode,
 /**
  * The task's commands run inside the sandbox VM rather than on the
  * host. Fixed when the session boots — a started task can report where

@@ -62,6 +62,11 @@ export const sessions = sqliteTable(
      * NULL while the session works in the project's ordinary checkout.
      */
     workspace: text("workspace"),
+    /**
+     * The parent task this session is a side chat of; NULL for ordinary
+     * tasks. Side chats stay out of task lists and die with their parent.
+     */
+    sideChatOf: text("side_chat_of"),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),

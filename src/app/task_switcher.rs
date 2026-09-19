@@ -120,7 +120,9 @@ fn ordered_task_ids(
 ) -> Vec<Uuid> {
     let eligible = sessions
         .iter()
-        .filter(|session| session.has_started() && session.archived_at.is_none())
+        .filter(|session| {
+            session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+        })
         .collect::<Vec<_>>();
     let valid = eligible
         .iter()

@@ -230,6 +230,10 @@ pub struct AgentLaunchEnv {
     /// The Waku task this runtime serves; the daemon attributes any prompt
     /// the token sends to it.
     pub task_id: Uuid,
+    /// The task this session is a side chat of, when it is one. Delivered as
+    /// `GODDARD_PARENT_TASK_ID` so the agent can find its parent's
+    /// transcript without parsing it out of a prompt.
+    pub parent_task_id: Option<Uuid>,
     /// The daemon's WebSocket address, as the daemon bound it.
     pub daemon_address: String,
     /// The `goddard-agent` executable.
@@ -283,14 +287,19 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
     #[cfg(unix)]
     let shim = {
         let path = env.shim_directory.join("goddard-agent");
+        let parent = env
+            .parent_task_id
+            .map(|id| format!(" {}='{id}'", waku_protocol::AGENT_PARENT_TASK_ENV))
+            .unwrap_or_default();
         let script = format!(
-            "#!/bin/sh\nexec env {}='{}' {}='{}' {}='{}' '{}' \"$@\"\n",
+            "#!/bin/sh\nexec env {}='{}' {}='{}' {}='{}'{} '{}' \"$@\"\n",
             waku_protocol::DAEMON_ADDRESS_ENV,
             shell_quote_escape(&env.daemon_address),
             waku_protocol::AGENT_TOKEN_ENV,
             shell_quote_escape(&env.token),
             waku_protocol::AGENT_TASK_ENV,
             env.task_id,
+            parent,
             shell_quote_escape(&env.cli_path.display().to_string()),
         );
         write_private_executable(&path, script.as_bytes())?;
@@ -299,14 +308,19 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
     #[cfg(windows)]
     let shim = {
         let path = env.shim_directory.join("goddard-agent.cmd");
+        let parent = env
+            .parent_task_id
+            .map(|id| format!("set \"{}={id}\"\r\n", waku_protocol::AGENT_PARENT_TASK_ENV))
+            .unwrap_or_default();
         let script = format!(
-            "@echo off\r\nset \"{}={}\"\r\nset \"{}={}\"\r\nset \"{}={}\"\r\n\"{}\" %*\r\n",
+            "@echo off\r\nset \"{}={}\"\r\nset \"{}={}\"\r\nset \"{}={}\"\r\n{}\"{}\" %*\r\n",
             waku_protocol::DAEMON_ADDRESS_ENV,
             env.daemon_address,
             waku_protocol::AGENT_TOKEN_ENV,
             env.token,
             waku_protocol::AGENT_TASK_ENV,
             env.task_id,
+            parent,
             env.cli_path.display(),
         );
         write_private_executable(&path, script.as_bytes())?;
@@ -332,6 +346,11 @@ pub fn shared_service_instruction(shim: &Path, env: &AgentLaunchEnv) -> String {
         instruction.push_str(
             " When — and only when — the human explicitly asks you to create another task or send a message to one, use `create` and `prompt`; those calls are attributed to this task in the target's transcript. Do not use them for exploration, convenience, or self-orchestration.",
         );
+        if let Some(parent) = env.parent_task_id {
+            instruction.push_str(&format!(
+                " This session is a side chat of task {parent}; `read` its transcript when you need its context."
+            ));
+        }
     }
     instruction
 }
@@ -486,6 +505,7 @@ mod tests {
         AgentLaunchEnv {
             token: "scoped-token".to_owned(),
             task_id: Uuid::new_v4(),
+            parent_task_id: None,
             daemon_address: "127.0.0.1:7777".to_owned(),
             cli_path: PathBuf::from("/waku/bin/goddard-agent"),
             shim_directory: directory.to_path_buf(),
@@ -513,6 +533,29 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         let mode = shim.metadata().unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700, "the shim is private and executable");
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_side_chat_shim_carries_its_parent_task_id() {
+        let directory = std::env::temp_dir().join(format!("goddard-agent-test-{}", Uuid::new_v4()));
+        let parent = Uuid::new_v4();
+        let env = AgentLaunchEnv {
+            parent_task_id: Some(parent),
+            ..launch_env(&directory)
+        };
+
+        let shim = write_session_shim(&env).expect("the shim should be written");
+        let script = std::fs::read_to_string(&shim).expect("the shim is readable");
+        assert!(script.contains(&format!("GODDARD_PARENT_TASK_ID='{parent}'")));
+
+        // A plain session's shim carries no parent reference at all.
+        let shim =
+            write_session_shim(&launch_env(&directory)).expect("the plain shim should be written");
+        let script = std::fs::read_to_string(&shim).expect("the plain shim is readable");
+        assert!(!script.contains("GODDARD_PARENT_TASK_ID"));
 
         let _ = std::fs::remove_dir_all(&directory);
     }

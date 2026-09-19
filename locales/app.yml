@@ -2700,6 +2700,18 @@ right_panel.terminal_unavailable:
   en: Terminal unavailable
 right_panel.terminal_unavailable_description:
   en: Open the Terminal surface again to start a shell
+right_panel.side_chat:
+  en: Side chat
+right_panel.side_chat_unavailable:
+  en: Side chat unavailable
+right_panel.side_chat_unavailable_description:
+  en: The chat was deleted with its parent task or closed from this tab
+side_chat.no_task:
+  en: No task to side chat with
+side_chat.no_nesting:
+  en: Side chats cannot spawn their own side chats
+side_chat.placeholder:
+  en: Message the side chat…
 terminal.localhost_detected:
   en: "%{url} is live"
 terminal.localhost_open:

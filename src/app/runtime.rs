@@ -219,6 +219,7 @@ pub(super) fn merge_remote_session_catalog(
             local.pinned_at = remote.pinned_at;
             local.dormant_at = remote.dormant_at;
             local.dormant_exempt_until = remote.dormant_exempt_until;
+            local.side_chat_of = remote.side_chat_of;
             // A hydrated session's workspace is at least as fresh as the
             // stored column the projection carries — and may hold an unsaved
             // move — so only skeletons adopt it.
@@ -1663,6 +1664,9 @@ impl Waku {
             self.runtimes.remove(session_id);
             self.background_work.remove(session_id);
             self.remove_right_panel_session_state(*session_id, cx);
+            self.remove_side_chat_surface(*session_id, cx);
+            self.side_chat_views.remove(session_id);
+            self.side_chat_composers.remove(session_id);
             self.task_switcher.remove(*session_id);
             self.project_switcher.session_removed(*session_id);
             self.transcript_scroll_positions.remove(session_id);
@@ -5141,6 +5145,28 @@ impl Waku {
                     .and_then(AgentSession::take_workspace_move_notice)
                 {
                     Some(notice) => format!("{notice}\n\n{driver_prompt}"),
+                    None => driver_prompt,
+                };
+                // A side chat's first turn tells the agent where its parent
+                // transcript lives and how to reach it. Provider-facing only
+                // — the transcript keeps the user's text, and the intro's own
+                // `turns` check keeps it a first-turn note.
+                let side_chat_intro = self.state.agent_tools_enabled.then(|| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .and_then(|session| {
+                            let parent_id = session.side_chat_of?;
+                            self.state
+                                .sessions
+                                .iter()
+                                .find(|parent| parent.id == parent_id)
+                                .and_then(|parent| session.side_chat_intro(parent))
+                        })
+                });
+                let driver_prompt = match side_chat_intro.flatten() {
+                    Some(intro) => format!("{intro}\n\n{driver_prompt}"),
                     None => driver_prompt,
                 };
                 driver.prompt(

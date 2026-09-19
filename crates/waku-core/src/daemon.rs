@@ -311,15 +311,38 @@ impl WakuBackend {
     /// directory and any archive zip — since no session can reach it again.
     fn remove_session(&self, session_id: Uuid) -> anyhow::Result<()> {
         let mut removed_workspace = None;
+        let mut removed_ids;
         {
             let mut state = self.task_state.lock();
-            self.removed_session_ids.lock().insert(session_id);
+            // Side chats die with their parent: walk the descendant set
+            // first so a removal can never leave orphans behind.
+            removed_ids = vec![session_id];
+            let mut cursor = 0;
+            while cursor < removed_ids.len() {
+                let parent = removed_ids[cursor];
+                cursor += 1;
+                removed_ids.extend(
+                    state
+                        .sessions
+                        .iter()
+                        .filter(|session| session.side_chat_of == Some(parent))
+                        .map(|session| session.id),
+                );
+            }
+            {
+                let mut removed = self.removed_session_ids.lock();
+                for id in &removed_ids {
+                    removed.insert(*id);
+                }
+            }
             let project_id = state
                 .sessions
                 .iter()
                 .find(|session| session.id == session_id)
                 .map(|session| session.project_id);
-            state.sessions.retain(|session| session.id != session_id);
+            state
+                .sessions
+                .retain(|session| !removed_ids.contains(&session.id));
             if let Some(project_id) = project_id {
                 let remove_project = state
                     .projects
@@ -346,9 +369,11 @@ impl WakuBackend {
             // removal does not hinge on it.
             let _ = crate::projectless::remove_workspace(&path);
         }
-        let removed = self.sessions.lock().remove(&session_id);
-        drop(removed);
-        self.agent.clear_session(session_id);
+        for id in removed_ids {
+            let removed = self.sessions.lock().remove(&id);
+            drop(removed);
+            self.agent.clear_session(id);
+        }
         Ok(())
     }
 
@@ -906,7 +931,41 @@ impl Backend for WakuBackend {
                 for session_id in &saved_ids {
                     state.mark_session_dirty(*session_id);
                 }
+                // Archiving a task deletes its side chats — the same rule the
+                // native app applies. A client that only flips `archived_at`
+                // must not leave them in the catalog.
+                let mut cascaded = Vec::new();
+                let mut queue: Vec<Uuid> = state
+                    .sessions
+                    .iter()
+                    .filter(|session| session.archived_at.is_some())
+                    .map(|session| session.id)
+                    .collect();
+                while let Some(parent) = queue.pop() {
+                    for session in state
+                        .sessions
+                        .iter()
+                        .filter(|session| session.side_chat_of == Some(parent))
+                    {
+                        cascaded.push(session.id);
+                        queue.push(session.id);
+                    }
+                }
+                if !cascaded.is_empty() {
+                    state
+                        .sessions
+                        .retain(|session| !cascaded.contains(&session.id));
+                    let mut removed = self.removed_session_ids.lock();
+                    for id in &cascaded {
+                        removed.insert(*id);
+                    }
+                }
                 self.task_store.save(&mut state)?;
+                for id in cascaded {
+                    let runtime = self.sessions.lock().remove(&id);
+                    drop(runtime);
+                    self.agent.clear_session(id);
+                }
                 let sessions = saved_ids
                     .into_iter()
                     .filter_map(|session_id| {
@@ -1367,6 +1426,11 @@ impl Backend for WakuBackend {
                     sender, task_id, thread_id, provider, prompt, delivery, events,
                 )
             }
+            Command::AgentReadSession {
+                task_id,
+                thread_id,
+                provider,
+            } => self.agent_read_session(task_id, thread_id, provider),
             command => {
                 // Quarantined transfer sessions hold received files that the
                 // user hasn't trusted yet — the composer shows a trust card
@@ -1509,6 +1573,9 @@ fn merge_session_list_columns(
     existing.dormant_at = incoming.dormant_at;
     existing.dormant_exempt_until = incoming.dormant_exempt_until;
     existing.landed_at = incoming.landed_at;
+    // Set once at creation and never mutated, but a skeleton merge should
+    // still carry it: the daemon's cascade reads it without hydrating.
+    existing.side_chat_of = incoming.side_chat_of;
     true
 }
 
@@ -2505,9 +2572,19 @@ impl WakuBackend {
             .join("agent")
             .join(session_id.to_string());
         let settings = self.settings.get();
+        // `side_chat_of` is a list column, so a skeleton answers this
+        // without a hydrate.
+        let parent_task_id = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.side_chat_of);
         Ok(crate::agent::AgentLaunchEnv {
             token: self.agent.mint(session_id),
             task_id: session_id,
+            parent_task_id,
             daemon_address,
             cli_path,
             shim_directory,
@@ -2921,6 +2998,29 @@ impl WakuBackend {
         Ok(())
     }
 
+    /// Resolve an agent read's target and return its transcript — the
+    /// compact message view a scoped caller pulls another task's context
+    /// from. Addressed like [`Self::agent_prompt`].
+    fn agent_read_session(
+        &self,
+        task_id: Option<Uuid>,
+        thread_id: Option<String>,
+        provider: Option<ProviderKind>,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.require_agent_tools()?;
+        let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        let mut state = self.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == target)
+            .ok_or_else(|| anyhow!("task {target} is unknown to the daemon"))?;
+        self.task_store.hydrate(session)?;
+        Ok(ResponsePayload::AgentSessionTranscript {
+            transcript: session.agent_transcript(),
+        })
+    }
+
     /// Resolve an agent prompt's target: an explicit Waku task id, or a
     /// provider-native Agent CLI thread id matched against every
     /// daemon-known task's stored resume cursor.
@@ -3290,6 +3390,7 @@ fn handle_driver_command(
         | Command::CloseSession
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
+        | Command::AgentReadSession { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }
         | Command::ListCustomCommands
@@ -3873,6 +3974,59 @@ mod tests {
             .unwrap();
         assert!(reloaded.sessions[index].quarantined);
         assert!(reloaded.sessions[index].sandboxed);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn removing_a_parent_removes_its_side_chats() {
+        let root = std::env::temp_dir().join(format!("waku-side-chats-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        let parent_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("parent");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+
+        let project_id = state.projects[0].id;
+        let mut side_chat = AgentSession::new(project_id, ProviderKind::Codex);
+        side_chat.side_chat_of = Some(parent_id);
+        side_chat.begin_turn("side prompt");
+        side_chat.finish_active_turn(crate::model::TurnStatus::Completed);
+        let side_chat_id = side_chat.id;
+        state.push_session(side_chat);
+        // A sibling in the same project stays — the cascade follows
+        // `side_chat_of`, not shared lineage.
+        let mut sibling = AgentSession::new(project_id, ProviderKind::Codex);
+        sibling.begin_turn("sibling");
+        sibling.finish_active_turn(crate::model::TurnStatus::Completed);
+        let sibling_id = sibling.id;
+        state.push_session(sibling);
+        store.save(&mut state).unwrap();
+
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        backend.remove_session(parent_id).unwrap();
+        let remaining = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        assert_eq!(remaining, vec![sibling_id]);
+
+        // The cascade is durable: the tombstone also keeps a stale client
+        // save from resurrecting the child.
+        let reloaded = StateStore::daemon(root.join("app.db")).load().unwrap();
+        assert!(
+            !reloaded
+                .sessions
+                .iter()
+                .any(|session| session.id == side_chat_id)
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

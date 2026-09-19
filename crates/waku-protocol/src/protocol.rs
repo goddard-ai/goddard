@@ -12,8 +12,9 @@ use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, Evaluation};
 use crate::model::{
-    AgentSession, GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe,
-    ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
+    AgentSession, AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProviderKind,
+    ProviderProbe, ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary,
+    UserInputAnswer,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -26,20 +27,24 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
 pub const APP_EXECUTABLE_ENV: &str = "GODDARD_APP_EXECUTABLE";
 /// Scoped bearer credential the daemon mints for one provider session's
 /// runtime and delivers through its launch environment. Unlike the master
-/// daemon token it is valid only for the two agent commands, only while the
-/// owning runtime is alive, and never leaves daemon memory.
+/// daemon token it is valid only for the agent command surface, only while
+/// the owning runtime is alive, and never leaves daemon memory.
 pub const AGENT_TOKEN_ENV: &str = "GODDARD_AGENT_TOKEN";
 /// The Waku task that owns the running provider session. Agent harnesses
 /// report it so the daemon can mark the prompts they submit with the sending
 /// task's provenance.
 pub const AGENT_TASK_ENV: &str = "GODDARD_TASK_ID";
+/// The task a side chat was spawned from. Only present on side-chat
+/// sessions, so their agents can discover the linkage without parsing the
+/// intro note out of a prompt.
+pub const AGENT_PARENT_TASK_ENV: &str = "GODDARD_PARENT_TASK_ID";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -492,6 +497,25 @@ pub enum Command {
     RunAutomationNow {
         automation_id: Uuid,
     },
+    /// Scoped agent credential only: read another task's transcript.
+    ///
+    /// Side chats use this to pull their parent task's context on demand —
+    /// they are fresh sessions with a reference, not forks, so nothing of
+    /// the parent's history is in their context natively. Addressed the
+    /// same way as [`Self::AgentPrompt`].
+    AgentReadSession {
+        /// Waku task id. Exactly one of `task_id` and `thread_id` is
+        /// required.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<Uuid>,
+        /// Provider-native Agent CLI thread id, resolved against
+        /// daemon-known tasks. `provider` disambiguates when more than one
+        /// task carries the id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<ProviderKind>,
+    },
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
@@ -775,6 +799,11 @@ pub enum ResponsePayload {
     AgentSessionCreated {
         session_id: Uuid,
     },
+    /// The transcript an `agentReadSession` resolved — the compact view a
+    /// scoped agent caller reads.
+    AgentSessionTranscript {
+        transcript: AgentSessionTranscript,
+    },
 }
 
 /// The i18n key and `%{name}` substitution values behind a user-facing
@@ -936,7 +965,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 10);
+        assert_eq!(PROTOCOL_VERSION, 11);
     }
 
     #[test]
@@ -945,7 +974,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 10);
+        assert_eq!(PROTOCOL_VERSION, 11);
     }
 
     #[test]
@@ -973,6 +1002,30 @@ mod tests {
             "01900000-0000-7000-8000-000000000001"
         );
         assert_eq!(load["cwd"], "/tmp/project");
+    }
+
+    #[test]
+    fn agent_read_command_uses_stable_camel_case_fields() {
+        let task_id = Uuid::from_u128(42);
+        let by_task = serde_json::to_value(Command::AgentReadSession {
+            task_id: Some(task_id),
+            thread_id: None,
+            provider: None,
+        })
+        .unwrap();
+        assert_eq!(by_task["type"], "agentReadSession");
+        assert_eq!(by_task["taskId"], task_id.to_string());
+        assert!(by_task.get("threadId").is_none());
+        assert!(by_task.get("provider").is_none());
+
+        let by_thread = serde_json::to_value(Command::AgentReadSession {
+            task_id: None,
+            thread_id: Some("thread-9".into()),
+            provider: Some(ProviderKind::Claude),
+        })
+        .unwrap();
+        assert_eq!(by_thread["threadId"], "thread-9");
+        assert_eq!(by_thread["provider"], "claude");
     }
 
     #[test]

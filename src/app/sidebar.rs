@@ -2612,7 +2612,7 @@ impl Waku {
         );
         let now = unix_time();
         for session in &self.state.sessions {
-            if !session.has_started() || session.archived_at.is_some() {
+            if !session.has_started() || session.archived_at.is_some() || session.is_side_chat() {
                 continue;
             }
             fingerprint = mix_uuid(fingerprint, session.id);
@@ -2695,7 +2695,10 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .filter(|session| session.has_started() && session.archived_at.is_none())
+            // Side chats are panel content under their parent, never rows.
+            .filter(|session| {
+                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+            })
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 

@@ -530,7 +530,8 @@ pub struct PersistedListOffset {
 
 /// A right-panel tab that can be reopened without runtime objects. Terminal,
 /// browser, and background-work surfaces are omitted: their PTYs, webviews,
-/// and output buffers die with the app.
+/// and output buffers die with the app. Side chats persist — they are
+/// sessions, and the session outlives the window.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersistedRightPanelSurface {
@@ -539,6 +540,9 @@ pub enum PersistedRightPanelSurface {
     File(String),
     PullRequest { number: u64 },
     GitHub(Uuid),
+    /// The side-chat session's id; the tab restores only while that session
+    /// still lives under this panel's owner.
+    SideChat(Uuid),
 }
 
 /// A right-panel surface maximized over the window, if one was.
