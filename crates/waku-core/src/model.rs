@@ -1,13 +1,14 @@
 //! Daemon-only provider discovery layered over shared protocol models.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use waku_protocol::model::*;
 
 pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> ProviderProbe {
     let path = match binary_override {
         Some(binary) => crate::command_env::resolve_binary_override(binary),
-        None => crate::command_env::find_executable(provider.command()),
+        None => crate::command_env::find_executable(provider.command())
+            .or_else(|| shell_resolved_binary(provider)),
     };
     ProviderProbe {
         provider,
@@ -16,6 +17,18 @@ pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> 
         models: crate::model_catalog::fallback_models(provider),
         agent_presets: crate::model_catalog::fallback_agent_presets(provider),
     }
+}
+
+/// The static search missed this provider's CLI; ask the user's interactive
+/// shell for all provider commands in one spawn — the first miss in a
+/// detection pass resolves the cohort, the rest read the cache. An explicit
+/// binary override never reaches this.
+fn shell_resolved_binary(provider: ProviderKind) -> Option<PathBuf> {
+    let commands: Vec<&'static str> = ProviderKind::ALL
+        .iter()
+        .map(|provider| provider.command())
+        .collect();
+    crate::command_env::find_executable_via_shell(provider.command(), &commands)
 }
 
 /// Detect a provider and hydrate its catalog from the daemon-owned cache.

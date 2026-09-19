@@ -1,11 +1,11 @@
 //! Process environment capture and provider-safe command spawning.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use std::fs::{self, OpenOptions};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,6 +32,18 @@ type ShellEnvironment = Vec<(OsString, OsString)>;
 
 static LOGIN_SHELL_ENVIRONMENT: OnceLock<RwLock<Option<ShellEnvironment>>> = OnceLock::new();
 static SHELL_ENV_CAPTURE_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Bumped every time the login-shell environment is re-captured so caches
+/// derived from it — the `command -v` fallback results — cannot serve
+/// answers older than the PATH they were resolved against.
+static SHELL_ENV_GENERATION: AtomicU64 = AtomicU64::new(0);
+static LAST_SHELL_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Detection probes re-capture the shell environment at most this often.
+/// A refresh pass probes every provider back to back, and installing a CLI
+/// minutes after the daemon started is the case worth catching — seconds of
+/// staleness are not.
+const SHELL_ENV_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Build a command with the environment a terminal-launched Goddard normally
 /// inherits. Apps opened through LaunchServices do not receive variables
@@ -447,6 +459,148 @@ pub fn resolve_binary_override(spec: &str) -> Option<PathBuf> {
     find_executable(spec)
 }
 
+/// `(environment generation, command -> resolved path)`; the generation
+/// invalidates the whole map when the shell environment is re-captured.
+type ShellCommandResolution = (u64, HashMap<String, Option<PathBuf>>);
+
+/// Fallback for commands the static directory search missed: ask the user's
+/// interactive shell to resolve every command in `cohort` in a single
+/// invocation. Interactive rc files (`.zshrc`) can put directories on PATH
+/// that the login-shell env probe never captured — a timed-out `-i` attempt
+/// falls back to `-l`, which skips `.zshrc` entirely — so the shell the user
+/// actually types into is the last word on what it can run.
+///
+/// Results for the whole cohort are cached until the captured environment is
+/// refreshed (see [`SHELL_ENV_GENERATION`]), so the sequential per-provider
+/// probes in a detection pass share one spawn. Must only be called from a
+/// background thread.
+
+pub fn find_executable_via_shell(name: &str, cohort: &[&str]) -> Option<PathBuf> {
+    static CACHE: OnceLock<Mutex<ShellCommandResolution>> = OnceLock::new();
+    let generation = SHELL_ENV_GENERATION.load(Ordering::Relaxed);
+    let cache = CACHE.get_or_init(|| Mutex::new((u64::MAX, HashMap::new())));
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.0 != generation {
+        guard.1 = resolve_commands_via_shell(cohort);
+        guard.0 = generation;
+    }
+    match guard.1.get(name) {
+        Some(found) => found.clone(),
+        None => {
+            // A name outside the cohort caches a miss too, so repeated probes
+            // for it cannot spawn a shell per call.
+            guard.1.insert(name.to_owned(), None);
+            None
+        }
+    }
+}
+
+#[cfg(unix)]
+fn resolve_commands_via_shell(names: &[&str]) -> HashMap<String, Option<PathBuf>> {
+    let mut results: HashMap<String, Option<PathBuf>> = names
+        .iter()
+        .map(|name| ((*name).to_owned(), None))
+        .collect();
+    let Some(bytes) = run_command_lookup(names) else {
+        return results;
+    };
+    for (name, path) in parse_command_lookup(&bytes) {
+        if results.contains_key(name.as_str()) {
+            results.insert(name, Some(path));
+        }
+    }
+    results
+}
+
+/// Pairs of `name\0path` from the lookup script. `command -v` also prints
+/// alias definitions and function names, so only an absolute path to a real
+/// file counts — anything else is not spawnable.
+#[cfg(unix)]
+fn parse_command_lookup(bytes: &[u8]) -> Vec<(String, PathBuf)> {
+    bytes
+        .split(|byte| *byte == 0)
+        .collect::<Vec<_>>()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter_map(|[name, path]| {
+            let name = std::str::from_utf8(name).ok()?.to_owned();
+            let path = PathBuf::from(os_string_from_bytes(path)?);
+            (path.is_absolute() && path.is_file()).then_some((name, path))
+        })
+        .collect()
+}
+
+/// The `command -v` fallback is POSIX-only; on Windows the env re-capture and
+/// the registry-merged `PATH` in `search_paths_from` carry that weight.
+#[cfg(not(unix))]
+fn resolve_commands_via_shell(names: &[&str]) -> HashMap<String, Option<PathBuf>> {
+    names
+        .iter()
+        .map(|name| ((*name).to_owned(), None))
+        .collect()
+}
+
+/// One `command -v` per name, NUL-separated `name\0path` pairs written to the
+/// capture file so profile noise on stdout cannot corrupt the result.
+#[cfg(unix)]
+const SHELL_LOOKUP_COMMAND: &str = concat!(
+    "for name in \"$@\"; do ",
+    "path=$(command -v \"$name\" 2>/dev/null) && printf '%s\\0%s\\0' \"$name\" \"$path\"; ",
+    "done > \"$GODDARD_SHELL_ENV_CAPTURE_FILE\""
+);
+
+/// `-i -l` first so rc files of both kinds apply; `-i` alone is the retry for
+/// a login file that hangs or exits early, and it is the mode that reads
+/// `.zshrc` — the gap this fallback exists to close.
+#[cfg(unix)]
+fn run_command_lookup(names: &[&str]) -> Option<Vec<u8>> {
+    for shell in default_shell_candidates() {
+        if !shell.is_file() {
+            continue;
+        }
+        for shell_args in [["-i", "-l", "-c"].as_slice(), ["-i", "-c"].as_slice()] {
+            if let Some(bytes) =
+                capture_command_lookup(&shell, shell_args, names, INTERACTIVE_SHELL_ENV_TIMEOUT)
+            {
+                return Some(bytes);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn capture_command_lookup(
+    shell: &Path,
+    shell_args: &[&str],
+    names: &[&str],
+    timeout: Duration,
+) -> Option<Vec<u8>> {
+    let capture = ShellEnvironmentCapture::create()?;
+    let mut command = Command::new(shell);
+    command
+        .args(shell_args)
+        .arg(SHELL_LOOKUP_COMMAND)
+        .arg("goddard-command-lookup")
+        .args(names)
+        .env("GODDARD_SHELL_ENV_CAPTURE_FILE", capture.path())
+        .env("DISABLE_AUTO_UPDATE", "true")
+        .env("ZSH_TMUX_AUTOSTARTED", "true")
+        .env("ZSH_TMUX_AUTOSTART", "false")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command.process_group(0);
+    let mut child = spawn(&mut command).ok()?;
+    if !wait_for_child(&mut child, timeout).ok()?.success() {
+        return None;
+    }
+    fs::read(capture.path()).ok()
+}
+
 pub fn executable_search_path() -> Option<std::ffi::OsString> {
     std::env::join_paths(executable_search_paths()).ok()
 }
@@ -462,6 +616,7 @@ pub fn refresh_from_default_shell() -> bool {
     *login_shell_environment()
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(environment);
+    note_shell_environment_refreshed();
     true
 }
 
@@ -482,13 +637,41 @@ pub fn refresh_from_default_shell() -> bool {
     *login_shell_environment()
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(environment);
+    note_shell_environment_refreshed();
     true
 }
 
 /// Targets with neither probe keep the inherited environment.
 #[cfg(not(any(unix, windows)))]
 pub fn refresh_from_default_shell() -> bool {
+    note_shell_environment_refreshed();
     true
+}
+
+fn note_shell_environment_refreshed() {
+    SHELL_ENV_GENERATION.fetch_add(1, Ordering::Relaxed);
+    *LAST_SHELL_REFRESH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
+}
+
+/// Re-capture the login-shell environment when the cached one predates
+/// [`SHELL_ENV_REFRESH_INTERVAL`]. Provider detection calls this so a CLI
+/// installed after the daemon started is found without a restart; a burst
+/// of probes in one pass shares a single capture. Must only be called from
+/// a background thread — a real capture starts a shell.
+pub fn refresh_shell_environment_if_stale() -> bool {
+    {
+        let last = LAST_SHELL_REFRESH
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(last) = *last
+            && last.elapsed() < SHELL_ENV_REFRESH_INTERVAL
+        {
+            return true;
+        }
+    }
+    refresh_from_default_shell()
 }
 
 /// A hanging or exiting profile loses the whole probe run, so the
@@ -1587,5 +1770,41 @@ mod tests {
         );
         let _ = fs::remove_file(shell);
         let _ = fs::remove_dir(directory);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_lookup_keeps_only_absolute_paths_to_real_files() {
+        let id = SHELL_ENV_CAPTURE_ID.fetch_add(1, Ordering::Relaxed);
+        let directory =
+            std::env::temp_dir().join(format!("waku-lookup-test-{}-{id}", std::process::id()));
+        fs::create_dir(&directory).expect("create lookup fixture directory");
+        let binary = directory.join("faux-provider");
+        fs::write(&binary, "#!/bin/sh\n").expect("write binary fixture");
+        let mut permissions = fs::metadata(&binary)
+            .expect("read binary fixture")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&binary, permissions).expect("make binary fixture executable");
+
+        let captured = format!(
+            "faux-provider\0{}\0aliased\0pi: aliased to pi --stdio\0relative\0faux-provider\0dangling\0/no/such/path\0",
+            binary.display()
+        );
+        let parsed = parse_command_lookup(captured.as_bytes());
+
+        assert_eq!(parsed, vec![("faux-provider".to_owned(), binary)]);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_the_shell_cannot_find_is_a_cached_miss() {
+        let name = "waku-definitely-missing-cli";
+
+        assert_eq!(find_executable_via_shell(name, &[name]), None);
+        // The negative answer is cached until the environment generation
+        // bumps; a repeat probe must not spawn another shell.
+        assert_eq!(find_executable_via_shell(name, &[name]), None);
     }
 }
