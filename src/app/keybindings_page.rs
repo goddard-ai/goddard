@@ -1062,6 +1062,10 @@ fn render_keyboard_stage(
             );
     }
 
+    // Caption above the caps names the command whose chord is lit, so the
+    // reader doesn't have to glance back at the table. Falls back to a
+    // hint while the pointer is off the rows.
+    let caption = preview_row.map(|row| row.descriptor.title().to_string());
     let mut stage = div()
         .px(px(20.0))
         .py(px(12.0))
@@ -1069,7 +1073,20 @@ fn render_keyboard_stage(
         .flex_col()
         .gap(px(KEY_GAP))
         .border_b_1()
-        .border_color(theme.border);
+        .border_color(theme.border)
+        .child(
+            div()
+                .h(px(18.0))
+                .flex()
+                .items_center()
+                .text_size(sp(11.5))
+                .text_color(if caption.is_some() {
+                    theme.text_secondary
+                } else {
+                    theme.text_tertiary
+                })
+                .child(caption.unwrap_or_else(|| tr!("keybind.stage.hover_hint"))),
+        );
     for row in layout.rows {
         let mut line = div().flex().gap(px(KEY_GAP));
         for capdef in *row {
