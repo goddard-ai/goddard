@@ -37,7 +37,7 @@ use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
-    ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
+    ComposerDraftTarget, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
 };
 
 const STATE_VERSION: u32 = 5;
@@ -892,6 +892,7 @@ fn search_session_messages(
     path: &Path,
     query: &str,
     limit: usize,
+    scope: SessionMessageSearchScope,
 ) -> io::Result<Vec<SessionMessageMatch>> {
     let query = query.trim();
     if query.is_empty() || limit == 0 {
@@ -905,8 +906,14 @@ fn search_session_messages(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(to_io_error)?;
+    // The two surfaces are complementary: the palette scans active tasks, the
+    // Archived settings page scans the archive.
+    let archive_clause = match scope {
+        SessionMessageSearchScope::Active => "sessions.archived_at IS NULL",
+        SessionMessageSearchScope::Archived => "sessions.archived_at IS NOT NULL",
+    };
     let mut statement = connection
-        .prepare(
+        .prepare(&format!(
             "WITH ranked AS (
                  SELECT messages.session_id,
                         messages.role,
@@ -923,7 +930,7 @@ fn search_session_messages(
                    FROM messages
                    INNER JOIN sessions ON sessions.id = messages.session_id
                   WHERE messages.streaming = 0
-                    AND sessions.archived_at IS NULL
+                    AND {archive_clause}
                     AND messages.role IN ('user', 'assistant')
                     AND messages.hidden = 0
                     AND instr(lower(messages.content), lower(?1)) > 0
@@ -933,7 +940,7 @@ fn search_session_messages(
               WHERE session_match_rank = 1
               ORDER BY source_rank, session_updated_at DESC, session_id
               LIMIT ?2",
-        )
+        ))
         .map_err(to_io_error)?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let rows = statement
@@ -1123,9 +1130,10 @@ impl StateStore {
         &self,
         query: String,
         limit: usize,
+        scope: SessionMessageSearchScope,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let path = self.path.clone();
-        move || search_session_messages(&path, &query, limit)
+        move || search_session_messages(&path, &query, limit, scope)
     }
 
     pub fn blobs(&self) -> Arc<BlobStore> {
@@ -3524,7 +3532,9 @@ mod tests {
                 .all(|session| session.messages.is_empty())
         );
 
-        let matches = reopened.session_message_search("needle".into(), 50)().unwrap();
+        let matches = reopened
+            .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
+            .unwrap();
         assert_eq!(
             matches
                 .iter()
@@ -3540,7 +3550,12 @@ mod tests {
         assert!(!matches[1].snippet.contains("Streaming"));
         assert!(!matches[1].snippet.contains("System"));
         assert_eq!(
-            reopened.session_message_search("100%_literal".into(), 50)()
+            reopened
+                .session_message_search(
+                    "100%_literal".into(),
+                    50,
+                    SessionMessageSearchScope::Active
+                )()
                 .unwrap()
                 .iter()
                 .map(|matched| matched.session_id)
@@ -3549,7 +3564,12 @@ mod tests {
             "SQL wildcard characters are searched literally"
         );
         assert!(
-            reopened.session_message_search("Hidden continue".into(), 50)()
+            reopened
+                .session_message_search(
+                    "Hidden continue".into(),
+                    50,
+                    SessionMessageSearchScope::Active
+                )()
                 .unwrap()
                 .is_empty(),
             "a hidden prompt never surfaces in search"
@@ -3793,7 +3813,8 @@ mod tests {
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
         assert_eq!(
-            store.session_message_search("needle".into(), 50)()
+            store
+                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
                 .unwrap()
                 .len(),
             1
@@ -3807,10 +3828,19 @@ mod tests {
         let mut restored = reopened.load().unwrap();
         assert_eq!(restored.sessions[0].archived_at, Some(archived_at));
         assert!(
-            reopened.session_message_search("needle".into(), 50)()
+            reopened
+                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
                 .unwrap()
                 .is_empty(),
-            "archived sessions are hidden from transcript search"
+            "archived sessions are hidden from the active transcript search"
+        );
+        assert_eq!(
+            reopened
+                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Archived)()
+                .unwrap()
+                .len(),
+            1,
+            "the archived scope finds the same transcript"
         );
 
         restored.session_mut(session_id).unwrap().archived_at = None;
@@ -3819,10 +3849,18 @@ mod tests {
         let reopened = store_in(&directory);
         assert_eq!(reopened.load().unwrap().sessions[0].archived_at, None);
         assert_eq!(
-            reopened.session_message_search("needle".into(), 50)()
+            reopened
+                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
                 .unwrap()
                 .len(),
             1
+        );
+        assert!(
+            reopened
+                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Archived)()
+                .unwrap()
+                .is_empty(),
+            "an unarchived session leaves the archived scope"
         );
 
         fs::remove_dir_all(directory).ok();

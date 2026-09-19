@@ -132,7 +132,7 @@ export async function searchSessionMessages(
   limit = 40,
 ): Promise<SessionMessageMatch[]> {
   const response = expectResponse(
-    await client.request({ type: 'searchSessionMessages', query, limit }),
+    await client.request({ type: 'searchSessionMessages', query, limit, scope: 'active' }),
     'sessionMessageMatches',
   )
   return response.matches

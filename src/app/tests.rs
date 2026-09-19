@@ -3105,25 +3105,68 @@ fn archived_filter_matches_titles_and_projects() {
 
     // No query and no project filter keeps every row in the given order.
     assert_eq!(
-        filter_archived_sessions(&sessions, "", None, &names),
+        filter_archived_sessions(&sessions, "", None, &names, None),
         vec![alpha.id, beta.id]
     );
     // Titles match a normalized query; the project name matches too.
     assert_eq!(
-        filter_archived_sessions(&sessions, "sidebar", None, &names),
+        filter_archived_sessions(&sessions, "sidebar", None, &names, None),
         vec![alpha.id]
     );
     assert_eq!(
-        filter_archived_sessions(&sessions, "waku", None, &names),
+        filter_archived_sessions(&sessions, "waku", None, &names, None),
         vec![beta.id]
     );
     // The project filter narrows before the query runs.
     assert_eq!(
-        filter_archived_sessions(&sessions, "", Some(project_a), &names),
+        filter_archived_sessions(&sessions, "", Some(project_a), &names, None),
         vec![alpha.id]
     );
     assert_eq!(
-        filter_archived_sessions(&sessions, "sidebar", Some(project_b), &names),
+        filter_archived_sessions(&sessions, "sidebar", Some(project_b), &names, None),
+        Vec::<Uuid>::new()
+    );
+}
+
+#[test]
+fn archived_filter_matches_transcript_hits() {
+    use crate::persistence::SessionMessageMatch;
+
+    let project = Uuid::new_v4();
+    let names: HashMap<Uuid, String> = [(project, "goddard".to_string())].into_iter().collect();
+
+    let mut alpha = AgentSession::new(project, ProviderKind::Codex);
+    alpha.title = "fix the sidebar".into();
+    let mut beta = AgentSession::new(project, ProviderKind::Claude);
+    beta.title = "usage chart".into();
+    let sessions = vec![&alpha, &beta];
+
+    // A transcript match surfaces a row whose title and project miss.
+    let matches: HashMap<Uuid, SessionMessageMatch> = [(
+        beta.id,
+        SessionMessageMatch {
+            session_id: beta.id,
+            source: MessageRole::User,
+            snippet: "a needle in the transcript".into(),
+        },
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        filter_archived_sessions(&sessions, "needle", None, &names, Some(&matches)),
+        vec![beta.id]
+    );
+
+    // The project filter still gates content matches.
+    let other_project = Uuid::new_v4();
+    assert_eq!(
+        filter_archived_sessions(
+            &sessions,
+            "needle",
+            Some(other_project),
+            &names,
+            Some(&matches)
+        ),
         Vec::<Uuid>::new()
     );
 }

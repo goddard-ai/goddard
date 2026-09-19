@@ -862,8 +862,12 @@ impl Backend for WakuBackend {
                 trim_resident_transcripts(&mut state, &pinned);
                 Ok(ResponsePayload::Session { session })
             }
-            Command::SearchSessionMessages { query, limit } => {
-                let matches = self.task_store.session_message_search(query, limit)()?;
+            Command::SearchSessionMessages {
+                query,
+                limit,
+                scope,
+            } => {
+                let matches = self.task_store.session_message_search(query, limit, scope)()?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
             Command::ListProviderSessions { provider, limit } => {

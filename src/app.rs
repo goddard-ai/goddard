@@ -2439,6 +2439,19 @@ pub struct Waku {
     /// Session ids the search and project filters leave visible, newest
     /// archived first — the row builder reads only this.
     archived_session_rows: RefCell<Vec<Uuid>>,
+    /// Transcript-search results keyed by the archived field's query, fetched
+    /// on the background executor — the SQLite scan never runs on a frame.
+    archived_message_searches:
+        QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
+    /// The query `archived_message_matches` belongs to; a map built for an
+    /// older query must not decorate rows under a newer one.
+    archived_message_matches_query: Option<String>,
+    /// The current query's transcript matches, by session. A row missing here
+    /// renders normally — the match may still be in flight.
+    archived_message_matches: HashMap<Uuid, crate::persistence::SessionMessageMatch>,
+    /// The current query's transcript scan has not landed yet; the empty
+    /// state reads "searching" rather than "no match" while this holds.
+    archived_message_search_pending: bool,
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
@@ -4509,9 +4522,9 @@ impl Waku {
             .detach();
             cx.subscribe(
                 &archived_search,
-                |_: &mut Self, _, event: &InputEvent, cx| {
+                |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
-                        cx.notify();
+                        this.schedule_archived_message_search(cx);
                     }
                 },
             )
@@ -5157,6 +5170,12 @@ impl Waku {
                 archived_sessions_list: ListState::new(0, ListAlignment::Top, px(256.0)),
                 archived_sessions_scrollbar: ScrollbarState::new(),
                 archived_session_rows: RefCell::new(Vec::new()),
+                archived_message_searches: QueryCache::new(
+                    settings::ARCHIVED_MESSAGE_SEARCH_CACHE_CAPACITY,
+                ),
+                archived_message_matches_query: None,
+                archived_message_matches: HashMap::new(),
+                archived_message_search_pending: false,
                 completion_volume_slider: SliderState::new(),
                 sidebar_transparency_slider: SliderState::new(),
                 border_intensity_slider: SliderState::new(),

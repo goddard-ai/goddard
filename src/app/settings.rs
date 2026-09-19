@@ -21,6 +21,14 @@ const SETTINGS_GIT_MAX_WIDTH: f32 = SETTINGS_USAGE_MAX_WIDTH;
 /// scrollbar knows the total extent before rows are measured.
 const ARCHIVED_SESSION_ROW_HEIGHT: f32 = 45.0;
 
+/// The archived filter's transcript scan uses the command palette's shape:
+/// one best match per session, capped well above what one page can show.
+const ARCHIVED_MESSAGE_SEARCH_LIMIT: usize = 50;
+const ARCHIVED_MESSAGE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(90);
+/// Resolved transcript queries kept for the field's lifetime, so backspacing
+/// to an earlier query does not re-scan SQLite.
+pub(super) const ARCHIVED_MESSAGE_SEARCH_CACHE_CAPACITY: usize = 24;
+
 /// Key context the settings sidebar declares around its search field.
 const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
 
@@ -535,11 +543,15 @@ fn settings_row_card(rows: Vec<Option<AnyElement>>, theme: Theme) -> Option<Div>
 /// preserving the input order (callers sort newest-archived first). `query`
 /// must already be trimmed and lowercased, and `project_names` must hold
 /// each project id's lowercased display name — title and project both match.
+/// `content_matches` carries the transcript hits for this exact query, when
+/// the background scan has landed; a session matching on content alone still
+/// surfaces.
 pub(super) fn filter_archived_sessions(
     sessions: &[&AgentSession],
     query: &str,
     project_filter: Option<Uuid>,
     project_names: &HashMap<Uuid, String>,
+    content_matches: Option<&HashMap<Uuid, crate::persistence::SessionMessageMatch>>,
 ) -> Vec<Uuid> {
     sessions
         .iter()
@@ -552,6 +564,7 @@ pub(super) fn filter_archived_sessions(
                 || project_names
                     .get(&session.project_id)
                     .is_some_and(|name| name.contains(query))
+                || content_matches.is_some_and(|matches| matches.contains_key(&session.id))
         })
         .map(|session| session.id)
         .collect()
@@ -4688,7 +4701,18 @@ impl Waku {
             .archived_project_filter
             .filter(|id| project_names.contains_key(id));
 
-        let visible = filter_archived_sessions(&archived, &query, project_filter, &project_names);
+        // Transcript hits only count while the stored map belongs to this
+        // exact query — a stale map would show the wrong sessions' snippets.
+        let content_matches = (self.archived_message_matches_query.as_deref()
+            == Some(query.as_str()))
+        .then_some(&self.archived_message_matches);
+        let visible = filter_archived_sessions(
+            &archived,
+            &query,
+            project_filter,
+            &project_names,
+            content_matches,
+        );
         self.sync_archived_session_rows(&visible);
 
         let mut page = div()
@@ -4790,7 +4814,13 @@ impl Waku {
                     .mt(px(12.0))
                     .text_size(sp(13.0))
                     .text_color(theme.text_tertiary)
-                    .child(tr!("settings.archived_no_match")),
+                    .child(
+                        if self.archived_message_search_pending && !query.is_empty() {
+                            tr!("settings.archived_searching")
+                        } else {
+                            tr!("settings.archived_no_match")
+                        },
+                    ),
             );
         } else {
             let entity = cx.entity().downgrade();
@@ -4803,12 +4833,12 @@ impl Waku {
                     .child(
                         list(
                             self.archived_sessions_list.clone(),
-                            move |index, _window, cx| {
+                            move |index, window, cx| {
                                 entity
                                     .upgrade()
                                     .map(|entity| {
                                         entity.update(cx, |this, cx| {
-                                            this.archived_session_row(index, cx)
+                                            this.archived_session_row(index, window, cx)
                                         })
                                     })
                                     .unwrap_or_else(|| div().into_any_element())
@@ -4834,6 +4864,107 @@ impl Waku {
             .find(|project| project.id == project_id)
             .map(Project::display_name)
             .unwrap_or_else(|| tr!("project.no_project_name"))
+    }
+
+    /// Debounce the archived filter's transcript scan onto the background
+    /// executor, mirroring the command palette's message search: the SQLite
+    /// read runs off-thread, results land on `archived_message_matches`, and
+    /// rows pick up their snippets on the next frame.
+    pub(super) fn schedule_archived_message_search(&mut self, cx: &mut Context<Self>) {
+        let query = self
+            .archived_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_lowercase();
+        let fetch = if query.is_empty() {
+            self.archived_message_matches_query = None;
+            self.archived_message_matches.clear();
+            self.archived_message_search_pending = false;
+            None
+        } else {
+            match self.archived_message_searches.read(&query) {
+                Query::Ready(matches) => {
+                    self.archived_message_matches_query = Some(query.clone());
+                    self.archived_message_matches = matches
+                        .iter()
+                        .cloned()
+                        .map(|matched| (matched.session_id, matched))
+                        .collect();
+                    self.archived_message_search_pending = false;
+                    None
+                }
+                Query::Pending => {
+                    self.archived_message_search_pending = true;
+                    None
+                }
+                Query::Missing(token) => {
+                    self.archived_message_search_pending = true;
+                    Some(token)
+                }
+            }
+        };
+        cx.notify();
+
+        let Some(token) = fetch else { return };
+        let search = self.store.session_message_search(
+            query.clone(),
+            ARCHIVED_MESSAGE_SEARCH_LIMIT,
+            crate::persistence::SessionMessageSearchScope::Archived,
+        );
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(ARCHIVED_MESSAGE_SEARCH_DEBOUNCE)
+                .await;
+            let current = this
+                .update(cx, |this, cx| {
+                    this.archived_search
+                        .read(cx)
+                        .content()
+                        .trim()
+                        .to_lowercase()
+                        == query
+                })
+                .unwrap_or(false);
+            if !current {
+                let _ = this.update(cx, |this, _| {
+                    this.archived_message_searches.abandon(token)
+                });
+                return;
+            }
+            let matches = cx
+                .background_executor()
+                .spawn(async move { search().unwrap_or_default() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if !this.archived_message_searches.fulfill(token, matches) {
+                    return;
+                }
+                if this
+                    .archived_search
+                    .read(cx)
+                    .content()
+                    .trim()
+                    .to_lowercase()
+                    != query
+                {
+                    return;
+                }
+                let Query::Ready(matches) = this.archived_message_searches.read(&query)
+                else {
+                    return;
+                };
+                this.archived_message_matches_query = Some(query.clone());
+                this.archived_message_matches = matches
+                    .iter()
+                    .cloned()
+                    .map(|matched| (matched.session_id, matched))
+                    .collect();
+                this.archived_message_search_pending = false;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Keep the virtualized archived list in sync with the filtered session
@@ -4868,7 +4999,12 @@ impl Waku {
     /// One archived-chat row, built only while visible. Reads the per-frame
     /// id cache; a stale index from a frame racing a state change renders as
     /// an empty row for that frame rather than panicking.
-    fn archived_session_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn archived_session_row(
+        &self,
+        row: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let rows = self.archived_session_rows.borrow();
         let Some(session_id) = rows.get(row).copied() else {
@@ -4894,6 +5030,19 @@ impl Waku {
         } else {
             format!("{project_name} · {updated}")
         };
+        // The transcript hit that surfaced this row, when the field's query
+        // still owns the stored map — shown like the palette's match line.
+        let query = self
+            .archived_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_lowercase();
+        let content_match = (self.archived_message_matches_query.as_deref()
+            == Some(query.as_str()))
+        .then(|| self.archived_message_matches.get(&session_id))
+        .flatten()
+        .cloned();
 
         let unarchive_button = div()
             .id(SharedString::from(format!(
@@ -5008,7 +5157,22 @@ impl Waku {
                                 element.child(icon("icons/check.svg", 11.0, theme.success))
                             })
                             .child(detail),
-                    ),
+                    )
+                    .when_some(content_match, |column, matched| {
+                        column.child(
+                            div()
+                                .mt(px(1.0))
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_size(sp(11.5))
+                                .child(
+                                    super::command_palette::palette_content_match_text(
+                                        &matched, &query, window, theme,
+                                    ),
+                                ),
+                        )
+                    }),
             )
             .child(
                 div()

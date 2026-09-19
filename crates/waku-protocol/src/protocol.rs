@@ -14,7 +14,9 @@ use crate::model::{
     AgentSession, GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe,
     ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
 };
-use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
+use crate::persistence::{
+    ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
+};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 use crate::routing::{RouteCandidate, RouteDecision, RoutePolicyView, RouteTarget, TaskClass};
 use crate::settings::DaemonSettings;
@@ -250,6 +252,10 @@ pub enum Command {
     SearchSessionMessages {
         query: String,
         limit: usize,
+        /// Which sessions the search scans; absent means active tasks, so
+        /// pre-scope clients keep their palette behavior.
+        #[serde(default)]
+        scope: SessionMessageSearchScope,
     },
     /// List one provider's resumable CLI conversations on the daemon host.
     ListProviderSessions {

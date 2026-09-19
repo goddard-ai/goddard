@@ -1265,6 +1265,8 @@ impl Waku {
             // clobber the flag.
             session.updated_at = now;
         }
+        // A cached transcript query predates this arrival in the archive.
+        self.archived_message_searches.clear();
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
             self.state.selected_session = None;
@@ -1325,6 +1327,8 @@ impl Waku {
             session.archived_at = None;
             session.updated_at = now;
         }
+        // A cached transcript query still counts this departed session.
+        self.archived_message_searches.clear();
         // An unarchived session keeps its worktree: a queued cleanup must
         // not fire after the task is back.
         self.pending_workspace_cleanups.remove(&session_id);
