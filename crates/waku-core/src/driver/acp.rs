@@ -870,37 +870,65 @@ async fn establish_session(
     Option<Vec<SessionConfigOption>>,
 )> {
     if let Some(existing) = resume_session_id {
+        let mut resume_error = None;
         if initialize
             .agent_capabilities
             .session_capabilities
             .resume
             .is_some()
-            && let Ok(response) = connection
+        {
+            match connection
                 .send_request(ResumeSessionRequest::new(existing.to_owned(), cwd))
                 .block_task()
                 .await
-        {
-            return Ok((
-                SessionId::new(existing.to_owned()),
-                response.modes,
-                response.config_options,
-            ));
+            {
+                Ok(response) => {
+                    return Ok((
+                        SessionId::new(existing.to_owned()),
+                        response.modes,
+                        response.config_options,
+                    ));
+                }
+                Err(error) => resume_error = Some(error),
+            }
         }
 
         if initialize.agent_capabilities.load_session {
             suppress_session_updates.store(true, Ordering::Release);
-            let response = connection
+            // A runtime this session just replaced — a worktree move resets
+            // it — may still hold the provider-side session lock while its
+            // process shuts down, so retry failures the agent flags as
+            // retryable before giving up.
+            let mut response = connection
                 .send_request(LoadSessionRequest::new(existing.to_owned(), cwd))
                 .block_task()
                 .await;
+            for _ in 0..ACP_SESSION_LOAD_RETRIES {
+                if response.as_ref().err().is_none_or(|e| !session_error_retryable(e)) {
+                    break;
+                }
+                smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
+                response = connection
+                    .send_request(LoadSessionRequest::new(existing.to_owned(), cwd))
+                    .block_task()
+                    .await;
+            }
             suppress_session_updates.store(false, Ordering::Release);
-            if let Ok(response) = response {
-                return Ok((
+            return match response {
+                Ok(response) => Ok((
                     SessionId::new(existing.to_owned()),
                     response.modes,
                     response.config_options,
-                ));
-            }
+                )),
+                // A failed resume must not fall through to session/new: that
+                // would silently fork the task onto an empty provider
+                // session and overwrite its resume cursor with the new id.
+                Err(error) => Err(error),
+            };
+        }
+
+        if let Some(error) = resume_error {
+            return Err(error);
         }
     }
 
@@ -909,6 +937,24 @@ async fn establish_session(
         .block_task()
         .await?;
     Ok((response.session_id, response.modes, response.config_options))
+}
+
+const ACP_SESSION_LOAD_RETRIES: usize = 6;
+const ACP_SESSION_LOAD_RETRY_DELAY: Duration = Duration::from_millis(400);
+
+/// Agents flag transient resume failures in the JSON-RPC error `data` — e.g.
+/// Devin's `session_locked`, while a replaced runtime's process still holds
+/// the session — with a `retryable` marker, namespaced or not.
+fn session_error_retryable(error: &agent_client_protocol::Error) -> bool {
+    error
+        .data
+        .as_ref()
+        .and_then(Value::as_object)
+        .is_some_and(|data| {
+            data.iter().any(|(key, value)| {
+                key.rsplit('/').next() == Some("retryable") && value.as_bool() == Some(true)
+            })
+        })
 }
 
 fn desired_access_mode(
@@ -2777,6 +2823,30 @@ mod tests {
     #[test]
     fn advertised_model_config_id_falls_back_to_model() {
         assert_eq!(advertised_model_config_id(&[]), "model");
+    }
+
+    #[test]
+    fn session_error_retryable_reads_namespaced_and_plain_markers() {
+        let mut locked = agent_client_protocol::Error::new(-32015, "session is locked");
+        locked.data = Some(json!({
+            "cognition.ai/errorKind": "session_locked",
+            "cognition.ai/retryable": true,
+        }));
+        assert!(session_error_retryable(&locked));
+
+        let mut plain = agent_client_protocol::Error::new(-32015, "busy");
+        plain.data = Some(json!({"retryable": true}));
+        assert!(session_error_retryable(&plain));
+
+        let mut not_retryable = agent_client_protocol::Error::new(-32016, "Session not found");
+        not_retryable.data = Some(json!({
+            "cognition.ai/errorKind": "session_not_found",
+            "cognition.ai/retryable": false,
+        }));
+        assert!(!session_error_retryable(&not_retryable));
+        assert!(!session_error_retryable(
+            &agent_client_protocol::Error::invalid_params()
+        ));
     }
 
     #[test]
