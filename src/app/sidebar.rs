@@ -1560,7 +1560,7 @@ impl Waku {
                     div()
                         .flex()
                         .items_end()
-                        .gap(px(6.0))
+                        .gap(px(2.0))
                         .children(
                             items
                                 .iter()
@@ -1592,18 +1592,34 @@ impl Waku {
             ),
         };
         let hovered = self.sidebar_dock_hover_item == Some(item);
+        // Sketch "Dock": white buttons cooling to pale blue at the bottom, a
+        // soft blue shadow, a 12% black hairline, and solid black glyphs.
         let surface = linear_gradient(
             180.0,
-            linear_color_stop(theme.raised, 0.0),
-            linear_color_stop(theme.inset, 1.0),
+            linear_color_stop(rgb(0xFFFFFF), 0.0),
+            linear_color_stop(rgb(0xC4DCFC), 1.0),
         );
+        let pill_surface = linear_gradient(
+            180.0,
+            linear_color_stop(rgb(0xFFFFFF), 0.0),
+            linear_color_stop(rgb(0xEDF5FF), 1.0),
+        );
+        let surface_border = gpui::hsla(0.0, 0.0, 0.0, 0.12);
+        let surface_shadow = vec![gpui::BoxShadow {
+            color: rgb(0xDAEAFF).into(),
+            offset: point(px(0.0), px(1.0)),
+            blur_radius: px(2.0),
+            spread_radius: px(0.0),
+            inset: false,
+        }];
+        let glyph: Hsla = rgb(0x000000).into();
         div()
             .id(SharedString::from(format!("sidebar-dock-{id}")))
             .tab_index(0)
             .flex()
             .flex_col()
             .items_center()
-            .w(px(44.0))
+            .w(px(48.0))
             .cursor_default()
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered {
@@ -1615,39 +1631,40 @@ impl Waku {
             }))
             .child(
                 div()
-                    .h(px(20.0))
+                    .h(px(22.0))
                     .flex()
                     .items_center()
                     .when(hovered, |slot| {
                         slot.child(
                             div()
                                 .h(px(18.0))
-                                .px(px(8.0))
+                                .px(px(10.0))
                                 .rounded_full()
-                                .bg(surface.clone())
+                                .bg(pill_surface)
                                 .border(hairline())
-                                .border_color(theme.border_subtle)
+                                .border_color(surface_border)
+                                .shadow(surface_shadow.clone())
                                 .flex()
                                 .items_center()
-                                .text_size(sp(10.5))
+                                .text_size(sp(11.0))
                                 .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_secondary)
+                                .text_color(glyph)
                                 .child(label),
                         )
                     }),
             )
             .child(
                 div()
-                    .size(px(40.0))
+                    .size(px(44.0))
                     .rounded_full()
                     .bg(surface)
                     .border(hairline())
-                    .border_color(theme.border_subtle)
-                    .shadow_sm()
+                    .border_color(surface_border)
+                    .shadow(surface_shadow)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon(path, 19.0, theme.text)),
+                    .child(icon(path, 22.0, glyph)),
             )
             .focus_visible(|style| {
                 style
