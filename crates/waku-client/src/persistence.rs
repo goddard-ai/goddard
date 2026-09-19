@@ -729,6 +729,11 @@ pub struct AppSettings {
     /// through the daemon's evaluation model and starts on the resolved
     /// provider/model. Defaults on in debug builds.
     pub model_router_enabled: bool,
+    /// Experimental: each assistant turn that ends while its session is on
+    /// screen is scored by the evaluation model against a fixed marker set;
+    /// markers that clear their threshold render as chips on the response
+    /// footer. Defaults on in debug builds.
+    pub status_markers_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -774,6 +779,7 @@ impl Default for AppSettings {
             projects_page_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
             model_router_enabled: default_experiment_enabled(),
+            status_markers_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1088,6 +1094,8 @@ pub struct PersistedState {
     pub friends_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub model_router_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub status_markers_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1256,6 +1264,7 @@ impl PersistedState {
             projects_page_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
             model_router_enabled: default_experiment_enabled(),
+            status_markers_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1545,6 +1554,7 @@ impl PersistedState {
             projects_page_enabled: self.projects_page_enabled,
             friends_enabled: self.friends_enabled,
             model_router_enabled: self.model_router_enabled,
+            status_markers_enabled: self.status_markers_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1633,6 +1643,7 @@ impl PersistedState {
         self.projects_page_enabled = settings.projects_page_enabled;
         self.friends_enabled = settings.friends_enabled;
         self.model_router_enabled = settings.model_router_enabled;
+        self.status_markers_enabled = settings.status_markers_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 

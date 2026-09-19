@@ -3753,6 +3753,16 @@ impl Waku {
                         search,
                         cx,
                         |this, enabled, cx| this.set_model_router_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "status-markers-experiment-toggle",
+                        "experiments.status_markers_title",
+                        "experiments.status_markers_description",
+                        self.state.status_markers_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_status_markers_enabled(enabled, cx),
                     )),
             )
             .when(self.state.model_router_enabled, |element| {
@@ -3866,6 +3876,15 @@ impl Waku {
             self.seed_eval_inputs(cx);
             self.request_route_policy(cx);
         }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_status_markers_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.clear_status_markers();
+        }
+        self.state.status_markers_enabled = enabled;
         self.save();
         cx.notify();
     }

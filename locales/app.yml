@@ -585,6 +585,24 @@ experiments.model_router_title:
   en: Auto model routing
 experiments.model_router_description:
   en: Add Auto to the model picker. A task's first prompt is classified by the evaluation model, then routed to a provider and model from your routing policy.
+experiments.status_markers_title:
+  en: Turn status markers
+experiments.status_markers_description:
+  en: When an assistant turn ends, the evaluation model scores it against a fixed marker set — complete, awaiting input, unverified, partial, blocked, failed, drifted — and markers that clear their threshold appear as chips under the response.
+status_markers.complete:
+  en: Complete
+status_markers.awaiting_input:
+  en: Awaiting input
+status_markers.unverified:
+  en: Unverified
+status_markers.partial:
+  en: Partial
+status_markers.blocked:
+  en: Blocked
+status_markers.failed:
+  en: Failed
+status_markers.drifted:
+  en: Drifted
 routing.backend:
   en: Evaluation backend
 routing.backend_description:

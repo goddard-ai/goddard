@@ -688,14 +688,13 @@ impl Waku {
                 {
                     self.plan_usage_stale.insert(provider);
                 }
-                if self
+                let finished_turn_id = self
                     .state
                     .sessions
                     .iter()
                     .find(|session| session.id == session_id)
-                    .and_then(AgentSession::active_turn_id)
-                    .is_none()
-                {
+                    .and_then(AgentSession::active_turn_id);
+                if finished_turn_id.is_none() {
                     return true;
                 }
                 let task_notification = cx.active_window().is_none().then(|| {
@@ -733,7 +732,7 @@ impl Waku {
                             MessageRole::Assistant,
                             summary_i18n
                                 .map(|i18n| i18n.render())
-                                .or(summary)
+                                .or_else(|| summary.clone())
                                 .unwrap_or_else(|| {
                                     if success {
                                         tr!("session.turn_completed")
@@ -770,6 +769,16 @@ impl Waku {
                 runtime.computer_use_previews.clear();
                 runtime.driver.refresh_background_work();
                 self.capture_latest_turn_checkpoint_for(session_id);
+                // A natural end is the only finish the status-marker eval
+                // scores; failed and interrupted turns keep their own status.
+                if success {
+                    self.note_turn_finished_for_status_markers(
+                        session_id,
+                        finished_turn_id,
+                        summary.clone(),
+                        cx,
+                    );
+                }
                 if allow_queue_drain && success {
                     // Start the next queued follow-up once the runtime has
                     // been re-inserted so the same process is reused.

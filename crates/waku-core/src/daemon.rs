@@ -619,7 +619,11 @@ impl Backend for WakuBackend {
                     permissions: crate::computer_use::probe_permissions(prompt)?,
                 })
             }
-            Command::Evaluate { state, questions } => {
+            Command::Evaluate {
+                state,
+                questions,
+                feature,
+            } => {
                 let settings = self
                     .settings
                     .get()
@@ -628,6 +632,9 @@ impl Backend for WakuBackend {
                 let started = std::time::Instant::now();
                 let result = crate::eval::evaluate(&settings, &state, &questions);
                 let mut record = crate::eval::EvalDecisionRecord::empty("evaluate");
+                if let Some(feature) = feature {
+                    record.feature = feature;
+                }
                 record.backend = Some(settings.backend);
                 record.latency_ms = Some(started.elapsed().as_millis() as u64);
                 record.model = result

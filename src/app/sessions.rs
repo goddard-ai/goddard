@@ -347,6 +347,9 @@ impl Waku {
         if self.unread_sweep_target.take() != Some(session_id) {
             self.unread_sweep.clear();
         }
+        // Turns that settled off screen get their marker evals now that the
+        // session is on it.
+        self.drain_pending_status_marker_turns(session_id, cx);
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
         self.selected_terminal = None;

@@ -5158,6 +5158,7 @@ impl Waku {
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)
             | self.drain_route_policy_events()
+            | self.drain_status_marker_events()
         {
             cx.notify();
         }

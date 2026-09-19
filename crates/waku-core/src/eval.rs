@@ -57,7 +57,7 @@ pub struct EvalDecisionRecord {
     /// Unix seconds when the call was made.
     pub ts: u64,
     /// Which eval-driven feature made the call.
-    pub feature: &'static str,
+    pub feature: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<EvalBackend>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,7 +100,7 @@ impl EvalDecisionRecord {
     pub fn empty(feature: &'static str) -> Self {
         Self {
             ts: crate::model::unix_time(),
-            feature,
+            feature: feature.to_owned(),
             backend: None,
             latency_ms: None,
             model: None,

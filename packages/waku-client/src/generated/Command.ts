@@ -50,7 +50,13 @@ attachments?: Array<MessageAttachment>, } | { "type": "steer", prompt: string, }
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.
  */
-scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider: ProviderKind, limit: number, } | { "type": "loadProviderSession", cursor: ProviderResumeCursor, cwd: string, } | { "type": "evaluate", state: unknown, questions: { [key in string]: EvalQuestion }, } | { "type": "routeTask", prompt: string,
+scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider: ProviderKind, limit: number, } | { "type": "loadProviderSession", cursor: ProviderResumeCursor, cwd: string, } | { "type": "evaluate", state: unknown, questions: { [key in string]: EvalQuestion },
+/**
+ * Which eval-driven feature made the call, recorded on the decision
+ * log record. `None` — every caller before this field existed —
+ * logs as a bare `"evaluate"`.
+ */
+feature?: string | null, } | { "type": "routeTask", prompt: string,
 /**
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.
