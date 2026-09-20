@@ -125,6 +125,7 @@ actions!(
         SaveFile,
         SyncBranch,
         ArchiveSession,
+        PushBaseBranch,
         ToggleSessionPin,
         ToggleTerminals,
         NewTerminal,
@@ -375,6 +376,7 @@ pub fn run() {
             crate::app::init_full_access_dialog_keys(cx);
             crate::app::init_terminal_close_dialog_keys(cx);
             crate::app::init_provider_switch_dialog_keys(cx);
+            crate::app::init_push_base_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);
@@ -916,6 +918,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
             Some("Workspace"),
         ),
         KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Workspace")),
+        // Push the landed session's base branch to its upstream — the
+        // landed notice's button, without the card. A stronger submit
+        // chord: `secondary-enter` already means "send" in the composer.
+        KeyBinding::new("secondary-shift-enter", PushBaseBranch, Some("Workspace")),
         KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Workspace")),
         KeyBinding::new("secondary-c", CopySelection, Some("Workspace")),
         KeyBinding::new("secondary-shift-c", CopyWorkingDirectory, Some("Workspace")),

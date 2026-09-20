@@ -1802,6 +1802,7 @@ impl Backend for WakuBackend {
                     operation,
                     WorkspaceOperation::Commit { .. }
                         | WorkspaceOperation::Push { .. }
+                        | WorkspaceOperation::PushBase { .. }
                         | WorkspaceOperation::Land { .. }
                         | WorkspaceOperation::RebaseOnto { .. }
                 );

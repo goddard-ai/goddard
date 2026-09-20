@@ -1394,6 +1394,22 @@ transcript.provider_switched_restarted: "已切换 provider — %{from} → %{to
 transcript.show_more_commits: 再显示 %{count} 个提交
 transcript.show_fewer_commits: 收起提交列表
 transcript.showing_first_commits: 仅显示前 %{count}/%{total} 个
+push_base.button: 推送
+push_base.tooltip: "将 %{base} 推送到 %{upstream}"
+push_base.pushed_chip: 已推送
+push_base.pushed: "已将 %{base} 推送到 %{upstream}"
+push_base.up_to_date: "%{base} 已与 %{upstream} 保持一致"
+push_base.no_upstream: "%{base} 未跟踪远程分支"
+push_base.no_base: "无可推送内容 —— 此任务没有已合入的分支"
+push_base.failed_title: "无法推送 %{base}"
+push_base.rejected_description: "%{upstream} 含有 %{base} 没有的提交 —— 先同步 %{base}，再推送。"
+push_base.failed_description: "推送失败 —— Git 的错误信息见下方。"
+push_base.sync_failed_description: "同步 %{base} 失败 —— Git 的错误信息见下方。"
+push_base.sync_and_retry: 同步并重试推送
+push_base.retry_push: 重试推送
+push_base.copy_error: 复制错误信息
+push_base.synced: "%{base} 已与其上游同步"
+shortcuts.push_base: 推送基分支
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
 duration.minute: "%{count} 分钟"

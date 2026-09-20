@@ -253,6 +253,42 @@ pub enum PullOutcome {
     },
 }
 
+/// A base branch's relationship to its remote tracking branch — what the
+/// transcript's landed notice reads to offer its push affordance. A read,
+/// not a fetch: `ahead` counts against the last-known remote-tracking ref.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BasePushState {
+    /// `<base>@{upstream}` ("origin/main"); `None` when the branch tracks
+    /// no remote branch or does not exist.
+    pub upstream: Option<String>,
+    /// Commits on the base its upstream lacks; `None` when the upstream is
+    /// configured but its remote-tracking ref does not resolve locally —
+    /// unknown, not zero.
+    pub ahead: Option<u64>,
+}
+
+/// How a `PushBase` operation ended. `base` and `upstream` echo the
+/// resolved refs so toasts and the failure modal can name them.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PushBaseOutcome {
+    /// The upstream now contains every commit on the base.
+    Pushed { base: String, upstream: String },
+    /// The base tracks no remote branch — there is nowhere to push.
+    NoUpstream { base: String },
+    /// The upstream already contains every commit on the base.
+    UpToDate { base: String, upstream: String },
+    /// The remote refused a non-fast-forward update: its branch carries
+    /// commits the base lacks, so it must be synced first. `message` is
+    /// Git's own output for the failure modal's detail block.
+    Rejected {
+        base: String,
+        upstream: String,
+        message: String,
+    },
+}
+
 /// How a `RebaseOnto` operation ended. `base` names the branch the checkout
 /// was being moved onto, which the conflict modal and prompts quote back to
 /// the user.

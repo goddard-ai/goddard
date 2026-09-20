@@ -1557,6 +1557,12 @@ impl Waku {
                             view.set_text(message.visible_content(), message.streaming);
                             &*view
                         });
+                    let landed_push = match &message.notice {
+                        Some(TranscriptNotice::Landed { base, .. }) => {
+                            self.landed_push_for_base(base, cx)
+                        }
+                        _ => push_base::LandedPush::Hidden,
+                    };
                     let landed_notice = matches!(
                         message.notice,
                         Some(TranscriptNotice::Landed { .. })
@@ -1568,6 +1574,9 @@ impl Waku {
                             .transcript_control_focus(format!("landed-notice-{}", message.id), cx),
                         commits_focus: self
                             .transcript_control_focus(format!("landed-commits-{}", message.id), cx),
+                        push: landed_push,
+                        push_focus: self
+                            .transcript_control_focus(format!("landed-push-{}", message.id), cx),
                     });
                     let rendered = render_message(
                         MessageRender {
@@ -1883,6 +1892,14 @@ impl Waku {
                         .transcript_control_focus(format!("landed-notice-{}", message.id), cx),
                     commits_focus: self
                         .transcript_control_focus(format!("landed-commits-{}", message.id), cx),
+                    push: match &message.notice {
+                        Some(TranscriptNotice::Landed { base, .. }) => {
+                            self.landed_push_for_base(base, cx)
+                        }
+                        _ => push_base::LandedPush::Hidden,
+                    },
+                    push_focus: self
+                        .transcript_control_focus(format!("landed-push-{}", message.id), cx),
                 }),
             },
             cx,

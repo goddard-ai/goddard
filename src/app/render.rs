@@ -505,6 +505,7 @@ impl Render for Waku {
             let full_access_dialog = self.render_full_access_dialog(cx);
             let terminal_close_dialog = self.render_terminal_close_dialog(cx);
             let provider_switch_dialog = self.render_provider_switch_dialog(cx);
+            let push_base_dialog = self.render_push_base_dialog(window, cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
             let send_file_dialog = self.render_send_file_dialog(cx);
@@ -557,6 +558,7 @@ impl Render for Waku {
                 .children(full_access_dialog)
                 .children(terminal_close_dialog)
                 .children(provider_switch_dialog)
+                .children(push_base_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
                 .children(send_file_dialog)
@@ -592,6 +594,7 @@ impl Render for Waku {
         let full_access_dialog = self.render_full_access_dialog(cx);
         let terminal_close_dialog = self.render_terminal_close_dialog(cx);
         let provider_switch_dialog = self.render_provider_switch_dialog(cx);
+        let push_base_dialog = self.render_push_base_dialog(window, cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let send_file_dialog = self.render_send_file_dialog(cx);
@@ -651,6 +654,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::sync_branch_action))
             .on_action(cx.listener(Self::cancel_turn_action))
             .on_action(cx.listener(Self::archive_session_action))
+            .on_action(cx.listener(Self::push_base_branch_action))
             .on_action(cx.listener(Self::toggle_session_pin_action))
             .on_action(cx.listener(Self::copy_selection_action))
             .on_action(cx.listener(Self::add_to_chat_action))
@@ -980,6 +984,7 @@ impl Render for Waku {
             .children(full_access_dialog)
             .children(terminal_close_dialog)
             .children(provider_switch_dialog)
+            .children(push_base_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(send_file_dialog)

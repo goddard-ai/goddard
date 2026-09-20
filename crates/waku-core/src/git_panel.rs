@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, bail};
 
 use waku_protocol::git::{
-    CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
-    PullStrategy, RebaseOutcome, SyncInProgress, UpstreamStatus,
+    BasePushState, CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget,
+    PullOutcome, PullStrategy, PushBaseOutcome, RebaseOutcome, SyncInProgress, UpstreamStatus,
 };
 
 use crate::git_branch::remote_url;
@@ -198,6 +198,126 @@ pub fn abort_sync(cwd: &Path) -> anyhow::Result<()> {
         None => {}
     }
     Ok(())
+}
+
+/// `<branch>`'s configured upstream as a display name ("origin/main").
+/// `for-each-ref`'s `%(upstream)` reads the branch config, where
+/// `<branch>@{upstream}` fails outright when the remote-tracking ref is
+/// missing — the exact shape of a first push to a not-yet-created remote
+/// branch.
+fn branch_upstream(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
+    Ok(git_optional_stdout(
+        cwd,
+        &[
+            "for-each-ref",
+            "--format=%(upstream)",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?
+    // No upstream configured prints an empty line, not an error.
+    .filter(|name| !name.is_empty())
+    .map(|name| {
+        name.strip_prefix("refs/remotes/")
+            .or_else(|| name.strip_prefix("refs/heads/"))
+            .unwrap_or(&name)
+            .to_owned()
+    }))
+}
+
+/// The base branch's upstream and the commits it lacks — what the landed
+/// notice's push affordance reads. Local refs only: `ahead` counts against
+/// the last-known remote-tracking ref, never a fetch.
+pub fn base_push_state(cwd: &Path, base: &str) -> anyhow::Result<BasePushState> {
+    ensure_repository(cwd)?;
+    let upstream = branch_upstream(cwd, base)?;
+    let ahead = upstream.as_deref().and_then(|upstream| {
+        git_optional_stdout(
+            cwd,
+            &["rev-list", "--count", &format!("{upstream}..{base}")],
+        )
+        .ok()
+        .flatten()
+        .and_then(|count| count.parse::<u64>().ok())
+    });
+    Ok(BasePushState { upstream, ahead })
+}
+
+/// Push `base` to its tracked upstream — the landed notice's follow-up.
+/// When a checkout owns the base the push runs there, so `git push`
+/// resolves the branch's configured upstream (including a remote branch
+/// named differently); a base checked out nowhere goes by explicit refspec.
+/// A non-fast-forward refusal reports `Rejected` — the caller syncs first —
+/// while auth, hook, and network failures stay errors.
+pub fn push_base(cwd: &Path, base: &str) -> anyhow::Result<PushBaseOutcome> {
+    ensure_repository(cwd)?;
+    let Some(upstream) = branch_upstream(cwd, base)? else {
+        return Ok(PushBaseOutcome::NoUpstream {
+            base: base.to_owned(),
+        });
+    };
+    let ahead = git_optional_stdout(
+        cwd,
+        &["rev-list", "--count", &format!("{upstream}..{base}")],
+    )?
+    .and_then(|count| count.parse::<u64>().ok());
+    if ahead == Some(0) {
+        return Ok(PushBaseOutcome::UpToDate {
+            base: base.to_owned(),
+            upstream,
+        });
+    }
+    let checkout = checkouts(cwd)?
+        .into_iter()
+        .find(|entry| entry.branch.as_deref() == Some(base))
+        .map(|entry| entry.path);
+    let output = match checkout {
+        Some(path) => git_capture(&path, &["push"])?,
+        None => {
+            let remote = git_optional_stdout(cwd, &["config", &format!("branch.{base}.remote")])?
+                .unwrap_or_else(|| "origin".to_owned());
+            let remote_branch =
+                git_optional_stdout(cwd, &["config", &format!("branch.{base}.merge")])?
+                    .and_then(|merge| merge.strip_prefix("refs/heads/").map(str::to_owned))
+                    .unwrap_or_else(|| base.to_owned());
+            git_capture(cwd, &["push", &remote, &format!("{base}:{remote_branch}")])?
+        }
+    };
+    if output.status.success() {
+        return Ok(PushBaseOutcome::Pushed {
+            base: base.to_owned(),
+            upstream,
+        });
+    }
+    let message = command_error(&output);
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    if stderr.contains("non-fast-forward") || stderr.contains("fetch first") {
+        return Ok(PushBaseOutcome::Rejected {
+            base: base.to_owned(),
+            upstream,
+            message,
+        });
+    }
+    bail!("{message}")
+}
+
+/// `git pull` for a base branch — run inside the checkout that owns it, so
+/// the integration, and a stopped one's conflict markers, land where the
+/// branch lives. Returns the checkout it ran in.
+pub fn sync_base(
+    cwd: &Path,
+    base: &str,
+    strategy: PullStrategy,
+) -> anyhow::Result<(PathBuf, PullOutcome)> {
+    ensure_repository(cwd)?;
+    let checkout = checkouts(cwd)?
+        .into_iter()
+        .find(|entry| entry.branch.as_deref() == Some(base))
+        .map(|entry| entry.path)
+        .ok_or_else(|| {
+            anyhow::anyhow!("`{base}` is not checked out anywhere — sync it from its own checkout")
+        })?;
+    let outcome = pull(&checkout, strategy)?;
+    Ok((checkout, outcome))
 }
 
 /// Whether a rebase or merge stopped on conflicts. Rebase state lives in
@@ -1249,6 +1369,218 @@ mod tests {
                 base: "feature".to_owned()
             }
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A repository with a bare `origin` remote and `main` tracking
+    /// `origin/main` — the shape a landed session pushes from. Returns
+    /// (root, primary checkout, bare remote).
+    fn remote_repository() -> (PathBuf, PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("waku-git-panel-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let remote = root.join("remote.git");
+        run_git(
+            &root,
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                remote.to_str().unwrap(),
+            ],
+        );
+        let repository = root.join("primary");
+        run_git(
+            &root,
+            &["init", "-q", "-b", "main", repository.to_str().unwrap()],
+        );
+        run_git(&repository, &["config", "user.email", "test@example.com"]);
+        run_git(&repository, &["config", "user.name", "Test"]);
+        std::fs::write(repository.join("file.txt"), "base\n").unwrap();
+        run_git(&repository, &["add", "file.txt"]);
+        run_git(&repository, &["commit", "-qm", "init"]);
+        run_git(
+            &repository,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run_git(&repository, &["push", "-q", "-u", "origin", "main"]);
+        (root, repository, remote)
+    }
+
+    /// A clone of `remote` one commit ahead of it — the other writer that
+    /// moves the upstream.
+    fn remote_writer(root: &Path, remote: &Path) -> PathBuf {
+        let other = root.join("other");
+        run_git(
+            root,
+            &[
+                "clone",
+                "-q",
+                remote.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
+        run_git(&other, &["config", "user.email", "test@example.com"]);
+        run_git(&other, &["config", "user.name", "Test"]);
+        commit_in(&other, "remote.txt", "remote work\n");
+        run_git(&other, &["push", "-q", "origin", "main"]);
+        other
+    }
+
+    #[test]
+    fn base_push_state_reports_the_upstream_and_ahead_count() {
+        let (root, repository, _remote) = remote_repository();
+        let state = base_push_state(&repository, "main").unwrap();
+        assert_eq!(state.upstream.as_deref(), Some("origin/main"));
+        assert_eq!(state.ahead, Some(0));
+
+        commit_in(&repository, "work.txt", "session\n");
+        let state = base_push_state(&repository, "main").unwrap();
+        assert_eq!(state.ahead, Some(1));
+
+        // A branch that tracks nothing reports no upstream; a branch that
+        // does not exist reads the same way.
+        run_git(&repository, &["branch", "loose"]);
+        assert_eq!(
+            base_push_state(&repository, "loose").unwrap().upstream,
+            None
+        );
+        assert_eq!(
+            base_push_state(&repository, "missing").unwrap().upstream,
+            None
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn push_base_pushes_a_base_owned_by_another_checkout() {
+        let (root, repository, _remote) = remote_repository();
+        let worktree = root.join("session");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        commit_in(&repository, "work.txt", "landed\n");
+
+        let outcome = push_base(&worktree, "main").unwrap();
+        assert_eq!(
+            outcome,
+            PushBaseOutcome::Pushed {
+                base: "main".to_owned(),
+                upstream: "origin/main".to_owned()
+            }
+        );
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "origin/main"]).unwrap()
+        );
+        // The follow-up read sees the base caught up; a second push is a
+        // no-op.
+        assert_eq!(base_push_state(&repository, "main").unwrap().ahead, Some(0));
+        assert!(matches!(
+            push_base(&worktree, "main").unwrap(),
+            PushBaseOutcome::UpToDate { .. }
+        ));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn push_base_pushes_by_refspec_when_no_checkout_owns_the_base() {
+        let (root, repository, _remote) = remote_repository();
+        // A branch ahead of origin that no checkout owns — and whose remote
+        // ref has never been fetched, so `ahead` cannot be counted.
+        run_git(&repository, &["switch", "-q", "-c", "feature"]);
+        commit_in(&repository, "feature.txt", "feature\n");
+        run_git(&repository, &["switch", "-q", "main"]);
+        run_git(&repository, &["config", "branch.feature.remote", "origin"]);
+        run_git(
+            &repository,
+            &["config", "branch.feature.merge", "refs/heads/feature"],
+        );
+
+        let state = base_push_state(&repository, "feature").unwrap();
+        assert_eq!(state.upstream.as_deref(), Some("origin/feature"));
+        assert_eq!(state.ahead, None);
+
+        let outcome = push_base(&repository, "feature").unwrap();
+        assert!(matches!(outcome, PushBaseOutcome::Pushed { .. }));
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "feature"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "origin/feature"]).unwrap()
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn push_base_reports_no_upstream() {
+        let (root, repository, _remote) = remote_repository();
+        run_git(&repository, &["branch", "loose"]);
+        assert_eq!(
+            push_base(&repository, "loose").unwrap(),
+            PushBaseOutcome::NoUpstream {
+                base: "loose".to_owned()
+            }
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn push_base_reports_rejected_when_the_remote_moved() {
+        let (root, repository, remote) = remote_repository();
+        remote_writer(&root, &remote);
+        // The local base advanced too — a real divergence — and the fetch
+        // makes `origin/main` resolve locally.
+        commit_in(&repository, "local.txt", "local work\n");
+        run_git(&repository, &["fetch", "-q", "origin"]);
+
+        let outcome = push_base(&repository, "main").unwrap();
+        let PushBaseOutcome::Rejected { message, .. } = outcome else {
+            panic!("expected Rejected, got {outcome:?}");
+        };
+        assert!(message.contains("rejected") || message.contains("fetch first"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn sync_base_pulls_inside_the_owning_checkout() {
+        let (root, repository, remote) = remote_repository();
+        let worktree = root.join("session");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        remote_writer(&root, &remote);
+
+        // The pull runs in the primary checkout that owns `main` even
+        // though the request came from the worktree. `git worktree list`
+        // reports canonicalized paths — /var resolves to /private/var.
+        let (checkout, outcome) = sync_base(&worktree, "main", PullStrategy::Merge).unwrap();
+        assert_eq!(checkout, repository.canonicalize().unwrap());
+        assert_eq!(outcome, PullOutcome::Clean);
+        assert!(repository.join("remote.txt").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn sync_base_fails_when_no_checkout_owns_the_base() {
+        let (root, repository, _remote) = remote_repository();
+        run_git(&repository, &["branch", "unowned"]);
+        let error = sync_base(&repository, "unowned", PullStrategy::Rebase).unwrap_err();
+        assert!(error.to_string().contains("not checked out"));
         std::fs::remove_dir_all(root).ok();
     }
 }

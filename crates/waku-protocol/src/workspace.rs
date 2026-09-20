@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
-    AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot,
-    CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy, RebaseOutcome,
-    RemoteFileRef, ReviewQueue,
+    AgentInvocation, ArchivePreview, BasePushState, BranchSnapshot, CheckoutStatus, CommitEntry,
+    CommitSnapshot, CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy,
+    PushBaseOutcome, RebaseOutcome, RemoteFileRef, ReviewQueue,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -762,6 +762,33 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    /// Push a base branch to its tracked upstream — the landed notice's
+    /// follow-up after `Land` moves `base`. Unlike `Push`, which sends the
+    /// checkout's current branch, this pushes `base` wherever it lives:
+    /// inside its owning checkout when one exists, else by explicit refspec
+    /// from `cwd`. `Rejected` means the remote refused a non-fast-forward —
+    /// `SyncBase` then `PushBase` is the recovery.
+    PushBase {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        base: String,
+    },
+    /// Sync a base branch with its upstream: `git pull` inside the checkout
+    /// that owns `base`, so a stopped integration and its conflict markers
+    /// land where the branch lives. Fails when no checkout owns `base`.
+    SyncBase {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        base: String,
+        strategy: PullStrategy,
+    },
+    /// The base branch's upstream and ahead count for the landed notice's
+    /// push affordance — a read against local refs, no fetch.
+    BasePushState {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        base: String,
+    },
     /// The Git panel's one-pass working-tree read: branch, upstream counts,
     /// and both change lists. `None` outside a work tree. `base` is the
     /// session's recorded base branch — the snapshot's land target falls back
@@ -1159,6 +1186,19 @@ pub enum WorkspaceResult {
     },
     Pull {
         outcome: PullOutcome,
+    },
+    PushBase {
+        outcome: PushBaseOutcome,
+    },
+    /// `checkout` is the working tree `SyncBase` ran in — the one owning
+    /// `base` — so conflict paths are relative to it.
+    SyncBase {
+        #[ts(type = "string")]
+        checkout: PathBuf,
+        outcome: PullOutcome,
+    },
+    BasePushState {
+        state: BasePushState,
     },
     Land {
         outcome: LandOutcome,

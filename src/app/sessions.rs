@@ -790,6 +790,7 @@ impl Waku {
         };
         self.branch_snapshots.invalidate(&workspace_path);
         self.invalidate_workspace_remote_files(&workspace_path);
+        self.invalidate_base_push_state(&workspace_path);
         self.sidebar_branch_scan_fingerprint.set(None);
         self.sidebar_branch_scan_generation
             .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));

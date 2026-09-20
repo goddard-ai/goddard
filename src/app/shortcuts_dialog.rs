@@ -260,6 +260,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("Workspace"),
                 ),
                 bound(
+                    tr!("shortcuts.push_base"),
+                    PushBaseBranch,
+                    Some("Workspace"),
+                ),
+                bound(
                     tr!("shortcuts.copy_selection"),
                     CopySelection,
                     Some("Workspace"),
@@ -1200,6 +1205,7 @@ mod tests {
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_full_access_dialog_keys(cx);
             crate::app::init_provider_switch_dialog_keys(cx);
+            crate::app::init_push_base_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);

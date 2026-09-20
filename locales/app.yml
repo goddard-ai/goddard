@@ -3567,6 +3567,36 @@ transcript.show_fewer_commits:
   en: Show fewer commits
 transcript.showing_first_commits:
   en: Showing first %{count} of %{total}
+push_base.button:
+  en: Push
+push_base.tooltip:
+  en: "Push %{base} to %{upstream}"
+push_base.pushed_chip:
+  en: Pushed
+push_base.pushed:
+  en: "Pushed %{base} to %{upstream}"
+push_base.up_to_date:
+  en: "%{base} is already up to date with %{upstream}"
+push_base.no_upstream:
+  en: "%{base} does not track a remote branch"
+push_base.no_base:
+  en: "Nothing to push — this task has no landed branch"
+push_base.failed_title:
+  en: "Couldn't push %{base}"
+push_base.rejected_description:
+  en: "%{upstream} has commits %{base} doesn't — sync %{base}, then push again."
+push_base.failed_description:
+  en: "The push failed — the error from Git is below."
+push_base.sync_failed_description:
+  en: "Syncing %{base} failed — the error from Git is below."
+push_base.sync_and_retry:
+  en: Sync & Retry Push
+push_base.retry_push:
+  en: Retry Push
+push_base.copy_error:
+  en: Copy Error
+push_base.synced:
+  en: "%{base} is synced with its upstream"
 
 duration.second:
   en: "%{count} second"
@@ -3947,6 +3977,8 @@ shortcuts.archive_task:
   en: Archive Task
 shortcuts.pin_task:
   en: Pin or Unpin Task
+shortcuts.push_base:
+  en: Push Base Branch
 shortcuts.copy_selection:
   en: Copy Selection
 shortcuts.copy_workdir:

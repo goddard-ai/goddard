@@ -82,10 +82,18 @@ const GIT_PANEL_MODAL_HEIGHT: f32 = 520.0;
 /// pending label while one is in flight and refuses to start a second.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum GitPanelPending {
-    Generating { include_unstaged: bool },
+    Generating {
+        include_unstaged: bool,
+    },
     Committing,
     Pushing,
+    /// The landed notice's base push — distinct so its failure can open
+    /// the push modal rather than the panel's error line.
+    PushingBase,
     Syncing(PullStrategy),
+    /// The failure modal's "Sync & retry push": a `SyncBase` pull whose
+    /// clean outcome re-fires the push it is recovering.
+    SyncingBase,
     Landing,
     Rebasing,
     AbortingSync,
@@ -96,8 +104,10 @@ impl GitPanelPending {
         match self {
             GitPanelPending::Generating { .. } => tr!("commit.generating_message"),
             GitPanelPending::Committing => tr!("commit.committing"),
-            GitPanelPending::Pushing => tr!("commit.pushing"),
-            GitPanelPending::Syncing(PullStrategy::Rebase) => tr!("git_panel.syncing_rebase"),
+            GitPanelPending::Pushing | GitPanelPending::PushingBase => tr!("commit.pushing"),
+            GitPanelPending::SyncingBase | GitPanelPending::Syncing(PullStrategy::Rebase) => {
+                tr!("git_panel.syncing_rebase")
+            }
             GitPanelPending::Syncing(PullStrategy::Merge) => tr!("git_panel.syncing_merge"),
             GitPanelPending::Landing => tr!("git_panel.landing"),
             GitPanelPending::Rebasing => tr!("git_panel.rebasing"),
@@ -218,6 +228,9 @@ pub(super) struct GitPanelOperation {
     /// from. Its pull conflicts resolve in a fresh chat on the checkout, and
     /// its completion closes the picker card.
     pub sync_branch: bool,
+    /// The base a `PushingBase`/`SyncingBase` op targets — the failure
+    /// modal quotes it back when the run ends badly.
+    pub base: Option<String>,
 }
 
 /// Everything the panel needs, created when the panel opens and rebuilt when
@@ -710,7 +723,7 @@ impl Waku {
 
     /// Refetch the commits the list already shows — same window, so the
     /// scroll position survives a new commit landing at the top.
-    fn refresh_git_panel_commits(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn refresh_git_panel_commits(&mut self, cx: &mut Context<Self>) {
         let Some(panel) = self.git_panel.as_ref() else {
             return;
         };
@@ -1066,6 +1079,7 @@ impl Waku {
             pending,
             toast_id: None,
             sync_branch: false,
+            base: None,
         });
         cx.notify();
         Some((id, workspace))
@@ -1513,7 +1527,7 @@ impl Waku {
     /// not only the picker's — opens a fresh chat on the checkout and sends
     /// the resolution prompt itself, no click. When no provider can take the
     /// send, the prompt still lands in the new chat's composer as a draft.
-    fn auto_resolve_sync_conflict(&mut self, conflict: SyncConflict, cx: &mut Context<Self>) {
+    pub(super) fn auto_resolve_sync_conflict(&mut self, conflict: SyncConflict, cx: &mut Context<Self>) {
         let workspace = conflict.workspace();
         let prompt = sync_conflict_prompt(&conflict);
         if let SyncConflict::Rebase { base, .. } = &conflict {
@@ -1618,6 +1632,8 @@ impl Waku {
         let action = match op.pending {
             GitPanelPending::Committing => Some("commit"),
             GitPanelPending::Pushing => Some("push"),
+            GitPanelPending::PushingBase => Some("push_base"),
+            GitPanelPending::SyncingBase => Some("sync_base"),
             GitPanelPending::Syncing(_) => Some("sync"),
             GitPanelPending::Landing => Some("land"),
             GitPanelPending::Rebasing => Some("rebase"),
@@ -1629,6 +1645,10 @@ impl Waku {
             Ok(WorkspaceResult::CommitMessage { .. }) => None,
             Ok(WorkspaceResult::Pull {
                 outcome: PullOutcome::Conflict { .. },
+            })
+            | Ok(WorkspaceResult::SyncBase {
+                outcome: PullOutcome::Conflict { .. },
+                ..
             })
             | Ok(WorkspaceResult::Land {
                 outcome: LandOutcome::Conflict { .. },
@@ -1731,6 +1751,9 @@ impl Waku {
                     );
                     self.record_landed_transcript_notice(&op.workspace, &base, commits, ahead);
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
+                    // The base moved — every landed notice's push answer is
+                    // stale, selected workspace or not.
+                    self.invalidate_base_push_state(&op.workspace);
                     self.invalidate_workspace_queries(cx);
                     self.refresh_git_panel(cx);
                     self.refresh_git_panel_commits(cx);
@@ -1784,6 +1807,12 @@ impl Waku {
                     self.refresh_git_panel_commits(cx);
                 }
             },
+            Ok(WorkspaceResult::PushBase { outcome }) => {
+                self.finish_push_base(&op, outcome, cx);
+            }
+            Ok(WorkspaceResult::SyncBase { checkout, outcome }) => {
+                self.finish_sync_base(&op, checkout, outcome, cx);
+            }
             Ok(_) => {
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = None;
@@ -1805,19 +1834,46 @@ impl Waku {
                 self.refresh_git_panel_commits(cx);
             }
             Err(error) => {
-                // A composer-started land can fail with the panel closed;
-                // its errors need a surface the panel doesn't provide. When
-                // the panel shows the failed workspace it carries the error
-                // inline — a run that raised a toast still resolves it, and
-                // the picker's runs always toast since its card is gone.
-                if same_panel && let Some(panel) = self.git_panel.as_mut() {
-                    panel.error = Some(error.to_string());
-                }
-                if op.toast_id.is_some() || !same_panel || op.sync_branch {
-                    self.settle_operation_toast(op.toast_id, error.to_string(), ToastTone::Alert);
-                }
-                if picker_sync.is_some() {
-                    self.close_sync_branch(cx);
+                if matches!(
+                    op.pending,
+                    GitPanelPending::PushingBase | GitPanelPending::SyncingBase
+                ) {
+                    // Transcript pushes have no panel to carry an error —
+                    // the failure modal is their surface, whatever went
+                    // wrong.
+                    self.dismiss_operation_toast(op.toast_id);
+                    let kind = if op.pending == GitPanelPending::SyncingBase {
+                        push_base::PushBaseFailureKind::Sync
+                    } else {
+                        push_base::PushBaseFailureKind::Push
+                    };
+                    self.open_push_base_failure(
+                        op.workspace.clone(),
+                        op.base.clone().unwrap_or_default(),
+                        None,
+                        error.to_string(),
+                        kind,
+                        cx,
+                    );
+                } else {
+                    // A composer-started land can fail with the panel closed;
+                    // its errors need a surface the panel doesn't provide. When
+                    // the panel shows the failed workspace it carries the error
+                    // inline — a run that raised a toast still resolves it, and
+                    // the picker's runs always toast since its card is gone.
+                    if same_panel && let Some(panel) = self.git_panel.as_mut() {
+                        panel.error = Some(error.to_string());
+                    }
+                    if op.toast_id.is_some() || !same_panel || op.sync_branch {
+                        self.settle_operation_toast(
+                            op.toast_id,
+                            error.to_string(),
+                            ToastTone::Alert,
+                        );
+                    }
+                    if picker_sync.is_some() {
+                        self.close_sync_branch(cx);
+                    }
                 }
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
@@ -1923,7 +1979,7 @@ impl Waku {
     /// place while it is still the visible toast, or raise a fresh toast
     /// when something else took the slot. Operations that never raised one
     /// get the fresh toast unconditionally.
-    fn settle_operation_toast(
+    pub(super) fn settle_operation_toast(
         &mut self,
         toast_id: Option<u64>,
         message: impl Into<String>,
@@ -1939,7 +1995,7 @@ impl Waku {
     /// Retire an operation's spinner toast with no result to show — a
     /// conflict modal took over. Only fires while that toast is still the
     /// visible one.
-    fn dismiss_operation_toast(&mut self, toast_id: Option<u64>) {
+    pub(super) fn dismiss_operation_toast(&mut self, toast_id: Option<u64>) {
         if toast_id.is_some_and(|id| self.toast.as_ref().is_some_and(|toast| toast.id == id)) {
             self.hide_toast();
         }
@@ -4507,7 +4563,10 @@ impl Waku {
             );
         if !conflict.files().is_empty() {
             let code = crate::fonts::current(cx).code;
-            let workspace = self.git_panel.as_ref().map(|panel| panel.workspace.clone());
+            // The conflict's own workspace, not the panel's — a SyncBase
+            // conflict belongs to the base's checkout, which the open panel
+            // may not show (or may not be open at all).
+            let workspace = Some(conflict.workspace());
             let weak = cx.entity().downgrade();
             let mut files = div().flex().flex_col().py(px(2.0));
             for path in conflict.files() {

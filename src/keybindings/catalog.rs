@@ -770,6 +770,24 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "dialog.push_base.confirm",
+        action: || Box::new(crate::app::ConfirmPushBaseDialog),
+        title_key: "shortcuts.confirm_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "dialog.push_base.dismiss",
+        action: || Box::new(crate::app::DismissPushBaseDialog),
+        title_key: "shortcuts.dismiss_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "dialog.goal.confirm",
         action: || Box::new(crate::app::ConfirmGoalDialog),
         title_key: "shortcuts.confirm_dialog",
@@ -1331,6 +1349,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "workspace.pin_task",
         action: || Box::new(crate::ToggleSessionPin),
         title_key: "shortcuts.pin_task",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "workspace.push_base",
+        action: || Box::new(crate::PushBaseBranch),
+        title_key: "shortcuts.push_base",
         title_index: None,
         category: C::Workspace,
         editability: EDITABLE,
@@ -2393,6 +2420,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "escape",
         ProviderSwitchDialog,
     ),
+    // === app::init_push_base_dialog_keys =========================================
+    e("dialog.push_base.confirm", All, "enter", PushBaseDialog),
+    e("dialog.push_base.dismiss", All, "escape", PushBaseDialog),
     // === app::init_big_picture_keys ===================================================
     e("bigpicture.dismiss", All, "escape", BigPicture),
     e("bigpicture.left", All, "left", BigPicture),
@@ -2639,6 +2669,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "secondary-shift-a",
         Workspace,
     ),
+    e("workspace.push_base", All, "secondary-shift-enter", Workspace),
     e("workspace.pin_task", All, "secondary-alt-p", Workspace),
     e("workspace.copy_selection", All, "secondary-c", Workspace),
     e(
@@ -2719,6 +2750,7 @@ mod ctx {
     pub const ArchiveDialog: &str = "ArchiveDialog";
     pub const TerminalCloseDialog: &str = "TerminalCloseDialog";
     pub const ProviderSwitchDialog: &str = "ProviderSwitchDialog";
+    pub const PushBaseDialog: &str = "PushBaseDialog";
     pub const BigPicture: &str = "BigPicture";
     pub const GoalInput: &str = "GoalDialog > TextInput";
     pub const GoalDialog: &str = "GoalDialog";

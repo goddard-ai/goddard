@@ -86,7 +86,7 @@ use crate::{
     FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion,
     GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward,
     NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine,
-    OpenResumePicker, OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile,
+    OpenResumePicker, OpenSettings, PushBaseBranch, ReplaceAllMatches, RunProjectScript, SaveFile,
     SelectAllProjectsRows, SelectAutomationsTab, SelectFavoriteModel, SelectFirstProject,
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, SyncBranch,
@@ -2085,6 +2085,12 @@ pub struct Waku {
     /// Answers come from the daemon's remote-tracking refs; misses are
     /// fetched on the background executor like `branch_snapshots`.
     remote_files: QueryCache<(PathBuf, String), Result<Option<RemoteFileRef>, String>>,
+    /// Landed-notice push state per (workspace path, base branch): the
+    /// upstream name and how far the base is ahead of it, fetched on the
+    /// background executor like `branch_snapshots`. `RefCell` because
+    /// transcript row building reads it from `&self` paths.
+    base_push_states:
+        RefCell<QueryCache<(PathBuf, String), Result<waku_client::git::BasePushState, String>>>,
     /// Stale-while-revalidate value for the selected path, avoiding label
     /// flicker when app activation invalidates the query.
     visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
@@ -2448,6 +2454,12 @@ pub struct Waku {
     git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
     /// Focus target the Git panel's modals share — only one is ever open.
     git_panel_modal_focus: FocusHandle,
+    /// The push-after-land failure modal's payload while it is open.
+    push_base_failure: Option<push_base::PushBaseFailure>,
+    /// A `SyncBase` started by "Sync & retry push" remembers the push it is
+    /// recovering, so a clean pull re-fires it.
+    push_base_retry: Option<(PathBuf, String)>,
+    push_base_modal_focus: FocusHandle,
     /// Focus targets for the modal buttons so each is tabbable; distinct
     /// handles per modal keep a stacked pair from fighting over one.
     git_panel_unstaged_cancel_focus: FocusHandle,
@@ -3141,6 +3153,7 @@ mod project_switcher;
 mod projects;
 mod provider_switch;
 mod provider_switch_dialog;
+mod push_base;
 mod relocate;
 mod render;
 mod right_panel;
@@ -3187,6 +3200,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
 pub use provider_switch_dialog::init as init_provider_switch_dialog_keys;
+pub use push_base::init as init_push_base_dialog_keys;
 pub use saved_drafts::init as init_drafts_keys;
 pub use send_file_dialog::init as init_send_file_dialog_keys;
 pub use settings::init as init_settings_keys;
@@ -3212,6 +3226,7 @@ pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryA
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use provider_switch_dialog::{ConfirmProviderSwitchDialog, DismissProviderSwitchDialog};
+pub use push_base::{ConfirmPushBaseDialog, DismissPushBaseDialog};
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
@@ -5353,6 +5368,7 @@ impl Waku {
                 branch_picker_row_cache: RefCell::new(Vec::new()),
                 branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
                 remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
+                base_push_states: RefCell::new(QueryCache::new(MAX_CACHED_WORKSPACES)),
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,
@@ -5492,6 +5508,9 @@ impl Waku {
                 git_panel_land_prompt: None,
                 git_panel_commit_diff: None,
                 git_panel_modal_focus: cx.focus_handle(),
+                push_base_failure: None,
+                push_base_retry: None,
+                push_base_modal_focus: cx.focus_handle(),
                 git_panel_unstaged_cancel_focus: cx.focus_handle(),
                 git_panel_unstaged_confirm_focus: cx.focus_handle(),
                 git_panel_land_cancel_focus: cx.focus_handle(),

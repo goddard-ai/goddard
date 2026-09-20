@@ -255,6 +255,20 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::git_commit::push(&cwd)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::PushBase { cwd, base } => WorkspaceResult::PushBase {
+            outcome: crate::git_panel::push_base(&cwd, &base)?,
+        },
+        WorkspaceOperation::SyncBase {
+            cwd,
+            base,
+            strategy,
+        } => {
+            let (checkout, outcome) = crate::git_panel::sync_base(&cwd, &base, strategy)?;
+            WorkspaceResult::SyncBase { checkout, outcome }
+        }
+        WorkspaceOperation::BasePushState { cwd, base } => WorkspaceResult::BasePushState {
+            state: crate::git_panel::base_push_state(&cwd, &base)?,
+        },
         WorkspaceOperation::InspectGitPanel { cwd, base } => WorkspaceResult::GitPanel {
             snapshot: crate::git_panel::inspect(&cwd, base.as_deref())?,
         },

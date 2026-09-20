@@ -386,12 +386,16 @@ pub(super) struct MessageRender<'a> {
 
 /// How far a landed notice is opened and the focus handles its controls
 /// track. `expanded` reveals the commit list; `show_all` lifts the
-/// [`LANDED_NOTICE_SHOWN_COMMITS`] preview cap within it.
+/// [`LANDED_NOTICE_SHOWN_COMMITS`] preview cap within it. `push` is the
+/// base branch's live push state — the card's push affordance — and
+/// `push_focus` its button's focus target.
 pub(super) struct LandedNoticeState {
     pub(super) expanded: bool,
     pub(super) show_all: bool,
     pub(super) header_focus: FocusHandle,
     pub(super) commits_focus: FocusHandle,
+    pub(super) push: push_base::LandedPush,
+    pub(super) push_focus: FocusHandle,
 }
 
 /// Filename text that opens the file in its OS default app — the user's
@@ -1351,6 +1355,110 @@ fn status_notice_row(
 /// behind a "Show N more commits" row.
 const LANDED_NOTICE_SHOWN_COMMITS: usize = 5;
 
+/// The landed card's push affordance: a button while the base is ahead of
+/// its upstream, a spinner while a push runs, a check once the upstream
+/// holds every commit. `None` hides it — no upstream, or the read has not
+/// landed yet.
+fn landed_push_control(
+    message_id: Uuid,
+    state: &LandedNoticeState,
+    theme: &Theme,
+    waku: &gpui::WeakEntity<Waku>,
+) -> Option<AnyElement> {
+    match &state.push {
+        push_base::LandedPush::Pushable {
+            workspace,
+            base,
+            upstream,
+        } => {
+            let click_waku = waku.clone();
+            let key_waku = waku.clone();
+            let click_workspace = workspace.clone();
+            let click_base = base.clone();
+            let key_workspace = workspace.clone();
+            let key_base = base.clone();
+            Some(
+                div()
+                    .id(SharedString::from(format!("landed-push-{message_id}")))
+                    .track_focus(&state.push_focus)
+                    .tab_index(0)
+                    .h(px(22.0))
+                    .px(px(7.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_default()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .child(icon("icons/cloud-upload.svg", 11.0, theme.text_secondary))
+                    .child(tr!("push_base.button"))
+                    .tooltip(Tooltip::text_with_action(
+                        tr!(
+                            "push_base.tooltip",
+                            base = base.clone(),
+                            upstream = upstream.clone()
+                        ),
+                        &PushBaseBranch,
+                    ))
+                    // The press stays inside the control: the header's own
+                    // click toggles the disclosure.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        let _ = click_waku.update(cx, |waku, cx| {
+                            waku.start_push_base(click_workspace.clone(), click_base.clone(), cx);
+                        });
+                    })
+                    .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            cx.stop_propagation();
+                            let _ = key_waku.update(cx, |waku, cx| {
+                                waku.start_push_base(key_workspace.clone(), key_base.clone(), cx);
+                            });
+                        }
+                    })
+                    .into_any_element(),
+            )
+        }
+        push_base::LandedPush::Pushing => Some(
+            div()
+                .h(px(22.0))
+                .px(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .text_size(sp(11.5))
+                .text_color(theme.text_secondary)
+                .child(motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    11.0,
+                    theme.text_secondary,
+                )))
+                .child(tr!("commit.pushing"))
+                .into_any_element(),
+        ),
+        push_base::LandedPush::Pushed => Some(
+            div()
+                .h(px(22.0))
+                .px(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .text_size(sp(11.5))
+                .text_color(theme.text_ghost)
+                .child(icon("icons/circle-check.svg", 11.0, theme.success))
+                .child(tr!("push_base.pushed_chip"))
+                .into_any_element(),
+        ),
+        push_base::LandedPush::Hidden => None,
+    }
+}
+
 /// The "Landed on `base`" card a [`TranscriptNotice::Landed`] renders as: a
 /// collapsed disclosure header over the commit list, wearing the changed-files
 /// card's chrome. The SHAs ride the ctx's commit-ref detection — enabled for
@@ -1413,6 +1521,10 @@ fn landed_notice_row(
             .when(!expanded, |header| header.rounded_b(px(13.0)))
             .hover(|style| style.bg(theme.overlay_strong))
             .focus_visible(|style| style.bg(theme.overlay_strong))
+            .when_some(
+                landed_push_control(message_id, state, theme, waku),
+                |header, control| header.child(control),
+            )
             .child(icon(
                 if expanded {
                     "icons/chevron-down.svg"

@@ -1440,6 +1440,22 @@ transcript.provider_switched_restarted: "プロバイダーを切り替えまし
 transcript.show_more_commits: "さらに %{count} 件のコミットを表示"
 transcript.show_fewer_commits: 表示するコミットを減らす
 transcript.showing_first_commits: "%{total} 件中、先頭 %{count} 件を表示"
+push_base.button: プッシュ
+push_base.tooltip: "%{base} を %{upstream} にプッシュ"
+push_base.pushed_chip: プッシュ済み
+push_base.pushed: "%{base} を %{upstream} にプッシュしました"
+push_base.up_to_date: "%{base} は %{upstream} と同期済みです"
+push_base.no_upstream: "%{base} はリモートブランチを追跡していません"
+push_base.no_base: "プッシュするものがありません — このタスクに取り込み済みのブランチがありません"
+push_base.failed_title: "%{base} をプッシュできませんでした"
+push_base.rejected_description: "%{upstream} には %{base} にないコミットがあります — %{base} を同期してから再プッシュしてください。"
+push_base.failed_description: "プッシュに失敗しました — Git のエラーは以下のとおりです。"
+push_base.sync_failed_description: "%{base} の同期に失敗しました — Git のエラーは以下のとおりです。"
+push_base.sync_and_retry: 同期してプッシュを再試行
+push_base.retry_push: プッシュを再試行
+push_base.copy_error: エラーをコピー
+push_base.synced: "%{base} は上流と同期済みです"
+shortcuts.push_base: ベースブランチをプッシュ
 
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
