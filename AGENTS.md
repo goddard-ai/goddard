@@ -139,6 +139,22 @@
   experimental opt-ins (emitted with a bold `[Experimental]` marker —
   experiments are never highlights), `fix-` for bugs that existed in a
   previously released version.
+- A second filename segment tags the change's topic group —
+  `.changelog/<prefix>-<group>-<slug>.md` — and collect nests grouped
+  bullets under a `- **Group**` parent inside their `###` section, in a
+  fixed product-surface-first order. The vocabulary: `sessions`,
+  `sidebar`, `composer`, `providers`, `git`, `transcript`, `panels`,
+  `terminals`, `keyboard`, `navigation`, `appearance`, `permissions`,
+  `settings`, `friends`, `ssh`, `platform`. Pick the group the change is
+  about (`git` covers worktrees and the Git panel, `providers` covers the
+  model picker, `ssh` covers remote daemon pairing); when none fits, omit
+  the segment rather than stretching one. A group tagged by only one
+  fragment in a release folds back into the flat tail, so tagging is
+  always safe. `highlight-` fragments are never grouped — everything
+  after the prefix is their media slug.
+- Preview how fragments will group with `bun ./scripts/changelog.ts check`
+  before folding; an unrecognized group token lands the bullet in the
+  flat tail, so check is how a mistyped group gets caught.
 - Every `highlight-` fragment must embed a screenshot or recording —
   `![](media/<slug>.{png,gif,mp4,mov})` with the asset committed at
   `.changelog/media/<slug>.<ext>`; collect moves it to

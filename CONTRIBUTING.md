@@ -141,7 +141,10 @@ your responses in your own words.
 - Add a `.changelog/<prefix>-<slug>.md` fragment (one bullet) for user-visible
   changes — `highlight-` for headline features, `feat-` for other features,
   `exp-` for experimental opt-ins, `fix-` for bugs that existed in a released
-  version. `bun run changelog`
+  version. A non-highlight fragment may add a topic group as a second
+  segment — `<prefix>-<group>-<slug>.md` — to file under a `- **Group**`
+  subsection (the vocabulary lives in `scripts/changelog.ts`).
+  `bun run changelog`
   folds them into `CHANGELOG.md` at release time. Highlight fragments must
   embed a screenshot or recording via `![](media/<slug>.{png,gif,mp4,mov})`
   with the asset at `.changelog/media/<slug>.<ext>`.
