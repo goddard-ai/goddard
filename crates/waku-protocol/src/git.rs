@@ -50,6 +50,20 @@ impl BranchSnapshot {
     }
 }
 
+/// Where a workspace file is reachable on the repository's `origin` remote,
+/// as of the last fetch — the pieces a host like GitHub needs to build a
+/// `blob/` URL. Resolved from local remote-tracking refs, so it reflects
+/// the last fetch rather than the remote's live state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct RemoteFileRef {
+    /// The URL's ref segment: the remote branch name (`origin/` stripped)
+    /// for a tracked branch, or HEAD's full SHA for a pushed detached HEAD.
+    pub reference: String,
+    /// Repo-root-relative path — the workspace root can sit inside the
+    /// repository, so this is not always the workspace-relative path.
+    pub path: String,
+}
+
 /// Sidebar-grade checkout status: whether the working tree is dirty and how
 /// many commits on HEAD are not reachable from any remote-tracking ref.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]

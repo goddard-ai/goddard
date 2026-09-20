@@ -28,7 +28,7 @@ use crate::computer_use::{
     PendingComputerApproval,
 };
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
-use crate::git_branch::BranchSnapshot;
+use crate::git_branch::{BranchSnapshot, RemoteFileRef};
 use crate::input::{
     ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerSplice, ComposerTextPaste,
     FOLDED_PASTE_MARKER, InputEvent, TextInput, Undo,
@@ -2043,6 +2043,12 @@ pub struct Waku {
     /// Git subprocess results per concrete workspace path. Render only reads
     /// this in-memory cache; misses are fulfilled on the background executor.
     branch_snapshots: QueryCache<PathBuf, Result<Option<BranchSnapshot>, String>>,
+    /// Per-file remote reachability for the file header's "Open on GitHub"
+    /// button, keyed by (workspace path, workspace-relative file path).
+    /// Answers come from the daemon's remote-tracking refs; misses are
+    /// fetched on the background executor like `branch_snapshots`.
+    remote_files:
+        QueryCache<(PathBuf, String), Result<Option<RemoteFileRef>, String>>,
     /// Stale-while-revalidate value for the selected path, avoiding label
     /// flicker when app activation invalidates the query.
     visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
@@ -5289,6 +5295,7 @@ impl Waku {
                 branch_picker_list_state,
                 branch_picker_row_cache: RefCell::new(Vec::new()),
                 branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
+                remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,

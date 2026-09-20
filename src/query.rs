@@ -176,6 +176,16 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
         self.entries.remove(key);
     }
 
+    /// Drops every key matching `predicate` — the scoped version of
+    /// [`invalidate`] for tuple keys that share a prefix, like all file
+    /// queries belonging to one workspace.
+    ///
+    /// [`invalidate`]: Self::invalidate
+    pub fn invalidate_where(&mut self, mut predicate: impl FnMut(&K) -> bool) {
+        self.generation += 1;
+        self.entries.retain(|key, _| !predicate(key));
+    }
+
     /// Drops every cached value and invalidates all fetches in flight.
     pub fn clear(&mut self) {
         self.generation += 1;

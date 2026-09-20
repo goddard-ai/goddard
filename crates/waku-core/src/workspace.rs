@@ -295,6 +295,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::ListUpstreamCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::upstream_commits(&cwd, skip, limit)?,
         },
+        WorkspaceOperation::ResolveRemoteFile { cwd, path } => WorkspaceResult::RemoteFile {
+            file: crate::git_branch::remote_file(&cwd, &path)?,
+        },
         WorkspaceOperation::FileDiff { cwd, path, staged } => WorkspaceResult::ReviewDiff {
             data: file_diff(&cwd, &path, staged)?,
         },

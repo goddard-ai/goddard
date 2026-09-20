@@ -28,7 +28,7 @@ pub use waku_protocol::*;
 pub use workspace_client::WorkspaceClient;
 
 pub mod git_branch {
-    pub use waku_protocol::git::{BranchEntry, BranchSnapshot};
+    pub use waku_protocol::git::{BranchEntry, BranchSnapshot, RemoteFileRef};
 }
 
 pub mod git_commit {

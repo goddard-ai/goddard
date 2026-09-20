@@ -5715,6 +5715,7 @@ impl Waku {
                         };
                         if let Some(path) = subject_project_path {
                             this.branch_snapshots.invalidate(&path);
+                            this.invalidate_workspace_remote_files(&path);
                         }
                     } else {
                         let focus = this.composer_focus(cx);

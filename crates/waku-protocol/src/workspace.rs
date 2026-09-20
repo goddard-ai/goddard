@@ -8,7 +8,7 @@ use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
     AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot,
     CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy, RebaseOutcome,
-    ReviewQueue,
+    RemoteFileRef, ReviewQueue,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -841,6 +841,16 @@ pub enum WorkspaceOperation {
         skip: usize,
         limit: usize,
     },
+    /// Whether a workspace file is reachable on the `origin` remote — the
+    /// `blob/` URL ingredients a host like GitHub can actually serve —
+    /// checked against local remote-tracking refs (the last fetch). Returns
+    /// `RemoteFile`; `file` is `None` when no `origin` ref carries the
+    /// path: untracked, uncommitted, or only in unpushed commits.
+    ResolveRemoteFile {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+    },
     /// One file's working-tree diff for the Git panel's hover preview.
     /// `staged` selects `--cached`; an unstaged path with no index entry is
     /// diffed as a new file.
@@ -1141,6 +1151,11 @@ pub enum WorkspaceResult {
     /// `None` when `cwd` is not inside a Git repository.
     GitPanel {
         snapshot: Option<GitPanelSnapshot>,
+    },
+    /// `None` when no `origin` remote-tracking ref carries the file, or
+    /// `cwd` is not inside a Git repository.
+    RemoteFile {
+        file: Option<RemoteFileRef>,
     },
     Pull {
         outcome: PullOutcome,

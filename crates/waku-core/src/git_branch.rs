@@ -20,7 +20,7 @@ const MAX_UNTRACKED_FILE_BYTES: u64 = 8 * 1_024 * 1_024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 32 * 1_024 * 1_024;
 const BINARY_PROBE_BYTES: usize = 8_000;
 
-pub use waku_protocol::git::{BranchEntry, BranchSnapshot, UpstreamStatus};
+pub use waku_protocol::git::{BranchEntry, BranchSnapshot, RemoteFileRef, UpstreamStatus};
 
 /// Inspect local branches and which worktree, if any, currently owns each.
 /// `Ok(None)` means `cwd` is not inside a Git repository.
@@ -126,11 +126,10 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
     }))
 }
 
-/// The checked-out branch's upstream and its divergence from it. `None` for
-/// a detached HEAD or a branch with no upstream configured; a probe failure
-/// also degrades to `None` rather than failing the whole inspect.
-fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
-    let name = crate::command_env::plain_command("git")
+/// The checked-out branch's upstream short name (e.g. `origin/main`), or
+/// `None` for a detached HEAD or a branch with no upstream configured.
+fn upstream_name(cwd: &Path) -> Option<String> {
+    crate::command_env::plain_command("git")
         .args([
             "rev-parse",
             "--abbrev-ref",
@@ -142,7 +141,14 @@ fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
         .ok()
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        .filter(|name| !name.is_empty())?;
+        .filter(|name| !name.is_empty())
+}
+
+/// The checked-out branch's upstream and its divergence from it. `None` for
+/// a detached HEAD or a branch with no upstream configured; a probe failure
+/// also degrades to `None` rather than failing the whole inspect.
+fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
+    let name = upstream_name(cwd)?;
     // `--left-right --count @{upstream}...HEAD` reports the upstream-only
     // count first — how far the checkout trails — then the HEAD-only count.
     let counts = crate::command_env::plain_command("git")
@@ -160,6 +166,115 @@ fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
         ahead,
         behind,
     })
+}
+
+/// Whether `path` exists on an `origin` remote-tracking ref — i.e. the
+/// remote can serve it, as of the last fetch. `Ok(None)` outside a
+/// repository or when no `origin` ref carries the file: untracked,
+/// uncommitted, or only in unpushed commits. Returns the `blob/` URL
+/// ingredients (ref segment + repo-relative path), not a verdict.
+pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRef>> {
+    // `ls-files --full-name` reports the index path repo-root-relative —
+    // the blob URL's trailing segment — and doubles as the untracked
+    // filter: a path the index has never seen cannot sit in any commit.
+    // `:(literal)` keeps glob characters in the name from expanding.
+    let listed = crate::command_env::plain_command("git")
+        .args([
+            "ls-files",
+            "--full-name",
+            "-z",
+            "--error-unmatch",
+            "--",
+            &format!(":(literal){path}"),
+        ])
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git")?;
+    if !listed.status.success() {
+        return Ok(None);
+    }
+    let repo_path = listed
+        .stdout
+        .split(|byte| *byte == 0)
+        .next()
+        .map(|raw| path_from_git_bytes(raw).to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty());
+    let Some(repo_path) = repo_path else {
+        return Ok(None);
+    };
+
+    // Pick the ref the blob URL should name, most specific first:
+    // 1. The branch's upstream — only `origin/` names map to the origin
+    //    remote's repo; a foreign upstream means the branch may not exist
+    //    there at all.
+    // 2. `refs/remotes/origin/<current>` — the branch is on the remote but
+    //    tracks nothing.
+    // 3. A pushed detached HEAD — some `origin` ref contains the commit,
+    //    so the full SHA resolves.
+    let candidate = upstream_name(cwd)
+        .and_then(|name| {
+            name.strip_prefix("origin/")
+                .map(|branch| (format!("refs/remotes/origin/{branch}"), branch.to_owned()))
+        })
+        .or_else(|| {
+            let current = optional_stdout(cwd, &["branch", "--show-current"])
+                .ok()
+                .flatten()
+                .filter(|branch| !branch.is_empty())?;
+            let refname = format!("refs/remotes/origin/{current}");
+            let exists = crate::command_env::plain_command("git")
+                .args(["rev-parse", "--verify", "--quiet", &refname])
+                .current_dir(cwd)
+                .output()
+                .ok()?
+                .status
+                .success();
+            exists.then(|| (refname, current))
+        })
+        .or_else(|| {
+            let current = optional_stdout(cwd, &["branch", "--show-current"])
+                .ok()
+                .flatten()
+                .filter(|branch| !branch.is_empty());
+            if current.is_some() {
+                return None;
+            }
+            let contained = crate::command_env::plain_command("git")
+                .args(["for-each-ref", "--contains", "HEAD", "refs/remotes/origin"])
+                .current_dir(cwd)
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|output| !output.stdout.is_empty())
+                .unwrap_or(false);
+            if !contained {
+                return None;
+            }
+            let sha = optional_stdout(cwd, &["rev-parse", "HEAD"]).ok().flatten()?;
+            Some((sha.clone(), sha))
+        });
+    let Some((refname, reference)) = candidate else {
+        return Ok(None);
+    };
+
+    // Full refname in the check: a short `origin/foo` is ambiguous if a
+    // local branch shares the name. Require a blob — a path that resolves
+    // to a tree is a directory the file button never targets.
+    let object_type = crate::command_env::plain_command("git")
+        .args(["cat-file", "-t", &format!("{refname}:{repo_path}")])
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git")?;
+    if !object_type.status.success()
+        || String::from_utf8_lossy(&object_type.stdout).trim() != "blob"
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(RemoteFileRef {
+        reference,
+        path: repo_path,
+    }))
 }
 
 /// The fetch URL for `remote`, `None` when the remote is not configured.
@@ -578,6 +693,114 @@ mod tests {
             git_stdout(&repository, &["rev-parse", "attached"]).unwrap(),
             git_stdout(&repository, &["rev-parse", "main"]).unwrap()
         );
+    }
+
+    /// Simulate a fetched remote: `refs/remotes/origin/<branch>` points at
+    /// HEAD, and `local_branch` tracks it when `track` is set. The remote
+    /// itself must exist or `@{upstream}` cannot resolve `branch.*.merge`.
+    fn fake_origin(repository: &Path, remote_branch: &str, track: Option<&str>) {
+        let has_remote = crate::command_env::plain_command("git")
+            .args(["remote", "get-url", "origin"])
+            .current_dir(repository)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if !has_remote {
+            run_git(
+                repository,
+                &["remote", "add", "origin", "https://github.com/o/r.git"],
+            );
+        }
+        let head = git_stdout(repository, &["rev-parse", "HEAD"]).unwrap();
+        run_git(
+            repository,
+            &[
+                "update-ref",
+                &format!("refs/remotes/origin/{remote_branch}"),
+                &head,
+            ],
+        );
+        if let Some(local) = track {
+            run_git(
+                repository,
+                &["config", &format!("branch.{local}.remote"), "origin"],
+            );
+            run_git(
+                repository,
+                &[
+                    "config",
+                    &format!("branch.{local}.merge"),
+                    &format!("refs/heads/{remote_branch}"),
+                ],
+            );
+        }
+    }
+
+    fn commit_file(repository: &Path, name: &str, contents: &str, message: &str) {
+        fs::write(repository.join(name), contents).unwrap();
+        run_git(repository, &["add", name]);
+        run_git(
+            repository,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                message,
+            ],
+        );
+    }
+
+    #[test]
+    fn remote_file_reports_files_on_the_upstream_ref() {
+        let repository = repository();
+        fake_origin(&repository, "main", Some("main"));
+
+        let hit = remote_file(&repository, "README.md").unwrap().unwrap();
+        assert_eq!(hit.reference, "main");
+        assert_eq!(hit.path, "README.md");
+
+        // Untracked files can never be on the remote.
+        fs::write(repository.join("scratch.txt"), "new\n").unwrap();
+        assert_eq!(remote_file(&repository, "scratch.txt").unwrap(), None);
+
+        // Committed locally but not at the remote ref — the remote cannot
+        // serve what was never pushed.
+        commit_file(&repository, "UNPUSHED.md", "x\n", "unpushed");
+        assert_eq!(remote_file(&repository, "UNPUSHED.md").unwrap(), None);
+    }
+
+    #[test]
+    fn remote_file_uses_the_remote_branch_name_and_fallbacks() {
+        let repository = repository();
+        // Local branch name differs from the remote branch it tracks.
+        run_git(&repository, &["switch", "-c", "renamed"]);
+        fake_origin(&repository, "real-name", Some("renamed"));
+        let hit = remote_file(&repository, "README.md").unwrap().unwrap();
+        assert_eq!(hit.reference, "real-name");
+
+        // No upstream configured, but origin carries a same-named branch.
+        run_git(&repository, &["switch", "-c", "loose", "main"]);
+        fake_origin(&repository, "loose", None);
+        let hit = remote_file(&repository, "README.md").unwrap().unwrap();
+        assert_eq!(hit.reference, "loose");
+    }
+
+    #[test]
+    fn remote_file_detached_head_requires_a_pushed_commit() {
+        let repository = repository();
+        fake_origin(&repository, "main", None);
+        run_git(&repository, &["switch", "--detach", "HEAD"]);
+        let sha = git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap();
+
+        let hit = remote_file(&repository, "README.md").unwrap().unwrap();
+        assert_eq!(hit.reference, sha);
+
+        // A commit no origin ref contains cannot resolve on the remote.
+        commit_file(&repository, "LOCAL.md", "x\n", "local only");
+        assert_eq!(remote_file(&repository, "README.md").unwrap(), None);
     }
 
     #[test]

@@ -496,6 +496,7 @@ impl Waku {
                     waku.invalidate_workspace_queries(cx);
                 } else {
                     waku.branch_snapshots.invalidate(&workspace);
+                    waku.invalidate_workspace_remote_files(&workspace);
                 }
                 let focus = match result {
                     Ok(()) => {

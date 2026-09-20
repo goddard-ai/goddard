@@ -42,7 +42,7 @@ pub(super) fn github_remote_base(remote_url: &str) -> Option<String> {
 /// Escapes the characters that would change a GitHub URL's meaning. Git
 /// refnames already forbid space, `?`, `*`, `:` and friends; file paths keep
 /// their `/` separators and non-ASCII names are fine as UTF-8.
-fn github_url_path_encode(value: &str) -> String {
+pub(super) fn github_url_path_encode(value: &str) -> String {
     value
         .replace('%', "%25")
         .replace(' ', "%20")
@@ -224,7 +224,70 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.branch_snapshots.invalidate(&path.to_path_buf());
+        self.invalidate_workspace_remote_files(path);
         cx.notify();
+    }
+
+    /// Drop the remote-file verdicts for a workspace — they move with the
+    /// same events as the branch snapshot (fetch, push, checkout, commit).
+    pub(super) fn invalidate_workspace_remote_files(&mut self, path: &std::path::Path) {
+        self.remote_files
+            .invalidate_where(|(workspace, _)| workspace == path);
+    }
+
+    /// Read whether a workspace file is reachable on the `origin` remote,
+    /// starting one background fetch on a miss. `Some(Ok(Some(_)))` is the
+    /// verified hit, `Some(Ok(None))` the verified miss; `None` means the
+    /// answer is still in flight so callers should draw nothing rather than
+    /// a button that can vanish a frame later.
+    pub(super) fn remote_file_for(
+        &mut self,
+        workspace_path: &std::path::Path,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<Result<Option<RemoteFileRef>, String>> {
+        let key = (workspace_path.to_path_buf(), relative_path.to_owned());
+        match self.remote_files.read(&key) {
+            Query::Ready(result) => Some((*result).clone()),
+            Query::Pending => None,
+            Query::Missing(token) => {
+                let Some(workspace) = self.workspace_client_for_path(workspace_path) else {
+                    // Offline remote owner: drop the claim so the next read
+                    // retries once the host reconnects.
+                    self.remote_files.abandon(token);
+                    return None;
+                };
+                let cwd = workspace_path.to_path_buf();
+                let path = relative_path.to_owned();
+                cx.spawn(async move |waku, cx| {
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move {
+                            match workspace.request(
+                                waku_client::WorkspaceOperation::ResolveRemoteFile {
+                                    cwd,
+                                    path,
+                                },
+                            ) {
+                                Ok(waku_client::WorkspaceResult::RemoteFile { file }) => Ok(file),
+                                Ok(_) => {
+                                    Err("the daemon returned an invalid remote-file response"
+                                        .to_owned())
+                                }
+                                Err(error) => Err(error.to_string()),
+                            }
+                        })
+                        .await;
+                    let _ = waku.update(cx, |waku, cx| {
+                        if waku.remote_files.fulfill(token, result) {
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+                None
+            }
+        }
     }
 
     /// Select an existing branch on the workspace subject. A planned
@@ -531,6 +594,7 @@ impl Waku {
                         waku.cache_sidebar_branch_label(&path, snapshot.display_branch());
                         waku.visible_branch_snapshot = Some((path.clone(), snapshot));
                         waku.branch_snapshots.invalidate(&path);
+                        waku.invalidate_workspace_remote_files(&path);
                         // A worktree's persisted branch follows the checkout
                         // that just moved — for the subject session even
                         // when it is not the selection underneath.
