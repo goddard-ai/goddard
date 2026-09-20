@@ -755,7 +755,9 @@ impl Waku {
     /// `secondary-t` — always a fresh terminal, rooted where the user is:
     /// the selected terminal's directory and scope, the selected session's
     /// workspace, or a global terminal in ~ when the main area shows
-    /// neither.
+    /// neither. A selected session only lends its workspace — a terminal
+    /// owned by the session (a right-panel tab) comes from `secondary-j`
+    /// or the panel's terminal button.
     pub(super) fn new_terminal_action(
         &mut self,
         _: &NewTerminal,
@@ -787,7 +789,7 @@ impl Waku {
             (
                 self.workspace_path_for_session(session)
                     .map(std::path::Path::to_path_buf),
-                Some(session.id),
+                None,
             )
         } else {
             (dirs::home_dir(), None)

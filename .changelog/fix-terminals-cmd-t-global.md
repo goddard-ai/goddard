@@ -1,0 +1,1 @@
+- ⌘T with a session selected opens a global terminal in the session's workspace instead of a session-owned one — it no longer appears in that session's right panel; session terminals still come from ⌘J or the panel's terminal button
