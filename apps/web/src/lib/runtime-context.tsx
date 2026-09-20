@@ -1433,9 +1433,11 @@ function syntheticEvent(
 function providerName(provider: AgentSession['provider']) {
   return (
     {
+      antigravity: 'Antigravity',
       amp: 'Amp',
       claude: 'Claude Code',
       codex: 'Codex',
+      copilot: 'Copilot',
       cursor: 'Cursor Agent',
       deepSeek: 'DeepSeek Harness',
       devin: 'Devin',
@@ -1443,8 +1445,10 @@ function providerName(provider: AgentSession['provider']) {
       fx: 'Fx',
       openCode: 'OpenCode',
       openCode2: 'OpenCode 2',
+      goose: 'Goose',
       grok: 'Grok',
       kimi: 'Kimi',
+      muse: 'Muse',
       ohMyPi: 'Oh My Pi',
       pi: 'Pi',
     } as const

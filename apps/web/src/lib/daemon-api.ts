@@ -619,6 +619,7 @@ export function createProject(path: string): Project {
     name,
     path: normalized,
     created_at: unixTime(),
+    temporary: false,
   }
 }
 
@@ -718,9 +719,9 @@ export function createResumedSession(
 }
 
 export function providerSessionNativeId(cursor: ProviderResumeCursor): string {
-  return cursor.provider === 'amp' || cursor.provider === 'codex'
-    ? cursor.threadId
-    : cursor.sessionId
+  if (cursor.provider === 'amp' || cursor.provider === 'codex') return cursor.threadId
+  if (cursor.provider === 'antigravity') return cursor.conversationId
+  return cursor.sessionId
 }
 
 export function sameProviderSession(

@@ -68,6 +68,7 @@ describe('desktop sidebar presentation', () => {
       name: 'No project',
       path: '/home/me/.waku/projects/session',
       created_at: 1,
+      temporary: false,
     }
     const groups = groupSessions(
       [project],

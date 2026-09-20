@@ -1764,7 +1764,7 @@ function BranchPicker({
       ? snapshot.current ?? workspace.branch ?? snapshot.detached_head
       : snapshot.current ?? snapshot.detached_head
   const normalized = query.trim().toLowerCase()
-  const visible = visibleBranches(snapshot.branches, selected, normalized, Date.now() / 1_000)
+  const visible = visibleBranches(snapshot.branches, selected ?? undefined, normalized, Date.now() / 1_000)
   const actions = [
     ...visible
       .filter((branch) => plannedWorktree || !branch.checked_out_elsewhere || branch.name === selected)

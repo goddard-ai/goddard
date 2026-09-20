@@ -430,5 +430,5 @@ describe('removeSession', () => {
 })
 
 function project(id: string, name: string, path: string): Project {
-  return { id, name, path, created_at: 0 }
+  return { id, name, path, created_at: 0, temporary: false }
 }

@@ -56,6 +56,7 @@ export function reviewDiffSourceLabel(
     staged: 'diff.source_staged',
     committed: 'diff.source_committed',
     branch: 'diff.source_branch',
+    commit: 'diff.source_commit',
   }[source])
   return {
     uncommitted: 'Uncommitted',
@@ -63,6 +64,7 @@ export function reviewDiffSourceLabel(
     staged: 'Staged',
     committed: 'Committed',
     branch: 'Branch',
+    commit: 'Commit',
   }[source]
 }
 

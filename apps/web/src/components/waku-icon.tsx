@@ -326,6 +326,7 @@ function fileTypeIconName(path: string): FileTypeIconName {
 }
 
 const PROVIDER_ICONS: Record<ProviderKind, string> = {
+  antigravity: 'i-waku-provider-antigravity',
   amp: 'i-waku-provider-amp',
   claude: 'i-waku-provider-claude',
   codex: 'i-waku-provider-openai',
@@ -337,8 +338,10 @@ const PROVIDER_ICONS: Record<ProviderKind, string> = {
   fx: 'i-waku-provider-fx',
   openCode: 'i-waku-provider-opencode',
   openCode2: 'i-waku-provider-opencode2',
+  goose: 'i-waku-provider-goose',
   grok: 'i-waku-provider-grok',
   kimi: 'i-waku-provider-kimi',
+  muse: 'i-waku-provider-muse',
   ohMyPi: 'i-waku-provider-ohmypi',
   pi: 'i-waku-provider-pi',
 }
@@ -349,6 +352,7 @@ export const PROVIDERS: Array<{
   shortName: string
   command: string
 }> = [
+  { id: 'antigravity', name: 'Antigravity CLI', shortName: 'Antigravity', command: 'agy' },
   { id: 'amp', name: 'Amp', shortName: 'Amp', command: 'amp' },
   { id: 'claude', name: 'Claude Code', shortName: 'Claude', command: 'claude' },
   { id: 'codex', name: 'Codex CLI', shortName: 'Codex', command: 'codex' },
@@ -360,8 +364,10 @@ export const PROVIDERS: Array<{
   { id: 'fx', name: 'Fx', shortName: 'Fx', command: 'fx' },
   { id: 'openCode', name: 'OpenCode', shortName: 'OpenCode', command: 'opencode' },
   { id: 'openCode2', name: 'OpenCode 2', shortName: 'OpenCode 2', command: 'opencode2' },
+  { id: 'goose', name: 'Goose', shortName: 'Goose', command: 'goose' },
   { id: 'grok', name: 'Grok Build', shortName: 'Grok', command: 'grok' },
   { id: 'kimi', name: 'Kimi Code', shortName: 'Kimi', command: 'kimi' },
+  { id: 'muse', name: 'Muse Code', shortName: 'Muse', command: 'muse' },
   { id: 'ohMyPi', name: 'Oh My Pi', shortName: 'Oh My Pi', command: 'omp' },
   { id: 'pi', name: 'Pi', shortName: 'Pi', command: 'pi' },
 ]
