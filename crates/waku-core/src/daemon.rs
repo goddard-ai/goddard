@@ -18,8 +18,8 @@ use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentSession, Checkpoint, CheckpointStatus, DriverEvent,
-    Project, ProjectMapStatus, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace,
-    TurnStatus,
+    Project, ProjectMapStatus, ProviderKind, ProviderResumeCursor, ProviderSessionCatalogStatus,
+    SessionStatus, SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -1485,7 +1485,7 @@ impl Backend for WakuBackend {
                 else {
                     return Ok(ResponsePayload::ProviderSessions {
                         sessions: Vec::new(),
-                        status: Default::default(),
+                        status: ProviderSessionCatalogStatus::BinaryMissing,
                     });
                 };
                 // Discovery is deliberately provider-scoped. Opening Resume

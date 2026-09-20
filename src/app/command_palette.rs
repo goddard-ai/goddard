@@ -4077,6 +4077,19 @@ impl Waku {
                     )),
                     false,
                 )
+            } else if resume_view
+                && self.command_palette.provider_session_status
+                    == ProviderSessionCatalogStatus::BinaryMissing
+            {
+                (
+                    "icons/download.svg",
+                    tr!("command_palette.resume_not_installed"),
+                    Some(tr!(
+                        "command_palette.resume_not_installed_hint",
+                        provider = self.command_palette.resume_provider.display_name()
+                    )),
+                    false,
+                )
             } else if resume_view {
                 (
                     "icons/search.svg",

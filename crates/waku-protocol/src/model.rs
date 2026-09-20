@@ -1274,6 +1274,9 @@ pub enum ProviderSessionCatalogStatus {
     /// The agent cannot list past sessions (e.g. an ACP agent without the
     /// `session/list` capability, or a provider with no readable store).
     Unsupported,
+    /// The provider's CLI wasn't found on the daemon host, so no catalog
+    /// could even be attempted.
+    BinaryMissing,
 }
 
 /// A resumable conversation discovered in a provider CLI's own history.

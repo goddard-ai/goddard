@@ -2155,6 +2155,7 @@ impl StateStore {
         move || {
             let mut catalog = ProviderSessionCatalog::default();
             let mut unsupported = 0usize;
+            let mut binary_missing = 0usize;
             let mut answered = 0usize;
             let mut first_error = None;
             for (key, daemon) in daemons.connected() {
@@ -2171,8 +2172,10 @@ impl StateStore {
                             .sessions
                             .extend(reported.into_iter().map(|session| (key, session)));
                         answered += 1;
-                        if status == ProviderSessionCatalogStatus::Unsupported {
-                            unsupported += 1;
+                        match status {
+                            ProviderSessionCatalogStatus::Unsupported => unsupported += 1,
+                            ProviderSessionCatalogStatus::BinaryMissing => binary_missing += 1,
+                            ProviderSessionCatalogStatus::Ready => {}
                         }
                     }
                     Ok(_) => {
@@ -2190,8 +2193,12 @@ impl StateStore {
                 .sessions
                 .sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
             catalog.sessions.truncate(limit);
-            if catalog.sessions.is_empty() && answered > 0 && unsupported == answered {
-                catalog.status = ProviderSessionCatalogStatus::Unsupported;
+            if catalog.sessions.is_empty() && answered > 0 {
+                if unsupported == answered {
+                    catalog.status = ProviderSessionCatalogStatus::Unsupported;
+                } else if binary_missing == answered {
+                    catalog.status = ProviderSessionCatalogStatus::BinaryMissing;
+                }
             }
             match (catalog.sessions.is_empty(), first_error) {
                 (true, Some(error)) => Err(error),

@@ -4,4 +4,4 @@
  * Why a provider-session catalog came back empty — distinguishes a
  * genuinely empty history from a provider that cannot enumerate one.
  */
-export type ProviderSessionCatalogStatus = "ready" | "unsupported";
+export type ProviderSessionCatalogStatus = "ready" | "unsupported" | "binaryMissing";

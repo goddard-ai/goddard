@@ -207,7 +207,9 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
           ListEmptyComponent={<Text style={[styles.note, { color: theme.textTertiary }]}>{
             catalog?.status === 'unsupported'
               ? `${providerLabel(provider)} can't list its sessions`
-              : 'No matching sessions'
+              : catalog?.status === 'binaryMissing'
+                ? `${providerLabel(provider)} isn't installed`
+                : 'No matching sessions'
           }</Text>}
           renderItem={({ item }) => (
             <SheetRow

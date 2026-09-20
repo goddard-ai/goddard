@@ -1,4 +1,4 @@
-import type { AgentSession, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@waku/client'
+import type { AgentSession, ProviderKind, ProviderSessionCatalogStatus, ProviderSessionSummary, SessionMessageMatch } from '@waku/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ProviderIcon, PROVIDERS, providerMeta, WakuIcon, type WakuIconName } from '@/components/waku-icon'
@@ -90,7 +90,7 @@ export function CommandPalette({
   const [providerSessions, setProviderSessions] = useState<ProviderSessionSummary[]>([])
   const [providerSessionsPending, setProviderSessionsPending] = useState(false)
   const [providerSessionError, setProviderSessionError] = useState<string | null>(null)
-  const [providerSessionUnsupported, setProviderSessionUnsupported] = useState(false)
+  const [providerSessionStatus, setProviderSessionStatus] = useState<ProviderSessionCatalogStatus>()
   const [providerSessionImport, setProviderSessionImport] = useState<string | null>(null)
   const [previousItems, setPreviousItems] = useState<PaletteItem[]>([])
   const [selected, setSelected] = useState(0)
@@ -137,7 +137,7 @@ export function CommandPalette({
     setProviderSessions([])
     setProviderSessionsPending(initialView === 'resume')
     setProviderSessionError(null)
-    setProviderSessionUnsupported(false)
+    setProviderSessionStatus(undefined)
     setProviderSessionImport(null)
     setPreviousItems([])
     setSelected(0)
@@ -205,7 +205,7 @@ export function CommandPalette({
       .then((catalog) => {
         if (!current) return
         setProviderSessions(catalog.sessions)
-        setProviderSessionUnsupported(catalog.status === 'unsupported')
+        setProviderSessionStatus(catalog.status)
         setProviderSessionsPending(false)
       })
       .catch((error) => {
@@ -227,7 +227,7 @@ export function CommandPalette({
     setSelected(0)
     setProviderSessionsPending(true)
     setProviderSessionError(null)
-    setProviderSessionUnsupported(false)
+    setProviderSessionStatus(undefined)
     setProviderSessionImport(null)
   }
 
@@ -246,7 +246,7 @@ export function CommandPalette({
     setProviderSessions([])
     setProviderSessionsPending(true)
     setProviderSessionError(null)
-    setProviderSessionUnsupported(false)
+    setProviderSessionStatus(undefined)
     setProviderSessionImport(null)
     setPreviousItems([])
     setSelected(0)
@@ -338,7 +338,7 @@ export function CommandPalette({
       setProviderSessions([])
       setProviderSessionsPending(true)
       setProviderSessionError(null)
-      setProviderSessionUnsupported(false)
+      setProviderSessionStatus(undefined)
       setSelected(0)
       requestAnimationFrame(() => input.current?.focus())
       return
@@ -349,7 +349,7 @@ export function CommandPalette({
       setProviderSessions([])
       setProviderSessionsPending(false)
       setProviderSessionError(null)
-      setProviderSessionUnsupported(false)
+      setProviderSessionStatus(undefined)
       setProviderSessionImport(null)
       setSelected(0)
       return
@@ -464,16 +464,20 @@ export function CommandPalette({
                   )}
                   name={view === 'resume' && resultsPending
                     ? 'loaderCircle'
-                    : view === 'resume' && providerSessionError ? 'alert' : 'search'}
+                    : view === 'resume' && providerSessionError
+                      ? 'alert'
+                      : view === 'resume' && providerSessionStatus === 'binaryMissing' ? 'download' : 'search'}
                 />
                 <div className="mt-3 text-[13px] font-medium text-[var(--text-secondary)]">
                   {view === 'resume' && resultsPending
                     ? t('command_palette.loading_sessions')
                     : view === 'resume' && providerSessionError
                       ? t('command_palette.could_not_load_sessions')
-                      : view === 'resume' && providerSessionUnsupported
+                      : view === 'resume' && providerSessionStatus === 'unsupported'
                         ? t('command_palette.resume_unsupported')
-                        : t(view === 'resume'
+                        : view === 'resume' && providerSessionStatus === 'binaryMissing'
+                          ? t('command_palette.resume_not_installed')
+                          : t(view === 'resume'
                           ? 'command_palette.no_resume_sessions'
                           : view === 'resumeProviders'
                             ? 'command_palette.no_matching_providers'
@@ -483,8 +487,10 @@ export function CommandPalette({
                   <div className="mt-[5px] text-[11.5px] text-[var(--text-tertiary)]">
                     {view === 'resume' && providerSessionError
                       ? providerSessionError
-                      : view === 'resume' && providerSessionUnsupported
+                      : view === 'resume' && providerSessionStatus === 'unsupported'
                         ? t('command_palette.resume_unsupported_hint', { provider: providerMeta(resumeProvider).name })
+                        : view === 'resume' && providerSessionStatus === 'binaryMissing'
+                          ? t('command_palette.resume_not_installed_hint', { provider: providerMeta(resumeProvider).name })
                         : view === 'resumeProviders'
                         ? null
                         : t(view === 'resume'

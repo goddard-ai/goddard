@@ -19,6 +19,7 @@ export const GODDARD_ICONS = {
   compose: 'i-waku-compose',
   copy: 'i-waku-copy',
   cornerDownRight: 'i-waku-corner-down-right',
+  download: 'i-waku-download',
   ellipsis: 'i-waku-ellipsis',
   eye: 'i-waku-eye',
   eyeOff: 'i-waku-eye-off',
