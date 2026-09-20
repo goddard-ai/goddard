@@ -4,7 +4,7 @@ use super::composer::{
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
-use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, actions};
+use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, Svg, actions};
 use waku_protocol::integrations::{IntegrationAuthKind, IntegrationAuthState};
 use waku_protocol::routing::TaskClass;
 
@@ -9108,6 +9108,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
+                    .child(integration_logo(&snapshot.info.id, theme))
                     .child(
                         div()
                             .flex_1()
@@ -9698,6 +9699,28 @@ fn integration_chip(
         .when(on, |element| element.bg(theme.accent.opacity(0.12)))
         .hover(|element| element.bg(theme.overlay))
         .child(label)
+}
+
+/// A service's square brand mark as a tinted `svg()` alpha mask. Each takes
+/// one color: the brand's own where it reads on either theme, `theme.text`
+/// where the authored black would vanish on the dark card, and a lighter
+/// brand-family color where the official one is too dark (Sentry, Atlassian).
+#[track_caller]
+fn integration_logo(id: &str, theme: Theme) -> Svg {
+    let (path, color): (&'static str, Hsla) = match id {
+        "atlassian" => ("icons/integration-atlassian.svg", rgb(0x2684FF).into()),
+        "figma" => ("icons/integration-figma.svg", rgb(0xF24E1E).into()),
+        "github" => ("icons/integration-github.svg", theme.text),
+        "linear" => ("icons/integration-linear.svg", rgb(0x5E6AD2).into()),
+        "monday" => ("icons/integration-monday.svg", rgb(0xFF3D57).into()),
+        "notion" => ("icons/integration-notion.svg", theme.text),
+        "sentry" => ("icons/integration-sentry.svg", rgb(0x6C5FC7).into()),
+        "stripe" => ("icons/integration-stripe.svg", rgb(0x635BFF).into()),
+        "supabase" => ("icons/integration-supabase.svg", rgb(0x3ECF8E).into()),
+        "vercel" => ("icons/integration-vercel.svg", theme.text),
+        _ => ("icons/server.svg", theme.text_tertiary),
+    };
+    icon(path, 15.0, color)
 }
 
 #[track_caller]
