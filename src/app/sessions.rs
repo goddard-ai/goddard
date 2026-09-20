@@ -742,6 +742,9 @@ impl Waku {
         self.sidebar_branch_scan_fingerprint.set(None);
         self.sidebar_branch_scan_generation
             .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
+        self.sidebar_checkout_scan_fingerprint.set(None);
+        self.sidebar_checkout_scan_generation
+            .set(self.sidebar_checkout_scan_generation.get().wrapping_add(1));
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
         // The panel's working-tree snapshot moved with the same moments.
