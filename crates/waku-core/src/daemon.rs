@@ -52,6 +52,19 @@ fn trim_resident_transcripts(state: &mut PersistedState, pinned: &HashSet<Uuid>)
     state.trim_idle_transcripts(pinned, RESIDENT_TRANSCRIPT_WINDOW);
 }
 
+/// Registry removal is the atomic handoff for a runtime or terminal, so the
+/// request handler can answer immediately: the teardown itself — PTY grace
+/// periods, process waits, provider unregistration — runs on this worker
+/// instead of blocking the session's serialized command mailbox. Events a
+/// driver emits while it unwinds stay scoped to the removed runtime id,
+/// which the hub has already retired. A spawn failure falls back to the
+/// inline drop.
+fn drop_detached<T: Send + 'static>(value: T) {
+    let _ = std::thread::Builder::new()
+        .name("waku-detached-teardown".into())
+        .spawn(move || drop(value));
+}
+
 /// Project-map state shared by every runtime in the daemon. One structural
 /// index per workspace root, built and refreshed on background threads; the
 /// lock pairs with the condvar so a first prompt can give a cold build a
@@ -542,9 +555,12 @@ impl WakuBackend {
             // removal does not hinge on it.
             let _ = crate::projectless::remove_workspace(&path);
         }
+        let removed_runtimes = removed_ids
+            .iter()
+            .filter_map(|id| self.sessions.lock().remove(id))
+            .collect::<Vec<_>>();
+        drop_detached(removed_runtimes);
         for id in removed_ids {
-            let removed = self.sessions.lock().remove(&id);
-            drop(removed);
             self.agent.clear_session(id);
         }
         Ok(())
@@ -606,9 +622,12 @@ impl WakuBackend {
         if let Some(path) = removed_workspace {
             let _ = crate::projectless::remove_workspace(&path);
         }
+        let removed_runtimes = removed_ids
+            .iter()
+            .filter_map(|id| self.sessions.lock().remove(id))
+            .collect::<Vec<_>>();
+        drop_detached(removed_runtimes);
         for id in removed_ids {
-            let removed = self.sessions.lock().remove(&id);
-            drop(removed);
             self.agent.clear_session(id);
         }
         Ok(())
@@ -1383,9 +1402,12 @@ impl Backend for WakuBackend {
                     }
                 }
                 self.task_store.save(&mut state)?;
+                let removed_runtimes = cascaded
+                    .iter()
+                    .filter_map(|id| self.sessions.lock().remove(id))
+                    .collect::<Vec<_>>();
+                drop_detached(removed_runtimes);
                 for id in cascaded {
-                    let runtime = self.sessions.lock().remove(&id);
-                    drop(runtime);
                     self.agent.clear_session(id);
                 }
                 let sessions = saved_ids
@@ -1749,7 +1771,7 @@ impl Backend for WakuBackend {
                     .terminals
                     .lock()
                     .insert(session_id, (runtime_id, terminal));
-                drop(previous);
+                drop_detached(previous);
                 Ok(ResponsePayload::Ack)
             }
             Command::WriteTerminal { data } => {
@@ -1790,12 +1812,12 @@ impl Backend for WakuBackend {
                     }
                     terminals.remove(&session_id)
                 };
-                drop(removed);
+                drop_detached(removed);
                 Ok(ResponsePayload::Ack)
             }
             Command::Start { options } => {
                 let previous = self.sessions.lock().remove(&session_id);
-                drop(previous);
+                drop_detached(previous);
                 // The replaced runtime's scoped credential dies with it; the
                 // new runtime mints its own inside `spawn_runtime`.
                 self.agent.revoke_session(session_id);
@@ -1844,7 +1866,7 @@ impl Backend for WakuBackend {
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };
-                drop(removed);
+                drop_detached(removed);
                 self.agent.revoke_session(session_id);
                 Ok(ResponsePayload::Ack)
             }
@@ -2323,10 +2345,12 @@ impl WakuBackend {
         .map(|error| error.to_string());
 
         // Every provider resumes from the newly stored cursor on the next
-        // prompt. Dropping a resident source driver also prevents its late
-        // events from racing the rewound transcript.
+        // prompt. Removing the resident source driver also prevents its late
+        // events from racing the rewound transcript: the hub retires the
+        // runtime id, so anything the detached teardown still emits dies
+        // with it.
         let removed = self.sessions.lock().remove(&session_id);
-        drop(removed);
+        drop_detached(removed);
 
         let mut rewound = source.clone();
         if !message_ids.is_empty() {
@@ -4186,13 +4210,15 @@ fn forward_driver_events(
                 maps.sessions.remove(&session_id);
                 maps.pending.remove(&session_id);
             }
-            let mut sessions = sessions.lock();
-            if sessions
-                .get(&session_id)
-                .is_some_and(|(active_runtime_id, _)| *active_runtime_id == runtime_id)
-            {
-                sessions.remove(&session_id);
-            }
+            let removed = {
+                let mut sessions = sessions.lock();
+                sessions
+                    .get(&session_id)
+                    .is_some_and(|(active_runtime_id, _)| *active_runtime_id == runtime_id)
+                    .then(|| sessions.remove(&session_id))
+                    .flatten()
+            };
+            drop_detached(removed);
             break;
         }
     }

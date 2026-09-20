@@ -38,9 +38,11 @@
 //! a daemon request thread. Nothing here is reachable from a frame.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
+
+use parking_lot::Mutex;
 
 use anyhow::{Context as _, anyhow};
 use crossbeam_channel::{Sender, bounded, unbounded};
@@ -610,15 +612,16 @@ impl OpenCode2Driver {
                     .map(|agent| agent.id.clone())
                     .collect::<Vec<_>>();
                 let hint = crate::subagents::opencode2_hint(&available);
-                match opencode2_api::put_instruction_entry(
+                match attach_instruction_entry(
                     &endpoint,
                     &session_id,
                     SUBAGENT_INSTRUCTION_KEY,
                     &hint,
                 ) {
-                    Ok(()) => Some(SubagentInstruction {
+                    Ok(generation) => Some(SubagentInstruction {
                         endpoint: endpoint.clone(),
                         session_id: session_id.clone(),
+                        generation,
                     }),
                     Err(error) => {
                         eprintln!(
@@ -768,24 +771,74 @@ struct OpenCode2AgentSurface {
     endpoint: Endpoint,
     session_id: String,
     shim_directory: std::path::PathBuf,
+    generation: u64,
 }
 
 const AGENT_INSTRUCTION_KEY: &str = "goddard-agent";
 const SUBAGENT_INSTRUCTION_KEY: &str = "goddard-subagents";
+
+/// Instruction entries are named per (endpoint, session, key) and the API
+/// has no conditional delete. Once runtime teardown detaches from the
+/// session mailbox, a dying runtime's DELETE can land after its
+/// replacement's PUT and revoke the new registration. Attach and guarded
+/// remove therefore share one lock and a per-entry attach generation: a
+/// stale teardown sees a newer generation and leaves the entry alone.
+/// Holding the lock across the request serializes the wire order too, so a
+/// remove already in flight finishes before the next attach is sent.
+static INSTRUCTION_ATTACH_GENERATIONS: OnceLock<Mutex<HashMap<(String, String, String), u64>>> =
+    OnceLock::new();
+
+fn instruction_attach_generations() -> &'static Mutex<HashMap<(String, String, String), u64>> {
+    INSTRUCTION_ATTACH_GENERATIONS.get_or_init(Default::default)
+}
+
+/// Attach an instruction entry and return its attach generation, which the
+/// caller must later present to remove it.
+fn attach_instruction_entry(
+    endpoint: &Endpoint,
+    session: &str,
+    key: &str,
+    value: &str,
+) -> opencode2_api::Result<u64> {
+    let mut generations = instruction_attach_generations().lock();
+    let map_key = (endpoint.address(), session.to_owned(), key.to_owned());
+    let generation = generations.get(&map_key).copied().unwrap_or(0) + 1;
+    opencode2_api::put_instruction_entry(endpoint, session, key, value)?;
+    generations.insert(map_key, generation);
+    Ok(generation)
+}
+
+/// Remove an entry only while `generation` is still the latest attach; a
+/// detached teardown whose runtime has already been replaced skips its
+/// DELETE instead of revoking the replacement's entry.
+fn remove_attached_instruction_entry(
+    endpoint: &Endpoint,
+    session: &str,
+    key: &str,
+    generation: u64,
+) {
+    let generations = instruction_attach_generations().lock();
+    let map_key = (endpoint.address(), session.to_owned(), key.to_owned());
+    if generations.get(&map_key).copied() == Some(generation) {
+        let _ = opencode2_api::remove_instruction_entry(endpoint, session, key);
+    }
+}
 
 /// A `goddard-subagents` instruction entry: attached at start, removed on drop
 /// so a later session reconciles to whatever its own launch injected.
 struct SubagentInstruction {
     endpoint: Endpoint,
     session_id: String,
+    generation: u64,
 }
 
 impl Drop for SubagentInstruction {
     fn drop(&mut self) {
-        let _ = opencode2_api::remove_instruction_entry(
+        remove_attached_instruction_entry(
             &self.endpoint,
             &self.session_id,
             SUBAGENT_INSTRUCTION_KEY,
+            self.generation,
         );
     }
 }
@@ -798,31 +851,36 @@ impl OpenCode2AgentSurface {
     ) -> anyhow::Result<Self> {
         let shim = crate::agent::write_session_shim(agent)?;
         let endpoint = service.endpoint();
-        if let Err(error) = opencode2_api::put_instruction_entry(
+        let generation = match attach_instruction_entry(
             &endpoint,
             session_id,
             AGENT_INSTRUCTION_KEY,
             &crate::agent::shared_service_instruction(&shim, agent),
         ) {
-            let _ = std::fs::remove_dir_all(&agent.shim_directory);
-            return Err(anyhow!(
-                "could not attach OpenCode 2 agent instructions: {error}"
-            ));
-        }
+            Ok(generation) => generation,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&agent.shim_directory);
+                return Err(anyhow!(
+                    "could not attach OpenCode 2 agent instructions: {error}"
+                ));
+            }
+        };
         Ok(Self {
             endpoint,
             session_id: session_id.to_owned(),
             shim_directory: agent.shim_directory.clone(),
+            generation,
         })
     }
 }
 
 impl Drop for OpenCode2AgentSurface {
     fn drop(&mut self) {
-        let _ = opencode2_api::remove_instruction_entry(
+        remove_attached_instruction_entry(
             &self.endpoint,
             &self.session_id,
             AGENT_INSTRUCTION_KEY,
+            self.generation,
         );
         let _ = std::fs::remove_dir_all(&self.shim_directory);
     }
