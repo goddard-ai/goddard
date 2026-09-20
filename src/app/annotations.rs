@@ -1428,6 +1428,19 @@ impl Waku {
                 } else {
                     None
                 };
+                // A pointer resting on an unverified candidate starts its
+                // lookup — the render-time pass only sees frames that
+                // painted before it ran.
+                let candidate = if hit.is_none() && ref_hit.is_none() && commit_hit.is_none() {
+                    git_panel::transcript_commit_candidate_at(&selection, event.position)
+                } else {
+                    None
+                };
+                if let Some(candidate) = candidate {
+                    let _ = waku.update(cx, |this, cx| {
+                        this.ensure_transcript_commit_detail(&candidate.sha, cx);
+                    });
+                }
                 let hovered_commit = commit_hit
                     .as_ref()
                     .map(|hit| (hit.key.clone(), hit.range.clone()));

@@ -3075,6 +3075,7 @@ impl Waku {
         self.transcript_selection.selection.borrow_mut().clear();
         self.transcript_selection.registry.borrow_mut().clear();
         *self.transcript_selection.hovered_commit.borrow_mut() = None;
+        self.transcript_selection.resolved_commits.borrow_mut().clear();
         self.transcript_commit_hover = None;
         self.transcript_commit_details.clear();
         self.transcript_commit_press = None;

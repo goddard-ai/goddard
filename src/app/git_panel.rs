@@ -2246,6 +2246,15 @@ impl Waku {
         .detach();
     }
 
+    /// Record `sha` as a confirmed commit: its transcript ranges gain the
+    /// underline, hit-testing, and hover popover from the next paint on.
+    fn mark_transcript_commit_resolved(&self, sha: &str) {
+        self.transcript_selection
+            .resolved_commits
+            .borrow_mut()
+            .insert(sha.to_owned());
+    }
+
     /// The commit entry already known for `sha`, either from the Git panel's
     /// loaded history or a transcript lookup that has landed.
     fn transcript_commit_entry(&self, sha: &str) -> Option<CommitEntry> {
@@ -2264,7 +2273,15 @@ impl Waku {
 
     /// Fetch a transcript SHA's metadata once. The request goes through the
     /// daemon so render and hit-testing never touch Git or the filesystem.
-    fn ensure_transcript_commit_detail(&mut self, sha: &str, cx: &mut Context<Self>) {
+    /// Infrastructure gaps — no workspace, no daemon connection — leave the
+    /// candidate unrecorded so a later pass retries; only a definitive answer
+    /// lands in `transcript_commit_details`, where `Failed` means "not a
+    /// commit" rather than "couldn't ask".
+    pub(super) fn ensure_transcript_commit_detail(
+        &mut self,
+        sha: &str,
+        cx: &mut Context<Self>,
+    ) {
         if self.transcript_commit_details.contains_key(sha) {
             return;
         }
@@ -2277,16 +2294,13 @@ impl Waku {
         }) {
             self.transcript_commit_details
                 .insert(sha.to_owned(), TranscriptCommitDetail::Ready(entry));
+            self.mark_transcript_commit_resolved(sha);
             return;
         }
         let Some(workspace) = self
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf)
         else {
-            self.transcript_commit_details.insert(
-                sha.to_owned(),
-                TranscriptCommitDetail::Failed(SharedString::from("workspace unavailable")),
-            );
             return;
         };
         let session_id = self.selected_session().map(|session| session.id);
@@ -2294,12 +2308,6 @@ impl Waku {
         let requested_sha = sha.to_owned();
         let request_sha = sha.to_owned();
         let Some(client) = self.workspace_client_for_path(&workspace) else {
-            self.transcript_commit_details.insert(
-                sha.to_owned(),
-                TranscriptCommitDetail::Failed(SharedString::from(
-                    tr!("daemon.remote_unreachable"),
-                )),
-            );
             return;
         };
         self.transcript_commit_details
@@ -2339,11 +2347,36 @@ impl Waku {
                         TranscriptCommitDetail::Failed(SharedString::from(error.to_string()))
                     }
                 };
+                if matches!(detail, TranscriptCommitDetail::Ready(_)) {
+                    waku.mark_transcript_commit_resolved(&key);
+                }
                 waku.transcript_commit_details.insert(key, detail);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// Resolve every commit candidate the transcript currently paints — one
+    /// daemon request per unique SHA, deduplicated by
+    /// `transcript_commit_details`. Runs from `render_transcript` so a
+    /// candidate is verified as soon as it scrolls on screen; until a `Ready`
+    /// entry lands the range stays plain text, which is what keeps
+    /// hex-looking ids (UUID segments, content hashes) non-interactive.
+    pub(super) fn resolve_transcript_commit_refs(&mut self, cx: &mut Context<Self>) {
+        let candidates: Vec<String> = {
+            let registry = self.transcript_selection.registry.borrow();
+            registry
+                .entries()
+                .iter()
+                .flat_map(|entry| entry.commit_refs.iter())
+                .filter(|(_, sha)| !self.transcript_commit_details.contains_key(sha.as_str()))
+                .map(|(_, sha)| sha.clone())
+                .collect()
+        };
+        for sha in candidates {
+            self.ensure_transcript_commit_detail(&sha, cx);
+        }
     }
 
     /// A transcript SHA's hover: fetch its metadata immediately, then reveal
@@ -4874,17 +4907,27 @@ fn commit_entry_matches(entry: &CommitEntry, sha: &str) -> bool {
 }
 
 /// The transcript commit reference containing `position`, consulting this
-/// frame's painted geometry.
-pub(super) fn transcript_commit_hit_at(
+/// frame's painted geometry. `resolved_only` restricts hits to SHAs already
+/// confirmed against the workspace — clicks and hovers need it; the pointer's
+/// prefetch path takes the wider candidate set so pointing at an unverified
+/// hex run kicks off its lookup.
+fn transcript_commit_hit_in(
     selection: &TranscriptSelection,
     position: Point<Pixels>,
+    resolved_only: bool,
 ) -> Option<TranscriptCommitHit> {
     let registry = selection.registry.borrow();
+    let resolved = selection.resolved_commits.borrow();
     for entry in registry.entries() {
         if entry.commit_refs.is_empty() || entry.geometry.is_missing() {
             continue;
         }
         for (range, sha) in &entry.commit_refs {
+            // Candidates a lookup hasn't confirmed are plain text — no hover,
+            // no press.
+            if resolved_only && !resolved.contains(sha.as_str()) {
+                continue;
+            }
             let hit = crate::md::render::text_range_bounds(&entry.geometry, range)
                 .iter()
                 .any(|rect| rect.contains(&position));
@@ -4898,6 +4941,23 @@ pub(super) fn transcript_commit_hit_at(
         }
     }
     None
+}
+
+/// The confirmed commit reference under `position` — the interactive set.
+pub(super) fn transcript_commit_hit_at(
+    selection: &TranscriptSelection,
+    position: Point<Pixels>,
+) -> Option<TranscriptCommitHit> {
+    transcript_commit_hit_in(selection, position, true)
+}
+
+/// The commit *candidate* under `position`, verified or not — used to start a
+/// lookup for text the pointer already rests on.
+pub(super) fn transcript_commit_candidate_at(
+    selection: &TranscriptSelection,
+    position: Point<Pixels>,
+) -> Option<TranscriptCommitHit> {
+    transcript_commit_hit_in(selection, position, false)
 }
 
 /// The commit card shared by the Git panel row tooltip and transcript SHA

@@ -1,0 +1,1 @@
+- Commit-looking hex in agent replies — UUID segments, content hashes — no longer gets a commit affordance: each candidate is verified against the repository before the underline, hover card, and diff link appear

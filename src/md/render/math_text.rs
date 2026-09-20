@@ -537,7 +537,12 @@ impl Element for MathText {
         }
         if !self.flat.commit_refs.is_empty() {
             let hovered = self.selection.hovered_commit.borrow().clone();
-            for (range, _) in &self.flat.commit_refs {
+            // Candidates stay plain text until a lookup confirms the SHA.
+            let resolved = self.selection.resolved_commits.borrow();
+            for (range, sha) in &self.flat.commit_refs {
+                if !resolved.contains(sha.as_str()) {
+                    continue;
+                }
                 let emphasised = hovered
                     .as_ref()
                     .is_some_and(|(key, hover_range)| *key == self.key && *hover_range == *range);

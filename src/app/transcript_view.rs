@@ -218,6 +218,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.prefetch_checkpoint_refs(cx);
+        self.resolve_transcript_commit_refs(cx);
         self.sync_transcript_rows();
         self.retire_fading_working_indicator(cx);
         self.sync_transcript_layout_width(window);

@@ -303,8 +303,10 @@ pub struct FlatText {
     /// set: byte ranges paired with the label's 1-based index. Painted as a
     /// dotted underline; hovering previews the annotation.
     pub annotation_refs: Vec<(Range<usize>, usize)>,
-    /// Git commit SHAs: byte ranges paired with the written SHA. Painted as a
-    /// dotted underline; hovering previews the commit.
+    /// Candidate Git commit SHAs: byte ranges paired with the written SHA.
+    /// A range gets the dotted underline and hover affordance only once the
+    /// app confirms the SHA resolves — see `resolved_commits` on the
+    /// selection state.
     pub commit_refs: Vec<(Range<usize>, String)>,
     /// `@`-mention file references: byte ranges painted with a dotted
     /// underline. The click itself rides `links` — each range has a matching
@@ -526,14 +528,34 @@ fn annotation_references(flat: &FlatText, limit: usize) -> Vec<(Range<usize>, us
 static COMMIT_REFERENCE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b[0-9a-f]{7,40}\b").unwrap());
 
+/// A hyphenated hexadecimal token — UUID-shaped ids like
+/// `3f8a2b1c-9d4e-4f5a-8b6c-7d8e9f0a1b2c`. Their segments are word-bounded
+/// hex runs `COMMIT_REFERENCE` would flag, but a SHA never contains a hyphen:
+/// the whole token is one identifier, not a commit. A segment that trails
+/// off into non-hex word characters (`abcdef1-based`) fails the trailing
+/// `\b`, so prose suffixes keep their SHA reading.
+static HYPHENATED_HEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b[0-9a-f]+(?:-[0-9a-f]+)+\b").unwrap());
+
 fn commit_references(flat: &FlatText) -> Vec<(Range<usize>, String)> {
+    let hyphenated: Vec<Range<usize>> = HYPHENATED_HEX
+        .find_iter(flat.text.as_ref())
+        .map(|found| found.range())
+        .collect();
+    // A hex match is contiguous, so it cannot span a hyphen: any overlap with
+    // a hyphenated token means it lies wholly inside one of its segments.
+    let in_hyphenated = |range: &Range<usize>| {
+        hyphenated
+            .iter()
+            .any(|token| token.start < range.end && range.start < token.end)
+    };
     COMMIT_REFERENCE
         .find_iter(flat.text.as_ref())
         .filter_map(|found| {
             let range = found.range();
             // Inline code remains a SHA reference; fenced blocks never reach
             // this pass. Links and rendered math own their own interaction.
-            (!linked_or_math_range(flat, &range))
+            (!linked_or_math_range(flat, &range) && !in_hyphenated(&range))
                 .then(|| (range, found.as_str().to_ascii_lowercase()))
         })
         .collect()
@@ -1263,7 +1285,13 @@ fn text_element_with_selection(
             }
             if !commit_refs.is_empty() {
                 let hovered_ref = selection.hovered_commit.borrow().clone();
-                for (range, _) in &commit_refs {
+                // Candidates stay plain text until a lookup confirms the SHA;
+                // hex-looking ids (UUIDs, content hashes) never underline.
+                let resolved = selection.resolved_commits.borrow();
+                for (range, sha) in &commit_refs {
+                    if !resolved.contains(sha.as_str()) {
+                        continue;
+                    }
                     let emphasised =
                         hovered_ref
                             .as_ref()
@@ -3301,6 +3329,25 @@ mod tests {
         );
         assert!(commit_refs("see abcdef").is_empty());
         assert!(commit_refs("x0123456 g123456").is_empty());
+    }
+
+    #[test]
+    fn commit_references_skip_hyphenated_hex_tokens() {
+        // Every UUID segment is word-bounded hex; none is a commit.
+        assert!(
+            commit_refs("id 3f8a2b1c-9d4e-4f5a-8b6c-7d8e9f0a1b2c done").is_empty()
+        );
+        assert!(commit_refs("deadbeef-1234").is_empty());
+        // A hyphenated token with non-hex letters is prose around a SHA.
+        assert_eq!(
+            commit_refs("the abcdef1-based fix"),
+            vec![(4..11, "abcdef1".to_owned())]
+        );
+        // A bare hex run beside a hyphenated token still matches.
+        assert_eq!(
+            commit_refs("abc1234 then 3f8a2b1c-9d4e-4f5a-8b6c-7d8e9f0a1b2c"),
+            vec![(0..7, "abc1234".to_owned())]
+        );
     }
 
     #[test]

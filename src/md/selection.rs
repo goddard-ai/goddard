@@ -15,6 +15,7 @@
 //! mouse listeners live in [`super::render`].
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -380,8 +381,10 @@ pub struct RegisteredText<G = ()> {
     /// with the label's 1-based index. Only transcript rows that resolve
     /// against a submitted annotation set carry any.
     pub annotation_refs: Vec<(Range<usize>, usize)>,
-    /// Commit references painted in this element: byte ranges paired with the
-    /// SHA text as it appears in the message.
+    /// Commit candidates in this element: byte ranges paired with the
+    /// hex text as it appears in the message. They become interactive only
+    /// once `resolved_commits` confirms the SHA — until then they paint as
+    /// plain text and fail hit-testing.
     pub commit_refs: Vec<(Range<usize>, String)>,
     /// The element's markdown mapping for copy; default emits flat text.
     pub copy: Rc<CopySpec>,
@@ -594,6 +597,11 @@ pub struct SelectionState<G = ()> {
     /// The commit reference under the pointer, identified by its element and
     /// byte range so the renderer can emphasise its dotted underline.
     pub hovered_commit: Rc<RefCell<Option<(TextKey, Range<usize>)>>>,
+    /// Transcript SHAs already confirmed to resolve to a commit. The markdown
+    /// pass can only spot hex-looking *candidates* — UUID segments and
+    /// content hashes look identical — so the underline, hit test and popover
+    /// all gate on this set, which the app fills as daemon lookups land.
+    pub resolved_commits: Rc<RefCell<HashSet<String>>>,
 }
 
 impl<G> Clone for SelectionState<G> {
@@ -603,6 +611,7 @@ impl<G> Clone for SelectionState<G> {
             registry: self.registry.clone(),
             annotations: self.annotations.clone(),
             hovered_commit: self.hovered_commit.clone(),
+            resolved_commits: self.resolved_commits.clone(),
         }
     }
 }
@@ -614,6 +623,7 @@ impl<G> Default for SelectionState<G> {
             registry: Rc::default(),
             annotations: Rc::default(),
             hovered_commit: Rc::default(),
+            resolved_commits: Rc::default(),
         }
     }
 }
