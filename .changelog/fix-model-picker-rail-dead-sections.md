@@ -1,1 +1,0 @@
-- The model picker's rail no longer shows buttons for sections with no rows — other providers during a locked session, providers whose combos are all favorites or recents, and favorites/recents jumps whose stored entries no longer resolve to picker rows

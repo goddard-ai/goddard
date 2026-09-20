@@ -1,1 +1,0 @@
-- The settings sidebar now behaves like the chat sidebar: it shares the same width, drags wider or narrower from its right edge, and picks up the macOS sidebar transparency (vibrancy or Liquid Glass) when that setting is on.

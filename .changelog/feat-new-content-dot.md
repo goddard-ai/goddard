@@ -1,1 +1,0 @@
-- Opening a task with unseen completions now shows an accent dot beside the first line of the agent's latest reply, fading out on the first scroll

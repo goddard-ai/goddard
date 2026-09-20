@@ -1,1 +1,0 @@
-- Keybindings search now filters by the keys themselves: typing a modifier in any spelling — "cmd", "command", "opt", "option", "ctrl", "control", "shift", "shft", "fn", or the ⌘⌥⌃⇧ glyphs — lists every binding that uses it, key names like "tab" or "f5" match too, and combinations such as "command p" narrow to the chords using them all.

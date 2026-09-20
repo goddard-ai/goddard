@@ -1,1 +1,0 @@
-- New "Resolve land conflicts in chat" setting (Settings → General) sends the conflict-resolution prompt to the owning task's chat automatically when a land stops on rebase or merge conflicts, instead of showing the conflict dialog

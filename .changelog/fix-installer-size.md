@@ -1,1 +1,0 @@
-- Shrunk the installer back to its old size — the Copilot SDK's default `bundled-cli` feature was embedding the entire ~118 MB Copilot CLI archive in the daemon even though sessions always launch the installed `copilot` binary, which had grown the download from ~35 MB to ~176 MB

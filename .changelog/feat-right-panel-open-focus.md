@@ -1,1 +1,0 @@
-- Opening the right panel (⌘⌥B or the panel toggle) moves keyboard focus into the active surface — the terminal, browser, file editor, or diff file tree — so its keybindings (⌘R reload, ⌘± code zoom, find toggles) work from the first keystroke; surfaces with no focusable body focus the panel itself

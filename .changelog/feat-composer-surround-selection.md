@@ -1,1 +1,0 @@
-- Typing a quote, backtick, or bracket over a text selection in the composer now wraps the selected text in the matching pair instead of replacing it

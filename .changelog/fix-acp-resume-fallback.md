@@ -1,1 +1,0 @@
-- Fix ACP tasks losing their conversation after Move to Worktree: a failed `session/load` — e.g. while the replaced runtime still held the provider's session lock — silently started a fresh provider session and overwrote the resume cursor. Failed resumes now retry transient errors briefly and surface the failure instead of forking onto an empty session

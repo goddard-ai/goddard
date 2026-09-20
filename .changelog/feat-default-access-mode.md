@@ -1,1 +1,0 @@
-- New tasks now default to Auto-accept edits instead of Full access — file edits apply without prompts while commands and other actions still ask first

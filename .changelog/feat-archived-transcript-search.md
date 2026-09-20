@@ -1,1 +1,0 @@
-- The Archived page's search now matches message text inside archived chats, not just titles and project names — rows found on content show a snippet of the matched line

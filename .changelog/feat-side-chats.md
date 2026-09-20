@@ -1,1 +1,0 @@
-- `/side [prompt]` opens a side chat in the task's right panel — a fresh session linked to the task that can read its transcript with `goddard-agent read` and message it with `goddard-agent prompt`. Side chats live as tabs in the panel, out of the sidebar and switcher, resume across restarts, and are deleted with their parent task.

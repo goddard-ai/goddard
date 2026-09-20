@@ -1,1 +1,0 @@
-- Browsing themes in the Appearance selectors no longer flashes back to the current theme a moment after each preview while "Match system appearance" is on

@@ -1,1 +1,0 @@
-- Archiving a task now shows a "Task archived" toast with an Undo button that restores it — a multi-selection archives as one undoable group

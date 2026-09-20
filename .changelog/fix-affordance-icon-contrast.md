@@ -1,1 +1,0 @@
-- In High contrast mode, the chevron carets on select-style controls and the disclosure chevrons on expandable rows (settings sections, transcript folds, menus) now render one text tier brighter so the affordance stays legible.

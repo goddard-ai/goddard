@@ -1,1 +1,0 @@
-- Drag the divider between an open commit's diff and its file tree in the Git panel to resize the split; it adjusts the same panel width as the panel's own edge

@@ -1,1 +1,0 @@
-- Rank branch picker results by a blend of name fit and last-committed recency; with no search text the list now orders by most recently committed

@@ -1,1 +1,0 @@
-- Archiving a task mid-⌘⇧D sweep no longer lands selection back on a task the sweep just marked unread; the departure falls through to the next genuinely unread or idle session until another navigation ends the sweep

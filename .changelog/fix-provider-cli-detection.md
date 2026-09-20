@@ -1,1 +1,0 @@
-- Detect provider CLIs installed after the daemon started and ones on PATH only via interactive shell config: provider refresh re-captures the login-shell environment, and a missed binary falls back to a single `command -v` resolution across all providers

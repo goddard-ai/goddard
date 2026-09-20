@@ -1,1 +1,0 @@
-- Connecting to a remote host over SSH works again: the control socket option was passed in a form `ssh` rejected outright, the control master was started in confirmation mode so every later command and port forward was denied, and a host with no published daemon build failed right after the bundled daemon was uploaded.

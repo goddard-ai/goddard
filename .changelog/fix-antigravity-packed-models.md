@@ -1,1 +1,0 @@
-- Antigravity's model list folds `base-effort` spellings like `gemini-3.1-pro-high` into one model row with an effort picker and drops the parenthesized effort from the label ("Gemini 3.1 Pro"), while traitless suffixes like `claude-opus-4-6-thinking` keep their full id instead of resolving to a base the CLI rejects

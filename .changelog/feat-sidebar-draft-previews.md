@@ -1,1 +1,0 @@
-- New "Sidebar draft previews" setting (General) shows a task's unsent composer draft on its own line under the sidebar row's title, drawn in the theme's alert color so an abandoned draft stands out

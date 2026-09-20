@@ -1,1 +1,0 @@
-- Archiving a chat no longer deletes its worktree while another unarchived chat shares it; the directory is removed once the last sibling chat is archived.

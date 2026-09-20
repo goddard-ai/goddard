@@ -1,1 +1,0 @@
-- Link commit hashes in agent messages: hovering shows the commit card, and clicking opens the commit's diff in the Git panel (requires the Git panel experiment)

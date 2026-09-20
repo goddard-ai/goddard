@@ -1,1 +1,0 @@
-- Collapsed text pastes now fold into the composer input as "Pasted text" chips at the paste position instead of collecting above it; pastes over 64 KB still become `paste.txt` file attachments

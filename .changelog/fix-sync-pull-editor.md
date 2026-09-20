@@ -1,1 +1,0 @@
-- Syncing a checkout from the new task strip can no longer open a Git editor in the terminal tab — the pull now runs with `core.editor` and `sequence.editor` stubbed out

@@ -1,3 +1,0 @@
-- Discover and pair with daemons on the local network: an exposed daemon now announces itself over Bonjour and the share endpoint's encrypted link, Settings → Daemon lists nearby daemons with a Pair button, and the mobile app's daemon list shows an "On your network" section — approving a request on the host issues a revocable per-device token, so adding a machine no longer means copying an address and token by hand
-- Friends and file transfers now find direct LAN paths through mDNS endpoint discovery instead of routing through relays, working even with the internet down
-- Manage pairings under Settings → Friends: pending requests show the requesting device with approve and decline controls, and the paired-devices list can revoke any device's token independently

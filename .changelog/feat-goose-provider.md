@@ -1,1 +1,0 @@
-- Goose is now a supported provider, driven over the Agent Client Protocol (`goose acp`). Goose sessions stream, prompt for permissions, and can be imported into Goddard like other ACP providers; the model comes from your `goose configure` setup.
