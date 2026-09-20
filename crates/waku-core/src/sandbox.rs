@@ -37,10 +37,17 @@ const GUEST_WORKSPACE: &str = "/workspace";
 struct GuestSpec {
     binary: &'static str,
     checkpoint: &'static str,
+    /// The shell script run inside a throwaway VM (open network) whose disk
+    /// becomes the checkpoint. Must leave the provider binary installed.
+    install: &'static str,
     allow_hosts: &'static [&'static str],
     /// (guest env name, host env name, allowed hosts) — the guest receives a
     /// placeholder; the proxy swaps in the real value only for these hosts.
+    /// At least one must be set on the host or the guest CLI has no
+    /// credentials at all.
     secrets: &'static [(&'static str, &'static str, &'static [&'static str])],
+    /// Human-readable name list for the missing-credentials error.
+    key_hint: &'static str,
 }
 
 const CODEX_ENDPOINTS: &[&str] = &[
@@ -51,16 +58,58 @@ const CODEX_ENDPOINTS: &[&str] = &[
     "auth.openai.com",
 ];
 
+const CLAUDE_ENDPOINTS: &[&str] = &[
+    "api.anthropic.com",
+    "statsig.anthropic.com",
+    "claude.ai",
+    "*.claude.ai",
+];
+
+const CODEX_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y bubblewrap; \
+    cd /tmp; \
+    curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-aarch64-unknown-linux-musl.tar.gz -o codex.tar.gz; \
+    mkdir -p codex-pkg; \
+    tar -xzf codex.tar.gz -C codex-pkg; \
+    bin=$(find codex-pkg -type f -name 'codex*' | head -1); \
+    install -m 755 \"$bin\" /usr/local/bin/codex; \
+    codex --version";
+
+const CLAUDE_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://claude.ai/install.sh | bash; \
+    install -m 755 /.local/bin/claude /usr/local/bin/claude; \
+    claude --version";
+
 fn guest_spec(provider: ProviderKind) -> Option<GuestSpec> {
     match provider {
         ProviderKind::Codex => Some(GuestSpec {
             binary: "/usr/local/bin/codex",
             checkpoint: "waku-provider-codex",
+            install: CODEX_INSTALL,
             allow_hosts: CODEX_ENDPOINTS,
             secrets: &[
                 ("OPENAI_API_KEY", "OPENAI_API_KEY", CODEX_ENDPOINTS),
                 ("CODEX_API_KEY", "CODEX_API_KEY", CODEX_ENDPOINTS),
             ],
+            key_hint: "OPENAI_API_KEY or CODEX_API_KEY",
+        }),
+        ProviderKind::Claude => Some(GuestSpec {
+            binary: "/usr/local/bin/claude",
+            checkpoint: "waku-provider-claude",
+            install: CLAUDE_INSTALL,
+            allow_hosts: CLAUDE_ENDPOINTS,
+            secrets: &[
+                ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", CLAUDE_ENDPOINTS),
+                (
+                    "CLAUDE_CODE_OAUTH_TOKEN",
+                    "CLAUDE_CODE_OAUTH_TOKEN",
+                    CLAUDE_ENDPOINTS,
+                ),
+            ],
+            key_hint: "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN",
         }),
         _ => None,
     }
@@ -129,20 +178,7 @@ fn checkpoint_names(shuru: &Path) -> anyhow::Result<Vec<String>> {
 /// Runs inside the VM with open network during `checkpoint create`; the
 /// session VM itself is restricted to the provider's endpoint allowlist.
 fn checkpoint_install_argv(spec: &GuestSpec) -> Vec<String> {
-    const CODEX_INSTALL: &str = "set -eux; \
-        apt-get update; \
-        apt-get install -y bubblewrap; \
-        cd /tmp; \
-        curl -fsSL https://github.com/openai/codex/releases/latest/download/codex-aarch64-unknown-linux-musl.tar.gz -o codex.tar.gz; \
-        mkdir -p codex-pkg; \
-        tar -xzf codex.tar.gz -C codex-pkg; \
-        bin=$(find codex-pkg -type f -name 'codex*' | head -1); \
-        install -m 755 \"$bin\" /usr/local/bin/codex; \
-        codex --version";
-    if spec.checkpoint == "waku-provider-codex" {
-        return vec!["sh".to_owned(), "-c".to_owned(), CODEX_INSTALL.to_owned()];
-    }
-    unreachable!("no install recipe for checkpoint {}", spec.checkpoint)
+    vec!["sh".to_owned(), "-c".to_owned(), spec.install.to_owned()]
 }
 
 /// Build the provider checkpoint once — the download happens in a throwaway
@@ -251,10 +287,12 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
             scrub.push(guest_name.to_owned());
         }
     }
-    if provider == ProviderKind::Codex && secrets.is_empty() {
+    if secrets.is_empty() {
         bail!(
-            "sandboxed Codex needs OPENAI_API_KEY or CODEX_API_KEY in the environment — \
-             the key is proxied to the provider endpoint and never enters the VM"
+            "sandboxed {} needs {} in the environment — \
+             the key is proxied to the provider endpoint and never enters the VM",
+            provider.display_name(),
+            spec.key_hint,
         );
     }
 

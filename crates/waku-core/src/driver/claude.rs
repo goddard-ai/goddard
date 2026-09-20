@@ -183,7 +183,7 @@ impl ClaudeDriver {
             integrations: _,
             provider_cursor,
             eval: _,
-            sandbox: _,
+            sandbox,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
             Some(ProviderResumeCursor::Claude {
@@ -234,12 +234,18 @@ impl ClaudeDriver {
             command.args(["--session-id", &session_id]);
         }
 
-        let mut command = crate::command_env::guard_command(command);
+        // Inside the guest the VM dying with the session is the teardown
+        // guarantee the host-side guardian script provides locally.
+        let mut command = if sandbox.is_some() {
+            command
+        } else {
+            crate::command_env::guard_command(command)
+        };
         let command = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = crate::command_env::spawn(command)
+        let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
             .context("failed to start `claude` in streaming-input mode")?;
         let stdin = child
             .stdin
