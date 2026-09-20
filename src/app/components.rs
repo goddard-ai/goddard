@@ -429,7 +429,7 @@ fn render_sent_message_attachments(
                 .gap(px(5.0))
                 .cursor_default()
                 .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|element| element.bg(theme.overlay))
                 .tooltip(Tooltip::text(format!("{} — {session_id}", attachment.name)))
                 .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
@@ -479,7 +479,7 @@ fn render_sent_message_attachments(
                 .gap(px(5.0))
                 .track_focus(menu.trigger_focus_handle())
                 .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
                 .child(
                     div()
@@ -528,7 +528,7 @@ fn render_sent_message_attachments(
             .bg(theme.inset)
             .track_focus(menu.trigger_focus_handle())
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(attachment.name.clone()));
         if attachment.is_image {
             let key_menu = menu.clone();
@@ -675,7 +675,7 @@ fn render_work_item_ref_chips(
             .gap(px(5.0))
             .cursor_default()
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .tooltip(Tooltip::text(format!("#{} — {}", item.number, item.title)))
             .child(icon("icons/github.svg", 11.0, theme.text_tertiary))
@@ -1019,7 +1019,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         .text_size(sp(12.5))
                                         .text_color(theme.text_tertiary)
                                         .hover(|style| style.text_color(theme.text))
-                                        .focus_visible(|style| style.text_color(theme.text))
+                                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                                         .child(tr!("transcript.show_more"))
                                         .on_click(move |_, _, cx| {
                                             let _ = click_waku.update(cx, |this, cx| {
@@ -1047,7 +1047,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                     .track_focus(menu.trigger_focus_handle())
                                     .tab_group()
                                     .tab_index(0)
-                                    .focus_visible(|style| style.border_color(theme.accent))
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                                     .on_key_down(move |event: &KeyDownEvent, window, cx| {
                                         if event.keystroke.key == "f10"
                                             && event.keystroke.modifiers.shift

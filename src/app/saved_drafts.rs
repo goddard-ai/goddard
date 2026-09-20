@@ -445,7 +445,7 @@ impl Waku {
                 .bg(theme.overlay_strong)
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.opacity(0.8))
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .child(
                     div()
                         .text_size(sp(11.0))
@@ -784,7 +784,7 @@ impl Waku {
             card.track_focus(&row_focus)
                 .tab_index(0)
                 .tab_stop(true)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     let key = event.keystroke.key.as_str();
                     if matches!(key, "enter" | "space") {

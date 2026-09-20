@@ -337,7 +337,7 @@ where
     let base = div()
         .id(id)
         .tab_index(0)
-        .focus_visible(|style| style.border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .w(px(36.0))
         .h(px(20.0))
         .p(px(2.0))
@@ -694,7 +694,7 @@ impl RenderOnce for MenuChip {
             .text_size(sp(13.0))
             .line_height(sp(16.0))
             .cursor_default()
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(self.outlined, |element| {
                 element
                     .border(hairline())
@@ -811,7 +811,7 @@ impl RenderOnce for ProjectNameSelector {
             .relative()
             .flex_none()
             .cursor_default()
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .child(self.label)
             .child(
                 canvas(

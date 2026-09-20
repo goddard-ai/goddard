@@ -3762,7 +3762,7 @@ impl Waku {
                     .items_center()
                     .justify_center()
                     .cursor_default()
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay))
                     .active(|element| element.bg(theme.overlay_strong))
                     .child(icon(icon_path, 13.0, theme.text_tertiary))
@@ -4288,7 +4288,7 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .cursor_default()
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|style| style.bg(theme.overlay))
                 .child(icon("icons/github.svg", 12.0, theme.text_tertiary))
                 .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
@@ -4320,7 +4320,7 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .cursor_default()
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|style| style.bg(theme.overlay))
                 .child(icon(icon_path, 12.0, theme.text_tertiary))
                 .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
@@ -5525,7 +5525,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .child(refresh_icon)
             .tooltip(|window, cx| Tooltip::new(tr!("diff.refresh")).build(window, cx))
@@ -5779,9 +5779,7 @@ impl Waku {
                         label
                             .tab_index(0)
                             .cursor_default()
-                            .focus_visible(|style| {
-                                style.border(hairline()).border_color(theme.accent)
-                            })
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
                             .hover(|style| {
                                 style
                                     .bg(theme.overlay_strong)
@@ -5940,7 +5938,7 @@ impl Waku {
             .when(border_bottom, |button| {
                 button.border_b(hairline()).border_color(theme.separator)
             })
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay_strong))
             .active(|style| style.bg(theme.overlay))
             .tooltip(Tooltip::text(tooltip))
@@ -6038,7 +6036,7 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.right_panel_diff_tree_key_down(event, window, cx)
                     }))

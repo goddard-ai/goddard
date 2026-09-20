@@ -218,6 +218,8 @@ pub struct Palette {
     pub active_search_match: Hsla,
     /// Soft fill marking a commented transcript passage.
     pub annotation: Hsla,
+    /// Keyboard-focus highlight wash, in place of a ring.
+    pub focus: Hsla,
     pub accent: Hsla,
     pub added: Hsla,
     pub removed: Hsla,
@@ -259,6 +261,7 @@ impl Palette {
                 0.70
             }),
             annotation: search_yellow.opacity(if theme.is_dark { 0.16 } else { 0.18 }),
+            focus: theme.focus_highlight(),
             accent: theme.accent,
             added: theme.success,
             removed: theme.danger,
@@ -2340,7 +2343,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .items_center()
         .justify_center()
         .cursor_default()
-        .focus_visible(|style| style.border(hairline()).border_color(ctx.palette.accent))
+        .focus_visible(|style| style.bg(ctx.palette.focus))
         .hover(|style| style.bg(ctx.palette.overlay))
         .child(crate::ui::icon(
             if copied {
@@ -2587,7 +2590,7 @@ fn table_resize_handle(
         .cursor_col_resize()
         .flex()
         .justify_center()
-        .focus_visible(|element| element.bg(ctx.palette.accent.opacity(0.12)))
+        .focus_visible(|element| element.bg(ctx.palette.focus))
         .child(
             div()
                 .w(px(1.5))

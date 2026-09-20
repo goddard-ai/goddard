@@ -456,7 +456,7 @@ impl Waku {
         let previous = icon_button("transcript-find-previous", "icons/arrow-up.svg", theme)
             .track_focus(&previous_focus)
             .tab_index(0)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .opacity(if has_matches { 1.0 } else { 0.45 })
             .tooltip(|window, cx| Tooltip::new(tr!("find.previous_match")).build(window, cx))
             .when(has_matches, |button| {
@@ -465,7 +465,7 @@ impl Waku {
         let next = icon_button("transcript-find-next", "icons/arrow-down.svg", theme)
             .track_focus(&next_focus)
             .tab_index(0)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .opacity(if has_matches { 1.0 } else { 0.45 })
             .tooltip(|window, cx| Tooltip::new(tr!("find.next_match")).build(window, cx))
             .when(has_matches, |button| {
@@ -474,7 +474,7 @@ impl Waku {
         let close = icon_button("transcript-find-close", "icons/x.svg", theme)
             .track_focus(&close_focus)
             .tab_index(0)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .tooltip(|window, cx| Tooltip::new(tr!("find.close")).build(window, cx))
             .on_activation(cx, |this, window, cx| {
                 this.close_transcript_search(true, window, cx)

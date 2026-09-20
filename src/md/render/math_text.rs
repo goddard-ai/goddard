@@ -359,13 +359,7 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
                         .border(hairline())
                         .border_color(gpui::transparent_black())
                 })
-                .focus_visible(|style| {
-                    if has_links {
-                        style.border_color(ctx.palette.accent)
-                    } else {
-                        style.bg(ctx.palette.overlay)
-                    }
-                })
+                .focus_visible(|style| style.bg(ctx.palette.focus))
         })
         .child(body)
         .into_any_element()

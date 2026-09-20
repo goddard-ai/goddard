@@ -1139,7 +1139,7 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .cursor_default()
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .when(menu_open, |element| element.bg(theme.overlay_strong))
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.bg(theme.overlay_strong))
@@ -1252,7 +1252,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .cursor_default()
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.overlay_strong))
             .child(
@@ -1516,7 +1516,7 @@ impl Waku {
             .when(available, |button| {
                 button
                     .hover(|style| style.opacity(0.92))
-                    .focus_visible(|style| style.border(hairline()).border_color(rgb(0xFFFFFF)))
+                    .focus_visible(|style| style.bg(gpui::white().opacity(0.2)))
                     .active(|style| style.opacity(0.8))
                     .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
                         this.set_updater_button_hovered(*hovering, cx);
@@ -1624,7 +1624,7 @@ impl Waku {
                 div()
                     .id("open-settings")
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .w(px(26.0))
                     .h(px(26.0))
                     .flex_none()
@@ -1648,7 +1648,7 @@ impl Waku {
                 div()
                     .id("open-shortcuts")
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .w(px(26.0))
                     .h(px(26.0))
                     .flex_none()
@@ -1967,12 +1967,7 @@ impl Waku {
                             .flex_none(),
                     ),
             )
-            .focus_visible(|style| {
-                style
-                    .border(hairline())
-                    .border_color(theme.accent)
-                    .rounded(px(12.0))
-            })
+            .focus_visible(|style| style.rounded(px(12.0)).bg(theme.focus_highlight()))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.activate_sidebar_dock_item(item, window, cx);
             }))
@@ -2063,7 +2058,7 @@ impl Waku {
             div()
                 .id("transfer-progress")
                 .tab_index(0)
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .w(px(26.0))
                 .h(px(26.0))
                 .flex_none()
@@ -3402,13 +3397,7 @@ impl Waku {
                         .cursor_default()
                         .opacity(0.0)
                         .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-                        .focus_visible(|style| {
-                            style
-                                .w(px(20.0))
-                                .opacity(1.0)
-                                .border(hairline())
-                                .border_color(theme.accent)
-                        })
+                        .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
                         .tooltip(if group == SidebarGroup::Terminals {
@@ -3473,7 +3462,7 @@ impl Waku {
                 .font_weight(FontWeight::NORMAL)
                 .text_size(sp(14.0))
         })
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .hover(|style| style.bg(theme.sidebar_item_background))
         .active(|style| style.bg(theme.overlay_strong))
         .child(
@@ -3641,7 +3630,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.text_tertiary)
-            .focus_visible(|style| style.text_color(theme.text))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.text_color(theme.text))
             .child(if dormant {
                 tr!("sidebar.show_dormant")
@@ -3936,7 +3925,7 @@ impl Waku {
                 element
                     .track_focus(&row_focus)
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     // Dragging a row anywhere the composer is reachable
                     // stages a session-reference chip there; dropping it back
                     // on the session it already addresses is a no-op.
@@ -4449,13 +4438,7 @@ impl Waku {
             .cursor_default()
             .opacity(0.0)
             .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-            .focus_visible(|style| {
-                style
-                    .w(px(20.0))
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text_with_action(
@@ -4502,13 +4485,7 @@ impl Waku {
             .cursor_default()
             .opacity(0.0)
             .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-            .focus_visible(|style| {
-                style
-                    .w(px(20.0))
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .when(!self.sidebar_alt_held, |element| {
@@ -4976,9 +4953,7 @@ impl Waku {
                                 .id("onboarding-add-project")
                                 .track_focus(&self.onboarding_add_project_focus)
                                 .tab_index(0)
-                                .focus_visible(|style| {
-                                    style.border(hairline()).border_color(theme.accent)
-                                })
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
                                 .h(px(32.0))
                                 .px(px(14.0))
                                 .rounded_full()
@@ -5005,9 +4980,7 @@ impl Waku {
                                 .id("onboarding-projectless")
                                 .track_focus(&self.onboarding_projectless_focus)
                                 .tab_index(1)
-                                .focus_visible(|style| {
-                                    style.border(hairline()).border_color(theme.accent)
-                                })
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
                                 .h(px(30.0))
                                 .px(px(12.0))
                                 .rounded_full()

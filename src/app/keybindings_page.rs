@@ -969,9 +969,7 @@ impl super::Waku {
                     .text_color(theme.danger)
                     .cursor_pointer()
                     .hover(|style| style.bg(theme.overlay))
-                    .focus_visible(|style| {
-                        style.border(hairline()).border_color(theme.accent)
-                    })
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(tr!("keybind.conflicts.cycle")))
                     .child(tr!("keybind.conflicts", n = hard_conflict_count))
                     .on_click(cx.listener(|this, _, _window, cx| {

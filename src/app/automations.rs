@@ -912,7 +912,7 @@ impl Waku {
             .bg(theme.raised)
             .cursor_pointer()
             .hover(|element| element.bg(theme.overlay))
-            .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
+            .focus_visible(|element| element.bg(theme.focus_highlight()))
             .track_focus(&self.automations_new_focus)
             .tab_index(0)
             .on_click(cx.listener(|this, _, _window, cx| {
@@ -1206,7 +1206,7 @@ impl Waku {
                 element.bg(theme.sidebar_item_background)
             })
             .hover(|element| element.bg(theme.overlay))
-            .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
+            .focus_visible(|element| element.bg(theme.focus_highlight()))
             .track_focus(&self.automations_row_focus)
             .tab_index(0)
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -2366,9 +2366,7 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .track_focus(&editor.advanced_focus)
                             .tab_index(0)
-                            .focus_visible(|element| {
-                                element.border(hairline()).border_color(theme.accent)
-                            })
+                            .focus_visible(|element| element.bg(theme.focus_highlight()))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(editor) = this.automations_editor.as_mut() {
                                     editor.advanced_open = !editor.advanced_open;
@@ -2455,9 +2453,7 @@ impl Waku {
                             .hover(|element| element.bg(theme.overlay))
                             .track_focus(&editor.cancel_focus)
                             .tab_index(0)
-                            .focus_visible(|element| {
-                                element.border(hairline()).border_color(theme.accent)
-                            })
+                            .focus_visible(|element| element.bg(theme.focus_highlight()))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_automation_editor(window, cx);
                             }))
@@ -2479,9 +2475,7 @@ impl Waku {
                             .hover(|element| element.bg(theme.accent.opacity(0.85)))
                             .track_focus(&editor.save_focus)
                             .tab_index(0)
-                            .focus_visible(|element| {
-                                element.border(hairline()).border_color(theme.accent)
-                            })
+                            .focus_visible(|element| element.bg(theme.focus_highlight()))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.confirm_automation_editor(window, cx);
                             }))

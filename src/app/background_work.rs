@@ -845,12 +845,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(if summary.is_empty() {
@@ -884,12 +879,7 @@ impl Waku {
                 .cursor_default()
                 .text_size(sp(12.5))
                 .font_weight(FontWeight::MEDIUM)
-                .focus_visible(|style| {
-                    style
-                        .bg(theme.overlay)
-                        .border(hairline())
-                        .border_color(theme.accent)
-                })
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|style| style.bg(theme.overlay))
                 .active(|style| style.bg(theme.overlay_strong))
                 .when(additions > 0, |button| {
@@ -1070,12 +1060,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("open_in.open", app = preferred_label)))
@@ -1105,12 +1090,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("open_in.choose")))
@@ -1190,12 +1170,7 @@ impl Waku {
             .items_center()
             .gap(px(4.0))
             .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(if unread {
@@ -1276,12 +1251,7 @@ impl Waku {
             .items_center()
             .gap(px(3.0))
             .cursor_default()
-            .focus_visible(|style| {
-                style
-                    .bg(theme.overlay)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("github.more_pull_requests")))
@@ -1409,7 +1379,7 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .hover(|style| style.bg(theme.danger.opacity(0.10)))
                     .active(|style| style.bg(theme.danger.opacity(0.16)))
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(tr!("background.stop")))
                     .child(icon("icons/stop-filled.svg", 11.0, theme.danger))
                     .child(tr!("background.stop"))
@@ -1831,12 +1801,7 @@ fn render_task_identifier_row(
         .items_center()
         .justify_center()
         .cursor_default()
-        .focus_visible(|style| {
-            style
-                .bg(theme.overlay)
-                .border(hairline())
-                .border_color(theme.accent)
-        })
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .hover(|style| style.bg(theme.overlay_strong))
         .active(|style| style.bg(theme.overlay))
         .tooltip(tooltip)
@@ -2009,7 +1974,7 @@ fn render_environment_action_row(
         .items_center()
         .gap(px(10.0))
         .cursor_default()
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .when(enabled, |row| {
             row.hover(|style| style.bg(theme.overlay_strong))
         })
@@ -2118,13 +2083,7 @@ fn render_background_summary_row(
             .opacity(0.0)
             .group_hover(group_name.clone(), |style| style.opacity(1.0))
             .hover(|style| style.bg(theme.overlay_strong))
-            .focus_visible(|style| {
-                style
-                    .opacity(1.0)
-                    .bg(theme.raised)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.opacity(1.0).bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(tr!("background.stop")))
             .child(icon("icons/stop-filled.svg", 12.0, theme.text_tertiary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -2174,7 +2133,7 @@ fn render_background_summary_row(
         .items_center()
         .gap(px(9.0))
         .cursor_default()
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .hover(|style| style.bg(theme.overlay_strong))
         .child(icon(
             work_kind_icon(item.key.kind),

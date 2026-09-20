@@ -504,7 +504,7 @@ fn compact_row(
         .gap(px(8.0))
         .cursor_default()
         .text_color(theme.text)
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .hover(|style| style.bg(theme.overlay_strong))
         .tooltip(Tooltip::text(tr!("commands.compact_description")))
         .child(icon("icons/minimize.svg", 12.0, theme.text_secondary))

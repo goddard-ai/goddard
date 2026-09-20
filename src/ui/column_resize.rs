@@ -93,7 +93,7 @@ where
         .cursor_col_resize()
         .flex()
         .justify_center()
-        .focus_visible(|element| element.bg(theme.accent.opacity(0.12)))
+        .focus_visible(|element| element.bg(theme.focus_highlight()))
         .child(
             div()
                 .w(px(1.5))

@@ -229,7 +229,7 @@ fn render_terminal_close_action_row(
         .cursor_default()
         .text_size(sp(14.0))
         .text_color(theme.text)
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .hover(|style| style.bg(theme.overlay_strong))
         .child(icon(icon_path, 15.0, theme.text))
         .child(div().min_w_0().flex_1().truncate().child(label))

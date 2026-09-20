@@ -461,7 +461,7 @@ pub(super) fn settings_title_jump(
         .tab_index(0)
         .cursor_pointer()
         .hover(|element| element.text_color(theme.accent))
-        .focus_visible(|element| element.text_color(theme.accent))
+        .focus_visible(|element| element.bg(theme.focus_highlight()))
         .on_click(move |_, window, cx| {
             let _ = weak.update(cx, |this, cx| {
                 this.visit_setting(page, Some(ordinal), window, cx);
@@ -1256,7 +1256,7 @@ impl Waku {
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
                                     .hover(|element| element.text_color(theme.accent))
-                                    .focus_visible(|element| element.text_color(theme.accent))
+                                    .focus_visible(|element| element.bg(theme.focus_highlight()))
                                     .child(settings_search_text(label, label_ranges, theme))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.visit_setting(page, None, window, cx);
@@ -2240,7 +2240,7 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .hover(|element| element.bg(theme.overlay))
                     .active(|element| element.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(icon("icons/plus.svg", 14.0, theme.text_tertiary))
                     .child(tr!("commands.new_command"))
                     .on_activation(cx, |this, window, cx| {
@@ -2354,7 +2354,7 @@ impl Waku {
                             theme,
                         )
                         .tab_index(0)
-                        .focus_visible(|style| style.border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .tooltip(|window, cx| Tooltip::new(tr!("commands.edit")).build(window, cx))
                         .on_activation(cx, move |this, window, cx| {
                             this.open_custom_command_editor(Some(&edit_command), window, cx);
@@ -2367,7 +2367,7 @@ impl Waku {
                             theme,
                         )
                         .tab_index(0)
-                        .focus_visible(|style| style.border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .tooltip(|window, cx| {
                             Tooltip::new(tr!("commands.delete")).build(window, cx)
                         })
@@ -2419,7 +2419,7 @@ impl Waku {
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .hover(|element| element.bg(theme.overlay))
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .child(label)
         };
         let selected_icon = editor.icon;
@@ -2658,7 +2658,7 @@ impl Waku {
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .opacity(if apply_disabled { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(!apply_disabled, |element| {
                 element
                     .hover(|element| element.bg(theme.overlay))
@@ -2697,7 +2697,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .child(icon(
                 if url_copied {
@@ -2744,7 +2744,7 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(icon(
@@ -2788,7 +2788,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .child(icon(
                 if token_copied {
@@ -2832,7 +2832,7 @@ impl Waku {
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .opacity(if pending { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(!pending, |element| {
                 element
                     .hover(|element| element.bg(theme.overlay))
@@ -3286,7 +3286,7 @@ impl Waku {
                 .cursor_default()
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|element| element.bg(theme.overlay))
                 .child(icon(
                     if copied {
@@ -3451,7 +3451,7 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .hover(|element| element.bg(theme.overlay))
                     .active(|element| element.bg(theme.overlay_strong))
-                    .focus_visible(|element| element.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|element| element.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(label))
                     .child(icon(icon_path, 13.0, theme.text_tertiary))
             };
@@ -3572,7 +3572,7 @@ impl Waku {
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .hover(|element| element.bg(theme.overlay))
-            .focus_visible(|element| element.border_color(theme.accent))
+            .focus_visible(|element| element.bg(theme.focus_highlight()))
             .child(icon("icons/plus.svg", 12.0, theme.text_tertiary))
             .child(tr!("daemon.remote_host_add"))
             .on_click(cx.listener(|this, _, window, cx| {
@@ -3680,7 +3680,7 @@ impl Waku {
                         .text_size(sp(12.5))
                         .text_color(theme.text_secondary)
                         .hover(|element| element.bg(theme.overlay))
-                        .focus_visible(|element| element.border_color(theme.accent))
+                        .focus_visible(|element| element.bg(theme.focus_highlight()))
                         .child(tr!("daemon.pair"))
                         .on_click(cx.listener({
                             let daemon = daemon.clone();
@@ -3786,7 +3786,7 @@ impl Waku {
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .hover(|element| element.bg(theme.overlay))
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .child(label)
         };
         div()
@@ -3847,7 +3847,7 @@ impl Waku {
                             .text_size(sp(11.5))
                             .text_color(theme.text_secondary)
                             .hover(|element| element.bg(theme.overlay))
-                            .focus_visible(|element| element.border_color(theme.accent))
+                            .focus_visible(|element| element.bg(theme.focus_highlight()))
                             .child(alias.clone())
                             .on_click(move |_, _, cx| {
                                 destination.update(cx, |input, cx| input.set_content(&alias, cx));
@@ -4499,7 +4499,7 @@ impl Waku {
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .opacity(if dirty { 1.0 } else { 0.55 })
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(dirty, |element| {
                 element
                     .hover(|element| element.bg(theme.overlay))
@@ -4533,7 +4533,7 @@ impl Waku {
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .opacity(if pending { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(!pending, |element| {
                 element
                     .hover(|element| element.bg(theme.overlay))
@@ -5705,12 +5705,7 @@ impl Waku {
             // same buttons, so focus makes them visible too.
             .opacity(0.0)
             .group_hover(group.clone(), |element| element.opacity(1.0))
-            .focus_visible(|element| {
-                element
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|element| element.opacity(1.0).bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(tr!("common.unarchive"))
@@ -5742,12 +5737,7 @@ impl Waku {
             .text_color(theme.danger)
             .opacity(0.0)
             .group_hover(group.clone(), |element| element.opacity(1.0))
-            .focus_visible(|element| {
-                element
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|element| element.opacity(1.0).bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.danger.opacity(0.12)))
             .active(|element| element.bg(theme.danger.opacity(0.18)))
             .child(tr!("common.remove"))
@@ -6409,7 +6399,7 @@ impl Waku {
             .items_center()
             .gap(px(24.0))
             .cursor_default()
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .child(settings_row_text(
                 tr!("settings.preview"),
                 tr!("settings.preview_description"),
@@ -7213,7 +7203,7 @@ impl Waku {
         let refresh = div()
             .id("refresh-providers")
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .h(px(28.0))
             .px(px(11.0))
             .rounded(px(9.0))
@@ -7328,7 +7318,7 @@ impl Waku {
                 theme.affordance_icon(),
             )
             .tab_index(0)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.toggle_provider_expanded(kind, window, cx);
             }));
@@ -7337,7 +7327,7 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("provider-setup-{}", kind.id())))
                     .tab_index(0)
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .h(px(28.0))
                     .px(px(11.0))
                     .rounded(px(9.0))
@@ -7554,7 +7544,7 @@ impl Waku {
                 kind.id()
             )))
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .h(px(29.0))
             .px(px(10.0))
             .rounded(px(9.0))
@@ -7671,7 +7661,7 @@ impl Waku {
                     kind.id()
                 )))
                 .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .h(px(29.0))
                 .px(px(10.0))
                 .rounded(px(9.0))
@@ -7703,7 +7693,7 @@ impl Waku {
         let docs = div()
             .id(SharedString::from(format!("provider-docs-{}", kind.id())))
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .h(px(29.0))
             .px(px(10.0))
             .rounded(px(9.0))
@@ -7769,9 +7759,7 @@ impl Waku {
                                     theme,
                                 )
                                 .tab_index(0)
-                                .focus_visible(|style| {
-                                    style.border(hairline()).border_color(theme.accent)
-                                })
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.dismiss_provider_setup_terminal(kind, cx);
                                 }))
@@ -7808,7 +7796,7 @@ impl Waku {
         let copy = div()
             .id(SharedString::from(copy_id))
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .size(px(22.0))
             .rounded(px(7.0))
             .flex()
@@ -9789,7 +9777,7 @@ fn integration_button(
     div()
         .id(id)
         .tab_index(0)
-        .focus_visible(|style| style.border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .h(px(25.0))
         .px(px(9.0))
         .rounded(px(8.0))
@@ -9816,7 +9804,7 @@ fn integration_chip(
     div()
         .id(id)
         .tab_index(0)
-        .focus_visible(|style| style.border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .h(px(22.0))
         .px(px(8.0))
         .rounded_full()

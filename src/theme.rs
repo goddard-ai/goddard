@@ -353,6 +353,14 @@ impl Theme {
         }
     }
 
+    /// Keyboard-focus highlight: a translucent wash of the scheme's accent,
+    /// painted as the focused element's fill in place of a ring. High
+    /// contrast deepens the wash so the focus landing stays legible.
+    pub fn focus_highlight(&self) -> Hsla {
+        self.accent
+            .opacity(if high_contrast() { 0.22 } else { 0.12 })
+    }
+
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActiveWakuTheme>() {
             cx.global::<ActiveWakuTheme>().0

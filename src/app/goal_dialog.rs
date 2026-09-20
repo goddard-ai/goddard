@@ -565,7 +565,7 @@ fn render_goal_action_row(
         .cursor_default()
         .text_size(sp(14.0))
         .text_color(foreground)
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .when(enabled, |row| {
             row.hover(|style| style.bg(theme.overlay_strong))
         })

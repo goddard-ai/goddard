@@ -194,7 +194,7 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .bg(gpui::hsla(0.0, 0.0, 0.0, 0.48))
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(gpui::hsla(0.0, 0.0, 0.0, 0.66)))
             .active(|style| style.opacity(0.8))
             .tooltip(Tooltip::text(tr!("attachments.close_preview")))

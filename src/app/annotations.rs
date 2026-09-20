@@ -954,7 +954,7 @@ impl Waku {
             .text_size(sp(12.5))
             .line_height(sp(14.0))
             .text_color(theme.text)
-            .focus_visible(|element| element.border_color(theme.accent))
+            .focus_visible(|element| element.bg(theme.focus_highlight()))
             .child(icon("icons/compose.svg", 12.0, theme.text_secondary))
             .child(tr!("annotations.add_to_chat"))
             .when_some(shortcut_label, |element, label| {
@@ -1340,9 +1340,7 @@ impl Waku {
                                 .items_center()
                                 .justify_center()
                                 .cursor_default()
-                                .focus_visible(|element| {
-                                    element.border(hairline()).border_color(theme.accent)
-                                })
+                                .focus_visible(|element| element.bg(theme.focus_highlight()))
                                 .hover(|element| element.bg(theme.overlay_strong))
                                 .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
                                 .tooltip(Tooltip::text(tr!("annotations.remove_all")))

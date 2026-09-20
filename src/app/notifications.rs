@@ -980,7 +980,7 @@ impl Waku {
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .when(show_read, |element| element.bg(theme.overlay))
                     .tooltip(Tooltip::text(tr!("notifications.show_read_tooltip")))
                     .child(icon(
@@ -1021,7 +1021,7 @@ impl Waku {
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(tr!("github.refresh")))
                     .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -1162,12 +1162,7 @@ impl Waku {
                         .gap(px(4.0))
                         .cursor_default()
                         .hover(|style| style.bg(theme.overlay))
-                        .focus_visible(|style| {
-                            style
-                                .visible()
-                                .border(hairline())
-                                .border_color(theme.accent)
-                        })
+                        .focus_visible(|style| style.visible().bg(theme.focus_highlight()))
                         .tooltip(Tooltip::text(tr!("notifications.mark_repo_read")))
                         .child(icon("icons/check.svg", 11.0, theme.text_tertiary))
                         .child(
@@ -1298,7 +1293,7 @@ impl Waku {
             .border_color(theme.border)
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
-            .focus_visible(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(!thread.unread, |element| element.opacity(0.5))
             .child(
                 div()
@@ -1396,12 +1391,7 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .hover(|style| style.bg(theme.overlay_strong))
-            .focus_visible(|style| {
-                style
-                    .visible()
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.visible().bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(tooltip))
             .child(icon(icon_path, 12.0, theme.text_secondary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

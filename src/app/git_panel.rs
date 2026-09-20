@@ -2645,7 +2645,7 @@ impl Waku {
             } else {
                 theme.text_ghost
             })
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .child(icon_path)
             .child(label);
         if enabled {
@@ -2748,7 +2748,7 @@ impl Waku {
             } else {
                 theme.text_ghost
             })
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .child(if landing {
                 motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
             } else {
@@ -3072,7 +3072,7 @@ impl Waku {
                     .gap(px(6.0))
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay))
-                    .focus_visible(|style| style.bg(theme.overlay))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(icon(
                         if *expanded {
                             "icons/chevron-down.svg"
@@ -3140,7 +3140,7 @@ impl Waku {
                     .when(selected, |row| row.bg(theme.overlay_strong))
                     .when(!selected, |row| {
                         row.hover(|style| style.bg(theme.overlay))
-                            .focus_visible(|style| style.bg(theme.overlay))
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
                     })
                     .child(file_icon(right_panel::file_icon_for_path(&path), 12.0))
                     .child(
@@ -3272,7 +3272,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .hover(|style| style.bg(theme.overlay))
-            .focus_visible(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .child(
                 div()
                     .w(px(14.0))
@@ -3328,7 +3328,7 @@ impl Waku {
                     .justify_center()
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(action_tooltip))
                     .child(icon(action_icon, 11.0, theme.text_tertiary))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -3825,7 +3825,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .hover(|style| style.bg(theme.overlay))
-            .focus_visible(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(
                 self.git_panel_commit_diff
                     .as_ref()
@@ -4848,7 +4848,7 @@ fn modal_button(
         })
         .hover(|style| style.bg(theme.selection))
         .active(|style| style.opacity(0.8))
-        .focus_visible(|style| style.border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .child(label)
         .on_activation(cx, activate)
 }

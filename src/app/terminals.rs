@@ -1074,13 +1074,7 @@ impl Waku {
             .cursor_default()
             .opacity(0.0)
             .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-            .focus_visible(|style| {
-                style
-                    .w(px(20.0))
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text_with_action(
@@ -1128,13 +1122,7 @@ impl Waku {
             .cursor_default()
             .opacity(0.0)
             .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-            .focus_visible(|style| {
-                style
-                    .w(px(20.0))
-                    .opacity(1.0)
-                    .border(hairline())
-                    .border_color(theme.accent)
-            })
+            .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("common.close")))
@@ -1272,7 +1260,7 @@ impl Waku {
                 element
                     .track_focus(&row_focus)
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if matches!(key, "enter" | "space") {

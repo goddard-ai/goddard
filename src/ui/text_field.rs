@@ -68,12 +68,12 @@ impl RenderOnce for TextField {
             .px(px(8.0))
             .rounded(px(8.0))
             .border(hairline())
-            .border_color(if ring {
-                theme.accent
+            .border_color(theme.border_subtle)
+            .bg(if ring {
+                theme.focus_highlight()
             } else {
-                theme.border_subtle
+                theme.inset
             })
-            .bg(theme.inset)
             .flex()
             .items_center()
             .gap(px(6.0))

@@ -341,7 +341,7 @@ impl Waku {
                         .items_center()
                         .justify_center()
                         .cursor_default()
-                        .focus_visible(|style| style.border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .hover(|style| style.bg(theme.raised))
                         .active(|style| style.bg(theme.overlay_strong))
                         .child(icon("icons/arrow-down.svg", 16.0, theme.text))
@@ -843,7 +843,7 @@ impl ConversationNavigationRail {
                     .rounded(px(4.0))
                     .track_focus(&focus_handle)
                     .tab_index(turn_index as isize)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .on_key_down(cx.listener(move |this, event, window, cx| {
                         this.navigation_rail_key_down(message_id, event, window, cx);
                     }))
@@ -1075,7 +1075,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .focus_visible(|button| button.bg(theme.overlay_strong))
+            .focus_visible(|button| button.bg(theme.focus_highlight()))
             .hover(|button| button.bg(theme.overlay_strong))
             .child(icon(
                 "icons/file-bottom-left-arrow.svg",
@@ -2223,7 +2223,7 @@ impl Waku {
             .text_size(sp(12.5))
             .font_weight(FontWeight::MEDIUM)
             .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
             .active(|style| style.bg(theme.overlay))
             .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
@@ -2347,7 +2347,7 @@ impl Waku {
                 .gap(px(8.0))
                 .when(last_row, |row| row.rounded_b(px(13.0)))
                 .hover(|style| style.bg(theme.overlay_strong))
-                .focus_visible(|style| style.bg(theme.overlay_strong))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                     this.changed_files_diff_row_hovered(
                         turn_id,
@@ -2430,7 +2430,7 @@ impl Waku {
                     .text_size(sp(12.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_secondary)
-                    .focus_visible(|style| style.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
                     .active(|style| style.bg(theme.overlay))
                     .child(SharedString::from(label))
@@ -2970,7 +2970,7 @@ impl Waku {
                     .text_size(sp(12.5))
                     .line_height(sp(16.0))
                     .cursor_default()
-                    .focus_visible(|style| style.text_color(theme.text))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.text_color(theme.text))
                     .child(
                         div()
@@ -3046,7 +3046,7 @@ impl Waku {
                     .cursor_default()
                     .text_size(sp(12.5))
                     .text_color(color)
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.bg(theme.overlay_strong))
                     .child(work_status_label(status))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -3137,7 +3137,7 @@ impl Waku {
                                 .track_focus(&item_focus)
                                 .tab_index(0)
                                 .cursor_default()
-                                .focus_visible(|element| element.bg(activity_hover_surface))
+                                .focus_visible(|element| element.bg(theme.focus_highlight()))
                                 .hover(|element| element.bg(activity_hover_surface))
                                 .active(|element| element.bg(activity_active_surface))
                         })

@@ -1076,12 +1076,14 @@ impl Waku {
             .border(hairline())
             .border_color(if invalid {
                 theme.danger
-            } else if focused {
-                theme.accent
             } else {
                 theme.border_strong
             })
-            .bg(theme.inset)
+            .bg(if focused {
+                theme.focus_highlight()
+            } else {
+                theme.inset
+            })
             .flex()
             .items_center()
             .gap(px(2.0))

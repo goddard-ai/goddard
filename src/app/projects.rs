@@ -1831,7 +1831,7 @@ impl Waku {
             .text_color(theme.on_inverse)
             .text_size(sp(12.5))
             .font_weight(FontWeight::SEMIBOLD)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.opacity(0.9))
             .active(|element| element.opacity(0.8))
             .child(tr!("project.locate"))
@@ -1905,7 +1905,7 @@ impl Waku {
                 .items_center()
                 .gap(px(5.0))
                 .cursor_default()
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .when(selector_open, |element| element.bg(theme.overlay_strong))
                 .hover(|style| style.bg(theme.overlay))
                 .child(
@@ -2001,7 +2001,7 @@ impl Waku {
             .when(enabled, |element| {
                 let element = element
                     .cursor_default()
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent));
+                    .focus_visible(|style| style.bg(theme.focus_highlight()));
                 if selected {
                     element.bg(theme.surface).text_color(theme.text)
                 } else {
@@ -2069,7 +2069,7 @@ impl Waku {
                     .items_center()
                     .gap(px(4.0))
                     .cursor_default()
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .when(menu_open, |element| element.bg(theme.overlay_strong))
                     .hover(|style| style.bg(theme.overlay))
                     .child(
@@ -2134,7 +2134,7 @@ impl Waku {
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(tr!("github.refresh")))
                     .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2431,7 +2431,7 @@ impl Waku {
                     .text_color(theme.on_inverse)
                     .hover(|style| style.opacity(0.9))
                     .active(|style| style.opacity(0.8))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.projects_review_promote(project_id, cx);
                     }))
@@ -2535,7 +2535,7 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .hover(|style| style.bg(theme.overlay))
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(tip))
             .child(icon(path, 12.0, color))
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -2979,7 +2979,7 @@ impl Waku {
             .border_color(theme.separator)
             .when(selected, |element| element.bg(theme.overlay_strong))
             .hover(|style| style.bg(theme.overlay))
-            .focus_visible(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 this.projects_row_select(project_id, click_key.clone(), event.modifiers(), cx);
             }))
@@ -3640,7 +3640,7 @@ impl Waku {
                         .text_size(sp(14.5))
                         .text_color(theme.text_secondary)
                         .hover(|style| style.bg(theme.overlay).text_color(theme.text))
-                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .child(tr!("projects.clear_selection"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(state) = this.projects_page_states.get_mut(&project_id) {
@@ -3666,9 +3666,7 @@ impl Waku {
                                 .cursor_default()
                                 .text_color(theme.danger)
                                 .hover(|style| style.bg(theme.danger_soft))
-                                .focus_visible(|style| {
-                                    style.border(hairline()).border_color(theme.accent)
-                                })
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let keys: Vec<ProjectsRowKey> = this
                                         .projects_page_states

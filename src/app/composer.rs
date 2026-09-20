@@ -307,7 +307,7 @@ impl Waku {
                             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
                     })
                     .active(|element| element.opacity(0.8))
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(SharedString::from(
                         option
                             .label_i18n
@@ -442,7 +442,7 @@ impl Waku {
                     .items_center()
                     .gap(px(8.0))
                     .cursor_default()
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .when(!is_selected, |row| {
                         row.hover(|style| style.border_color(theme.border).bg(theme.overlay_strong))
                     })
@@ -511,7 +511,7 @@ impl Waku {
                 .text_size(sp(12.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme.text_tertiary)
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.dismiss"))
@@ -556,7 +556,7 @@ impl Waku {
                 })
                 .when(has_custom, |button| {
                     button
-                        .focus_visible(|style| style.border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.opacity(0.8))
                         .on_click(cx.listener(|this, _, _, cx| this.clarify_user_input(cx)))
@@ -590,7 +590,7 @@ impl Waku {
                 .text_size(sp(12.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme.text_tertiary)
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.back"))
@@ -629,7 +629,7 @@ impl Waku {
             })
             .when(can_continue, |button| {
                 button
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.opacity(0.9))
                     .active(|style| style.opacity(0.8))
                     .on_click(cx.listener(|this, _, _, cx| this.advance_user_input(cx)))
@@ -814,7 +814,7 @@ impl Waku {
                             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
                     })
                     .active(|element| element.opacity(0.8))
-                    .focus_visible(|style| style.border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(label)
                     .on_activation(cx, move |this, _, cx| {
                         this.respond_computer_permission(decision, cx);
@@ -1012,7 +1012,7 @@ impl Waku {
                         ])
                         .occlude()
                         .cursor(gpui::CursorStyle::OpenHand)
-                        .focus_visible(|style| style.border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .on_drag(
                             ComputerUsePreviewDrag {
                                 cursor_offset: Cell::default(),
@@ -1118,7 +1118,7 @@ impl Waku {
                                         .rounded_full()
                                         .border(hairline())
                                         .border_color(gpui::transparent_black())
-                                        .focus_visible(|style| style.border_color(gpui::white()))
+                                        .focus_visible(|style| style.bg(gpui::white().opacity(0.2)))
                                         .flex()
                                         .items_center()
                                         .justify_center()
@@ -3627,7 +3627,7 @@ impl Waku {
                 .gap(px(4.0))
                 .cursor_default()
                 .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .when(!preview.is_empty(), |element| {
                     element.tooltip(pasted_text_tooltip(preview.clone()))
                 })
@@ -3654,7 +3654,7 @@ impl Waku {
                         .justify_center()
                         .cursor_default()
                         .tab_index(0)
-                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .hover(|element| element.bg(theme.overlay_strong))
                         .active(|element| element.opacity(0.8))
                         .child(icon("icons/x.svg", 9.0, theme.text_secondary))
@@ -3718,7 +3718,7 @@ impl Waku {
                 .bg(theme.inset)
                 .track_focus(menu.trigger_focus_handle())
                 .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .tooltip(Tooltip::text(format!("@{}", attachment.mention)));
             let attachment_image = attachment.client_preview_image.clone().or_else(|| {
                 attachment
@@ -3831,7 +3831,7 @@ impl Waku {
                     .justify_center()
                     .cursor_default()
                     .bg(theme.canvas.opacity(0.8))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.canvas.opacity(0.95)))
                     .active(|element| element.opacity(0.8))
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
@@ -3896,7 +3896,7 @@ impl Waku {
             .gap(px(4.0))
             .track_focus(menu.trigger_focus_handle())
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when_some(preview, |element, preview| {
                 element.tooltip(pasted_text_tooltip(preview))
             })
@@ -3923,7 +3923,7 @@ impl Waku {
                     .justify_center()
                     .cursor_default()
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
@@ -4001,7 +4001,7 @@ impl Waku {
             .gap(px(4.0))
             .track_focus(&focus)
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(format!("{} — {session_id}", attachment.name)))
             .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
             .child(
@@ -4026,7 +4026,7 @@ impl Waku {
                     .justify_center()
                     .cursor_default()
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
@@ -4107,7 +4107,7 @@ impl Waku {
                     .gap(px(5.0))
                     .cursor_default()
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
                     .text_size(sp(12.5))
@@ -4148,7 +4148,7 @@ impl Waku {
                     .items_center()
                     .justify_center()
                     .cursor_default()
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .when(menu_open, |element| element.bg(theme.overlay_strong))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
@@ -4190,7 +4190,7 @@ impl Waku {
                     .gap(px(9.0))
                     .cursor_default()
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay))
                     .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
                     .child(div().h(px(30.0)).flex().items_center().child(icon(
@@ -4232,9 +4232,7 @@ impl Waku {
                                     .justify_center()
                                     .cursor_default()
                                     .tab_index(0)
-                                    .focus_visible(|style| {
-                                        style.border(hairline()).border_color(theme.accent)
-                                    })
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .active(|element| element.opacity(0.8))
                                     .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
@@ -4530,9 +4528,7 @@ impl Waku {
                         div()
                             .id("trust-transfer")
                             .tab_index(0)
-                            .focus_visible(|style| {
-                                style.border(hairline()).border_color(theme.accent)
-                            })
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
                             .h(px(26.0))
                             .px(px(10.0))
                             .flex_none()
@@ -5472,7 +5468,7 @@ impl Waku {
                         .cursor_default()
                         .track_focus(&focus)
                         .tab_index(0)
-                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .bg(theme.overlay)
                         .hover(|element| element.bg(theme.overlay_strong))
                         .active(|element| element.opacity(0.8))
@@ -6485,7 +6481,7 @@ fn model_picker_empty_state(
                 .track_focus(focus)
                 .tab_index(0)
                 .tab_stop(true)
-                .focus_visible(|style| style.border_color(theme.accent))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .mt(px(3.0))
                 .h(px(28.0))
                 .px(px(11.0))
@@ -7335,5 +7331,5 @@ pub(super) fn model_picker_row_shell(
         .active(|element| element.opacity(0.85))
         // The keyboard cursor reads as an accent tint rather than a ring, so
         // it stays legible on the current row's already-filled surface.
-        .when(highlighted, |element| element.bg(theme.accent.opacity(0.14)))
+        .when(highlighted, |element| element.bg(theme.focus_highlight()))
 }

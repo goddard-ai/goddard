@@ -77,7 +77,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(label.into())
@@ -1371,7 +1371,7 @@ impl Waku {
                         .cursor_default()
                         .text_size(sp(11.5))
                         .text_color(theme.text_tertiary)
-                        .focus_visible(|style| style.bg(theme.overlay))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .hover(|element| element.bg(theme.overlay).text_color(theme.text))
                         .child(tr!("friends.stop_watching"))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1459,7 +1459,7 @@ impl Waku {
                             .items_center()
                             .gap(px(8.0))
                             .cursor_default()
-                            .focus_visible(|style| style.bg(theme.overlay))
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
                             .hover(|element| element.bg(theme.overlay))
                             .child(
                                 div()

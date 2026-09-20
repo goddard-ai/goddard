@@ -1270,7 +1270,7 @@ impl Waku {
             .border_color(theme.separator)
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
-            .focus_visible(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.github_open_detail(project_id, detail, window, cx);
             }))
@@ -1719,7 +1719,7 @@ impl Waku {
                         .cursor_default()
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
-                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .tooltip(Tooltip::text(tr!("github.open_external")))
                         .child(icon("icons/external-link.svg", 12.0, theme.text_secondary))
                         .child(
@@ -1978,7 +1978,7 @@ impl Waku {
                                     theme.overlay_strong
                                 })
                             })
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
                             .tooltip(Tooltip::text(tr!("github.post_comment")))
                             .child(if posting {
                                 motion::spin(icon(
@@ -2241,7 +2241,7 @@ pub(super) fn github_detail_action(
         .cursor_default()
         .hover(|style| style.bg(theme.overlay))
         .active(|style| style.bg(theme.overlay_strong))
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .child(icon(icon_path, 12.0, theme.text_secondary))
         .child(
             div()
@@ -2305,7 +2305,7 @@ fn github_fix_action(
                 .active(|style| style.bg(theme.overlay_strong))
         })
         .when(preparing, |element| element.opacity(0.6))
-        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .tooltip(Tooltip::text(if preparing {
             tr!("github.fix_preparing")
         } else {

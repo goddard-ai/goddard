@@ -396,7 +396,7 @@ impl Waku {
                         label.to_ascii_lowercase()
                     )))
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .h(px(26.0))
                     .px(px(11.0))
                     .flex()
@@ -467,7 +467,7 @@ impl Waku {
         let refresh = div()
             .id("usage-refresh")
             .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .h(px(28.0))
             .px(px(8.0))
             .rounded(px(9.0))
@@ -690,7 +690,7 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("usage-metric-{label}")))
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .h(px(22.0))
                     .px(px(9.0))
                     .flex()
@@ -1001,7 +1001,7 @@ impl Waku {
             .min_w(px(0.0))
             .h(px(CHART_HEIGHT))
             .tab_index(0)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
                 let Some(bounds) = this.usage_chart_bounds.get() else {
                     return;
@@ -1095,7 +1095,7 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("usage-breakdown-{label}")))
                     .tab_index(0)
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .h(px(22.0))
                     .px(px(9.0))
                     .flex()
@@ -1521,7 +1521,7 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .text_color(theme.text_tertiary)
-            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .hover(|element| element.bg(theme.overlay))
             .tooltip(Tooltip::text(SharedString::from(tr!(

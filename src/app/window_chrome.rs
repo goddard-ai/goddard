@@ -271,7 +271,7 @@ fn client_window_button(
         .justify_center()
         .cursor_default()
         .opacity(if enabled { 1.0 } else { 0.45 })
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
         .when(enabled, |control| {
             control
                 .hover(move |style| {
