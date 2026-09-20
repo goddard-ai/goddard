@@ -68,19 +68,23 @@ function fixture(options: { attached?: boolean } = {}) {
         case 'hydrateSession':
           return { type: 'session', session: await hydration.promise };
         case 'attachSession':
-          return { type: 'sessionRuntime', runtimeId: options.attached === false ? null : 'runtime', supportsSteer: true };
+          return { type: 'sessionRuntime', runtimeId: options.attached === false ? null : 'runtime', supportsSteer: true, supportsUserInputActions: true };
         case 'getSettings':
           return { type: 'settings', settings: {
             provider_binary_overrides: {}, disabled_providers: [],
-            computer_use_enabled: false, computer_use_allowed_apps: [],
+            computer_use_enabled: false, computer_use_experiment_enabled: false,
+            computer_use_allowed_apps: [],
             agent_tools_enabled: false, agent_settings_enabled: true,
+            subagents_enabled: false, project_map_enabled: false,
+            memory_experiment_enabled: false, integrations_enabled: false,
+            sandbox_experiment_enabled: false, sandbox_default_enabled: false,
           } };
         case 'loadTaskState':
           return {
             type: 'taskState',
             defaultCwd: '/repo',
             projectlessRoot: null,
-            projects: [{ id: 'project', name: 'Project', path: '/repo', created_at: 0 }],
+            projects: [{ id: 'project', name: 'Project', path: '/repo', created_at: 0, temporary: false }],
             sessions: [history],
           };
         case 'probeProvider':
@@ -89,7 +93,7 @@ function fixture(options: { attached?: boolean } = {}) {
             probe: { provider: 'codex', installed: true, path: '/bin/codex', models: [], agent_presets: [] },
           };
         case 'start':
-          return { type: 'started', supportsSteer: true };
+          return { type: 'started', supportsSteer: true, supportsUserInputActions: true };
         case 'saveTaskState':
           return { type: 'taskStateSaved', sessions: command.sessions };
         default:

@@ -13,4 +13,5 @@ export const ACTIVITY_ICONS: Record<ActivityKind, SymbolViewProps['name']> = {
   search: { ios: 'globe', android: 'travel_explore', web: 'travel_explore' },
   plan: { ios: 'checklist', android: 'checklist', web: 'checklist' },
   tool: { ios: 'wrench.and.screwdriver', android: 'build', web: 'build' },
+  projectMap: { ios: 'map', android: 'map', web: 'map' },
 };

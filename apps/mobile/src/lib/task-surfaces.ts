@@ -32,6 +32,7 @@ export function reviewDiffSourceLabel(source: ReviewDiffSource): string {
     staged: "Staged",
     committed: "Committed",
     branch: "Branch",
+    commit: "Commit",
   }[source];
 }
 

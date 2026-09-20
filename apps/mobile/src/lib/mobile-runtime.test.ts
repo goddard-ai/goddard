@@ -74,7 +74,7 @@ describe('mobile runtime projection', () => {
   });
 
   test('uses a worktree path and rejects replayed runtime events', () => {
-    const project: Project = { id: 'p', name: 'Goddard', path: '/waku', created_at: 1 };
+    const project: Project = { id: 'p', name: 'Goddard', path: '/waku', created_at: 1, temporary: false };
     const current = session({
       workspace: { kind: 'worktree', path: '/waku-worktree', name: 'mobile', branch: 'mobile' },
       runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 4 },
@@ -121,7 +121,7 @@ describe('mobile runtime projection', () => {
       project_id: 'project',
       provider: 'claude',
       workspace: { kind: 'newWorktree' },
-      runtime_mode: 'fullAccess',
+      runtime_mode: 'autoAcceptEdits',
       status: 'idle',
     });
   });
