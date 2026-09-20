@@ -77,6 +77,7 @@ helper_bundle="$contents/Helpers/$helper_name.app"
 repl_executable="$contents/Resources/goddard_js_repl"
 agent_executable="$contents/Resources/goddard-agent"
 daemon_executable="$contents/MacOS/goddard-daemon"
+shuru_executable="$contents/Resources/shuru"
 swift_module_cache="$cargo_target_dir/$profile/swift-module-cache"
 helper_source="resources/computer-use/WakuComputerUse.swift"
 helper_sdk_source="resources/computer-use/CuaDriver.swift"
@@ -176,6 +177,16 @@ chmod 755 "$agent_executable"
 if [ "$profile" = "release" ]; then
   cp "$cargo_target_dir/$profile/goddard-daemon" "$daemon_executable"
   chmod 755 "$daemon_executable"
+  # The sandbox VM runner travels with the bundled daemon. The build machine
+  # supplies it via GODDARD_SHURU_BIN or the default install location; it
+  # must carry the virtualization entitlement to boot VMs once signed.
+  shuru_source="${GODDARD_SHURU_BIN:-$HOME/.local/bin/shuru}"
+  if [ -x "$shuru_source" ]; then
+    cp "$shuru_source" "$shuru_executable"
+    chmod 755 "$shuru_executable"
+  else
+    echo "bundle: no shuru binary at $shuru_source — sandboxed sessions will ask users to install it" >&2
+  fi
 fi
 cp resources/Info.plist "$contents/Info.plist"
 cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
@@ -229,6 +240,9 @@ elif [ "$profile" = "release" ]; then
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.daemon" --sign "$codesign_identity" "$daemon_executable"
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.agent" --sign "$codesign_identity" "$agent_executable"
+  if [ -f "$shuru_executable" ]; then
+    codesign --force --options runtime --timestamp --entitlements scripts/shuru.entitlements --identifier "$bundle_identifier.shuru" --sign "$codesign_identity" "$shuru_executable"
+  fi
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$bundle"
 else
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Autoupdate"
@@ -242,6 +256,9 @@ if [ "$profile" = "release" ]; then
   codesign --verify --strict --verbose=2 "$repl_executable"
   codesign --verify --strict --verbose=2 "$daemon_executable"
   codesign --verify --strict --verbose=2 "$agent_executable"
+  if [ -f "$shuru_executable" ]; then
+    codesign --verify --strict --verbose=2 "$shuru_executable"
+  fi
   codesign --verify --deep --strict --verbose=2 "$bundle"
 fi
 

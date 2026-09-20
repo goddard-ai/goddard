@@ -151,6 +151,17 @@ fn shuru_binary() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GODDARD_SHURU_BIN").map(PathBuf::from) {
         return Ok(path);
     }
+    // Release bundles carry the VM runner at Contents/Resources/shuru — the
+    // daemon lives in Contents/MacOS, so its sibling is a deterministic
+    // lookup that needs no PATH.
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(bundled) = exe
+            .parent()
+            .map(|dir| dir.join("../Resources/shuru"))
+        && bundled.is_file()
+    {
+        return Ok(bundled);
+    }
     if let Some(path) = crate::command_env::find_executable("shuru") {
         return Ok(path);
     }
