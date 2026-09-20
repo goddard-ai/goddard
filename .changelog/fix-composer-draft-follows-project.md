@@ -1,0 +1,1 @@
+- Switching projects from a new task's composer now moves that draft's "New task" row to the picked project — typed text and all — instead of stacking a second row under the old one; picking "No project" does the same

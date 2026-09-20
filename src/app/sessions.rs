@@ -32,6 +32,21 @@ fn new_task_sandboxed(
                 .unwrap_or(remembered))
 }
 
+/// The workspace a planned worktree keeps when its draft retargets to
+/// another project: the mode choice rides along, but the picked base
+/// branch belongs to the old repository — it reopens at the destination's
+/// remembered default, and a project with no repository of its own falls
+/// back to the ordinary checkout.
+fn retargeted_workspace(has_repository: bool, remembered_base: Option<String>) -> SessionWorkspace {
+    if has_repository {
+        SessionWorkspace::NewWorktree {
+            base_branch: remembered_base,
+        }
+    } else {
+        SessionWorkspace::Local
+    }
+}
+
 /// Whether picking `mode` must pause on the one-time Full access
 /// confirmation. A no-op re-pick of the already-active mode skips it — the
 /// gate is on the change, not the menu item.
@@ -880,6 +895,38 @@ impl Waku {
         });
     }
 
+    /// Moves an unstarted session to another project — the composer project
+    /// picker's retarget, where the draft the user was typing into follows
+    /// the pick instead of leaving a second "New task" row behind. The
+    /// claim points it at the destination's daemon ahead of the first
+    /// prompt.
+    pub(super) fn retarget_draft_session(&mut self, session_id: Uuid, project_id: Uuid) {
+        let workspace = match self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| &session.workspace)
+        {
+            Some(SessionWorkspace::NewWorktree { .. }) => Some(retargeted_workspace(
+                self.state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id && !project.is_projectless()),
+                self.state.remembered_base_branch(project_id),
+            )),
+            _ => None,
+        };
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.project_id = project_id;
+            if let Some(workspace) = workspace {
+                session.workspace = workspace;
+            }
+        }
+        self.daemons
+            .claim_session(session_id, self.daemons.project_owner(project_id));
+    }
+
     /// A `/side` invocation's session: a fresh task that shares its parent's
     /// workspace and launch configuration but owns none of its history — the
     /// agent reaches the parent's transcript through `goddard-agent` instead.
@@ -1208,7 +1255,7 @@ impl Waku {
         self.remove_session_inner(session_id, None, false, cx);
     }
 
-    fn remove_session_inner(
+    pub(super) fn remove_session_inner(
         &mut self,
         session_id: Uuid,
         window: Option<&mut Window>,
@@ -4671,8 +4718,14 @@ impl Waku {
     }
 
     pub(super) fn create_projectless_session(&mut self, cx: &mut Context<Self>) {
-        if let Some(draft_id) = self
-            .state
+        self.create_projectless_session_inner(None, cx);
+    }
+
+    /// The draft `create_projectless_session` reuses — a composer's "No
+    /// project" pick asks the same question to tell whether it lands on an
+    /// existing row or provisions a new workspace.
+    pub(super) fn reusable_projectless_draft(&self) -> Option<Uuid> {
+        self.state
             .sessions
             .iter()
             .find(|session| {
@@ -4686,7 +4739,17 @@ impl Waku {
                     })
             })
             .map(|session| session.id)
-        {
+    }
+
+    /// `create_projectless_session` carrying the draft a "No project" pick
+    /// was made from: when provisioning lands, the draft moves onto the new
+    /// project rather than leaving a stale row under the old one.
+    pub(super) fn create_projectless_session_inner(
+        &mut self,
+        retarget_draft: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(draft_id) = self.reusable_projectless_draft() {
             self.select_session(draft_id, cx);
             return;
         }
@@ -4715,6 +4778,20 @@ impl Waku {
                     project.name = Project::PROJECTLESS_NAME.to_owned();
                     let project_id = project.id;
                     waku.state.projects.push(project);
+                    // The draft the pick was typed into moves onto the new
+                    // project — unless it started or materialized a
+                    // worktree while provisioning was in flight, in which
+                    // case the fresh-draft path takes over.
+                    if let Some(draft_id) = retarget_draft
+                        && let Some(session) = waku.state.session_mut(draft_id)
+                        && !session.has_started()
+                        && !matches!(session.workspace, SessionWorkspace::Worktree { .. })
+                    {
+                        session.project_id = project_id;
+                        session.workspace = SessionWorkspace::Local;
+                        waku.daemons
+                            .claim_session(draft_id, waku.daemons.project_owner(project_id));
+                    }
                     waku.create_session_for(project_id, waku.state.last_provider, cx);
                     // A "no project" pick from the overlay's composer
                     // retargets its new-task destination to the provisioned
@@ -4839,6 +4916,21 @@ mod tests {
             navigation.remembered_new_task(&[draft], current_project_id),
             None
         );
+    }
+
+    #[test]
+    fn retargeted_workspace_reopens_the_base_branch_pick_in_the_new_project() {
+        assert_eq!(
+            retargeted_workspace(true, Some("main".to_owned())),
+            SessionWorkspace::NewWorktree {
+                base_branch: Some("main".to_owned())
+            }
+        );
+        assert_eq!(
+            retargeted_workspace(true, None),
+            SessionWorkspace::NewWorktree { base_branch: None }
+        );
+        assert_eq!(retargeted_workspace(false, None), SessionWorkspace::Local);
     }
 
     #[test]

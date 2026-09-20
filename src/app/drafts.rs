@@ -256,6 +256,27 @@ impl Waku {
         }
     }
 
+    /// The session the composer is drafting into, when it can follow a
+    /// project change: unstarted, idle, and not a side chat. One holding a
+    /// materialized worktree can't move — the checkout belongs to its
+    /// project's repository, so it keeps the select-or-create path.
+    fn retargetable_draft(&self) -> Option<Uuid> {
+        let (session_id, _) = self.workspace_subject();
+        session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| {
+                    session.id == session_id
+                        && !session.has_started()
+                        && !session.is_busy()
+                        && !session.is_side_chat()
+                        && !matches!(session.workspace, SessionWorkspace::Worktree { .. })
+                })
+                .map(|session| session.id)
+        })
+    }
+
     pub(super) fn select_project_from_composer(
         &mut self,
         project_id: Uuid,
@@ -269,6 +290,28 @@ impl Waku {
             return;
         }
         let source = self.composer_draft_key();
+        // The composing draft follows the pick — retargeted outright, or
+        // collapsed into the draft the destination already holds once the
+        // text hand-off below lands.
+        let draft_id = self.retargetable_draft().filter(|draft_id| {
+            self.state
+                .sessions
+                .iter()
+                .any(|session| session.id == *draft_id && session.project_id != project_id)
+        });
+        let collapse_draft = draft_id.filter(|draft_id| {
+            self.state.sessions.iter().any(|session| {
+                session.id != *draft_id
+                    && session.project_id == project_id
+                    && !session.has_started()
+                    && !session.is_side_chat()
+            })
+        });
+        if let Some(draft_id) = draft_id
+            && collapse_draft.is_none()
+        {
+            self.retarget_draft_session(draft_id, project_id);
+        }
         self.select_project(project_id, cx);
         if self.big_picture.is_open() {
             // The composer card's project picker is Big Picture's destination
@@ -277,11 +320,26 @@ impl Waku {
             self.sync_big_picture_draft(cx);
         }
         self.move_composer_draft_after_project_change(source, cx);
+        if let Some(draft_id) = collapse_draft {
+            self.remove_session_inner(draft_id, None, false, cx);
+        }
     }
 
     pub(super) fn create_projectless_session_from_composer(&mut self, cx: &mut Context<Self>) {
         let source = self.composer_draft_key();
-        self.create_projectless_session(cx);
+        // "No project" moves the composing draft like a project switch
+        // does — collapsed into the projectless draft already waiting when
+        // there is one, retargeted onto the provisioned workspace when
+        // there is not.
+        let draft_id = self.retargetable_draft();
+        let collapse_draft = draft_id.filter(|draft_id| {
+            self.reusable_projectless_draft()
+                .is_some_and(|reusable| reusable != *draft_id)
+        });
+        self.create_projectless_session_inner(
+            draft_id.filter(|draft_id| collapse_draft != Some(*draft_id)),
+            cx,
+        );
         // Reusing an existing projectless draft resolves synchronously; a
         // freshly provisioned one lands in `create_projectless_session`'s
         // completion, which retargets the overlay there instead.
@@ -298,6 +356,9 @@ impl Waku {
             self.sync_big_picture_draft(cx);
         }
         self.move_composer_draft_after_project_change(source, cx);
+        if let Some(draft_id) = collapse_draft {
+            self.remove_session_inner(draft_id, None, false, cx);
+        }
     }
 
     /// Submission consumes the active draft before a blank session gains a
