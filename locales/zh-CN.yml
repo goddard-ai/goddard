@@ -963,6 +963,7 @@ goal.usage_tokens_unbudgeted: "%{used} 个 token"
 composer.edit_in_composer: 在输入框中编辑
 composer.steer: 引导
 composer.remove_followup: 从队列中移除
+composer.remove_followup_failed: "无法移除队列中的提示：%{error}"
 annotations.add_to_chat: 添加到对话
 annotations.comment_placeholder: 添加可选评论…
 annotations.remove: 删除批注

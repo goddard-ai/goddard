@@ -117,6 +117,10 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "steerAccepted",
             json!({ "message": message, "sentByTask": sent_by_task }),
         ),
+        DriverEvent::QueuedMessagesChanged { messages } => (
+            "queuedMessagesChanged",
+            json!({ "messages": messages }),
+        ),
         DriverEvent::SteerRejected {
             message,
             reason,
@@ -224,6 +228,16 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::SteerAccepted {
                 message: steer.message,
                 sent_by_task: steer.sent_by_task,
+            }
+        }
+        "queuedMessagesChanged" => {
+            #[derive(Deserialize)]
+            struct QueueWire {
+                messages: Vec<crate::model::QueuedMessage>,
+            }
+            let queue: QueueWire = serde_json::from_value(payload)?;
+            DriverEvent::QueuedMessagesChanged {
+                messages: queue.messages,
             }
         }
         "steerRejected" => {
@@ -414,6 +428,32 @@ mod tests {
             event_from_wire(ready).unwrap(),
             DriverEvent::SandboxSetup(SandboxSetupStatus::Ready)
         ));
+    }
+
+    #[test]
+    fn queued_messages_changed_round_trips_through_the_daemon_wire() {
+        use crate::model::QueuedMessage;
+
+        let sender = uuid::Uuid::new_v4();
+        let agent = QueuedMessage::agent("parked agent prompt", Some(sender));
+        let wire = event_to_wire(DriverEvent::QueuedMessagesChanged {
+            messages: vec![agent.clone()],
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "queuedMessagesChanged");
+
+        let DriverEvent::QueuedMessagesChanged { messages } = event_from_wire(wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(messages, vec![agent]);
+
+        let empty = event_to_wire(DriverEvent::QueuedMessagesChanged { messages: vec![] }).unwrap();
+        let DriverEvent::QueuedMessagesChanged { messages } = event_from_wire(empty).unwrap()
+        else {
+            panic!("an empty snapshot failed its wire round trip");
+        };
+        assert!(messages.is_empty());
     }
 
     #[test]

@@ -43,6 +43,7 @@ import {
   writeProviderProbeCache,
 } from './provider-probe-cache'
 import {
+  isAgentQueuedMessage,
   reduceRuntimeEvent,
   type PendingPermission,
   type PendingUserInput,
@@ -409,11 +410,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           const latest = queryClient.getQueryData<AgentSession>(
             daemonKeys.session(config.address, saved.id),
           ) ?? saved
-          const nextQueued = latest.queued_messages?.[0]
+          // Daemon-owned entries drain on the daemon's schedule — submitting
+          // one here would double-deliver it once the daemon's drain fires.
+          const nextQueued = latest.queued_messages?.find(
+            (message) => !isAgentQueuedMessage(message),
+          )
           if (!nextQueued) return
           const dequeued = {
             ...latest,
-            queued_messages: latest.queued_messages?.slice(1),
+            queued_messages: latest.queued_messages?.filter(
+              (message) => message.id !== nextQueued.id,
+            ),
           }
           cacheSession(dequeued)
           const persisted = await persistOrdered(dequeued)
@@ -1034,14 +1041,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const key = daemonKeys.session(config.address, sessionId)
       const session = queryClient.getQueryData<AgentSession>(key)
       if (!session) throw new Error(translate(localeRef.current, 'errors.task_not_loaded'))
+      const message = (session.queued_messages ?? []).find(
+        (queued) => queued.id === messageId,
+      )
+      // A daemon-owned chip is cancelled at the source: the daemon drops the
+      // parked prompt and the `queuedMessagesChanged` echo removes the row.
+      // Mutating locally would only hide a prompt that still delivers.
+      if (message && isAgentQueuedMessage(message)) {
+        if (!client) throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
+        await client.request(
+          { type: 'cancelQueuedPrompt', queuedMessageId: messageId },
+          sessionId,
+        )
+        return
+      }
       const next = {
         ...session,
-        queued_messages: (session.queued_messages ?? []).filter((message) => message.id !== messageId),
+        queued_messages: (session.queued_messages ?? []).filter((queued) => queued.id !== messageId),
       }
       cacheSession(next)
       await persistOrdered(next)
     },
-    [config, queryClient, cacheSession, persistOrdered],
+    [client, config, queryClient, cacheSession, persistOrdered],
   )
 
   const cancel = useCallback(

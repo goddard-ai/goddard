@@ -990,6 +990,7 @@ goal.usage_tokens_unbudgeted: "%{used} トークン"
 composer.edit_in_composer: 入力欄で編集
 composer.steer: 指示を追加
 composer.remove_followup: キューから削除
+composer.remove_followup_failed: "キュー済みプロンプトを削除できませんでした: %{error}"
 annotations.add_to_chat: チャットに追加
 annotations.comment_placeholder: コメントを入力（任意）…
 annotations.remove: 注釈を削除

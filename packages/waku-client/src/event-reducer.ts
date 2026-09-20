@@ -3,6 +3,7 @@ import type {
   ActivityKind,
   AgentSession,
   ProviderResumeCursor,
+  QueuedMessage,
   ReportedCommand,
   SequencedEvent,
   ThreadGoal,
@@ -10,6 +11,29 @@ import type {
   TurnStatus,
   WireTranslation,
 } from './generated'
+
+/** A queued follow-up the daemon parked from an agent prompt or automation
+ * run. The daemon owns its delivery and removal — clients must not submit,
+ * edit, or locally delete it. Older documents have no `source`; those are
+ * all composer-owned. */
+export function isAgentQueuedMessage(message: QueuedMessage): boolean {
+  return typeof message.source === 'object' && message.source !== null && 'agent' in message.source
+}
+
+/** Replace the daemon-owned slice of the follow-up queue with the daemon's
+ * latest snapshot, keeping composer-queued entries; combined order follows
+ * `created_at`. Mirrors `AgentSession::merge_agent_queued`. */
+export function mergeAgentQueuedMessages(
+  queuedMessages: QueuedMessage[] | undefined,
+  agentMessages: QueuedMessage[],
+): QueuedMessage[] {
+  const combined = [
+    ...(queuedMessages ?? []).filter((message) => !isAgentQueuedMessage(message)),
+    ...agentMessages,
+  ]
+  combined.sort((a, b) => a.created_at - b.created_at)
+  return combined
+}
 
 export interface PendingPermission {
   requestId: string
@@ -160,9 +184,23 @@ export function reduceRuntimeEvent(
         value.message,
         typeof value.turnId === 'string' ? value.turnId : clock.randomUUID(),
         typeof value.messageId === 'string' ? value.messageId : clock.randomUUID(),
+        typeof value.sentByTask === 'string' ? value.sentByTask : null,
         value.hidden === true,
         clock,
       )
+      break
+    }
+    case 'queuedMessagesChanged': {
+      // The daemon owns the agent-sourced slice of the follow-up queue — a
+      // parked prompt appeared, delivered, or was cancelled. Composer-queued
+      // entries pass through untouched.
+      const value = asRecord(payload)
+      if (!value || !Array.isArray(value.messages)) break
+      session.queued_messages = mergeAgentQueuedMessages(
+        session.queued_messages,
+        value.messages as QueuedMessage[],
+      )
+      session.updated_at = clock.nowSeconds()
       break
     }
     case 'turnStarted': {
@@ -378,10 +416,17 @@ function adoptSubmittedPrompt(
   message: string,
   turnId: string,
   messageId: string,
+  sentByTask: string | null,
   hidden: boolean,
   clock: ReducerClock,
 ) {
   const now = clock.nowSeconds()
+  // The daemon reuses a mirrored queue entry's id as the delivered
+  // message's id, so a parked agent chip converts into this turn's prompt
+  // even if its queue-change event was missed.
+  session.queued_messages = (session.queued_messages ?? []).filter(
+    (queued) => queued.id !== messageId,
+  )
   const active = activeTurn(session)
   if (active) {
     const hasPrompt = session.messages.some(
@@ -393,6 +438,7 @@ function adoptSubmittedPrompt(
       turn_id: active.id,
       role: 'user',
       content: message,
+      sent_by_task: sentByTask,
       hidden,
       created_at: now,
       streaming: false,
@@ -417,6 +463,7 @@ function adoptSubmittedPrompt(
     turn_id: turnId,
     role: 'user',
     content: message,
+    sent_by_task: sentByTask,
     hidden,
     created_at: now,
     streaming: false,

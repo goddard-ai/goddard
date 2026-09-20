@@ -5486,6 +5486,26 @@ impl Waku {
         message_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        // A daemon-owned chip is cancelled at the source: the daemon drops
+        // the parked prompt and the `queuedMessagesChanged` echo removes the
+        // row here. Mutating locally would only hide a prompt that still
+        // delivers.
+        if self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| {
+                session
+                    .queued_messages
+                    .iter()
+                    .find(|message| message.id == message_id)
+            })
+            .is_some_and(|message| message.is_agent_owned())
+        {
+            self.cancel_queued_agent_prompt(session_id, message_id, cx);
+            return;
+        }
         if let Some(session) = self.state.session_mut(session_id) {
             session
                 .queued_messages
@@ -5494,6 +5514,38 @@ impl Waku {
         self.queued_annotations.remove(&message_id);
         self.save();
         cx.notify();
+    }
+
+    /// Ask the daemon to drop a parked agent prompt; the session's
+    /// `queuedMessagesChanged` event removes the chip on success.
+    fn cancel_queued_agent_prompt(
+        &mut self,
+        session_id: Uuid,
+        queued_message_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let client = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        session_id,
+                        Uuid::nil(),
+                        waku_client::Command::CancelQueuedPrompt { queued_message_id },
+                    )
+                })
+                .await;
+            if let Err(error) = result {
+                let _ = this.update(cx, |this, _cx| {
+                    this.show_toast(tr!(
+                        "composer.remove_followup_failed",
+                        error = error.to_string()
+                    ));
+                });
+            }
+        })
+        .detach();
     }
 
     /// Pop a queued message back into the composer so the user can edit and
@@ -5510,6 +5562,11 @@ impl Waku {
                 .queued_messages
                 .iter()
                 .position(|message| message.id == message_id)?;
+            // Daemon-owned entries are parked agent prompts — editing them
+            // here would fork the text away from what the sender wrote.
+            if session.queued_messages[index].is_agent_owned() {
+                return None;
+            }
             Some(session.queued_messages.remove(index))
         }) else {
             return;
@@ -5541,6 +5598,9 @@ impl Waku {
                 .queued_messages
                 .iter()
                 .position(|message| message.id == message_id)?;
+            if session.queued_messages[index].is_agent_owned() {
+                return None;
+            }
             Some(session.queued_messages.remove(index))
         }) else {
             return;
@@ -5563,11 +5623,12 @@ impl Waku {
                 return None;
             }
             // A hidden queue entry is provider-facing text, not a follow-up
-            // the user can steer — its own drain still delivers it.
+            // the user can steer — its own drain still delivers it. Same for
+            // a daemon-owned agent prompt: its delivery is the daemon's.
             let message = session
                 .queued_messages
                 .iter()
-                .find(|message| !message.hidden)?;
+                .find(|message| !message.hidden && !message.is_agent_owned())?;
             Some((session.id, message.id))
         }) else {
             return;
@@ -5604,11 +5665,16 @@ impl Waku {
         {
             return;
         }
-        let Some(message) = self
-            .state
-            .session_mut(session_id)
-            .map(|session| session.queued_messages.remove(0))
-        else {
+        // Daemon-owned entries drain on the daemon's schedule, not this
+        // client's — a mirrored agent prompt submitted here would double-
+        // deliver once the daemon's own drain fires.
+        let Some(message) = self.state.session_mut(session_id).and_then(|session| {
+            session
+                .queued_messages
+                .iter()
+                .position(|queued| !queued.is_agent_owned())
+                .map(|index| session.queued_messages.remove(index))
+        }) else {
             return;
         };
         let queued_id = message.id;

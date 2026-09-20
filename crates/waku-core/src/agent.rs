@@ -30,6 +30,12 @@ pub struct AgentPrompt {
     /// The task whose agent sent it. `None` is possible only for requests
     /// made with the master token, which carries no session scope.
     pub sender: Option<Uuid>,
+    /// The [`crate::model::QueuedMessage`] mirroring this prompt in the
+    /// session document, when one was written. The daemon owns that entry:
+    /// it appears as a queued chip while parked and is removed when the
+    /// prompt is confirmed delivered. `None` for prompts that never parked —
+    /// steer-mode requests and queue prompts delivered immediately.
+    pub queued_id: Option<Uuid>,
 }
 
 /// Live turn bookkeeping the runtime event forwarder maintains per session.
@@ -127,7 +133,15 @@ impl AgentState {
                 self.pending_steers.lock().remove(&session_id);
             }
             DriverEvent::SteerRejected { message, .. } => {
-                self.take_pending_steer(session_id, message);
+                // A queue-drained prompt whose steer was refused goes back to
+                // the head of the queue — its mirrored chip never left the
+                // session, so the wait stays visible and ordered. A direct
+                // steer-mode request has no queue entry and stays dropped.
+                if let Some(entry) = self.take_pending_steer(session_id, message)
+                    && entry.queued_id.is_some()
+                {
+                    self.requeue_front(session_id, entry);
+                }
             }
             _ => {}
         }
@@ -190,6 +204,45 @@ impl AgentState {
             .entry(session_id)
             .or_default()
             .push_front(prompt);
+    }
+
+    /// Drop the queued prompt mirrored as `queued_id`, if it is still
+    /// parked. Returns whether anything was removed — a `false` means the
+    /// prompt already delivered (or this daemon restart lost the in-memory
+    /// queue and only the session document's mirror remains).
+    pub fn remove_queued(&self, session_id: Uuid, queued_id: Uuid) -> bool {
+        let mut queues = self.queues.lock();
+        let Some(queue) = queues.get_mut(&session_id) else {
+            return false;
+        };
+        let before = queue.len();
+        queue.retain(|prompt| prompt.queued_id != Some(queued_id));
+        let removed = queue.len() != before;
+        if queue.is_empty() {
+            queues.remove(&session_id);
+        }
+        removed
+    }
+
+    /// Rebuild the in-memory queue from prompts the session document still
+    /// mirrors as parked — a restart dropped the memory copy but not the
+    /// persisted chips. Entries already in the queue win; `prompts` fills
+    /// the gaps in document order.
+    pub fn seed_queue(&self, session_id: Uuid, prompts: Vec<AgentPrompt>) {
+        let mut queues = self.queues.lock();
+        let queue = queues.entry(session_id).or_default();
+        for prompt in prompts {
+            if prompt
+                .queued_id
+                .is_some_and(|id| queue.iter().any(|queued| queued.queued_id == Some(id)))
+            {
+                continue;
+            }
+            queue.push_back(prompt);
+        }
+        if queue.is_empty() {
+            queues.remove(&session_id);
+        }
     }
 
     /// Remember a steer injection so the provider's `steerAccepted` echo can
@@ -389,6 +442,7 @@ mod tests {
         AgentPrompt {
             prompt: text.to_owned(),
             sender,
+            queued_id: Some(Uuid::new_v4()),
         }
     }
 
@@ -432,6 +486,97 @@ mod tests {
         .map(|entry| entry.prompt)
         .collect();
         assert_eq!(order, ["one", "two", "three"]);
+        assert!(state.pop_queued(session).is_none());
+    }
+
+    #[test]
+    fn remove_queued_drops_only_the_named_entry() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let first = prompt("one", None);
+        let first_id = first.queued_id.unwrap();
+        state.enqueue(session, first);
+        state.enqueue(session, prompt("two", None));
+
+        assert!(state.remove_queued(session, first_id));
+        // A second removal finds nothing, and the sibling stays parked.
+        assert!(!state.remove_queued(session, first_id));
+        assert_eq!(state.pop_queued(session).unwrap().prompt, "two");
+        assert!(state.pop_queued(session).is_none());
+        // Removing from a session with no queue is a miss, not an error.
+        assert!(!state.remove_queued(session, Uuid::new_v4()));
+    }
+
+    #[test]
+    fn seed_queue_restores_mirrored_entries_without_duplicates() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let restored = prompt("one", None);
+        let restored_id = restored.queued_id.unwrap();
+
+        // A restart emptied the memory copy; the document's mirrors refill it.
+        state.seed_queue(session, vec![restored, prompt("two", None)]);
+
+        // Seeding is additive only for ids the queue does not already hold.
+        state.seed_queue(
+            session,
+            vec![
+                AgentPrompt {
+                    prompt: "one rewritten".into(),
+                    sender: None,
+                    queued_id: Some(restored_id),
+                },
+                prompt("three", None),
+            ],
+        );
+        let order: Vec<String> = [
+            state.pop_queued(session),
+            state.pop_queued(session),
+            state.pop_queued(session),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|entry| entry.prompt)
+        .collect();
+        assert_eq!(order, ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn a_rejected_queued_steer_requeues_but_a_direct_one_drops() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+
+        let queued = prompt("drained", None);
+        let queued_id = queued.queued_id.unwrap();
+        state.record_pending_steer(session, queued);
+        state.record_pending_steer(
+            session,
+            AgentPrompt {
+                prompt: "direct".into(),
+                sender: None,
+                queued_id: None,
+            },
+        );
+
+        state.note_driver_event(
+            session,
+            &DriverEvent::SteerRejected {
+                message: "drained".into(),
+                reason: "turn ended".into(),
+                reason_i18n: None,
+            },
+        );
+        // The mirrored chip's prompt returns to the head of the queue.
+        assert_eq!(state.pop_queued(session).unwrap().queued_id, Some(queued_id));
+
+        state.note_driver_event(
+            session,
+            &DriverEvent::SteerRejected {
+                message: "direct".into(),
+                reason: "turn ended".into(),
+                reason_i18n: None,
+            },
+        );
         assert!(state.pop_queued(session).is_none());
     }
 

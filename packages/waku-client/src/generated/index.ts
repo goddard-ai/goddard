@@ -129,6 +129,7 @@ export type { PullRequestSummary } from "./PullRequestSummary";
 export type { PullStrategy } from "./PullStrategy";
 export type { PushBaseOutcome } from "./PushBaseOutcome";
 export type { QueuedMessage } from "./QueuedMessage";
+export type { QueuedMessageSource } from "./QueuedMessageSource";
 export type { ReasoningBlock } from "./ReasoningBlock";
 export type { RebaseOutcome } from "./RebaseOutcome";
 export type { RemoteFileRef } from "./RemoteFileRef";

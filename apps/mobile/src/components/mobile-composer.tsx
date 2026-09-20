@@ -5,7 +5,7 @@ import type {
   PendingUserInput,
   UserInputAnswer,
 } from '@waku/client';
-import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken } from '@waku/client';
+import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken, isAgentQueuedMessage } from '@waku/client';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -488,8 +488,14 @@ export function MobileComposer({
         <View
           key={message.id}
           style={[styles.queuedRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
+          {/* A daemon-owned agent prompt wears the same badge as a delivered
+              agent message; removing it cancels the parked delivery. */}
           <AppSymbol
-            name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
+            name={
+              isAgentQueuedMessage(message)
+                ? { ios: 'cpu', android: 'smart_toy', web: 'smart_toy' }
+                : { ios: 'clock', android: 'schedule', web: 'schedule' }
+            }
             size={12}
             tintColor={theme.textTertiary}
           />

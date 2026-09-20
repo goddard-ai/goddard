@@ -113,6 +113,86 @@ describe('promptSubmitted', () => {
     expect(result.session.auto_title).toBe('Add a dark mode toggle to settings')
     expect(result.session.turns.at(-1)?.turn_count).toBe(1)
   })
+
+  test('a delivered agent prompt drops its chip and carries provenance', () => {
+    const queuedId = '30000000-0000-4000-8000-000000000003'
+    const session: AgentSession = {
+      ...idleSession(),
+      queued_messages: [
+        {
+          id: queuedId,
+          content: 'Agent follow-up',
+          source: { agent: { sentBy: 'sender-task' } },
+          created_at: 120,
+        },
+        { id: 'user-queued', content: 'Mine next', created_at: 130 },
+      ],
+    }
+    const result = reduceRuntimeEvent(
+      session,
+      event('promptSubmitted', {
+        message: 'Agent follow-up',
+        turnId: SUBMISSION.turnId,
+        messageId: queuedId,
+        sentByTask: 'sender-task',
+      }),
+      clock,
+    )
+
+    // The mirrored entry became the turn's prompt; the client-owned draft
+    // behind it is untouched.
+    expect(result.session.queued_messages).toMatchObject([
+      { id: 'user-queued' },
+    ])
+    expect(result.session.messages.at(-1)).toMatchObject({
+      id: queuedId,
+      role: 'user',
+      sent_by_task: 'sender-task',
+    })
+  })
+})
+
+describe('queuedMessagesChanged', () => {
+  test('the daemon’s agent slice replaces itself without touching user entries', () => {
+    const session: AgentSession = {
+      ...idleSession(),
+      queued_messages: [
+        { id: 'stale-agent', content: 'Delivered already', source: { agent: { sentBy: null } }, created_at: 50 },
+        { id: 'user-queued', content: 'Mine', created_at: 60 },
+      ],
+    }
+    const result = reduceRuntimeEvent(
+      session,
+      event('queuedMessagesChanged', {
+        messages: [
+          { id: 'new-agent', content: 'Parked prompt', source: { agent: { sentBy: 'sender' } }, created_at: 70 },
+        ],
+      }),
+      clock,
+    )
+
+    expect(result.session.queued_messages).toMatchObject([
+      { id: 'user-queued' },
+      { id: 'new-agent', source: { agent: { sentBy: 'sender' } } },
+    ])
+  })
+
+  test('a cancellation snapshot empties the agent slice', () => {
+    const session: AgentSession = {
+      ...idleSession(),
+      queued_messages: [
+        { id: 'user-queued', content: 'Mine', created_at: 60 },
+        { id: 'agent', content: 'Parked', source: { agent: { sentBy: null } }, created_at: 70 },
+      ],
+    }
+    const result = reduceRuntimeEvent(
+      session,
+      event('queuedMessagesChanged', { messages: [] }),
+      clock,
+    )
+
+    expect(result.session.queued_messages).toMatchObject([{ id: 'user-queued' }])
+  })
 })
 
 test('MCP tool identity survives partial updates and stays separate in expanded details', () => {

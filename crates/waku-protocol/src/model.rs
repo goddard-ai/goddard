@@ -1105,9 +1105,23 @@ impl SessionStatus {
     }
 }
 
+/// Who parked a queued follow-up. Composer-queued entries belong to the
+/// client holding them — it edits, steers, removes, and drains them.
+/// `Agent` entries mirror the daemon's `AgentPrompt` queue: the daemon owns
+/// delivery and removal, and `sent_by` carries the same provenance as
+/// [`Message::sent_by_task`] (`None` for automation runs and master-token
+/// requests).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum QueuedMessageSource {
+    #[default]
+    User,
+    Agent { sent_by: Option<Uuid> },
+}
+
 /// A follow-up message queued while the agent is busy. It becomes its own
 /// turn once the current turn settles successfully.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct QueuedMessage {
     pub id: Uuid,
     pub content: String,
@@ -1121,7 +1135,17 @@ pub struct QueuedMessage {
     /// the internal "continue" nudge parked behind a busy session.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// Which queue owns the entry. Absent in documents written before the
+    /// field existed — those are all composer-owned, so `User` is default.
+    #[serde(default, skip_serializing_if = "QueuedMessageSource::is_user")]
+    pub source: QueuedMessageSource,
     pub created_at: u64,
+}
+
+impl QueuedMessageSource {
+    fn is_user(&self) -> bool {
+        matches!(self, Self::User)
+    }
 }
 
 impl QueuedMessage {
@@ -1132,7 +1156,17 @@ impl QueuedMessage {
             display_content: None,
             attachments: Vec::new(),
             hidden: false,
+            source: QueuedMessageSource::User,
             created_at: unix_time(),
+        }
+    }
+
+    /// The daemon's mirror of a parked agent prompt: it renders a queued
+    /// chip with provenance but is delivered and removed only by the daemon.
+    pub fn agent(content: impl Into<String>, sent_by: Option<Uuid>) -> Self {
+        Self {
+            source: QueuedMessageSource::Agent { sent_by },
+            ..Self::new(content)
         }
     }
 
@@ -1150,6 +1184,12 @@ impl QueuedMessage {
 
     pub fn visible_content(&self) -> &str {
         self.display_content.as_deref().unwrap_or(&self.content)
+    }
+
+    /// Daemon-owned entries wait for the daemon's queue drain; the client
+    /// holding the session must not submit, edit, or locally remove them.
+    pub fn is_agent_owned(&self) -> bool {
+        matches!(self.source, QueuedMessageSource::Agent { .. })
     }
 }
 
@@ -2053,12 +2093,18 @@ impl AgentSession {
         hidden: bool,
     ) -> bool {
         let now = unix_time();
+        // The daemon reuses a mirrored queue entry's id as the delivered
+        // message's id, so a parked agent chip converts into this turn's
+        // prompt even if its queue-change event was missed.
+        let dequeued = self.queued_messages.iter().any(|queued| queued.id == message_id);
+        self.queued_messages
+            .retain(|queued| queued.id != message_id);
         if let Some(active) = self.active_turn_id() {
             let has_prompt = self.messages.iter().any(|candidate| {
                 candidate.turn_id == Some(active) && candidate.role == MessageRole::User
             });
             if has_prompt {
-                return false;
+                return dequeued;
             }
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
             prompt.id = message_id;
@@ -2089,6 +2135,26 @@ impl AgentSession {
         self.status = SessionStatus::Connecting;
         self.last_reply_at = Some(now);
         self.updated_at = now;
+        true
+    }
+
+    /// Replace the daemon-owned slice of the follow-up queue with the
+    /// daemon's latest snapshot. Composer-queued entries are untouched;
+    /// combined order follows `created_at`. Returns whether anything changed.
+    pub fn merge_agent_queued(&mut self, agent_messages: Vec<QueuedMessage>) -> bool {
+        let mut combined: Vec<QueuedMessage> = self
+            .queued_messages
+            .iter()
+            .filter(|queued| !queued.is_agent_owned())
+            .cloned()
+            .chain(agent_messages)
+            .collect();
+        combined.sort_by_key(|queued| queued.created_at);
+        if combined == self.queued_messages {
+            return false;
+        }
+        self.queued_messages = combined;
+        self.updated_at = unix_time();
         true
     }
 
@@ -2803,6 +2869,12 @@ pub enum DriverEvent {
         message: String,
         sent_by_task: Option<Uuid>,
     },
+    /// The daemon-owned slice of the session's follow-up queue changed —
+    /// an agent prompt was parked, delivered, or cancelled. Carries the
+    /// daemon's full snapshot of agent-sourced entries; clients merge it
+    /// through [`AgentSession::merge_agent_queued`] so composer-queued
+    /// follow-ups are untouched.
+    QueuedMessagesChanged { messages: Vec<QueuedMessage> },
     /// The provider could not steer the running turn (for example it ended
     /// before the request arrived). The app decides the fallback.
     SteerRejected {
@@ -5579,6 +5651,88 @@ mod tests {
         legacy.as_object_mut().unwrap().remove("queued_messages");
         let legacy_session: AgentSession = serde_json::from_value(legacy).unwrap();
         assert!(legacy_session.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn queued_message_source_defaults_to_user_and_marks_agent_entries() {
+        // Documents written before `source` existed carry no field; every
+        // one of those entries was composer-owned.
+        let mut value = serde_json::to_value(QueuedMessage::new("follow-up")).unwrap();
+        value.as_object_mut().unwrap().remove("source");
+        let restored: QueuedMessage = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.source, QueuedMessageSource::User);
+        assert!(!restored.is_agent_owned());
+
+        let sender = Uuid::new_v4();
+        let agent = QueuedMessage::agent("from an agent", Some(sender));
+        assert!(agent.is_agent_owned());
+        let value = serde_json::to_value(&agent).unwrap();
+        let restored: QueuedMessage = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            restored.source,
+            QueuedMessageSource::Agent {
+                sent_by: Some(sender)
+            }
+        );
+    }
+
+    #[test]
+    fn agent_queue_merge_replaces_only_the_daemon_owned_slice() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+
+        let mut user_entry = QueuedMessage::new("mine");
+        user_entry.created_at = 10;
+        let mut old_agent = QueuedMessage::agent("parked", None);
+        old_agent.created_at = 20;
+        session.queued_messages = vec![user_entry.clone(), old_agent];
+
+        let mut new_agent = QueuedMessage::agent("freshly parked", Some(Uuid::new_v4()));
+        new_agent.created_at = 30;
+        assert!(session.merge_agent_queued(vec![new_agent.clone()]));
+
+        // The user entry survives, the superseded agent entry is gone, and
+        // the combined queue stays in submission order.
+        assert_eq!(session.queued_messages, vec![user_entry, new_agent]);
+
+        // An identical snapshot is a no-op.
+        let snapshot = session.queued_messages.clone();
+        assert!(!session.merge_agent_queued(
+            snapshot
+                .iter()
+                .filter(|queued| queued.is_agent_owned())
+                .cloned()
+                .collect()
+        ));
+        assert_eq!(session.queued_messages, snapshot);
+    }
+
+    #[test]
+    fn adopting_a_submitted_prompt_drops_its_queued_chip() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        let agent_entry = QueuedMessage::agent("parked prompt", None);
+        let queued_id = agent_entry.id;
+        session.queued_messages.push(agent_entry);
+        session
+            .queued_messages
+            .push(QueuedMessage::new("user draft"));
+
+        let turn_id = Uuid::new_v4();
+        assert!(session.adopt_submitted_prompt(
+            "parked prompt",
+            turn_id,
+            queued_id,
+            None,
+            false
+        ));
+
+        // Only the matching entry left; the delivered message reuses its id.
+        assert_eq!(session.queued_messages.len(), 1);
+        assert!(!session.queued_messages[0].is_agent_owned());
+        let prompt = session.messages.last().unwrap();
+        assert_eq!(prompt.id, queued_id);
+        assert_eq!(prompt.content, "parked prompt");
     }
 
     #[test]

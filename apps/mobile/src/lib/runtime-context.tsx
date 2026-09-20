@@ -9,7 +9,7 @@ import type {
   SequencedEvent,
   UserInputAnswer,
 } from '@waku/client';
-import { reduceRuntimeEvent } from '@waku/client/event-reducer';
+import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
 import * as Crypto from 'expo-crypto';
 import {
@@ -286,13 +286,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       daemonKeys.session(profileId, sessionId),
     );
     if (!latest || latest.status !== 'idle') return;
-    const next = latest.queued_messages?.[0];
+    // Daemon-owned entries drain on the daemon's schedule — submitting one
+    // here would double-deliver it once the daemon's drain fires.
+    const next = latest.queued_messages?.find((message) => !isAgentQueuedMessage(message));
     if (!next) return;
     drainingQueues.current.add(sessionId);
     try {
       const dequeued = {
         ...latest,
-        queued_messages: latest.queued_messages?.slice(1),
+        queued_messages: latest.queued_messages?.filter((message) => message.id !== next.id),
       };
       cacheSession(dequeued);
       const persisted = await persistOrdered(dequeued);
@@ -886,13 +888,23 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       daemonKeys.session(profileId, sessionId),
     );
     if (!current) return;
+    const message = (current.queued_messages ?? []).find((item) => item.id === messageId);
+    // A daemon-owned chip is cancelled at the source: the daemon drops the
+    // parked prompt and the `queuedMessagesChanged` echo removes the row.
+    // Mutating locally would only hide a prompt that still delivers.
+    if (message && isAgentQueuedMessage(message)) {
+      const client = daemon.client;
+      if (!client) throw new Error('Goddard daemon is disconnected');
+      await client.request({ type: 'cancelQueuedPrompt', queuedMessageId: messageId }, sessionId);
+      return;
+    }
     const next = {
       ...current,
       queued_messages: (current.queued_messages ?? []).filter((item) => item.id !== messageId),
     };
     cacheSession(next);
     await persistOrdered(next);
-  }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient]);
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient]);
 
   const dismissError = useCallback((sessionId: string) => {
     setErrors((values) => removeKey(values, sessionId));

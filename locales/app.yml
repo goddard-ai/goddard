@@ -2504,6 +2504,8 @@ composer.steer:
   en: Steer
 composer.remove_followup:
   en: Remove from queue
+composer.remove_followup_failed:
+  en: "Could not remove the queued prompt: %{error}"
 composer.queued_message_actions:
   en: Follow-up actions
 user_input.other_placeholder:

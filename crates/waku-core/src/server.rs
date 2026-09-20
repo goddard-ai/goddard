@@ -1851,7 +1851,8 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         // Agent commands mutate daemon-owned task state directly; attached
         // clients learn about the new task or prompt from the revision bump.
         | Command::AgentCreateSession { .. }
-        | Command::AgentPrompt { .. } => TaskCatalogAction::Changed,
+        | Command::AgentPrompt { .. }
+        | Command::CancelQueuedPrompt { .. } => TaskCatalogAction::Changed,
         _ => TaskCatalogAction::None,
     }
 }

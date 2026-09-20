@@ -322,6 +322,16 @@ impl Waku {
                     self.state.mark_session_dirty(session_id);
                 }
             }
+            DriverEvent::QueuedMessagesChanged { messages } => {
+                // The daemon owns the agent-sourced slice of the follow-up
+                // queue — a parked prompt appeared, delivered, or was
+                // cancelled. Composer-queued entries pass through untouched.
+                if let Some(session) = self.state.session_mut(session_id)
+                    && session.merge_agent_queued(messages)
+                {
+                    self.state.mark_session_dirty(session_id);
+                }
+            }
             DriverEvent::TurnStarted => {
                 runtime.last_driver_error = None;
                 if let Some(session) = self.state.session_mut(session_id) {

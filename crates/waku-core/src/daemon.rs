@@ -1380,6 +1380,7 @@ impl Backend for WakuBackend {
                             true
                         } else {
                             preserve_daemon_checkpoints(existing, &mut session);
+                            preserve_daemon_queued_messages(existing, &mut session);
                             *existing = session;
                             true
                         }
@@ -1984,6 +1985,9 @@ impl Backend for WakuBackend {
                 thread_id,
                 provider,
             } => self.agent_read_session(task_id, thread_id, provider),
+            Command::CancelQueuedPrompt { queued_message_id } => {
+                self.cancel_queued_prompt(session_id, queued_message_id, &events)
+            }
             command => {
                 // Quarantined transfer sessions still take interactive
                 // prompts — the sandbox is the boundary, and the quarantine
@@ -2144,6 +2148,12 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.landed_at = incoming.landed_at;
     }
     for queued in incoming.queued_messages {
+        // Client saves never create daemon-owned entries: a mirrored agent
+        // prompt absent from the daemon's copy was delivered or cancelled,
+        // and re-adding it would resurrect — then re-deliver — the prompt.
+        if queued.is_agent_owned() {
+            continue;
+        }
         if !existing
             .queued_messages
             .iter()
@@ -2152,6 +2162,26 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
             existing.queued_messages.push(queued);
         }
     }
+}
+
+/// Client saves never mutate the daemon-owned slice of a follow-up queue:
+/// `existing` entries are the truth, `incoming` agent entries are only
+/// echoes of them. Union them back before the wholesale replace so a
+/// projection written before a mirror arrived cannot erase a parked prompt.
+fn preserve_daemon_queued_messages(existing: &AgentSession, incoming: &mut AgentSession) {
+    incoming
+        .queued_messages
+        .retain(|queued| !queued.is_agent_owned());
+    incoming.queued_messages.extend(
+        existing
+            .queued_messages
+            .iter()
+            .filter(|queued| queued.is_agent_owned())
+            .cloned(),
+    );
+    incoming
+        .queued_messages
+        .sort_by_key(|queued| queued.created_at);
 }
 
 /// Ending checkpoints are produced and stored by the daemon. A second client
@@ -3642,6 +3672,8 @@ impl WakuBackend {
                     crate::agent::AgentPrompt {
                         prompt: prompt.clone(),
                         sender,
+                        // A direct steer never parks — no chip to mirror.
+                        queued_id: None,
                     },
                 );
                 driver.steer(prompt);
@@ -3665,11 +3697,35 @@ impl WakuBackend {
         sender: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        self.agent
-            .enqueue(target, crate::agent::AgentPrompt { prompt, sender });
+        let queued_id = Uuid::new_v4();
+        self.agent.enqueue(
+            target,
+            crate::agent::AgentPrompt {
+                prompt: prompt.clone(),
+                sender,
+                queued_id: Some(queued_id),
+            },
+        );
         if self.agent.is_working(target) {
             // The runtime event forwarder delivers queued prompts in
-            // order once the provider finishes the turn.
+            // order once the provider finishes the turn. Mirror the wait
+            // into the session document so every client renders the parked
+            // prompt as a queued follow-up chip.
+            mirror_agent_queued_prompt(
+                &self.task_state,
+                &self.task_store,
+                target,
+                queued_id,
+                &prompt,
+                sender,
+            )?;
+            if let Some(runtime_id) = self.runtime_id_for(target) {
+                send_agent_queue_changed(
+                    &self.task_state,
+                    &events.for_session(target, runtime_id),
+                    target,
+                );
+            }
             return Ok(());
         }
         let (runtime_id, driver) = self.ensure_agent_runtime(target, events)?;
@@ -3678,7 +3734,7 @@ impl WakuBackend {
     }
 
     /// Pop every queued agent prompt for the session, in submission order.
-    /// A turn that starts working mid-drain holds the remainder for the
+    /// A turn that started working mid-drain holds the remainder for the
     /// provider's finish event.
     fn drain_agent_queue(
         &self,
@@ -3686,6 +3742,7 @@ impl WakuBackend {
         driver: &DriverHandle,
         sink: &EventSink,
     ) -> anyhow::Result<()> {
+        rehydrate_agent_queue(&self.agent, &self.task_state, &self.task_store, session_id);
         while let Some(entry) = self.agent.pop_queued(session_id) {
             if self.agent.is_working(session_id) {
                 self.agent.requeue_front(session_id, entry);
@@ -3702,6 +3759,57 @@ impl WakuBackend {
             )?;
         }
         Ok(())
+    }
+
+    /// The running runtime's id for a session, when one is live. Queue
+    /// change events go out on that runtime's stream so attached clients
+    /// redraw the chip row without waiting for the next save cycle.
+    fn runtime_id_for(&self, session_id: Uuid) -> Option<Uuid> {
+        self.sessions
+            .lock()
+            .get(&session_id)
+            .map(|(runtime_id, _)| *runtime_id)
+    }
+
+    /// Cancel a parked agent prompt — the chip's own remove affordance.
+    /// Works whether or not the session's runtime is up: the in-memory
+    /// queue and the session document's mirrored entry are both cleared.
+    fn cancel_queued_prompt(
+        &self,
+        session_id: Uuid,
+        queued_message_id: Uuid,
+        events: &EventSink,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.agent.remove_queued(session_id, queued_message_id);
+        {
+            let mut state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("task {session_id} is unknown to the daemon"))?;
+            self.task_store.hydrate(session)?;
+            let index = session
+                .queued_messages
+                .iter()
+                .position(|queued| queued.id == queued_message_id)
+                .ok_or_else(|| anyhow!("task {session_id} has no queued prompt {queued_message_id}"))?;
+            if !session.queued_messages[index].is_agent_owned() {
+                bail!("queued message {queued_message_id} is owned by the client, not the daemon");
+            }
+            session.queued_messages.remove(index);
+            session.updated_at = crate::model::unix_time();
+            state.mark_session_dirty(session_id);
+            self.task_store.save(&mut state)?;
+        }
+        if let Some(runtime_id) = self.runtime_id_for(session_id) {
+            send_agent_queue_changed(
+                &self.task_state,
+                &events.for_session(session_id, runtime_id),
+                session_id,
+            );
+        }
+        Ok(ResponsePayload::Ack)
     }
 
     /// Resolve an agent read's target and return its transcript — the
@@ -4104,6 +4212,7 @@ fn handle_driver_command(
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
         | Command::AgentReadSession { .. }
+        | Command::CancelQueuedPrompt { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }
         | Command::ListCustomCommands
@@ -4253,11 +4362,24 @@ fn forward_driver_events(
                 DriverEvent::Connected { provider_cursor }
             }
             DriverEvent::SteerAccepted { message, .. } => {
-                let sent_by_task = agent
-                    .take_pending_steer(session_id, &message)
-                    .and_then(|steer| steer.sender);
+                let steer = agent.take_pending_steer(session_id, &message);
+                let sent_by_task = steer.as_ref().and_then(|steer| steer.sender);
                 if let Some(sender) = sent_by_task {
                     record_agent_steer(&task_state, &task_store, session_id, &message, sender);
+                }
+                // A queue-drained prompt folded into the parked turn: its
+                // mirrored chip's wait is over even when the steer carried
+                // no sender (an automation run) to attribute.
+                if let Some(queued_id) = steer.and_then(|steer| steer.queued_id)
+                    && unmirror_agent_queued_prompt(
+                        &task_state,
+                        &task_store,
+                        session_id,
+                        queued_id,
+                    )
+                    .is_ok()
+                {
+                    send_agent_queue_changed(&task_state, &events, session_id);
                 }
                 DriverEvent::SteerAccepted {
                     message,
@@ -4311,6 +4433,9 @@ fn forward_driver_events(
             break;
         }
         if drains_queue {
+            // A restarted daemon rebuilt no in-memory queue — the session
+            // document's mirrored entries are the surviving record.
+            rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
                 if agent.is_working(session_id) {
                     // A turn started while the queue drained — a human
@@ -4377,7 +4502,10 @@ fn deliver_agent_prompt(
         return Ok(());
     }
     let turn_id = Uuid::new_v4();
-    let message_id = Uuid::new_v4();
+    // A parked prompt reuses its mirrored chip's id as the delivered
+    // message's id: clients folding `promptSubmitted` drop the chip and
+    // adopt the transcript row in one move.
+    let message_id = entry.queued_id.unwrap_or_else(Uuid::new_v4);
     persist_agent_prompt(
         task_state,
         task_store,
@@ -4386,6 +4514,7 @@ fn deliver_agent_prompt(
         turn_id,
         message_id,
         entry.sender,
+        entry.queued_id,
     )?;
     sink.send(event_to_wire(DriverEvent::PromptSubmitted {
         message: entry.prompt.clone(),
@@ -4394,13 +4523,15 @@ fn deliver_agent_prompt(
         sent_by_task: entry.sender,
         hidden: false,
     })?)?;
+    send_agent_queue_changed(task_state, sink, session_id);
     driver.prompt(entry.prompt);
     Ok(())
 }
 
 /// Mirror an accepted agent prompt into the daemon's stored copy of the
 /// task, so the message and its sender provenance persist even when no
-/// client is attached to adopt it.
+/// client is attached to adopt it. `queued_id` names the parked chip the
+/// prompt is delivering out of — it leaves the queue in the same write.
 fn persist_agent_prompt(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
@@ -4409,6 +4540,7 @@ fn persist_agent_prompt(
     turn_id: Uuid,
     message_id: Uuid,
     sent_by_task: Option<Uuid>,
+    queued_id: Option<Uuid>,
 ) -> anyhow::Result<()> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -4419,11 +4551,155 @@ fn persist_agent_prompt(
         bail!("task {session_id} is unknown to the daemon");
     };
     task_store.hydrate(session)?;
-    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, false) {
+    let dequeued = queued_id.is_some_and(|queued_id| {
+        let before = session.queued_messages.len();
+        session
+            .queued_messages
+            .retain(|queued| queued.id != queued_id);
+        session.queued_messages.len() != before
+    });
+    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, false)
+        || dequeued
+    {
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
     }
     Ok(())
+}
+
+/// Park an agent prompt in the session document's follow-up queue so every
+/// client renders the wait as a queued chip. The entry's id doubles as the
+/// eventual transcript message id — delivery removes it.
+fn mirror_agent_queued_prompt(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    queued_id: Uuid,
+    prompt: &str,
+    sent_by: Option<Uuid>,
+) -> anyhow::Result<()> {
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        bail!("task {session_id} is unknown to the daemon");
+    };
+    task_store.hydrate(session)?;
+    if session
+        .queued_messages
+        .iter()
+        .any(|queued| queued.id == queued_id)
+    {
+        return Ok(());
+    }
+    let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
+    entry.id = queued_id;
+    session.queued_messages.push(entry);
+    session.updated_at = crate::model::unix_time();
+    state.mark_session_dirty(session_id);
+    task_store.save(&mut state)?;
+    Ok(())
+}
+
+/// Drop the mirrored chip a parked-steer prompt delivered out of, once the
+/// provider accepted it into the waiting turn.
+fn unmirror_agent_queued_prompt(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    queued_id: Uuid,
+) -> anyhow::Result<()> {
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        return Ok(());
+    };
+    task_store.hydrate(session)?;
+    let before = session.queued_messages.len();
+    session
+        .queued_messages
+        .retain(|queued| queued.id != queued_id);
+    if session.queued_messages.len() == before {
+        return Ok(());
+    }
+    session.updated_at = crate::model::unix_time();
+    state.mark_session_dirty(session_id);
+    task_store.save(&mut state)?;
+    Ok(())
+}
+
+/// Refill the in-memory prompt queue from agent entries the session
+/// document still mirrors as parked. The mirror survives restarts the
+/// `AgentState` map does not, so a drained or never-started runtime finds
+/// its backlog here instead of losing it.
+fn rehydrate_agent_queue(
+    agent: &crate::agent::AgentState,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+) {
+    let seeded = {
+        let mut state = task_state.lock();
+        let Some(session) = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if task_store.hydrate(session).is_err() {
+            return;
+        }
+        session
+            .queued_messages
+            .iter()
+            .filter_map(|queued| match queued.source {
+                crate::model::QueuedMessageSource::Agent { sent_by } => {
+                    Some(crate::agent::AgentPrompt {
+                        prompt: queued.content.clone(),
+                        sender: sent_by,
+                        queued_id: Some(queued.id),
+                    })
+                }
+                crate::model::QueuedMessageSource::User => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    if !seeded.is_empty() {
+        agent.seed_queue(session_id, seeded);
+    }
+}
+
+/// Publish the daemon-owned follow-up queue for a session so attached
+/// clients redraw the chip row. Best-effort: a dead subscriber just misses
+/// the frame and picks the state up on its next hydrate.
+fn send_agent_queue_changed(
+    task_state: &Mutex<PersistedState>,
+    sink: &EventSink,
+    session_id: Uuid,
+) {
+    let messages = task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .map(|session| {
+            session
+                .queued_messages
+                .iter()
+                .filter(|queued| queued.is_agent_owned())
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if let Ok(wire) = event_to_wire(DriverEvent::QueuedMessagesChanged { messages }) {
+        let _ = sink.send(wire);
+    }
 }
 
 /// Mirror a provider-accepted agent steer into the stored task the way
@@ -4604,6 +4880,145 @@ mod tests {
         preserve_daemon_checkpoints(&existing, &mut incoming);
 
         assert_eq!(incoming.turns[0].checkpoint.as_ref(), Some(&checkpoint));
+    }
+
+    #[test]
+    fn a_parked_agent_prompt_mirrors_a_chip_then_cancels_cleanly() {
+        let root = std::env::temp_dir().join(format!("waku-queue-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        // Unstarted drafts own no row; the session must exist on disk for
+        // the backend to know it.
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].finish_active_turn(TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+        let session_id = state.sessions[0].id;
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+
+        // A working session parks the prompt — no runtime runs in the test,
+        // so the queuedMessagesChanged broadcast is skipped but the mirror
+        // still lands in the session document.
+        backend
+            .agent
+            .note_driver_event(session_id, &DriverEvent::TurnStarted);
+        backend
+            .queue_agent_prompt(
+                session_id,
+                "agent follow-up".into(),
+                None,
+                &EventSink::detached(),
+            )
+            .unwrap();
+
+        {
+            let mut locked = backend.task_state.lock();
+            let session = locked
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            assert_eq!(session.queued_messages.len(), 1);
+            assert!(session.queued_messages[0].is_agent_owned());
+            assert_eq!(session.queued_messages[0].content, "agent follow-up");
+        }
+
+        // A fresh daemon's memory holds nothing; the document rebuilds the
+        // parked prompt.
+        backend.agent.clear_session(session_id);
+        rehydrate_agent_queue(
+            &backend.agent,
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+        );
+        let restored = backend.agent.pop_queued(session_id).unwrap();
+        assert_eq!(restored.prompt, "agent follow-up");
+        assert!(restored.queued_id.is_some());
+
+        // Cancel drops the memory entry and the mirrored chip.
+        backend.agent.clear_session(session_id);
+        let queued_id = restored.queued_id.unwrap();
+        rehydrate_agent_queue(
+            &backend.agent,
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+        );
+        let result = backend
+            .cancel_queued_prompt(session_id, queued_id, &EventSink::detached())
+            .unwrap();
+        assert!(matches!(result, ResponsePayload::Ack));
+        assert!(backend.agent.pop_queued(session_id).is_none());
+        {
+            let mut locked = backend.task_state.lock();
+            let session = locked
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            assert!(session.queued_messages.is_empty());
+        }
+
+        // Cancelling a client-owned entry is refused.
+        let mut locked = backend.task_state.lock();
+        let session = locked
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        session.queued_messages.push(crate::model::QueuedMessage::new("mine"));
+        let user_id = session.queued_messages[0].id;
+        drop(locked);
+        assert!(
+            backend
+                .cancel_queued_prompt(session_id, user_id, &EventSink::detached())
+                .is_err()
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn client_saves_cannot_resurrect_or_erase_daemon_queue_entries() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let mut agent_entry = crate::model::QueuedMessage::agent("parked", None);
+        agent_entry.created_at = 20;
+        let mut user_entry = crate::model::QueuedMessage::new("mine");
+        user_entry.created_at = 10;
+        existing.queued_messages = vec![user_entry.clone(), agent_entry.clone()];
+
+        // Stale path: a client projection still holding a delivered agent
+        // chip must not re-add it — rehydration would deliver it twice.
+        let daemon_copy_without_agent = {
+            let mut copy = existing.clone();
+            copy.queued_messages.retain(|queued| !queued.is_agent_owned());
+            copy
+        };
+        let mut resurrecting = daemon_copy_without_agent.clone();
+        merge_stale_session_metadata(&mut resurrecting, existing.clone());
+        assert!(
+            resurrecting
+                .queued_messages
+                .iter()
+                .all(|queued| !queued.is_agent_owned()),
+            "a stale client save must not resurrect a daemon-owned entry"
+        );
+
+        // Fresh path: a projection written before the mirror arrived keeps
+        // the daemon's parked entry instead of erasing it wholesale.
+        let mut fresh = daemon_copy_without_agent.clone();
+        preserve_daemon_queued_messages(&existing, &mut fresh);
+        assert_eq!(
+            fresh.queued_messages,
+            vec![user_entry, agent_entry],
+            "the daemon's agent slice survives a fresh client save"
+        );
     }
 
     #[test]

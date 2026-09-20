@@ -4080,6 +4080,10 @@ impl Waku {
                 continue;
             }
             let message_id = message.id;
+            // A daemon-owned agent prompt is a parked delivery, not a draft:
+            // it renders with the agent badge, and the only local action is
+            // cancelling it — edit and steer stay client-owned.
+            let agent_owned = message.is_agent_owned();
             let content = if message.visible_content().trim().is_empty() {
                 message
                     .attachments
@@ -4090,7 +4094,7 @@ impl Waku {
             } else {
                 message.visible_content().to_owned()
             };
-            let steer_control = steerable.then(|| {
+            let steer_control = (steerable && !agent_owned).then(|| {
                 div()
                     .id(SharedString::from(format!(
                         "queued-message-steer-{message_id}"
@@ -4155,6 +4159,15 @@ impl Waku {
                 move |_| {
                     let edit_weak = weak.clone();
                     let remove_weak = weak.clone();
+                    let remove_item = MenuItem::new(tr!("composer.remove_followup"), move |_, cx| {
+                        let _ = remove_weak.update(cx, |this, cx| {
+                            this.remove_queued_message(session_id, message_id, cx);
+                        });
+                    })
+                    .icon("icons/trash.svg");
+                    if agent_owned {
+                        return vec![remove_item];
+                    }
                     vec![
                         MenuItem::new(tr!("composer.edit_in_composer"), move |window, cx| {
                             let _ = edit_weak.update(cx, |this, cx| {
@@ -4162,12 +4175,7 @@ impl Waku {
                             });
                         })
                         .icon("icons/pencil.svg"),
-                        MenuItem::new(tr!("composer.remove_followup"), move |_, cx| {
-                            let _ = remove_weak.update(cx, |this, cx| {
-                                this.remove_queued_message(session_id, message_id, cx);
-                            });
-                        })
-                        .icon("icons/trash.svg"),
+                        remove_item,
                     ]
                 },
             );
@@ -4185,12 +4193,21 @@ impl Waku {
                     .items_start()
                     .gap(px(9.0))
                     .cursor_default()
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .hover(|element| element.bg(theme.overlay))
-                    .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
+                    .when(!agent_owned, |row| {
+                        row.tab_index(0)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .hover(|element| element.bg(theme.overlay))
+                            .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
+                    })
+                    .when(agent_owned, |row| {
+                        row.tooltip(Tooltip::text(tr!("transcript.sent_by_agent")))
+                    })
                     .child(div().h(px(30.0)).flex().items_center().child(icon(
-                        "icons/queue.svg",
+                        if agent_owned {
+                            "icons/bot.svg"
+                        } else {
+                            "icons/queue.svg"
+                        },
                         12.0,
                         theme.text_tertiary,
                     )))
@@ -4253,15 +4270,19 @@ impl Waku {
                             )
                             .child(more_control),
                     )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.edit_queued_message(session_id, message_id, window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    .when(!agent_owned, |row| {
+                        row.on_click(cx.listener(move |this, _, window, cx| {
                             this.edit_queued_message(session_id, message_id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    })),
+                        }))
+                        .on_key_down(cx.listener(
+                            move |this, event: &KeyDownEvent, window, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.edit_queued_message(session_id, message_id, window, cx);
+                                    cx.stop_propagation();
+                                }
+                            },
+                        ))
+                    }),
             );
         }
         Some(

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Popover } from '@base-ui/react/popover'
-import { attachmentPromptToken } from '@waku/client'
+import { attachmentPromptToken, isAgentQueuedMessage } from '@waku/client'
 import type {
   AgentSession,
   BranchSnapshot,
@@ -1663,69 +1663,92 @@ function QueuedMessages({
           only, open bottom, and overflow-hidden so row hover fills clip to
           the rounding. */}
       <div className="overflow-hidden rounded-t-xl border border-b-0 bg-card py-1">
-        {messages.map((message) => (
-          <div
-            className="flex h-[30px] w-full items-center gap-2 pr-1.5 text-[12.5px] hover:bg-accent"
-            key={message.id}
-          >
-            <button
-              className="flex min-w-0 flex-1 items-center gap-2 self-stretch pl-3 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-              title={t('composer.edit_in_composer')}
-              type="button"
-              onClick={() => onEdit(message)}
-            >
-              <WakuIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="queue" />
-              <span className="min-w-0 flex-1 truncate">
-                {message.display_content || message.content || message.attachments?.map((item) => item.name).join(', ')}
-              </span>
-            </button>
-            <div className="flex shrink-0 items-center gap-0.5">
-              {canSteer && (
-                <button
-                  className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
-                  title={t('composer.steer_current')}
-                  type="button"
-                  onClick={() => onSteer(message)}
-                >
-                  <WakuIcon className="size-[11px]" name="cornerDownRight" />
-                  {t('composer.steer')}
-                </button>
-              )}
-              <button
-                aria-label={t('composer.remove_followup')}
-                className="grid size-6 shrink-0 place-items-center rounded-md text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
-                type="button"
-                onClick={() => onRemove(message.id)}
-              >
-                <WakuIcon className="size-3" name="trash" />
-              </button>
-              <ControlMenu
-                caret={false}
-                items={[
+        {messages.map((message) => {
+          // A daemon-owned agent prompt is a parked delivery, not a draft:
+          // it renders with the agent badge, and the only local action is
+          // cancelling it — edit and steer stay client-owned.
+          const agentOwned = isAgentQueuedMessage(message)
+          const menuItems: ControlMenuItem[] = [
+            ...(agentOwned
+              ? []
+              : [
                   {
                     id: 'edit',
                     label: t('composer.edit_in_composer'),
-                    icon: 'pencil',
+                    icon: 'pencil' as const,
                     onSelect: () => onEdit(message),
                   },
-                  {
-                    id: 'remove',
-                    label: t('composer.remove_followup'),
-                    icon: 'trash',
-                    onSelect: () => onRemove(message.id),
-                  },
-                ]}
-                align="right"
-                label={t('composer.queued_message_actions')}
-                placement="below"
-                selectionMode="status"
-                triggerClassName="grid size-6 place-items-center px-0 rounded-md"
-              >
-                <WakuIcon className="size-3" name="ellipsis" />
-              </ControlMenu>
+                ]),
+            {
+              id: 'remove',
+              label: t('composer.remove_followup'),
+              icon: 'trash' as const,
+              onSelect: () => onRemove(message.id),
+            },
+          ]
+          return (
+            <div
+              className="flex h-[30px] w-full items-center gap-2 pr-1.5 text-[12.5px] hover:bg-accent"
+              key={message.id}
+            >
+              {agentOwned ? (
+                <div
+                  className="flex min-w-0 flex-1 items-center gap-2 self-stretch pl-3 text-left"
+                  title={t('transcript.sent_by_agent')}
+                >
+                  <WakuIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="bot" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {message.display_content || message.content || message.attachments?.map((item) => item.name).join(', ')}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  className="flex min-w-0 flex-1 items-center gap-2 self-stretch pl-3 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+                  title={t('composer.edit_in_composer')}
+                  type="button"
+                  onClick={() => onEdit(message)}
+                >
+                  <WakuIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="queue" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {message.display_content || message.content || message.attachments?.map((item) => item.name).join(', ')}
+                  </span>
+                </button>
+              )}
+              <div className="flex shrink-0 items-center gap-0.5">
+                {canSteer && !agentOwned && (
+                  <button
+                    className="flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                    title={t('composer.steer_current')}
+                    type="button"
+                    onClick={() => onSteer(message)}
+                  >
+                    <WakuIcon className="size-[11px]" name="cornerDownRight" />
+                    {t('composer.steer')}
+                  </button>
+                )}
+                <button
+                  aria-label={t('composer.remove_followup')}
+                  className="grid size-6 shrink-0 place-items-center rounded-md text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                  type="button"
+                  onClick={() => onRemove(message.id)}
+                >
+                  <WakuIcon className="size-3" name="trash" />
+                </button>
+                <ControlMenu
+                  caret={false}
+                  items={menuItems}
+                  align="right"
+                  label={t('composer.queued_message_actions')}
+                  placement="below"
+                  selectionMode="status"
+                  triggerClassName="grid size-6 place-items-center px-0 rounded-md"
+                >
+                  <WakuIcon className="size-3" name="ellipsis" />
+                </ControlMenu>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
