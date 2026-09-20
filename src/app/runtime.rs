@@ -1573,7 +1573,8 @@ impl Waku {
         if !changed {
             return false;
         }
-        if let Some(project_id) = self.projects_page
+        if self.state.review_queue_enabled
+            && let Some(project_id) = self.projects_page
             && self
                 .projects_page_states
                 .get(&project_id)

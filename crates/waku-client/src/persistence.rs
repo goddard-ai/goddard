@@ -736,6 +736,10 @@ pub struct AppSettings {
     /// branches, issues, and pull requests in one place. Defaults on in
     /// debug builds.
     pub projects_page_enabled: bool,
+    /// Experimental: the Projects page's Review tab — the `qa` branch's
+    /// proposed-commit queue with approve, reject, and promote. Defaults
+    /// on in debug builds.
+    pub review_queue_enabled: bool,
     /// Experimental: the Settings → Friends page and friend-to-friend file
     /// transfers. Defaults on in debug builds.
     pub friends_enabled: bool,
@@ -800,6 +804,7 @@ impl Default for AppSettings {
             git_panel_enabled: default_experiment_enabled(),
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
+            review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
@@ -1152,6 +1157,8 @@ pub struct PersistedState {
     #[serde(default = "default_experiment_enabled")]
     pub projects_page_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
+    pub review_queue_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
     pub friends_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub model_router_enabled: bool,
@@ -1360,6 +1367,7 @@ impl PersistedState {
             git_panel_enabled: default_experiment_enabled(),
             github_enabled: default_experiment_enabled(),
             projects_page_enabled: default_experiment_enabled(),
+            review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
@@ -1676,6 +1684,7 @@ impl PersistedState {
             git_panel_enabled: self.git_panel_enabled,
             github_enabled: self.github_enabled,
             projects_page_enabled: self.projects_page_enabled,
+            review_queue_enabled: self.review_queue_enabled,
             friends_enabled: self.friends_enabled,
             model_router_enabled: self.model_router_enabled,
             status_markers_enabled: self.status_markers_enabled,
@@ -1770,6 +1779,7 @@ impl PersistedState {
         self.git_panel_enabled = settings.git_panel_enabled;
         self.github_enabled = settings.github_enabled;
         self.projects_page_enabled = settings.projects_page_enabled;
+        self.review_queue_enabled = settings.review_queue_enabled;
         self.friends_enabled = settings.friends_enabled;
         self.model_router_enabled = settings.model_router_enabled;
         self.status_markers_enabled = settings.status_markers_enabled;

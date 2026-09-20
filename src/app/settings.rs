@@ -4189,6 +4189,16 @@ impl Waku {
                         |this, enabled, cx| this.set_projects_page_enabled(enabled, cx),
                     ))
                     .children(self.experiment_card(
+                        "review-queue-experiment-toggle",
+                        "experiments.review_queue_title",
+                        "experiments.review_queue_description",
+                        self.state.review_queue_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_review_queue_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
                         "subagents-experiment-toggle",
                         "experiments.subagents_title",
                         "experiments.subagents_description",
@@ -4374,6 +4384,22 @@ impl Waku {
             self.close_projects_page(cx);
         }
         self.state.projects_page_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The Review tab's opt-in sits under the Projects page's: disabling
+    /// folds any open Review tab back to Issues so the surface is never
+    /// reachable-but-dead.
+    fn set_review_queue_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            for state in self.projects_page_states.values_mut() {
+                if state.tab == projects::ProjectsTab::Review {
+                    state.tab = projects::ProjectsTab::Issues;
+                }
+            }
+        }
+        self.state.review_queue_enabled = enabled;
         self.save();
         cx.notify();
     }

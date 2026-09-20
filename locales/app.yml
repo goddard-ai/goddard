@@ -674,6 +674,10 @@ experiments.projects_page_title:
   en: Projects page
 experiments.projects_page_description:
   en: Press ⌘⇧P for a per-project page listing its worktrees, branches, issues, and pull requests, with ⌘⌥1–4 jumping straight to a tab.
+experiments.review_queue_title:
+  en: QA review
+experiments.review_queue_description:
+  en: Add a Review tab to the Projects page — the qa branch's proposed commits listed oldest first, with per-commit approve, reject-and-revert, and a promote control for the approved frontier.
 experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:

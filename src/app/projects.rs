@@ -44,6 +44,12 @@ impl ProjectsTab {
         matches!(self, Self::Worktrees | Self::Branches)
     }
 
+    /// Whether the tab is reachable — Review rides its own experiment
+    /// flag on top of the page's.
+    fn available(self, review_queue_enabled: bool) -> bool {
+        self != Self::Review || review_queue_enabled
+    }
+
     pub fn label(self) -> String {
         match self {
             Self::Worktrees => tr!("projects.tab_worktrees"),
@@ -818,6 +824,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !tab.available(self.state.review_queue_enabled) {
+            return;
+        }
         let changed = self
             .projects_page_states
             .get_mut(&project_id)
@@ -978,10 +987,11 @@ impl Waku {
         })
         .detach();
 
-        if self
-            .projects_page_states
-            .get(&project_id)
-            .is_some_and(|state| state.tab == ProjectsTab::Review)
+        if self.state.review_queue_enabled
+            && self
+                .projects_page_states
+                .get(&project_id)
+                .is_some_and(|state| state.tab == ProjectsTab::Review)
         {
             self.projects_refresh_review(project_id, cx);
         }
@@ -1790,10 +1800,13 @@ impl Waku {
         let Some(state) = self.projects_page_states.get(&project_id) else {
             return div().into_any_element();
         };
-        // The page's tabs are the GitHub pair; a non-GitHub repo disables
-        // them but the tab still shows its hint, and a git sub-tab held over
-        // from shared state falls back to Issues.
-        let tab = if state.tab.is_git_tab() {
+        // The page's tabs are the GitHub pair plus Review; a non-GitHub
+        // repo disables them but the tab still shows its hint. A git
+        // sub-tab held over from shared state — or a Review tab left over
+        // after its experiment turned off — falls back to Issues.
+        let tab = if state.tab.is_git_tab()
+            || !state.tab.available(self.state.review_queue_enabled)
+        {
             ProjectsTab::Issues
         } else {
             state.tab
@@ -1994,6 +2007,7 @@ impl Waku {
             },
         );
 
+        let review_queue_enabled = self.state.review_queue_enabled;
         div()
             .flex_none()
             .h(px(PROJECTS_HEADER_HEIGHT))
@@ -2013,10 +2027,18 @@ impl Waku {
                     .rounded(px(6.0))
                     .p(px(2.0))
                     .bg(theme.inset)
-                    .children(ProjectsTab::ALL.into_iter().map(|candidate| {
-                        let enabled = github_enabled || candidate.github_tab().is_none();
-                        self.projects_tab_button(project_id, candidate, tab, enabled, false, cx)
-                    })),
+                    .children(
+                        ProjectsTab::ALL
+                            .into_iter()
+                            .filter(|candidate| candidate.available(review_queue_enabled))
+                            .map(|candidate| {
+                                let enabled =
+                                    github_enabled || candidate.github_tab().is_none();
+                                self.projects_tab_button(
+                                    project_id, candidate, tab, enabled, false, cx,
+                                )
+                            }),
+                    ),
             )
             .child(div().flex_1())
             .into_any_element()
