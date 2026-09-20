@@ -454,6 +454,15 @@ session.unpin: 取消置顶
 session.sweep: 移至休眠
 session.restore: 恢复
 session.mark_unread: 标记为未读
+session.pin_many: "置顶 %{count} 个任务"
+session.unpin_many: "取消置顶 %{count} 个任务"
+session.mark_unread_many: "将 %{count} 个任务标记为未读"
+session.copy_working_directory_many: "复制 %{count} 个工作目录"
+session.move_to_worktree_many: "将 %{count} 个任务移动到工作树"
+session.sweep_many: "将 %{count} 个任务移至休眠"
+session.restore_many: "恢复 %{count} 个任务"
+session.archive_many: "归档 %{count} 个任务"
+session.remove_many: "移除 %{count} 个任务"
 archive.confirm_title: 归档此任务？
 archive.confirm_title_named: "归档 %{name}？"
 archive.confirm_description: 该检出中仍有进行中的工作。归档会将其快照并移除工作树；取消归档可恢复。

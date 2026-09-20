@@ -3075,9 +3075,19 @@ impl Waku {
     }
 
     /// ⌘-click: toggle `session_id` in the multi-selection without making it
-    /// the active surface. The clicked row becomes the range anchor either
-    /// way — even when the toggle removed it — matching Finder's pivot.
+    /// the active surface. Creating the set seeds it with the active session —
+    /// ⌘-click extends the current selection rather than replacing it, like
+    /// Finder — so the viewed task joins the batch until ⌘-clicked back out,
+    /// when its row falls back to the neutral active highlight. The clicked
+    /// row becomes the range anchor either way — even when the toggle removed
+    /// it — matching Finder's pivot.
     fn toggle_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.sidebar_multi_selection.is_empty()
+            && let Some(active) = self.state.selected_session
+            && active != session_id
+        {
+            self.sidebar_multi_selection.insert(active);
+        }
         if !self.sidebar_multi_selection.remove(&session_id) {
             self.sidebar_multi_selection.insert(session_id);
         }
@@ -4068,6 +4078,19 @@ impl Waku {
                         })
                         .unwrap_or((vec![session_id], false, false, pinned, Vec::new()));
                     let all_dormant = dormant_targets.len() == targets.len();
+                    // A batch labels every item with the count it acts on —
+                    // the multi-selection can hold members the row menu
+                    // doesn't show (the active session, folded groups), so
+                    // the number is the honest contract.
+                    let batch = targets.len() > 1;
+                    let item_label = |single: &'static str, many: &'static str, count: usize| {
+                        if batch {
+                            tr!(many, count = count)
+                        } else {
+                            tr!(single).to_string()
+                        }
+                    };
+                    let sweep_count = targets.len() - dormant_targets.len();
                     let pin_targets = targets.clone();
                     let unread_targets = targets.clone();
                     let copy_targets = targets.clone();
@@ -4087,9 +4110,9 @@ impl Waku {
                         .icon("icons/pencil.svg"),
                         MenuItem::new(
                             if all_pinned {
-                                tr!("session.unpin")
+                                item_label("session.unpin", "session.unpin_many", pin_targets.len())
                             } else {
-                                tr!("session.pin")
+                                item_label("session.pin", "session.pin_many", pin_targets.len())
                             },
                             move |_, cx| {
                                 let _ = pin_waku.update(cx, |waku, cx| {
@@ -4103,32 +4126,53 @@ impl Waku {
                         } else {
                             "icons/pin.svg"
                         }),
-                        MenuItem::new(tr!("session.mark_unread"), move |_, cx| {
-                            let _ = unread_waku.update(cx, |waku, cx| {
-                                for target in &unread_targets {
-                                    waku.mark_session_unread(*target, cx);
-                                }
-                            });
-                        })
+                        MenuItem::new(
+                            item_label(
+                                "session.mark_unread",
+                                "session.mark_unread_many",
+                                unread_targets.len(),
+                            ),
+                            move |_, cx| {
+                                let _ = unread_waku.update(cx, |waku, cx| {
+                                    for target in &unread_targets {
+                                        waku.mark_session_unread(*target, cx);
+                                    }
+                                });
+                            },
+                        )
                         .shortcut_action(&MarkSessionUnread)
                         .icon("icons/eye-off.svg"),
-                        MenuItem::new(tr!("session.copy_working_directory"), move |_, cx| {
-                            let _ = copy_waku.update(cx, |waku, cx| {
-                                waku.copy_sessions_working_directory(&copy_targets, cx);
-                            });
-                        })
+                        MenuItem::new(
+                            item_label(
+                                "session.copy_working_directory",
+                                "session.copy_working_directory_many",
+                                copy_targets.len(),
+                            ),
+                            move |_, cx| {
+                                let _ = copy_waku.update(cx, |waku, cx| {
+                                    waku.copy_sessions_working_directory(&copy_targets, cx);
+                                });
+                            },
+                        )
                         .shortcut_action(&CopyWorkingDirectory)
                         .icon("icons/copy.svg"),
                     ];
                     if local_workspace {
                         items.push(
-                            MenuItem::new(tr!("session.move_to_worktree"), move |_, cx| {
-                                let _ = move_waku.update(cx, |waku, cx| {
-                                    for target in &move_targets {
-                                        waku.move_session_to_worktree(*target, None, cx);
-                                    }
-                                });
-                            })
+                            MenuItem::new(
+                                item_label(
+                                    "session.move_to_worktree",
+                                    "session.move_to_worktree_many",
+                                    move_targets.len(),
+                                ),
+                                move |_, cx| {
+                                    let _ = move_waku.update(cx, |waku, cx| {
+                                        for target in &move_targets {
+                                            waku.move_session_to_worktree(*target, None, cx);
+                                        }
+                                    });
+                                },
+                            )
                             .icon("icons/fork.svg")
                             .disabled(!any_movable),
                         );
@@ -4139,45 +4183,69 @@ impl Waku {
                     if !all_dormant {
                         let sweep_waku = waku.clone();
                         items.push(
-                            MenuItem::new(tr!("session.sweep"), move |window, cx| {
-                                let _ = sweep_waku.update(cx, |waku, cx| {
-                                    for target in &sweep_targets {
-                                        waku.sweep_session(*target, window, cx);
-                                    }
-                                });
-                            })
+                            MenuItem::new(
+                                item_label("session.sweep", "session.sweep_many", sweep_count),
+                                move |window, cx| {
+                                    let _ = sweep_waku.update(cx, |waku, cx| {
+                                        for target in &sweep_targets {
+                                            waku.sweep_session(*target, window, cx);
+                                        }
+                                    });
+                                },
+                            )
                             .icon("icons/broom.svg"),
                         );
                     }
                     if !restore_targets.is_empty() {
                         let restore_waku = waku.clone();
                         items.push(
-                            MenuItem::new(tr!("session.restore"), move |_, cx| {
-                                let _ = restore_waku.update(cx, |waku, cx| {
-                                    waku.restore_dormant_sessions(&restore_targets, cx);
-                                });
-                            })
+                            MenuItem::new(
+                                item_label(
+                                    "session.restore",
+                                    "session.restore_many",
+                                    restore_targets.len(),
+                                ),
+                                move |_, cx| {
+                                    let _ = restore_waku.update(cx, |waku, cx| {
+                                        waku.restore_dormant_sessions(&restore_targets, cx);
+                                    });
+                                },
+                            )
                             .icon("icons/rotate-cw.svg"),
                         );
                     }
                     items.extend([
-                        MenuItem::new(tr!("session.archive"), move |window, cx| {
-                            let _ = archive_waku.update(cx, |waku, cx| {
-                                for target in &archive_targets {
-                                    waku.archive_session(*target, window, cx)
-                                }
-                            });
-                        })
+                        MenuItem::new(
+                            item_label(
+                                "session.archive",
+                                "session.archive_many",
+                                archive_targets.len(),
+                            ),
+                            move |window, cx| {
+                                let _ = archive_waku.update(cx, |waku, cx| {
+                                    for target in &archive_targets {
+                                        waku.archive_session(*target, window, cx)
+                                    }
+                                });
+                            },
+                        )
                         .shortcut_action(&ArchiveSession)
                         .icon("icons/archive.svg"),
                         MenuItem::Separator,
-                        MenuItem::new(tr!("common.remove"), move |window, cx| {
-                            let _ = remove_waku.update(cx, |waku, cx| {
-                                for target in &remove_targets {
-                                    waku.remove_session(*target, window, cx)
-                                }
-                            });
-                        })
+                        MenuItem::new(
+                            item_label(
+                                "common.remove",
+                                "session.remove_many",
+                                remove_targets.len(),
+                            ),
+                            move |window, cx| {
+                                let _ = remove_waku.update(cx, |waku, cx| {
+                                    for target in &remove_targets {
+                                        waku.remove_session(*target, window, cx)
+                                    }
+                                });
+                            },
+                        )
                         .icon("icons/trash.svg"),
                     ]);
                     items

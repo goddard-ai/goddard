@@ -1356,6 +1356,24 @@ session.restore:
   en: Restore
 session.mark_unread:
   en: Mark as Unread
+session.pin_many:
+  en: "Pin %{count} tasks"
+session.unpin_many:
+  en: "Unpin %{count} tasks"
+session.mark_unread_many:
+  en: "Mark %{count} tasks as unread"
+session.copy_working_directory_many:
+  en: "Copy %{count} working directories"
+session.move_to_worktree_many:
+  en: "Move %{count} tasks to worktrees"
+session.sweep_many:
+  en: "Move %{count} tasks to Dormant"
+session.restore_many:
+  en: "Restore %{count} tasks"
+session.archive_many:
+  en: "Archive %{count} tasks"
+session.remove_many:
+  en: "Remove %{count} tasks"
 
 archive.confirm_title:
   en: Archive this task?
