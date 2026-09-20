@@ -192,8 +192,10 @@ GitHub release at the end — that stays a human's click.
    ```sh
    bun run release --local
    ```
-   The workflow opens a **draft** GitHub release — stop there. A human reviews
-   the notes and publishes it, which is what syncs the assets to R2.
+   The workflow opens a **draft** GitHub release — stop there. The notes open
+   with a `### Downloads` section the `draft-release` job writes itself; its
+   links only resolve once publishing syncs the assets to R2, so verifying them
+   is part of the human review that follows.
 
 The script builds and signs the app via `scripts/bundle.sh release`, verifies
 the bundled JS REPL and computer-use helper, builds the styled DMG, notarizes
@@ -287,12 +289,15 @@ assets — including every signed update feed — to R2.
 
 Every GitHub release's notes open with a **### Downloads** section — direct
 links to the macOS DMG, the Windows installers and portable zips, and the Linux
-tarballs plus the `install.sh` one-liner — above the changelog. The one-liner
+tarballs plus the `install.sh` one-liner — above the changelog. The
+`draft-release` job writes it; keep it when editing a draft's notes. The links
+point at the R2 bucket, so they 404 until publishing syncs the assets — a human
+verifies them as part of reviewing the draft. The one-liner
 pins the release's own tag so it always fetches a published script:
 `curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/<tag>/install.sh | sh`.
-Keep it there when editing a draft's notes, and add it when cutting a release
-by hand — but only on releases whose tag contains `install.sh` at the repo
-root; older tags 404 and must not recommend it.
+When cutting a release by hand, add the section yourself — but only on
+releases whose tag contains `install.sh` at the repo root; older tags 404 and
+must not recommend it.
 
 `appcast.xml`, the architecture-specific Linux/Windows appcasts,
 `latest-linux.txt`, and `latest-windows.txt` are the bucket's mutable pointers

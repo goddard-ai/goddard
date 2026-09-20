@@ -483,6 +483,25 @@ jobs:
             );
           '
 
+      # Downloads sit above the changelog. They link the R2 bucket rather than
+      # GitHub assets, so they 404 until publishing the draft syncs them —
+      # verifying them is part of the human review. The install.sh URL pins the
+      # release tag so the script it fetches always matches this version.
+      - name: Prepend download links
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          cat > downloads.md <<EOF
+          ### Downloads
+
+          - **macOS** — [Goddard-${VERSION}.dmg](https://releases.goddardai.org/Goddard-${VERSION}.dmg)
+          - **Windows** — [x64 installer](https://releases.goddardai.org/Goddard-${VERSION}-x86_64-Setup.exe) · [arm64 installer](https://releases.goddardai.org/Goddard-${VERSION}-aarch64-Setup.exe) · [x64 zip](https://releases.goddardai.org/Goddard-${VERSION}-x86_64-pc-windows-msvc.zip) · [arm64 zip](https://releases.goddardai.org/Goddard-${VERSION}-aarch64-pc-windows-msvc.zip)
+          - **Linux** — \`curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/${TAG}/install.sh | sh\` · [x64 tarball](https://releases.goddardai.org/Goddard-${VERSION}-x86_64-unknown-linux-gnu.tar.gz) · [arm64 tarball](https://releases.goddardai.org/Goddard-${VERSION}-aarch64-unknown-linux-gnu.tar.gz)
+          EOF
+          cat downloads.md release-notes.md > notes.md
+          mv notes.md release-notes.md
+
       - name: Draft the release
         uses: softprops/action-gh-release@v3
         with:
