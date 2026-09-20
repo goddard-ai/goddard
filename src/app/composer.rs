@@ -5899,6 +5899,7 @@ impl Waku {
             .max_w(px(180.0))
             .when(can_pick_worktree, |chip| {
                 chip.tooltip(tr!("menu.toggle_workspace"))
+                    .shortcut_action(&ToggleWorkspace)
             });
         let worktree_selector = if can_pick_worktree {
             // The base entries describe the project's ordinary checkout, so
