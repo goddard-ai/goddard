@@ -102,11 +102,7 @@ pub fn authorize(
     entry: &CatalogEntry,
     variant: &CatalogVariant,
 ) -> anyhow::Result<StoredCredential> {
-    let issuer = url::Url::parse(variant.url)
-        .and_then(|url| url.join("/"))
-        .context("catalog entry has an invalid URL")?
-        .to_string();
-    let metadata = discover(&issuer)?;
+    let (metadata, resource) = discover(variant.url)?;
     let (client_id, client_secret) = match (&entry.oauth_client_id, &metadata.registration_endpoint)
     {
         (Some(id), _) => (id.to_string(), entry.oauth_client_secret.map(str::to_owned)),
@@ -121,7 +117,9 @@ pub fn authorize(
         TcpListener::bind("127.0.0.1:0").context("could not bind the OAuth callback listener")?;
     listener.set_nonblocking(true)?;
     let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{port}{CALLBACK_PATH}");
+    // `localhost` rather than `127.0.0.1`: some providers (Supabase) reject
+    // loopback-IP redirect URIs while accepting the `localhost` hostname.
+    let redirect_uri = format!("http://localhost:{port}{CALLBACK_PATH}");
 
     let verifier = random_urlsafe(32);
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -139,7 +137,7 @@ pub fn authorize(
             .append_pair("code_challenge", &challenge)
             .append_pair("code_challenge_method", "S256")
             .append_pair("state", &state)
-            .append_pair("resource", &issuer);
+            .append_pair("resource", &resource);
         if let Some(scopes) = variant.scopes {
             query.append_pair("scope", scopes);
         }
@@ -155,7 +153,7 @@ pub fn authorize(
         &code,
         &redirect_uri,
         &verifier,
-        &issuer,
+        &resource,
     )?;
     let credential = StoredCredential::OAuth {
         client_id,
@@ -180,42 +178,119 @@ struct ServerMetadata {
     registration_endpoint: Option<String>,
 }
 
-fn discover(issuer: &str) -> anyhow::Result<ServerMetadata> {
-    let issuer = issuer.trim_end_matches('/');
-    for path in [
-        format!("{issuer}/.well-known/oauth-authorization-server"),
-        format!("{issuer}/.well-known/openid-configuration"),
-    ] {
-        let job = CurlJob {
-            method: "GET",
-            url: &path,
-            headers: &[("Accept", "application/json".to_owned())],
-            body_file: None,
-        };
-        let Ok(response) = http::request(&job) else {
+#[derive(Deserialize)]
+struct ResourceMetadata {
+    #[serde(default)]
+    resource: Option<String>,
+    #[serde(default)]
+    authorization_servers: Vec<String>,
+}
+
+/// Resolve the authorization server for `server_url` per RFC 9728: the
+/// resource's own metadata names the servers that issue its tokens — which
+/// is not always the same host (Supabase and Atlassian delegate elsewhere).
+/// Falls back to metadata at the server's origin. Returns the AS metadata
+/// and the RFC 8707 `resource` value to request a token for.
+fn discover(server_url: &str) -> anyhow::Result<(ServerMetadata, String)> {
+    let server = url::Url::parse(server_url).context("catalog entry has an invalid URL")?;
+    for url in protected_resource_urls(&server) {
+        let Ok(document) = get_json::<ResourceMetadata>(&url) else {
             continue;
         };
-        if response.status == 200 {
-            return serde_json::from_slice(&response.body)
-                .context("authorization server metadata is unreadable");
+        for issuer in &document.authorization_servers {
+            if let Ok(metadata) = discover_as(issuer) {
+                let resource = document
+                    .resource
+                    .clone()
+                    .unwrap_or_else(|| server_url.to_owned());
+                return Ok((metadata, resource));
+            }
+        }
+    }
+    let issuer = server
+        .join("/")
+        .context("catalog entry has an invalid URL")?
+        .to_string();
+    Ok((discover_as(&issuer)?, server_url.to_owned()))
+}
+
+/// Candidate `/.well-known/oauth-protected-resource` documents: path-aware
+/// first per RFC 9728, then the origin root.
+fn protected_resource_urls(server: &url::Url) -> Vec<String> {
+    let origin = server.origin().ascii_serialization();
+    let path = if server.path() == "/" {
+        ""
+    } else {
+        server.path()
+    };
+    let mut urls = vec![format!("{origin}/.well-known/oauth-protected-resource{path}")];
+    if !path.is_empty() {
+        urls.push(format!("{origin}/.well-known/oauth-protected-resource"));
+    }
+    urls
+}
+
+fn discover_as(issuer: &str) -> anyhow::Result<ServerMetadata> {
+    for url in metadata_urls(issuer) {
+        if let Ok(metadata) = get_json(&url) {
+            return Ok(metadata);
         }
     }
     bail!("{issuer} does not publish OAuth metadata")
 }
 
+/// Candidate authorization-server metadata documents for `issuer`. RFC 8414
+/// puts `.well-known` between the host and the issuer path; some servers
+/// append it after the path instead.
+fn metadata_urls(issuer: &str) -> Vec<String> {
+    let issuer = issuer.trim_end_matches('/');
+    let mut urls = Vec::new();
+    for well_known in ["oauth-authorization-server", "openid-configuration"] {
+        if let Ok(url) = url::Url::parse(issuer) {
+            let origin = url.origin().ascii_serialization();
+            let path = url.path().trim_end_matches('/');
+            let candidate = format!("{origin}/.well-known/{well_known}{path}");
+            if !urls.contains(&candidate) {
+                urls.push(candidate);
+            }
+        }
+        let candidate = format!("{issuer}/.well-known/{well_known}");
+        if !urls.contains(&candidate) {
+            urls.push(candidate);
+        }
+    }
+    urls
+}
+
+fn get_json<T: for<'de> Deserialize<'de>>(url: &str) -> anyhow::Result<T> {
+    let job = CurlJob {
+        method: "GET",
+        url,
+        headers: &[("Accept", "application/json".to_owned())],
+        body_file: None,
+        follow: true,
+    };
+    let response = http::request(&job)?;
+    if response.status != 200 {
+        bail!("{url} returned {}", response.status);
+    }
+    serde_json::from_slice(&response.body).context("OAuth metadata is unreadable")
+}
+
 fn register_client(endpoint: &str) -> anyhow::Result<(String, Option<String>)> {
     let body = serde_json::json!({
         "client_name": "Goddard",
-        "redirect_uris": ["http://127.0.0.1/callback", "http://localhost/callback"],
+        "redirect_uris": [
+            format!("http://127.0.0.1{CALLBACK_PATH}"),
+            format!("http://localhost{CALLBACK_PATH}"),
+        ],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
     });
-    // Registration endpoints disagree on whether redirect URIs may be
-    // dynamic; the loopback listener binds a random port, so the registered
-    // URIs above are placeholders some servers ignore. Servers that enforce
-    // exact-match redirect URIs reject the flow at authorize time and the
-    // credential simply never lands — the tile stays at NeedsAuth.
+    // Providers that enforce redirect URIs follow RFC 8252: any loopback
+    // port is accepted, but the path must match a registered URI exactly —
+    // so these must carry CALLBACK_PATH, not a placeholder.
     let tmp = std::env::temp_dir().join(format!("goddard-oauth-{}", Uuid::new_v4().simple()));
     std::fs::write(&tmp, serde_json::to_vec(&body)?)?;
     let job = CurlJob {
@@ -226,6 +301,7 @@ fn register_client(endpoint: &str) -> anyhow::Result<(String, Option<String>)> {
             ("Accept", "application/json".to_owned()),
         ],
         body_file: Some(&tmp),
+        follow: false,
     };
     let response = http::request(&job);
     let _ = std::fs::remove_file(&tmp);
@@ -273,6 +349,7 @@ fn token_request(
             ("Accept", "application/json".to_owned()),
         ],
         body_file: Some(&tmp),
+        follow: false,
     };
     let response = http::request(&job);
     let _ = std::fs::remove_file(&tmp);
@@ -457,4 +534,43 @@ fn open_browser(url: &str) -> anyhow::Result<()> {
         .spawn()
         .context("could not open the browser for authorization")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protected_resource_urls_are_path_aware_then_root() {
+        let server = url::Url::parse("https://mcp.atlassian.com/v2/mcp").unwrap();
+        assert_eq!(
+            protected_resource_urls(&server),
+            [
+                "https://mcp.atlassian.com/.well-known/oauth-protected-resource/v2/mcp",
+                "https://mcp.atlassian.com/.well-known/oauth-protected-resource",
+            ]
+        );
+    }
+
+    #[test]
+    fn protected_resource_urls_drops_the_root_slash() {
+        let server = url::Url::parse("https://mcp.stripe.com").unwrap();
+        assert_eq!(
+            protected_resource_urls(&server),
+            ["https://mcp.stripe.com/.well-known/oauth-protected-resource"]
+        );
+    }
+
+    #[test]
+    fn metadata_urls_cover_both_well_known_placements() {
+        assert_eq!(
+            metadata_urls("https://auth.monday.com/mcp"),
+            [
+                "https://auth.monday.com/.well-known/oauth-authorization-server/mcp",
+                "https://auth.monday.com/mcp/.well-known/oauth-authorization-server",
+                "https://auth.monday.com/.well-known/openid-configuration/mcp",
+                "https://auth.monday.com/mcp/.well-known/openid-configuration",
+            ]
+        );
+    }
 }

@@ -20,6 +20,9 @@ pub struct CurlJob<'a> {
     pub headers: &'a [(&'a str, String)],
     /// Request body, already written to a file by the caller.
     pub body_file: Option<&'a Path>,
+    /// Follow redirects. Only enable for requests that carry no
+    /// credentials — curl forwards headers to the redirect target.
+    pub follow: bool,
 }
 
 /// Spawn curl for `job` with stdin config written. The child's stdout is the
@@ -29,6 +32,9 @@ pub struct CurlJob<'a> {
 pub fn spawn_with(job: &CurlJob<'_>, stderr: Stdio) -> anyhow::Result<Child> {
     let mut config = String::new();
     config.push_str("silent\nshow-error\nno-buffer\nhttp1.1\ninclude\n");
+    if job.follow {
+        config.push_str("location\nmax-redirs = 5\n");
+    }
     config.push_str(&format!("request = {}\n", config_quote(job.method)));
     config.push_str(&format!("url = {}\n", config_quote(job.url)));
     for (name, value) in job.headers {
@@ -83,33 +89,29 @@ pub fn request(job: &CurlJob<'_>) -> anyhow::Result<CurlResponse> {
     collect(spawn_with(job, Stdio::piped())?)
 }
 
-/// Parse `curl -i` output, skipping interim 1xx blocks.
+/// Parse `curl -i` output into the final response. With `location` set the
+/// output is a chain of response blocks — interim 1xx, each redirect, then
+/// the real one — so the last parseable head wins.
 fn parse_response(raw: &[u8]) -> anyhow::Result<CurlResponse> {
-    let mut rest = raw;
-    loop {
-        let split = rest
-            .windows(4)
-            .position(|w| w == b"\r\n\r\n")
-            .ok_or_else(|| anyhow!("curl output had no header terminator"))?;
-        let (head, body) = rest.split_at(split);
-        let body = &body[4..];
-        let head = String::from_utf8_lossy(head);
-        let mut lines = head.lines();
-        let status_line = lines.next().unwrap_or_default();
-        let status = status_line
-            .split_whitespace()
-            .nth(1)
-            .and_then(|code| code.parse::<u16>().ok())
-            .ok_or_else(|| anyhow!("could not parse curl status line: {status_line}"))?;
-        if (100..200).contains(&status) {
-            rest = body;
-            continue;
+    let mut offset = 0;
+    let mut response = None;
+    while let Some(split) = raw[offset..].windows(4).position(|w| w == b"\r\n\r\n") {
+        let head = String::from_utf8_lossy(&raw[offset..offset + split]);
+        offset += split + 4;
+        let status = head
+            .lines()
+            .next()
+            .filter(|line| line.starts_with("HTTP/"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok());
+        if let Some(status) = status {
+            response = Some(CurlResponse {
+                status,
+                body: raw[offset..].to_vec(),
+            });
         }
-        return Ok(CurlResponse {
-            status,
-            body: body.to_vec(),
-        });
     }
+    response.ok_or_else(|| anyhow!("curl output had no header terminator"))
 }
 
 fn config_quote(value: &str) -> String {
@@ -126,4 +128,33 @@ pub fn body_file(dir: &Path, name: &str) -> anyhow::Result<PathBuf> {
     crate::fs_ext::create_private_dir_all(&dir)?;
     let path = dir.join(name);
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_response_returns_last_block_after_redirects() {
+        let raw = b"HTTP/1.1 302 Found\r\nLocation: /next\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":true}";
+        let response = parse_response(raw).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"{\"ok\":true}");
+    }
+
+    #[test]
+    fn parse_response_skips_interim_1xx() {
+        let raw = b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\n\r\nbody";
+        let response = parse_response(raw).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"body");
+    }
+
+    #[test]
+    fn parse_response_ignores_non_response_blocks() {
+        let raw = b"HTTP/1.1 200 OK\r\n\r\npart\r\n\r\nnot HTTP 404 here";
+        let response = parse_response(raw).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"part\r\n\r\nnot HTTP 404 here");
+    }
 }

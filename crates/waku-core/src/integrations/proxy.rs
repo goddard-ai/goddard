@@ -276,6 +276,7 @@ fn relay(
         url: &upstream.url,
         headers: &headers,
         body_file: body_file.as_deref(),
+        follow: false,
     };
     let mut child = match http::spawn_with(&job, std::process::Stdio::null()) {
         Ok(child) => child,
