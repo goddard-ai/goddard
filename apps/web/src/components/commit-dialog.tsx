@@ -18,8 +18,16 @@ import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import { providerMeta } from '@/components/waku-icon'
 
 type CommitAction = 'commit' | 'commitAndPush' | 'push'
+
+// The daemon pins commit-subject generation to these cheap tiers regardless
+// of the session model (waku-protocol CLAUDE_COMMIT_MODEL/CODEX_COMMIT_MODEL).
+const COMMIT_GENERATION_MODELS: Partial<Record<AgentSession['provider'], string>> = {
+  claude: 'claude-haiku-4-5',
+  codex: 'gpt-5.6-luna',
+}
 
 export function CommitDialog({
   open,
@@ -39,7 +47,7 @@ export function CommitDialog({
   const queryClient = useQueryClient()
   const [message, setMessage] = useState('')
   const [includeUnstaged, setIncludeUnstaged] = useState(true)
-  const [pending, setPending] = useState<CommitAction | null>(null)
+  const [pending, setPending] = useState<CommitAction | 'generate' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const commitShortcut = usePrimaryShortcut('⌘↩', 'Ctrl+Enter')
   const cwd = session && project ? sessionCwd(session, project) : undefined
@@ -68,36 +76,64 @@ export function CommitDialog({
     snapshot.data?.has_staged || (includeUnstaged && snapshot.data?.has_unstaged),
   )
   const canPush = !snapshot.isPending && Boolean(snapshot.data?.can_push)
+  const hasMessage = Boolean(message.trim())
+  const generationLabel = session
+    ? [providerMeta(session.provider).name,
+       COMMIT_GENERATION_MODELS[session.provider] ?? session.model]
+      .filter(Boolean)
+      .join(' · ')
+    : null
+
+  // Generate a subject into the field and stop — the user reviews or edits
+  // it, then commits with a separate action. Generation never commits.
+  async function generate() {
+    if (!client || !config || !cwd || pending) return
+    if (!session) {
+      setError(t('commit.no_task'))
+      return
+    }
+    setPending('generate')
+    setError(null)
+    try {
+      const settings = await loadDaemonSettings(client)
+      const probe = await probeProvider(client, session.provider, settings)
+      if (!probe.installed || !probe.path) {
+        throw new Error(t('commit.agent_unavailable'))
+      }
+      const commitMessage = await generateWorkspaceCommitMessage(
+        client,
+        cwd,
+        includeUnstaged,
+        {
+          provider: session.provider,
+          binary: probe.path,
+          model: session.model ?? null,
+          reasoning_effort: session.reasoning_effort ?? null,
+        },
+      )
+      setMessage(commitMessage)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setPending(null)
+    }
+  }
 
   async function run(action: CommitAction) {
     if (!client || !config || !cwd || pending) return
+    const commitMessage = message.trim()
+    // A blank message has nothing to commit — the confirm becomes a
+    // generate request instead, and the subject lands for review.
+    if (action !== 'push' && !commitMessage) {
+      await generate()
+      return
+    }
     setPending(action)
     setError(null)
     try {
       if (action === 'push') {
         await pushWorkspace(client, cwd)
       } else {
-        let commitMessage = message.trim()
-        if (!commitMessage) {
-          if (!session) throw new Error(t('commit.no_task'))
-          const settings = await loadDaemonSettings(client)
-          const probe = await probeProvider(client, session.provider, settings)
-          if (!probe.installed || !probe.path) {
-            throw new Error(t('commit.agent_unavailable'))
-          }
-          commitMessage = await generateWorkspaceCommitMessage(
-            client,
-            cwd,
-            includeUnstaged,
-            {
-              provider: session.provider,
-              binary: probe.path,
-              model: session.model ?? null,
-              reasoning_effort: session.reasoning_effort ?? null,
-            },
-          )
-          setMessage(commitMessage)
-        }
         await commitWorkspace(client, cwd, commitMessage, includeUnstaged, action === 'commitAndPush')
       }
       await Promise.all([
@@ -136,9 +172,10 @@ export function CommitDialog({
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canCommit) {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canCommit && !pending) {
               event.preventDefault()
-              void run('commit')
+              // Blank field: the confirm generates instead of committing.
+              void (hasMessage ? run('commit') : generate())
             }
           }}
         />
@@ -173,20 +210,23 @@ export function CommitDialog({
         <div className="flex flex-col gap-0.5 p-2">
           <CommitActionRow
             enabled={canCommit}
+            icon="sparkle"
+            label={t(pending === 'generate' ? 'commit.generating_message' : 'commit.generate')}
+            pending={pending === 'generate'}
+            onClick={() => void generate()}
+          />
+          <CommitActionRow
+            enabled={canCommit && hasMessage}
             icon="gitCommitHorizontal"
-            label={pending === 'commit'
-              ? t(message.trim() ? 'commit.committing' : 'commit.generating_message')
-              : t('commit.commit')}
+            label={t(pending === 'commit' ? 'commit.committing' : 'commit.commit')}
             pending={pending === 'commit'}
             shortcut={commitShortcut}
             onClick={() => void run('commit')}
           />
           <CommitActionRow
-            enabled={canCommit}
+            enabled={canCommit && hasMessage}
             icon="cloudUpload"
-            label={pending === 'commitAndPush'
-              ? t(message.trim() ? 'commit.committing_and_pushing' : 'commit.generating_message')
-              : t('commit.commit_and_push')}
+            label={t(pending === 'commitAndPush' ? 'commit.committing_and_pushing' : 'commit.commit_and_push')}
             pending={pending === 'commitAndPush'}
             onClick={() => void run('commitAndPush')}
           />
@@ -198,6 +238,11 @@ export function CommitDialog({
             onClick={() => void run('push')}
           />
         </div>
+        {generationLabel && (
+          <p className="px-5 pb-2.5 text-[11.5px] text-[var(--text-ghost)]">
+            {t('commit.generates_with', { name: generationLabel })}
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   )

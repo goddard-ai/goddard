@@ -3185,7 +3185,7 @@ pub use command_palette::{
     Confirm, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown, SelectPageUp,
     SelectPrevious,
 };
-pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog};
+pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog, GenerateCommitDialog};
 pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;

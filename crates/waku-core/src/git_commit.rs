@@ -19,6 +19,7 @@ use crate::model::ProviderKind;
 pub use waku_protocol::git::{
     AgentInvocation, ArchivePreview, CheckoutStatus, CommitSnapshot as Snapshot, StatusEntry,
 };
+use waku_protocol::git::{CLAUDE_COMMIT_MODEL, CODEX_COMMIT_MODEL};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -30,11 +31,9 @@ const MAX_ERROR_CHARS: usize = 4_000;
 
 // A commit subject is a fixed classification over a diff that is already in the
 // prompt, so it does not need — or benefit from — the model the task runs on.
-// Where a provider exposes a cheap tier by name, generation is pinned to it and
-// to the lowest effort that tier's API accepts, whatever the session selected.
-const CLAUDE_COMMIT_MODEL: &str = "claude-haiku-4-5";
+// The pinned model ids live in waku-protocol so clients can display them; the
+// pin extends here to the lowest effort each tier's API accepts.
 const CLAUDE_COMMIT_EFFORT: &str = "low";
-const CODEX_COMMIT_MODEL: &str = "gpt-5.6-luna";
 // `codex exec` has no effort flag, so the config override is the only route.
 // `none` is the floor: `minimal` is rejected by the API for this model with
 // `unsupported_value`, listing `none` as the lowest it accepts.

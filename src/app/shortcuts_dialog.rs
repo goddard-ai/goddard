@@ -719,6 +719,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("CommitDialog"),
                 ),
                 bound(
+                    tr!("shortcuts.generate_message"),
+                    commit_dialog::GenerateCommitDialog,
+                    Some("CommitDialog"),
+                ),
+                bound(
                     tr!("shortcuts.confirm_dialog"),
                     goal_dialog::ConfirmGoalDialog,
                     Some("GoalDialog"),

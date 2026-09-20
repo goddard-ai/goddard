@@ -9,7 +9,7 @@ use super::*;
 
 actions!(
     waku_commit_dialog,
-    [ConfirmCommitDialog, DismissCommitDialog]
+    [ConfirmCommitDialog, DismissCommitDialog, GenerateCommitDialog]
 );
 
 const DIALOG_CONTEXT: &str = "CommitDialog";
@@ -23,6 +23,8 @@ pub fn init(cx: &mut App) {
             Some(DIALOG_INPUT_CONTEXT),
         ),
         KeyBinding::new("secondary-enter", ConfirmCommitDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("secondary-g", GenerateCommitDialog, Some(DIALOG_INPUT_CONTEXT)),
+        KeyBinding::new("secondary-g", GenerateCommitDialog, Some(DIALOG_CONTEXT)),
         KeyBinding::new("escape", DismissCommitDialog, Some(DIALOG_CONTEXT)),
     ]);
 }
@@ -36,7 +38,7 @@ enum CommitAction {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CommitPending {
-    Generating(CommitAction),
+    Generating,
     Git(CommitAction),
 }
 
@@ -54,7 +56,7 @@ impl CommitOperationState {
 
 fn commit_pending_status_label(pending: CommitPending) -> String {
     match pending {
-        CommitPending::Generating(_) => tr!("commit.generating_message"),
+        CommitPending::Generating => tr!("commit.generating_message"),
         CommitPending::Git(CommitAction::Commit) => tr!("commit.committing"),
         CommitPending::Git(CommitAction::CommitAndPush) => {
             tr!("commit.committing_and_pushing")
@@ -73,6 +75,7 @@ pub(super) struct CommitDialogState {
     snapshot_loading: bool,
     error: Option<String>,
     include_focus: FocusHandle,
+    generate_focus: FocusHandle,
     commit_focus: FocusHandle,
     commit_push_focus: FocusHandle,
     push_focus: FocusHandle,
@@ -167,6 +170,7 @@ impl Waku {
             snapshot_loading: true,
             error: None,
             include_focus: cx.focus_handle(),
+            generate_focus: cx.focus_handle(),
             commit_focus: cx.focus_handle(),
             commit_push_focus: cx.focus_handle(),
             push_focus: cx.focus_handle(),
@@ -222,6 +226,16 @@ impl Waku {
     }
 
     fn close_commit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Dismissing mid-generation cancels it: the reply's staleness guard
+        // then drops the result instead of filling a closed dialog. A git
+        // phase already fired, so it keeps its operation and reports by toast.
+        if self
+            .commit_operation
+            .as_ref()
+            .is_some_and(|operation| operation.pending == CommitPending::Generating)
+        {
+            self.commit_operation = None;
+        }
         if self.commit_dialog.take().is_none() {
             return;
         }
@@ -276,39 +290,13 @@ impl Waku {
         let id = dialog.id;
         let workspace = dialog.workspace.clone();
         let include_unstaged = dialog.include_unstaged;
-        let invocation = dialog.invocation.clone();
         let message = dialog.message.read(cx).content().trim().to_owned();
         let window_handle = window.window_handle();
 
+        // A blank message has nothing to commit — the confirm becomes a
+        // generate request instead, and the subject lands for review.
         if action != CommitAction::Push && message.is_empty() {
-            let Some(invocation) = invocation else {
-                if let Some(dialog) = self.commit_dialog.as_mut() {
-                    dialog.error = Some(tr!("commit.agent_unavailable"));
-                }
-                cx.notify();
-                return;
-            };
-            if let Some(dialog) = self.commit_dialog.as_mut() {
-                dialog.error = None;
-                dialog
-                    .message
-                    .update(cx, |message, _| message.set_read_only(true));
-            }
-            self.commit_operation = Some(CommitOperationState {
-                id,
-                workspace: workspace.clone(),
-                pending: CommitPending::Generating(action),
-            });
-            self.spawn_commit_message_generation(
-                id,
-                action,
-                workspace,
-                include_unstaged,
-                invocation,
-                window_handle,
-                cx,
-            );
-            cx.notify();
+            self.request_commit_generation(cx);
             return;
         }
 
@@ -335,14 +323,50 @@ impl Waku {
         cx.notify();
     }
 
+    /// Generate a subject into the message field and stop — the user reviews
+    /// or edits it, then commits with a separate action. Generation never
+    /// chains into git.
+    fn request_commit_generation(&mut self, cx: &mut Context<Self>) {
+        if self.commit_operation.is_some() {
+            return;
+        }
+        let Some(dialog) = self.commit_dialog.as_ref() else {
+            return;
+        };
+        if !dialog.can_commit() {
+            return;
+        }
+        let id = dialog.id;
+        let workspace = dialog.workspace.clone();
+        let include_unstaged = dialog.include_unstaged;
+        let Some(invocation) = dialog.invocation.clone() else {
+            if let Some(dialog) = self.commit_dialog.as_mut() {
+                dialog.error = Some(tr!("commit.agent_unavailable"));
+            }
+            cx.notify();
+            return;
+        };
+        if let Some(dialog) = self.commit_dialog.as_mut() {
+            dialog.error = None;
+            dialog
+                .message
+                .update(cx, |message, _| message.set_read_only(true));
+        }
+        self.commit_operation = Some(CommitOperationState {
+            id,
+            workspace: workspace.clone(),
+            pending: CommitPending::Generating,
+        });
+        self.spawn_commit_message_generation(id, workspace, include_unstaged, invocation, cx);
+        cx.notify();
+    }
+
     fn spawn_commit_message_generation(
         &mut self,
         id: Uuid,
-        action: CommitAction,
         workspace: PathBuf,
         include_unstaged: bool,
         invocation: crate::git_commit::AgentInvocation,
-        window_handle: gpui::AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
         let Some(workspace_client) = self.workspace_client_for_path(&workspace) else {
@@ -373,35 +397,24 @@ impl Waku {
                 let current = waku.commit_operation.as_ref().is_some_and(|operation| {
                     operation.id == id
                         && operation.workspace == workspace
-                        && operation.pending == CommitPending::Generating(action)
+                        && operation.pending == CommitPending::Generating
                 });
                 if !current {
                     return;
                 }
+                waku.commit_operation = None;
                 match result {
                     Ok(message) => {
-                        if let Some(operation) = waku.commit_operation.as_mut() {
-                            operation.pending = CommitPending::Git(action);
-                        }
                         if let Some(dialog) =
                             waku.commit_dialog.as_mut().filter(|dialog| dialog.id == id)
                         {
-                            dialog
-                                .message
-                                .update(cx, |input, cx| input.set_content(message.clone(), cx));
+                            dialog.message.update(cx, |input, cx| {
+                                input.set_content(message.clone(), cx);
+                                input.set_read_only(false);
+                            });
                         }
-                        waku.spawn_git_action(
-                            id,
-                            action,
-                            workspace,
-                            message,
-                            include_unstaged,
-                            window_handle,
-                            cx,
-                        );
                     }
                     Err(error) => {
-                        waku.commit_operation = None;
                         if let Some(dialog) =
                             waku.commit_dialog.as_mut().filter(|dialog| dialog.id == id)
                         {
@@ -555,10 +568,26 @@ impl Waku {
             .map(|operation| operation.pending);
         let include_enabled = pending.is_none();
         let (additions, deletions) = dialog.displayed_counts();
-        let can_commit = pending.is_none() && dialog.can_commit();
+        let message_blank = dialog.message.read(cx).content().trim().is_empty();
+        let can_commit = pending.is_none() && dialog.can_commit() && !message_blank;
+        let can_generate = pending.is_none() && dialog.can_commit();
         let can_push = pending.is_none() && dialog.can_push();
         let pending_status = pending.map(commit_pending_status_label);
         let error = dialog.error.clone();
+        let generation_label = dialog.invocation.as_ref().map(|invocation| {
+            let provider = invocation.provider;
+            match crate::git_commit::commit_generation_model(
+                provider,
+                invocation.model.as_deref(),
+            ) {
+                Some(model) => format!(
+                    "{} · {}",
+                    provider.display_name(),
+                    self.model_display_name(provider, Some(model))
+                ),
+                None => provider.display_name().to_owned(),
+            }
+        });
         let weak = cx.entity().downgrade();
 
         let include = {
@@ -649,11 +678,26 @@ impl Waku {
                 })
         };
 
-        let commit_active = pending.is_some_and(|pending| match pending {
-            CommitPending::Generating(action) | CommitPending::Git(action) => {
-                action == CommitAction::Commit
-            }
-        });
+        let generate_active = pending == Some(CommitPending::Generating);
+        let generate = render_commit_action_row(
+            "commit-dialog-generate",
+            &dialog.generate_focus,
+            "icons/sparkle.svg",
+            if generate_active {
+                pending_status
+                    .clone()
+                    .unwrap_or_else(|| tr!("commit.generate"))
+            } else {
+                tr!("commit.generate")
+            },
+            can_generate,
+            generate_active,
+            Some(crate::platform::primary_shortcut("⌘G", "Ctrl+G")),
+            CommitRowTarget::Generate,
+            weak.clone(),
+            &theme,
+        );
+        let commit_active = pending == Some(CommitPending::Git(CommitAction::Commit));
         let commit = render_commit_action_row(
             "commit-dialog-commit",
             &dialog.commit_focus,
@@ -668,15 +712,12 @@ impl Waku {
             can_commit,
             commit_active,
             Some(crate::platform::primary_shortcut("⌘↩", "Ctrl+Enter")),
-            CommitAction::Commit,
+            CommitRowTarget::Action(CommitAction::Commit),
             weak.clone(),
             &theme,
         );
-        let commit_and_push_active = pending.is_some_and(|pending| match pending {
-            CommitPending::Generating(action) | CommitPending::Git(action) => {
-                action == CommitAction::CommitAndPush
-            }
-        });
+        let commit_and_push_active =
+            pending == Some(CommitPending::Git(CommitAction::CommitAndPush));
         let commit_and_push = render_commit_action_row(
             "commit-dialog-commit-and-push",
             &dialog.commit_push_focus,
@@ -691,7 +732,7 @@ impl Waku {
             can_commit,
             commit_and_push_active,
             None,
-            CommitAction::CommitAndPush,
+            CommitRowTarget::Action(CommitAction::CommitAndPush),
             weak.clone(),
             &theme,
         );
@@ -708,7 +749,7 @@ impl Waku {
             can_push,
             push_active,
             None,
-            CommitAction::Push,
+            CommitRowTarget::Action(CommitAction::Push),
             weak,
             &theme,
         );
@@ -718,6 +759,9 @@ impl Waku {
             .key_context(DIALOG_CONTEXT)
             .on_action(cx.listener(|waku, _: &ConfirmCommitDialog, window, cx| {
                 waku.request_commit_action(CommitAction::Commit, window, cx)
+            }))
+            .on_action(cx.listener(|waku, _: &GenerateCommitDialog, _, cx| {
+                waku.request_commit_generation(cx)
             }))
             .on_action(cx.listener(|waku, _: &DismissCommitDialog, window, cx| {
                 waku.close_commit_dialog(window, cx)
@@ -775,10 +819,21 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .gap(px(2.0))
+                    .child(generate)
                     .child(commit)
                     .child(commit_and_push)
                     .child(push),
-            );
+            )
+            .when_some(generation_label, |card, label| {
+                card.child(
+                    div()
+                        .px(px(20.0))
+                        .pb(px(10.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("commit.generates_with", name = label)),
+                )
+            });
 
         let scrim = if theme.is_dark {
             gpui::hsla(0.0, 0.0, 0.0, 0.34)
@@ -808,6 +863,14 @@ impl Waku {
     }
 }
 
+/// What an action row fires — a git action, or message generation, which
+/// fills the field and stops for review.
+#[derive(Clone, Copy)]
+enum CommitRowTarget {
+    Action(CommitAction),
+    Generate,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_commit_action_row(
     id: &'static str,
@@ -817,7 +880,7 @@ fn render_commit_action_row(
     enabled: bool,
     active: bool,
     shortcut: Option<&'static str>,
-    action: CommitAction,
+    target: CommitRowTarget,
     weak: WeakEntity<Waku>,
     theme: &Theme,
 ) -> Stateful<Div> {
@@ -878,16 +941,22 @@ fn render_commit_action_row(
         })
         .when(enabled, |row| {
             row.on_click(move |_, window, cx| {
-                let _ = click_weak.update(cx, |waku, cx| {
-                    waku.request_commit_action(action, window, cx)
+                let _ = click_weak.update(cx, |waku, cx| match target {
+                    CommitRowTarget::Action(action) => {
+                        waku.request_commit_action(action, window, cx)
+                    }
+                    CommitRowTarget::Generate => waku.request_commit_generation(cx),
                 });
             })
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
                 if !event.keystroke.modifiers.modified()
                     && matches!(event.keystroke.key.as_str(), "enter" | "space")
                 {
-                    let _ = key_weak.update(cx, |waku, cx| {
-                        waku.request_commit_action(action, window, cx)
+                    let _ = key_weak.update(cx, |waku, cx| match target {
+                        CommitRowTarget::Action(action) => {
+                            waku.request_commit_action(action, window, cx)
+                        }
+                        CommitRowTarget::Generate => waku.request_commit_generation(cx),
                     });
                     cx.stop_propagation();
                 }

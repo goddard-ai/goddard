@@ -323,6 +323,25 @@ pub struct AgentInvocation {
     pub reasoning_effort: Option<String>,
 }
 
+// A commit subject is a fixed classification over a diff that is already in
+// the prompt, so it does not need — or benefit from — the model the task
+// runs on. These providers pin generation to a named cheap tier.
+pub const CLAUDE_COMMIT_MODEL: &str = "claude-haiku-4-5";
+pub const CODEX_COMMIT_MODEL: &str = "gpt-5.6-luna";
+
+/// The model a commit-message generation actually invokes: the pinned tier
+/// for providers that pin one, otherwise the requested model.
+pub fn commit_generation_model<'a>(
+    provider: ProviderKind,
+    requested: Option<&'a str>,
+) -> Option<&'a str> {
+    match provider {
+        ProviderKind::Claude => Some(CLAUDE_COMMIT_MODEL),
+        ProviderKind::Codex => Some(CODEX_COMMIT_MODEL),
+        _ => requested,
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct CreatedWorktree {
     #[ts(type = "string")]

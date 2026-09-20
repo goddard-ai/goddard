@@ -2917,6 +2917,10 @@ commit.commit_and_push:
   en: Commit and push
 commit.push:
   en: Push
+commit.generate:
+  en: Generate message
+commit.generates_with:
+  en: Generates with %{name}
 commit.generating_message:
   en: Generating commit message…
 commit.committing:
@@ -4023,6 +4027,8 @@ shortcuts.confirm_kill_terminal:
   en: Confirm Kill Terminal
 shortcuts.dismiss_dialog:
   en: Dismiss Dialog
+shortcuts.generate_message:
+  en: Generate Message
 shortcuts.bigpicture_move:
   en: Focus Left Session
 shortcuts.bigpicture_move_right:

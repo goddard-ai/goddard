@@ -167,6 +167,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor { id: "settings.focus_previous", action: || Box::new(crate::app::FocusPrevious), title_key: "shortcuts.previous_field", title_index: None, category: C::Settings, editability: MODAL_NAV, builtin_label: None },
     CommandDescriptor { id: "dialog.commit.confirm", action: || Box::new(crate::app::ConfirmCommitDialog), title_key: "shortcuts.confirm_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.commit.dismiss", action: || Box::new(crate::app::DismissCommitDialog), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
+    CommandDescriptor { id: "dialog.commit.generate", action: || Box::new(crate::app::GenerateCommitDialog), title_key: "shortcuts.generate_message", title_index: None, category: C::Dialogs, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.git.primary", action: || Box::new(crate::app::GitPanelPrimaryAction), title_key: "shortcuts.git_primary", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.git.dismiss", action: || Box::new(crate::app::DismissGitPanelModal), title_key: "shortcuts.dismiss_dialog", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
     CommandDescriptor { id: "dialog.git.confirm", action: || Box::new(crate::app::ConfirmGitPanelModal), title_key: "shortcuts.confirm", title_index: None, category: C::Git, editability: TEXT_ENTRY, builtin_label: None },
@@ -485,6 +486,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_commit_dialog_keys ==============================================
     e("dialog.commit.confirm", All, "secondary-enter", CommitInput),
     e("dialog.commit.confirm", All, "secondary-enter", CommitDialog),
+    e("dialog.commit.generate", All, "secondary-g", CommitInput),
+    e("dialog.commit.generate", All, "secondary-g", CommitDialog),
     e("dialog.commit.dismiss", All, "escape", CommitDialog),
     // === app::init_git_panel_keys ===================================================
     e("dialog.git.primary", All, "secondary-enter", GitPanelInput),

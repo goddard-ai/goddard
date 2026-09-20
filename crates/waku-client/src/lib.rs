@@ -37,6 +37,7 @@ pub mod git_commit {
     pub use waku_protocol::git::CheckoutStatus;
     pub use waku_protocol::git::CommitSnapshot as Snapshot;
     pub use waku_protocol::git::StatusEntry;
+    pub use waku_protocol::git::commit_generation_model;
 }
 
 pub mod worktree {
