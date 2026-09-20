@@ -13,7 +13,7 @@ import {
   type TaskState,
 } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
-import { useDaemonSettings } from '@/hooks/use-daemon-data'
+import { useDaemonSettings, useProviderDetections } from '@/hooks/use-daemon-data'
 import { useI18n } from '@/lib/i18n'
 import { fuzzyScore, shouldKeepPreviousPaletteItems } from '@/lib/palette-search'
 import { useMacLikePlatform } from '@/lib/platform'
@@ -81,6 +81,7 @@ export function CommandPalette({
   const { t } = useI18n()
   const { client } = useDaemon()
   const settings = useDaemonSettings()
+  const detections = useProviderDetections(open)
   const [view, setView] = useState<CommandPaletteView>(initialView)
   const [resumeProvider, setResumeProvider] = useState<ProviderKind>(currentProvider)
   const [query, setQuery] = useState('')
@@ -110,6 +111,12 @@ export function CommandPalette({
     const disabled = settings.data?.disabled_providers ?? []
     return PROVIDERS.filter(({ id, canResume }) => canResume !== false && !disabled.includes(id))
   }
+
+  const disabledProviders = settings.data?.disabled_providers ?? []
+  const resumeAvailable = PROVIDERS.some(({ id, canResume }) =>
+    canResume !== false
+    && !disabledProviders.includes(id)
+    && Boolean(detections.data[id]?.installed))
 
   function enabledResumeProvider(): ProviderKind {
     const disabled = settings.data?.disabled_providers ?? []
@@ -301,6 +308,7 @@ export function CommandPalette({
         macShortcuts,
         actions,
         openResume: openResumeView,
+        resumeAvailable,
         t,
       })
   const items = view === 'commands' && shouldKeepPreviousPaletteItems(
@@ -599,6 +607,7 @@ function buildItems({
   macShortcuts,
   actions,
   openResume,
+  resumeAvailable,
   t,
 }: {
   taskState: TaskState
@@ -612,6 +621,7 @@ function buildItems({
   macShortcuts: boolean
   actions: CommandPaletteActions
   openResume: () => void
+  resumeAvailable: boolean
   t: Translator
 }): PaletteItem[] {
   const searching = Boolean(query.trim())
@@ -619,10 +629,10 @@ function buildItems({
   const shortcut = (mac: string, other: string) => macShortcuts ? mac : other
   const commands: PaletteItem[] = [
     command('new-task', commandSection, t('command_palette.new_task'), 'pencil', shortcut('⌘N', 'Ctrl+N'), `new task session chat conversation start ${t('command_palette.new_task')}`, actions.newTask),
-    {
+    ...(resumeAvailable ? [{
       ...command('resume', commandSection, t('command_palette.resume'), 'rotateCw', undefined, `resume continue restore import external terminal cli session conversation ${t('command_palette.resume')}`, openResume),
       closeOnRun: false,
-    },
+    }] : []),
     command('open-project', commandSection, t('command_palette.open_project'), 'folder', shortcut('⌘O', 'Ctrl+O'), `open add folder project workspace repository repo ${t('command_palette.open_project')}`, actions.openProject),
   ]
   if (canChooseModel) commands.push(command('choose-model', commandSection, t('command_palette.choose_model'), 'bot', shortcut('⌘/', 'Ctrl+/'), `choose change select model provider agent ${t('command_palette.choose_model')}`, actions.chooseModel))

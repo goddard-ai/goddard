@@ -2308,7 +2308,23 @@ impl Waku {
                 next(),
             ));
         }
+        if !self.resume_available() {
+            commands.retain(|item| item.action != PaletteAction::Resume);
+        }
         commands
+    }
+
+    /// Whether any provider could offer a resumable session — enabled,
+    /// catalog-capable, and detected with a binary by the daemon's provider
+    /// probe.
+    fn resume_available(&self) -> bool {
+        ProviderKind::ALL.iter().any(|provider| {
+            provider.supports_session_catalog()
+                && !self.state.disabled_providers.contains(provider)
+                && self
+                    .provider_probe(*provider)
+                    .is_some_and(|probe| probe.installed)
+        })
     }
 
     fn command_palette_task_candidates(&self) -> Vec<CommandPaletteItem> {
