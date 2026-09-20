@@ -147,13 +147,6 @@ big_picture.replying_to: "正在回复 %{title}"
 big_picture.hint: ← → 选择 · enter 设定目标 · esc 关闭
 big_picture.loading: 加载中…
 big_picture.empty_transcript: 暂无消息
-big_picture.status.waiting: 需要输入
-big_picture.status.unread: 未读
-big_picture.status.working: 运行中
-big_picture.status.starting: 正在启动
-big_picture.status.background: 后台
-big_picture.status.idle: 空闲
-big_picture.status.failed: 失败
 
 project_switcher.recently_used: 最近使用的项目
 
@@ -1606,3 +1599,706 @@ keybind.reason.text_entry: 核心文本输入 — 此版本不可重映射
 keybind.reason.modal_nav: 内置列表导航 — 此版本不可重映射
 keybind.reason.hand_rolled: 由终端直接处理 — 不可重映射
 shortcuts.projects_page: 项目
+a11y.draft_edit: 草稿文本
+a11y.sync_branch: 同步分支
+automations.advanced: 高级
+automations.cancel: 取消
+automations.command_failed: "自动化命令失败：%{error}"
+automations.confirm_delete: "删除 %{name}？"
+automations.confirm_delete_detail: 该自动化及其运行历史将被删除。
+automations.create: 创建
+automations.daemon_unreachable: 该守护进程未连接。
+automations.delete: 删除
+automations.deleted_name: 已删除的自动化
+automations.detail_gone: 自动化已移除
+automations.detail_gone_hint: 它已在守护进程上被删除 — 条目已不存在。
+automations.edit: 编辑
+automations.edit_title: 编辑自动化
+automations.empty_hint: 按计划定时运行提示词 — 点击上方“新建”即可创建。
+automations.empty_title: 还没有自动化
+automations.enabled: 已启用
+automations.error_name_required: 名称为必填项。
+automations.error_project_required: 请选择项目。
+automations.error_prompt_required: 提示词为必填项。
+automations.error_schedule_invalid: 请输入 HH:MM 格式的时间（每小时任务用 :MM），或 cron 表达式。
+automations.error_session_required: 请选择运行所在的任务。
+automations.field_agent: 智能体
+automations.field_base_branch: 基准分支
+automations.field_cron: Cron
+automations.field_enabled: 已启用
+automations.field_grace: 宽限（分钟）
+automations.field_host: 主机
+automations.field_last_run: 上次运行
+automations.field_model: 模型
+automations.field_name: 名称
+automations.field_next_run: 下次运行
+automations.field_precheck: 预检
+automations.field_precheck_timeout: 超时（秒）
+automations.field_project: 项目
+automations.field_prompt: 提示词
+automations.field_reuse: 复用任务
+automations.field_schedule: 计划
+automations.field_time: 时间
+automations.field_timezone: 时区
+automations.field_webhook: Webhook
+automations.field_workspace: 工作区
+automations.grace_placeholder: 跳过错过的运行
+automations.grace_value: 错过时在 %{count} 分钟内补跑一次
+automations.host_local: 这台 Mac
+automations.host_remote: 远程主机
+automations.in_days: "%{count} 天后"
+automations.in_hours: "%{count} 小时后"
+automations.in_minutes: "%{count} 分钟后"
+automations.last_run_never: 从未运行
+automations.model_default: 服务商默认
+automations.model_placeholder: 默认
+automations.name_placeholder: 工作日例行整理
+automations.new: 新建
+automations.new_title: 新建自动化
+automations.no_match: 没有匹配项
+automations.no_match_hint: 试试其他搜索。
+automations.open_task: 打开任务
+automations.pause: 暂停
+automations.paused: 已暂停
+automations.precheck_placeholder: 必须以 0 退出的 Shell 命令
+automations.preset_cron: Cron
+automations.preset_daily: 每天
+automations.preset_hourly: 每小时
+automations.preset_webhook: Webhook
+automations.preset_weekdays: 工作日
+automations.preset_weekly: 每周
+automations.project_pick: 选择项目…
+automations.prompt_placeholder: 每次运行时希望智能体做什么？
+automations.refusal_count: 已跳过 %{count} 次
+automations.resume: 恢复
+automations.reuse_session: 上次运行的任务空闲时复用它
+automations.run_now: 立即运行
+automations.runs_empty_hint: 计划首次触发或使用“立即运行”后，运行记录会显示在这里。
+automations.runs_empty_title: 还没有运行记录
+automations.runs_heading: 运行历史
+automations.save: 保存
+automations.schedule_cron: Cron %{expression}
+automations.schedule_daily: 每天 %{time}
+automations.schedule_hourly: 每小时 :%{minute}
+automations.schedule_none: 无计划
+automations.schedule_weekdays: 工作日 %{time}
+automations.schedule_weekly: 每%{day} %{time}
+automations.search: 搜索自动化
+automations.search_placeholder: 搜索名称、项目或提示词…
+automations.session_missing: 任务已不存在
+automations.session_pick: 选择任务…
+automations.soon: 1 分钟内
+automations.status_completed: 已完成
+automations.status_failed: 失败
+automations.status_missed: 已错过
+automations.status_pending: 待运行
+automations.status_precheck: 预检跳过
+automations.status_running: 运行中
+automations.status_unavailable: 不可用
+automations.tab_runs: 运行记录
+automations.tab_schedules: 计划
+automations.timezone_placeholder: 系统时区
+automations.title: 自动化
+automations.trigger_manual: 手动
+automations.trigger_scheduled: 按计划
+automations.trigger_webhook: Webhook
+automations.webhook_hint: 向该 webhook URL 发送 POST 请求即触发一次运行 — URL 在保存时生成。
+automations.weekday_fri: 周五
+automations.weekday_mon: 周一
+automations.weekday_sat: 周六
+automations.weekday_sun: 周日
+automations.weekday_thu: 周四
+automations.weekday_tue: 周二
+automations.weekday_wed: 周三
+automations.workspace_existing: 现有任务
+automations.workspace_local: 项目目录
+automations.workspace_worktree: 每次运行新建工作树
+command_palette.based_on: 基于 %{base}
+command_palette.branches: 分支
+command_palette.change_base_branch: 更改基准分支…
+command_palette.create_draft: 创建草稿
+command_palette.current_base: 当前基准分支
+command_palette.directories: 目录
+command_palette.directory_search_failed: "目录搜索失败：%{error}"
+command_palette.loading_branches: 正在加载分支…
+command_palette.loading_directories: 正在扫描目录…
+command_palette.new_task_in: 在…中新建任务
+command_palette.new_task_in_placeholder: 搜索任务所属项目的目录…
+command_palette.no_branches: 没有其他分支
+command_palette.no_branches_hint: 请先创建另一个分支
+command_palette.no_directories: 未找到目录
+command_palette.no_directories_hint: 主目录下以及已知项目旁的目录会显示在这里
+command_palette.project: 项目
+command_palette.rebase_base_placeholder: 从 %{base} 变基到…
+command_palette.rebase_base_placeholder_unknown: 变基到…
+command_palette.rebase_base_unchanged: 已基于 %{base}
+command_palette.resume_missing_folder: 文件夹缺失
+command_palette.resume_not_installed: 未安装服务商
+command_palette.resume_not_installed_hint: 在这台机器上安装 %{provider} 后才能恢复其终端会话。
+command_palette.resume_unsupported: 此服务商无法列出会话
+command_palette.resume_unsupported_hint: "%{provider} 未开放其终端会话以供恢复。"
+command_palette.sync_branch: 同步分支…
+command_palette.view_drafts: 查看草稿
+common.save: 保存
+composer.pasted_block: 粘贴的文本
+composer.remove_pasted_block: 移除粘贴的文本
+computer_use.confirm_revoke: "撤销 %{name} 的访问权限？"
+computer_use.confirm_revoke_detail: 在重新允许之前，会话将无法再操控此应用。
+daemon.nearby_title: 在你的网络中
+daemon.pair: 配对
+daemon.pair_added: 已与 {name} 配对
+daemon.pair_declined: "{name} 拒绝了配对请求"
+daemon.pair_failed: "配对请求失败：{error}"
+daemon.pair_no_address: "{name} 已批准，但它不接受 WebSocket 连接。"
+daemon.pair_waiting: 等待中…
+daemon.remote_host_add: 添加主机
+daemon.remote_host_address: 地址
+daemon.remote_host_address_description: 守护进程的 WebSocket URL，或用于未加密连接的 host:port。
+daemon.remote_host_address_placeholder: ws://host.example.com:34123
+daemon.remote_host_edit: 编辑远程主机
+daemon.remote_host_name: 名称
+daemon.remote_host_name_description: 主机的标签。留空时使用地址。
+daemon.remote_host_name_placeholder: build-server
+daemon.remote_host_new: 新建远程主机
+daemon.remote_host_remove: 移除主机
+daemon.remote_host_required: 请输入 SSH 目标，或同时输入地址和令牌。
+daemon.remote_host_save: 保存主机
+daemon.remote_host_ssh: SSH 目标
+daemon.remote_host_ssh_description: 改为通过 SSH 连接 — user@host 目标或 ~/.ssh/config 中的 Host 别名。Goddard 会自动部署并转发守护进程，无需地址和令牌。
+daemon.remote_host_ssh_placeholder: user@host 或 ssh config 别名
+daemon.remote_host_token: 令牌
+daemon.remote_host_token_description: 该守护进程连接信息中的 bearer 令牌。
+daemon.remote_host_token_placeholder: 粘贴守护进程令牌
+daemon.remote_hosts_description: 连接到其他机器上运行的守护进程。它们的项目和任务会与本地的一起显示，在其上的工作会路由到所属的守护进程。
+daemon.remote_hosts_title: 远程主机
+daemon.remote_unreachable: 该主机未连接
+daemon.ssh_password_label: 密码或密钥口令
+daemon.ssh_password_submit: 连接
+daemon.ssh_password_title: SSH 认证
+drafts.attachments: "%{count} 个附件"
+drafts.edit_cancel: 取消
+drafts.edit_placeholder: 编辑草稿
+drafts.edit_save: 保存
+drafts.empty_hidden: 没有隐藏的草稿
+drafts.empty_hidden_hint: 隐藏的草稿会保留在这里，直到你取消隐藏或删除它们
+drafts.empty_hint: 使用“创建草稿”把输入框的内容暂存在这里
+drafts.empty_title: 没有草稿
+drafts.menu.delete: 删除
+drafts.menu.edit: 编辑
+drafts.menu.hide: 隐藏
+drafts.menu.unhide: 取消隐藏
+drafts.menu.use: 使用
+drafts.missing_project: 已删除的项目
+drafts.missing_target: 撰写此草稿时所在的任务已不存在
+drafts.missing_task: 已删除的任务
+drafts.new_task_in: 在 %{project} 中新建任务
+drafts.no_composer: 没有可从中保存草稿的输入框
+drafts.no_match: 没有匹配的草稿
+drafts.no_match_hint: 试试其他搜索
+drafts.nothing_to_save: 输入框为空 — 没有可保存的内容
+drafts.saved_toast: 已保存到草稿
+drafts.search: 搜索草稿
+drafts.title: 草稿
+drafts.view_drafts: 草稿
+drafts.view_hidden: 已隐藏
+drafts.view_tooltip: 查看草稿
+errors.provider_terminal_sessions_local_only: "%{provider} 会话需要本地守护进程 — 此工作区位于远程主机"
+errors.remote_connect: "无法连接到 %{name}：%{error}"
+errors.store_pasted_text: "无法附加粘贴的文本：%{error}"
+experiments.automations_description: 新增“自动化”页面，可按计划定时运行提示词 — 每小时、每天、工作日、每周或 cron — 每次运行可作为独立任务或进入现有任务，并带有运行历史和单次手动运行。
+experiments.automations_title: 自动化
+experiments.big_picture_description: 按 ⌘0 打开全窗口的会话卡片网格，带实时转录、每张卡片的输入框，以及 ⌘1–9 选定。
+experiments.big_picture_title: 概览
+experiments.computer_use_description: 显示“电脑操作”设置页，并让会话通过内置助手驱动 Cua Driver 的截屏与输入。关闭此项会同时关闭电脑操作本身。
+experiments.computer_use_title: 电脑操作
+experiments.friends_description: 新增“设置 → 好友”页面，用于好友间文件传输 — 分享你的好友码、接受传入请求，并从侧边栏底部的圆环查看实时传输进度。
+experiments.friends_title: 好友
+experiments.gate_body: 这些是未完成功能。它们可能有缺陷、随时变更或移除，最坏情况下可能损坏你的数据。除非你知道自己在做什么，否则最好保持关闭。
+experiments.gate_confirm: 我已了解风险 — 显示实验功能
+experiments.gate_title: 实验功能可能导致问题
+experiments.git_panel_description: 在会话旁新增 ⌘⌥G 面板，包含提交图谱、可展开的差异、上游跟踪，以及将工作树合入其基准分支的 /land 命令。
+experiments.git_panel_title: Git 面板
+experiments.github_description: 浏览项目的 GitHub issue 和拉取请求，从中启动任务，并在侧边栏行和右侧面板中查看检查与审查状态。
+experiments.github_title: GitHub 集成
+experiments.group_git: Git 与审查
+experiments.group_sessions: 会话与智能体
+experiments.group_surfaces: 应用界面
+experiments.integrations_description: 新增“设置 → 集成”页面，一次连接 Linear、GitHub、Notion、Stripe 等官方远程 MCP 服务器，并通过 Goddard 的本地代理提供给每个已启用的智能体。
+experiments.integrations_title: MCP 集成
+experiments.memory_description: 为每个项目提供持久记忆。已完成的会话会被提炼进 .goddard/memory 存储，下一个会话的首条提示词会携带它 — 包括决策、偏好和失败的尝试。
+experiments.memory_title: 项目记忆
+experiments.model_router_description: 在模型选择器中新增“自动”。任务的第一个提示词由评估模型分类，然后按你的路由策略路由到某个服务商和模型。
+experiments.model_router_title: 自动模型路由
+experiments.project_map_description: 为每个新会话提供一份工作区的紧凑结构地图 — 最常被引用文件的顶层符号，预算约 1,000 个令牌 — 让智能体跳过冷启动的仓库探索。对开启后启动的会话生效。
+experiments.project_map_title: 项目地图
+experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
+experiments.projects_page_title: 项目页面
+experiments.review_queue_description: 在项目页面新增“审查”标签页 — qa 分支的提议提交按从旧到新列出，支持逐个批准、拒绝并回退，以及提升已批准前缀的控件。
+experiments.review_queue_title: QA 审查
+experiments.sandbox_description: 在输入框的访问菜单中显示环境选择 — 在这台 Mac 或隔离的 Linux VM 中运行任务 — 并在会话标题上显示“沙箱中”徽标。对开启后启动的会话生效。
+experiments.sandbox_title: 沙箱 VM
+experiments.sidebar_dock_description: 一个悬停时在侧边栏底部升起的快捷操作坞 — 收件箱、归档、键盘快捷键和设置一键可达。
+experiments.sidebar_dock_title: 侧边栏操作坞
+experiments.status_markers_description: 当助手轮次结束时，评估模型会按固定标记集为其打分 — 已完成、等待输入、未验证、部分完成、受阻、失败、已偏离 — 达到阈值的标记会以标签形式显示在回复下方。
+experiments.status_markers_title: 轮次状态标记
+experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。对开启后启动的会话生效。
+experiments.subagents_title: 子智能体
+friends.a_friend: 一位好友
+friends.abort_sync: 中止
+friends.accept: 接受
+friends.add_friend: 添加好友
+friends.add_hint: 粘贴对方的好友码。对方会收到请求，可接受或拒绝。
+friends.auto_push: 自动推送提交
+friends.auto_push_hint: 你合入到同步分支的提交会自动推送到 origin。
+friends.code_hint: 将此码分享给正在运行 Goddard 的人。对方添加你且你接受后，双方即可互发文件。
+friends.code_placeholder: gfr-…
+friends.command_failed: "好友命令失败：%{error}"
+friends.confirm_abort_sync: "中止 %{branch} 上的同步？"
+friends.confirm_abort_sync_detail: 已停止的同步将被丢弃，该分支会暂停，直到你手动再次同步。
+friends.confirm_disable_sync: "停用 %{name} 与 %{peer} 之间的同步？"
+friends.confirm_disable_sync_detail: 两侧的链接都会被拆除 — 重新建立前分支不再更新。
+friends.confirm_remove: "移除 %{name}？"
+friends.confirm_remove_detail: 对方将从你的好友列表中移除 — 想恢复需重新添加。
+friends.confirm_unshare: "停止分享 %{name}？"
+friends.confirm_unshare_detail: 该好友将失去此项目的访问权限 — 同步链接和共享会话都会停止。
+friends.decline: 拒绝
+friends.disable_sync: 停用同步
+friends.dismiss: 忽略
+friends.display_name: 你的显示名称
+friends.display_name_hint: 好友会在你的请求和文件发送中看到这个名称。
+friends.display_name_placeholder: 向好友显示的名称
+friends.empty: 还没有好友 — 分享你的好友码开始吧。
+friends.enable_sync: 启用同步
+friends.last_seen: "%{ago}前在线"
+friends.list: 好友
+friends.matches_project: 匹配 %{name}
+friends.merge_instead: 改为合并
+friends.nickname: 备注名
+friends.nickname_placeholder: 只有你能看到这个名字
+friends.no_local_match: 本地无检出
+friends.no_projects_hint: 添加一个项目即可与好友分享。
+friends.online: 在线
+friends.open_chat: 打开聊天
+friends.pending: 待处理
+friends.quarantined_hint: 此会话持有从好友处收到的文件。文件隔离期间聊天可正常使用 — 在输入框为空时按 Enter 会把文件和备注交给智能体。
+friends.quarantined_title: 隔离的文件
+friends.remove: 移除
+friends.requests: 请求
+friends.resolve_in_chat: 在聊天中解决
+friends.send_dialog_message: 消息
+friends.send_dialog_message_placeholder: 添加消息（可选）
+friends.send_dialog_send: 发送
+friends.send_dialog_title: 发送给 %{name}
+friends.send_file: 发送文件…
+friends.send_file_prompt: 选择要发送的文件或文件夹
+friends.send_request: 发送请求
+friends.session_running: 运行中
+friends.sessions: 会话
+friends.sessions_empty: 还没有会话。
+friends.sessions_error: 无法加载会话 — %{error}
+friends.sessions_loading: 正在加载会话…
+friends.share_sessions: 分享会话
+friends.shared_projects: 分享给 TA
+friends.shared_with_you: 分享给你
+friends.sharing: 正在分享…
+friends.show_in_finder: 在访达中显示
+friends.status_cancelled: 已取消
+friends.status_done: 已完成
+friends.status_failed: 失败
+friends.status_pending: 待处理
+friends.status_transferring: 正在传输…
+friends.stop_watching: 停止观看
+friends.sync_alerts: 同步提醒
+friends.sync_branches: 分支
+friends.sync_conflict_hint: "%{count} 个文件冲突 — %{integration} 已在 %{path} 中停止。"
+friends.sync_conflict_title: "%{branch} 上发生同步冲突"
+friends.sync_link_title: "%{name} 与 %{peer} 的同步"
+friends.sync_now: 立即同步
+friends.sync_paused: 已暂停 — 再次同步即可恢复
+friends.sync_refused_hint: "%{path} 中有未提交的更改 — 同步未改动该检出。"
+friends.sync_refused_title: "已跳过 %{branch} 的同步"
+friends.sync_toast_conflict: "%{branch} 上发生同步冲突 — 请到“设置 → 好友”中处理"
+friends.sync_toast_refused: "已跳过 %{branch} 的同步 — 有未提交的更改"
+friends.sync_waiting: 等待好友
+friends.transfers: 传输
+friends.transfers_active: "%{count} 个传输进行中 — 打开“好友”"
+friends.trust: 信任文件
+friends.unreachable: 无法连接
+friends.unshare: 取消分享
+friends.untitled_session: 未命名会话
+friends.wants_to_add: 想添加你为好友
+friends.watch: 观看
+friends.watch_ended: 与此会话的连接已结束。
+friends.watch_revoked: "%{name} 已停止分享此会话"
+friends.watching: 观看中
+friends.watching_session: 正在观看 %{name} 的会话 — 只读
+friends.withdraw: 撤回
+friends.your_code: 你的好友码
+git_panel.auto_resolving_rebase_in_chat: 变基到 %{base} 因冲突而停止 — 正在该任务的聊天中解决
+git_panel.files: 文件
+git_panel.land_confirm_description: 将此检出变基到 %{base} 并将 %{base} 快进到结果 — %{count} 个提交将落到该分支上。
+git_panel.land_confirm_description_one: 将此检出变基到 %{base} 并将 %{base} 快进到结果 — 1 个提交将落到该分支上。
+git_panel.land_confirm_title: 合入基准分支？
+git_panel.rebase_onto_conflict_description: 变基到 %{base} 中途停止 — 冲突仍留在工作区中。
+git_panel.rebased_onto: 已变基到 %{base}
+git_panel.rebasing: 正在变基…
+git_panel.rebasing_onto: 正在变基到 %{base}…
+git_panel.resolve_merge_onto_prompt: "`%{base}` 合并到此工作区时因冲突而停止。请解决工作区中的冲突并完成合并。"
+git_panel.resolve_rebase_onto_prompt: 此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成。
+git_panel.up_to_date: 已是最新
+integrations.agents: 智能体
+integrations.api_key: API 密钥
+integrations.api_key_hint: 保存在钥匙串中 — 不会写入服务商配置。
+integrations.api_key_placeholder: API 密钥
+integrations.confirm_disconnect: "断开 %{name}？"
+integrations.confirm_disconnect_detail: 登录状态和服务商分配将被移除 — 需重新连接才能使用。
+integrations.connect: 连接
+integrations.connected: 已连接
+integrations.description: 只需连接一次服务，Goddard 就会通过其本地 MCP 代理将其提供给智能体。凭据保存在钥匙串中 — 智能体只能看到本地端点。
+integrations.disconnect: 断开连接
+integrations.loading: 正在加载集成…
+integrations.not_connected: 未连接
+integrations.sign_in: 登录
+integrations.sign_in_required: 需要登录
+keybind.capture.hint: Esc 取消 · Backspace 删除一个键位 · Enter 立即保存
+keybind.capture.waiting: 请按键…
+keybind.column.category: 分类
+keybind.column.command: 命令
+keybind.column.keybinding: 按键绑定
+keybind.column.when: 生效条件
+keybind.command.automations_tab: "选择自动化标签 %{n}"
+keybind.command.cycle_effort: 循环切换推理强度
+keybind.command.cycle_effort_backward: 反向循环切换推理强度
+keybind.command.cycle_favorite: 循环切换收藏模型
+keybind.command.favorite_model: "选择收藏模型 %{n}"
+keybind.conflict.banner: 与 %{other} 冲突
+keybind.conflict.confirm: 按 Enter 仍然保存
+keybind.conflicts: "%{n} 个冲突"
+keybind.conflicts.cycle: 逐个查看冲突
+keybind.counts: "%{n} 个命令"
+keybind.keywords: 按键绑定 keybindings 键盘 keyboard 快捷键 shortcuts hotkeys 按键 keys 重映射 remap
+keybind.layout.auto: 自动检测
+keybind.layout.manual: 手动
+keybind.layout.unrecognized: 无法识别布局 — 显示美式键盘
+keybind.modified: "%{n} 个已自定义"
+keybind.reset: 重置
+keybind.search: 搜索命令
+keybind.search_placeholder: 搜索命令或快捷键…
+keybind.stage.collapsed: 键盘已隐藏
+keybind.stage.hover_hint: 悬停查看按键绑定…
+keybind.title: 按键绑定
+menu.new_task_in: 在…中新建任务
+models.auto: 自动
+models.auto_hint: 自动选择最佳服务商
+models.auto_missing_credential: 所选的 Jev 评估后端没有凭据 — 路由将回退到上次使用的服务商。请在 Jev 设置中添加。
+models.auto_routed: 自动 (Jev) · %{model}
+notifications.confirm_done: "将 %{title} 标为完成？"
+notifications.confirm_done_detail: “标为完成”会删除 GitHub 上的该讨论串 — 无法撤销。
+notifications.empty: 收件箱已清空 — 没有未读
+notifications.filter_placeholder: 筛选通知
+notifications.fix_tooltip: 修复审查发现的问题 — 在打开它的会话中，或在新的工作树中
+notifications.mark_all_read: 全部标为已读
+notifications.mark_done: 标为完成
+notifications.mark_read: 标为已读
+notifications.mark_repo_read: 全部标为已读
+notifications.new_activity: 新动态
+notifications.reason_assign: 已指派
+notifications.reason_author: 作者
+notifications.reason_ci_activity: CI 活动
+notifications.reason_comment: 评论
+notifications.reason_invitation: 邀请
+notifications.reason_manual: 手动
+notifications.reason_mention: 被提及
+notifications.reason_other: 动态
+notifications.reason_review_requested: 请求审查
+notifications.reason_security_alert: 安全警报
+notifications.reason_state_change: 状态变更
+notifications.reason_subscribed: 已订阅
+notifications.reason_team_mention: 团队提及
+notifications.show_read: 显示已读
+notifications.show_read_tooltip: 包含已读通知
+notifications.title: 收件箱
+notifications.update_failed: 无法更新通知 — 请检查 `gh`
+pairing.added: "%{ago}前配对"
+pairing.approve: 批准
+pairing.confirm_revoke: "撤销 %{name}？"
+pairing.confirm_revoke_detail: 该设备会立即失去访问权限 — 需要重新配对才能连接。
+pairing.decline: 拒绝
+pairing.none: 尚未配对任何设备。
+pairing.paired: 已配对的设备
+pairing.paired_hint: 持有此守护进程令牌的设备。撤销会立即移除其访问权限。
+pairing.requests: 配对请求
+pairing.revoke: 撤销
+pairing.wants_to_pair: 想连接到此守护进程
+project_map.action_label: 项目地图
+project_map.artifact_title: 项目地图 · %{files} 个文件 · 约 %{tokens} 个令牌
+project_map.indexing: 正在索引工作区…
+project_map.ready: 地图就绪 · %{files} 个文件
+project_map.refreshing: 正在刷新地图…
+project_map.sent: 地图 · %{files} 个文件 · ~%{tokens} 令牌
+projects.col_branch: 分支
+projects.col_changes: 更改
+projects.col_divergence: 领先/落后
+projects.col_last_commit: 最近提交
+projects.col_name: 名称
+projects.col_pull_request: PR
+projects.col_tasks: 任务
+projects.col_updated: 更新
+projects.confirm_reject: "拒绝并回退 %{commit}？"
+projects.confirm_reject_detail: 将向共享的 qa 分支推送一个回退提交 — 所有已同步的人都会收到它。
+projects.filter_review: 筛选提交
+projects.review_approve: 批准
+projects.review_approved: 已批准
+projects.review_auto: 自动批准
+projects.review_empty: qa 分支上没有提议的提交
+projects.review_frontier: 将提升
+projects.review_needs_review: 待审查
+projects.review_no_queue: origin 上没有 qa 分支
+projects.review_pending_count: "%{count} 个待审查"
+projects.review_promote: 提升到 %{branch}
+projects.review_reject: 拒绝并回退
+projects.review_rejected: 已拒绝
+projects.review_reverted: 已回退
+projects.review_train: "%{approved}/%{total} 个提交将被提升"
+projects.tab_review: 审查
+providers.api_key_hint: 或设置 %{var}
+providers.docs: 文档
+providers.install_label: 安装
+providers.run_in_terminal: 在终端中运行
+providers.set_up: 设置
+providers.setup: 设置
+providers.setup_terminal_title: 设置 %{provider}
+providers.sign_in_label: 登录
+right_panel.side_chat: 侧聊
+right_panel.side_chat_unavailable: 侧聊不可用
+right_panel.side_chat_unavailable_description: 该聊天已随其父任务删除，或已在此标签页中关闭
+routing.backend: 评估后端
+routing.backend_description: 对每个任务首条提示词进行分类的服务。三者回答同一套类型化评估问题，仅凭据不同。
+routing.class_demanding: 高要求任务
+routing.class_demanding_description: 微妙、高风险或长周期的工作 — 路由到最强的组合。
+routing.class_general: 普通任务
+routing.class_general_description: 适合稳定模型的普通任务 — 默认类别。
+routing.class_routine: 常规任务
+routing.class_routine_description: 机械、低风险或单步骤的工作 — 路由到便宜快速的组合。
+routing.cloudflare_account: 账户 ID
+routing.cloudflare_account_description: 拥有 Workers AI 评估绑定的 Cloudflare 账户。
+routing.cloudflare_account_placeholder: Cloudflare 账户 ID
+routing.cloudflare_token: API 令牌
+routing.cloudflare_token_description: 上述账户的 Workers AI 限定令牌。
+routing.cloudflare_token_placeholder: Cloudflare API 令牌
+routing.connection_failed: "连接失败：%{error}"
+routing.connection_ok: 已连接 — %{model} 在 %{latency} 毫秒内应答
+routing.effort_default: 默认
+routing.in_progress: 正在路由任务…
+routing.last_used: 上次使用
+routing.last_used_description: 沿用上次使用的服务商和模型
+routing.optional: 可选
+routing.provider_default: 默认
+routing.providers: 服务商
+routing.suggest_defaults: 根据近期使用情况生成建议
+routing.suggest_done: 建议已应用 — 可编辑任何类别进行调整
+routing.suggest_empty: Jev 未返回可用的建议
+routing.suggest_no_history: 近期模型使用记录不足，无法生成建议
+routing.suggesting: 正在生成建议…
+routing.test_connection: 测试连接
+routing.testing: 正在检查…
+routing.typesafe_key: TypeSafe API 密钥
+routing.typesafe_key_description: 直接调用 api.typesafe.ai。留空则保留已存储的密钥。
+routing.typesafe_key_placeholder: ts_…
+routing.vercel_key: AI Gateway 密钥或 OIDC 令牌
+routing.vercel_key_description: AI_GATEWAY_API_KEY 或 VERCEL_OIDC_TOKEN 值，作为 Bearer 凭据发送到 AI Gateway 评估端点。
+routing.vercel_key_placeholder: vck_… 或 OIDC 令牌
+routing.vercel_team: 团队 ID（可选）
+routing.vercel_team_description: 当你的网关限定在 Vercel 团队时，作为 x-vercel-ai-gateway-team 发送。
+session.agy_ended: Antigravity 会话已结束
+session.agy_relaunch: 重新启动会话
+session.marked_unread: 任务已标记为未读
+session.marked_unread_many: "已将 %{count} 个任务标记为未读"
+session.pinned: 任务已置顶
+session.pinned_many: "已置顶 %{count} 个任务"
+session.unpinned: 任务已取消置顶
+session.unpinned_many: "已取消置顶 %{count} 个任务"
+session.worktree_lfs_skipped: 工作树已创建，但 Git LFS 文件仍是指针存根 — 在其中运行 `git lfs pull` 以获取实际内容
+settings.experiments: 实验
+settings.experiments_description: 可提前体验的未完成功能。各项默认关闭，可能变更或移除，随时可关闭。
+settings.experiments_keywords: 实验 experiments experimental beta 预览 preview 未完成 unfinished 提前 opt in early big picture 概览 git 面板 panel github 子智能体 subagents 项目 projects 页面 page 电脑操作 computer use auto 自动 模型 model 路由 routing router 评估 evaluation jev
+settings.friends: 好友
+settings.friends_keywords: 好友 friends friend 分享 share 发送 send 接收 receive 文件传输 file transfer 对端 peer 在线 online 状态 presence
+settings.git: Git
+settings.git_keywords: git 工作树 worktrees 分支 branches 仓库 repository checkout 检出 local 本地 repo 提交 commits remote 远程 prune 清理
+settings.git_no_projects: 添加一个项目即可浏览其工作树和分支。
+settings.high_contrast: 高对比度边框
+settings.high_contrast_description: 提高边框和控件轮廓的对比度。系统“增强对比度”开启时自动启用。
+settings.integrations: 集成
+settings.integrations_keywords: 集成 integrations mcp 服务器 servers 工具 tools linear github notion figma sentry stripe supabase vercel atlassian monday slack 连接 connect oauth api key 密钥 智能体 agents
+settings.search_empty: 没有匹配的设置。
+settings.sidebar_composer_drafts: 侧边栏草稿预览
+settings.sidebar_composer_drafts_description: 在侧边栏的任务标题下显示未发送的输入框草稿
+shortcuts.add_to_chat: 将所选内容添加到对话
+shortcuts.archive_task: 归档任务
+shortcuts.big_picture: 显示或隐藏概览
+shortcuts.bigpicture_move: 聚焦左侧会话
+shortcuts.bigpicture_move_right: 聚焦右侧会话
+shortcuts.bigpicture_open: 打开会话
+shortcuts.browser_address: 聚焦地址栏
+shortcuts.browser_address_cancel: 取消地址编辑
+shortcuts.browser_back: 后退
+shortcuts.browser_devtools: 打开 DevTools
+shortcuts.browser_forward: 前进
+shortcuts.browser_hard_reload: 强制重新加载
+shortcuts.browser_reload: 重新加载
+shortcuts.browser_stop: 停止加载
+shortcuts.cancel_rename: 取消重命名
+shortcuts.clear_field: 清空输入框或关闭
+shortcuts.clear_scrollback: 清空回滚缓冲
+shortcuts.close_find: 关闭查找栏
+shortcuts.close_preview: 关闭预览
+shortcuts.confirm: 确认
+shortcuts.confirm_archive: 确认归档
+shortcuts.confirm_dialog: 确认对话框
+shortcuts.confirm_kill_terminal: 确认关闭终端
+shortcuts.copy_selection: 复制所选内容
+shortcuts.copy_workdir: 复制工作目录
+shortcuts.delete_back: 向后删除
+shortcuts.delete_forward: 向前删除
+shortcuts.delete_line_back: 删除到行首
+shortcuts.delete_line_forward: 删除到行尾
+shortcuts.delete_word_back: 删除上一个单词
+shortcuts.delete_word_forward: 删除下一个单词
+shortcuts.dismiss: 关闭
+shortcuts.dismiss_dialog: 关闭对话框
+shortcuts.doc_end: 移到文档末尾
+shortcuts.doc_start: 移到文档开头
+shortcuts.done: 完成
+shortcuts.exit_fullscreen_panel: 退出全屏面板
+shortcuts.file_finder: 文件查找器
+shortcuts.find: 在文件中查找
+shortcuts.find_case: 切换区分大小写
+shortcuts.find_next: 下一个匹配项
+shortcuts.find_previous: 上一个匹配项
+shortcuts.find_regex: 切换正则表达式
+shortcuts.find_replace: 查找和替换
+shortcuts.find_word: 切换全字匹配
+shortcuts.font_bigger: 增大字号
+shortcuts.font_bigger_ui: 增大界面字号
+shortcuts.font_smaller: 减小字号
+shortcuts.font_smaller_ui: 减小界面字号
+shortcuts.fps_counter: 帧率计数器
+shortcuts.generate_message: 生成提交信息
+shortcuts.git_primary: 提交或主要操作
+shortcuts.go_to_line: 跳转到行
+shortcuts.jump_to_task: 按位置跳转到任务
+shortcuts.kill_line_back: 删除到段首
+shortcuts.kill_line_forward: 删除到段尾
+shortcuts.line_end: 移到行尾
+shortcuts.line_start: 移到行首
+shortcuts.mark_unread: 将当前任务标记为未读
+shortcuts.mark_unread_next: 搁置任务并前往下一个重要任务
+shortcuts.menu_next_tab: 下一个标签页
+shortcuts.menu_previous_tab: 上一个标签页
+shortcuts.move_down: 下移
+shortcuts.move_left: 左移
+shortcuts.move_right: 右移
+shortcuts.move_up: 上移
+shortcuts.navigate_back: 后退
+shortcuts.navigate_forward: 前进
+shortcuts.newline: 插入换行
+shortcuts.next_field: 下一个字段
+shortcuts.next_turn: 下一轮
+shortcuts.next_unread_completion: 前往下一个未读完成的任务
+shortcuts.open_created_issue: 打开已创建的 GitHub Issue
+shortcuts.open_localhost: 打开 localhost URL
+shortcuts.open_localhost_tab: 在标签页中打开 localhost URL
+shortcuts.open_settings: 打开设置
+shortcuts.paragraph_back: 移到上一段
+shortcuts.paragraph_end: 移到段尾
+shortcuts.paragraph_forward: 移到下一段
+shortcuts.paragraph_start: 移到段首
+shortcuts.pin_task: 置顶或取消置顶任务
+shortcuts.previous_field: 上一个字段
+shortcuts.previous_turn: 上一轮
+shortcuts.project_cancel: 取消
+shortcuts.project_confirm: 确认
+shortcuts.project_next: 下一个项目
+shortcuts.project_previous: 上一个项目
+shortcuts.project_switcher: 向前循环切换项目
+shortcuts.project_switcher_back: 向后循环切换项目
+shortcuts.replace_all: 全部替换
+shortcuts.save_file: 保存文件
+shortcuts.section.bigpicture: 概览
+shortcuts.section.browser: 浏览器
+shortcuts.section.composer: 输入框与文本框
+shortcuts.section.dialogs: Git 与对话框
+shortcuts.section.editing: 文本编辑
+shortcuts.section.editor: 编辑器与差异
+shortcuts.section.find: 查找
+shortcuts.section.finder: 文件查找器
+shortcuts.section.global: 全局
+shortcuts.section.menus: 菜单与弹出框
+shortcuts.section.palette: 命令面板
+shortcuts.section.settings: 设置与技能
+shortcuts.section.switchers: 任务与项目切换器
+shortcuts.section.terminal: 终端
+shortcuts.section.workspace: 工作区
+shortcuts.select_doc_end: 选择到文档末尾
+shortcuts.select_doc_start: 选择到文档开头
+shortcuts.select_down: 向下选择
+shortcuts.select_first: 第一项
+shortcuts.select_last: 最后一项
+shortcuts.select_left: 向左选择
+shortcuts.select_line_end: 选择到行尾
+shortcuts.select_line_start: 选择到行首
+shortcuts.select_next: 下一项
+shortcuts.select_page_down: 向下翻页
+shortcuts.select_page_up: 向上翻页
+shortcuts.select_paragraph_back: 向上选择一段
+shortcuts.select_paragraph_forward: 向下选择一段
+shortcuts.select_previous: 上一项
+shortcuts.select_right: 向右选择
+shortcuts.select_up: 向上选择
+shortcuts.select_word_back: 选择到上一个单词
+shortcuts.select_word_forward: 选择到下一个单词
+shortcuts.steer: 引导正在运行的轮次
+shortcuts.stop_turn: 停止当前轮次
+shortcuts.stop_turn_now: 立即停止轮次
+shortcuts.submit: 提交
+shortcuts.switcher_cancel: 取消
+shortcuts.switcher_confirm: 确认
+shortcuts.switcher_first: 第一个任务
+shortcuts.switcher_last: 最后一个任务
+shortcuts.switcher_next: 下一个任务
+shortcuts.switcher_previous: 上一个任务
+shortcuts.task_switcher: 向前循环切换任务
+shortcuts.task_switcher_back: 向后循环切换任务
+shortcuts.title: 键盘快捷键
+shortcuts.toggle_terminals: 显示或隐藏终端
+shortcuts.usage_panel: 用量面板
+shortcuts.view_unarchived_task: 查看取消归档的任务
+shortcuts.word_back: 移到上一个单词
+shortcuts.word_forward: 移到下一个单词
+side_chat.no_nesting: 侧聊不能再派生侧聊
+side_chat.no_task: 没有可进行侧聊的任务
+side_chat.placeholder: 给侧聊发消息…
+sidebar.automations: 自动化
+sidebar.inbox: 收件箱
+sidebar.needs_auth: 需要密码
+sidebar.offline: 离线
+status_markers.awaiting_input: 等待输入
+status_markers.blocked: 受阻
+status_markers.complete: 已完成
+status_markers.drifted: 已偏离
+status_markers.failed: 失败
+status_markers.partial: 部分完成
+status_markers.unverified: 未验证
+sync_branch.busy: 另一个 Git 操作仍在运行
+sync_branch.current: 当前分支
+sync_branch.loading: 正在加载分支…
+sync_branch.no_results: 没有带跟踪分支的分支
+sync_branch.no_results_hint: 只有在工作区中检出的分支才能同步
+sync_branch.synced: 已同步 %{branch}
+sync_branch.syncing: 正在同步 %{branch}…
+terminal.localhost_detected: "%{url} 已上线"
+terminal.localhost_open: 打开
+terminal.localhost_open_in_tab: 按 %{keys} 在浏览器标签页中打开
+terminal.pinned: 终端已置顶
+terminal.unpinned: 终端已取消置顶
