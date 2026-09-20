@@ -343,7 +343,7 @@ describe('provider session resume', () => {
       },
     } as unknown as WakuClient
 
-    await expect(listProviderSessions(client, 'claude')).resolves.toEqual([summary])
+    await expect(listProviderSessions(client, 'claude')).resolves.toEqual({ sessions: [summary], status: undefined })
     await expect(loadProviderSessionHistory(client, summary)).resolves.toEqual(history)
     expect(commands).toEqual([
       { type: 'listProviderSessions', provider: 'claude', limit: 250 },

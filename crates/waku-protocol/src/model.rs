@@ -159,6 +159,13 @@ impl ProviderKind {
         }
     }
 
+    /// Whether Resume can enumerate this provider's native sessions at all.
+    /// Antigravity conversations live in its own TUI with no readable store,
+    /// so it is excluded statically rather than discovered by probing.
+    pub fn supports_session_catalog(self) -> bool {
+        !matches!(self, Self::Antigravity)
+    }
+
     /// Vendor-documented setup for the provider's CLI: the canonical one-line
     /// install command, the interactive sign-in command, and the docs page.
     /// The Settings page shows these verbatim and can run them in a terminal.
@@ -1255,6 +1262,18 @@ impl ThreadGoalStatus {
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Complete | Self::BudgetLimited)
     }
+}
+
+/// Why a provider-session catalog came back empty — distinguishes a
+/// genuinely empty history from a provider that cannot enumerate one.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderSessionCatalogStatus {
+    #[default]
+    Ready,
+    /// The agent cannot list past sessions (e.g. an ACP agent without the
+    /// `session/list` capability, or a provider with no readable store).
+    Unsupported,
 }
 
 /// A resumable conversation discovered in a provider CLI's own history.

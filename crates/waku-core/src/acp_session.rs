@@ -23,9 +23,33 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{
-    AgentTurn, Message, MessageRole, ProviderKind, ProviderResumeCursor, ProviderSessionHistory,
-    ProviderSessionSummary, TurnStatus,
+    AgentTurn, Message, MessageRole, ProviderKind, ProviderResumeCursor,
+    ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, TurnStatus,
 };
+
+/// A provider's session catalog plus why it may be empty.
+pub struct ProviderSessionCatalog {
+    pub sessions: Vec<ProviderSessionSummary>,
+    pub status: ProviderSessionCatalogStatus,
+}
+
+impl ProviderSessionCatalog {
+    pub fn unsupported() -> Self {
+        Self {
+            sessions: Vec::new(),
+            status: ProviderSessionCatalogStatus::Unsupported,
+        }
+    }
+}
+
+impl From<Vec<ProviderSessionSummary>> for ProviderSessionCatalog {
+    fn from(sessions: Vec<ProviderSessionSummary>) -> Self {
+        Self {
+            sessions,
+            status: ProviderSessionCatalogStatus::Ready,
+        }
+    }
+}
 
 const MAX_CATALOG_PAGES: usize = 20;
 const MAX_CATALOG_WORKSPACES: usize = 100;
@@ -88,9 +112,9 @@ pub fn list_provider_sessions(
     binary: &Path,
     cwd_filters: &[PathBuf],
     limit: usize,
-) -> anyhow::Result<Vec<ProviderSessionSummary>> {
+) -> anyhow::Result<ProviderSessionCatalog> {
     if limit == 0 {
-        return Ok(Vec::new());
+        return Ok(Vec::new().into());
     }
     let agent = crate::driver::catalog_agent(provider, binary, &catalog_working_directory()?)?;
     let filters = if cwd_filters.is_empty() {
@@ -117,7 +141,7 @@ pub fn list_provider_sessions(
                 .list
                 .is_none()
             {
-                return Ok(Vec::new());
+                return Ok(ProviderSessionCatalog::unsupported());
             }
 
             let mut found = Vec::new();
@@ -168,7 +192,7 @@ pub fn list_provider_sessions(
             }
             found.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
             found.truncate(limit);
-            Ok(found)
+            Ok(found.into())
         },
     );
     smol::block_on(smol::future::race(

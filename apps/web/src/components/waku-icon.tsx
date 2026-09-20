@@ -351,8 +351,9 @@ export const PROVIDERS: Array<{
   name: string
   shortName: string
   command: string
+  canResume?: boolean
 }> = [
-  { id: 'antigravity', name: 'Antigravity CLI', shortName: 'Antigravity', command: 'agy' },
+  { id: 'antigravity', name: 'Antigravity CLI', shortName: 'Antigravity', command: 'agy', canResume: false },
   { id: 'amp', name: 'Amp', shortName: 'Amp', command: 'amp' },
   { id: 'claude', name: 'Claude Code', shortName: 'Claude', command: 'claude' },
   { id: 'codex', name: 'Codex CLI', shortName: 'Codex', command: 'codex' },

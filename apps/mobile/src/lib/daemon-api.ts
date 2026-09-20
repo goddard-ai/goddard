@@ -8,6 +8,7 @@ import type {
   Project,
   ProviderKind,
   ProviderProbe,
+  ProviderSessionCatalogStatus,
   ProviderSessionSummary,
   ProviderSessionHistory,
   ReviewDiffData,
@@ -107,11 +108,12 @@ export async function hydrateSession(
 export async function listProviderSessions(
   client: WakuClient,
   provider: ProviderKind,
-): Promise<ProviderSessionSummary[]> {
-  return expectResponse(
+): Promise<{ sessions: ProviderSessionSummary[]; status: ProviderSessionCatalogStatus | undefined }> {
+  const response = expectResponse(
     await client.request({ type: 'listProviderSessions', provider, limit: 250 }),
     'providerSessions',
-  ).sessions;
+  );
+  return { sessions: response.sessions, status: response.status };
 }
 
 export async function loadProviderSessionHistory(
@@ -125,7 +127,10 @@ export async function loadProviderSessionHistory(
 
 export function providerSessionKey(cursor: ProviderSessionSummary['cursor']): string {
   const id = cursor.provider === 'codex' || cursor.provider === 'amp'
-    ? cursor.threadId : cursor.sessionId;
+    ? cursor.threadId
+    : cursor.provider === 'antigravity'
+      ? cursor.conversationId
+      : cursor.sessionId;
   return `${cursor.provider}:${id}`;
 }
 
@@ -201,7 +206,7 @@ export function createProject(
   }
   const path = input === '/' ? input : input.replace(/[\\/]+$/, '');
   const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Project';
-  return { id, name, path, created_at: createdAt };
+  return { id, name, path, created_at: createdAt, temporary: false };
 }
 
 export async function persistProject(

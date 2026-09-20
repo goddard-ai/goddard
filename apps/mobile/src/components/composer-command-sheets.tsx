@@ -151,8 +151,9 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
     enabled: daemon.phase === 'connected' && Boolean(daemon.client),
     staleTime: 15_000,
   });
-  const rows = useMemo(() => (sessions.data ?? []).filter((item) =>
-    fuzzyScore(search, `${item.title} ${item.cwd}`) !== null), [search, sessions.data]);
+  const catalog = sessions.data;
+  const rows = useMemo(() => (catalog?.sessions ?? []).filter((item) =>
+    fuzzyScore(search, `${item.title} ${item.cwd}`) !== null), [search, catalog]);
 
   async function resume(summary: ProviderSessionSummary) {
     const client = daemon.client;
@@ -203,7 +204,11 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
           keyExtractor={(item) => providerSessionKey(item.cursor)}
           keyboardShouldPersistTaps="handled"
           style={{ maxHeight: height * 0.45 }}
-          ListEmptyComponent={<Text style={[styles.note, { color: theme.textTertiary }]}>No matching sessions</Text>}
+          ListEmptyComponent={<Text style={[styles.note, { color: theme.textTertiary }]}>{
+            catalog?.status === 'unsupported'
+              ? `${providerLabel(provider)} can't list its sessions`
+              : 'No matching sessions'
+          }</Text>}
           renderItem={({ item }) => (
             <SheetRow
               label={item.title || 'Untitled session'}

@@ -109,6 +109,7 @@ export type { ProviderModel } from "./ProviderModel";
 export type { ProviderModelOption } from "./ProviderModelOption";
 export type { ProviderProbe } from "./ProviderProbe";
 export type { ProviderResumeCursor } from "./ProviderResumeCursor";
+export type { ProviderSessionCatalogStatus } from "./ProviderSessionCatalogStatus";
 export type { ProviderSessionFork } from "./ProviderSessionFork";
 export type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
 export type { ProviderSessionHistory } from "./ProviderSessionHistory";

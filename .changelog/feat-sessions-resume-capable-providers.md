@@ -1,0 +1,1 @@
+- The Resume… provider picker only offers providers that can enumerate their terminal sessions, and the Resume view explains when a provider can't expose them instead of showing an empty list

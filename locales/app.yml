@@ -358,6 +358,10 @@ command_palette.no_resume_sessions_hint:
   en: Sessions already in Goddard are hidden. Start one in an agent CLI and try again.
 command_palette.could_not_load_sessions:
   en: Couldn’t load terminal sessions
+command_palette.resume_unsupported:
+  en: This provider can’t list sessions
+command_palette.resume_unsupported_hint:
+  en: "%{provider} doesn’t expose its terminal sessions to resume."
 command_palette.loading_selected_session:
   en: Loading conversation…
 command_palette.resume_failed:

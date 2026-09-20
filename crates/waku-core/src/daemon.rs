@@ -1466,6 +1466,7 @@ impl Backend for WakuBackend {
                 if limit == 0 {
                     return Ok(ResponsePayload::ProviderSessions {
                         sessions: Vec::new(),
+                        status: Default::default(),
                     });
                 }
                 ensure_shell_environment();
@@ -1473,6 +1474,7 @@ impl Backend for WakuBackend {
                 if settings.disabled_providers.contains(&provider) {
                     return Ok(ResponsePayload::ProviderSessions {
                         sessions: Vec::new(),
+                        status: Default::default(),
                     });
                 }
                 let binary_override = settings
@@ -1483,24 +1485,29 @@ impl Backend for WakuBackend {
                 else {
                     return Ok(ResponsePayload::ProviderSessions {
                         sessions: Vec::new(),
+                        status: Default::default(),
                     });
                 };
                 // Discovery is deliberately provider-scoped. Opening Resume
                 // must not start every installed agent CLI, and another
                 // provider is queried only after the user explicitly picks it.
-                let mut sessions = match provider {
+                let mut catalog: crate::acp_session::ProviderSessionCatalog = match provider {
                     // Antigravity conversations live in its own TUI; there is
                     // no Goddard transcript to import.
-                    ProviderKind::Antigravity => Vec::new(),
-                    ProviderKind::Amp => {
-                        crate::amp_session::list_provider_sessions(&binary, limit)?
+                    ProviderKind::Antigravity => {
+                        crate::acp_session::ProviderSessionCatalog::unsupported()
                     }
-                    ProviderKind::Claude => crate::claude_session::list_provider_sessions(limit)?,
+                    ProviderKind::Amp => {
+                        crate::amp_session::list_provider_sessions(&binary, limit)?.into()
+                    }
+                    ProviderKind::Claude => {
+                        crate::claude_session::list_provider_sessions(limit)?.into()
+                    }
                     ProviderKind::Codex => {
-                        crate::codex_session::list_provider_sessions(&binary, limit)?
+                        crate::codex_session::list_provider_sessions(&binary, limit)?.into()
                     }
                     ProviderKind::Copilot => {
-                        crate::copilot_session::list_provider_sessions(limit)?
+                        crate::copilot_session::list_provider_sessions(limit)?.into()
                     }
                     ProviderKind::Cursor
                     | ProviderKind::Devin
@@ -1510,24 +1517,28 @@ impl Backend for WakuBackend {
                         crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
                     }
                     ProviderKind::OpenCode => {
-                        crate::opencode_session::list_provider_sessions(&binary, limit)?
+                        crate::opencode_session::list_provider_sessions(&binary, limit)?.into()
                     }
                     ProviderKind::OpenCode2 => {
-                        crate::opencode2_session::list_provider_sessions(&binary, limit)?
+                        crate::opencode2_session::list_provider_sessions(&binary, limit)?.into()
                     }
                     ProviderKind::DeepSeek => {
-                        crate::deepseek_session::list_provider_sessions(&binary, limit)?
+                        crate::deepseek_session::list_provider_sessions(&binary, limit)?.into()
                     }
-                    ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
-                    ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
+                    ProviderKind::Grok => {
+                        crate::grok_session::list_provider_sessions(limit)?.into()
+                    }
+                    ProviderKind::Kimi => {
+                        crate::kimi_session::list_provider_sessions(limit)?.into()
+                    }
                     ProviderKind::Muse => {
-                        crate::muse_session::list_provider_sessions(&binary, limit)?
+                        crate::muse_session::list_provider_sessions(&binary, limit)?.into()
                     }
                     ProviderKind::OhMyPi | ProviderKind::Pi => {
-                        crate::pi_session::list_provider_sessions(provider, limit)?
+                        crate::pi_session::list_provider_sessions(provider, limit)?.into()
                     }
                 };
-                sessions.sort_by(|a, b| {
+                catalog.sessions.sort_by(|a, b| {
                     b.updated_at
                         .cmp(&a.updated_at)
                         .then_with(|| a.title.cmp(&b.title))
@@ -1541,11 +1552,14 @@ impl Backend for WakuBackend {
                         .map(|cursor| (cursor.provider(), cursor.native_id().to_owned()))
                         .collect::<HashSet<_>>()
                 };
-                sessions.retain(|session| {
+                catalog.sessions.retain(|session| {
                     !imported.contains(&(session.provider(), session.cursor.native_id().to_owned()))
                 });
-                sessions.truncate(limit);
-                Ok(ResponsePayload::ProviderSessions { sessions })
+                catalog.sessions.truncate(limit);
+                Ok(ResponsePayload::ProviderSessions {
+                    sessions: catalog.sessions,
+                    status: catalog.status,
+                })
             }
             Command::LoadProviderSession { cursor, cwd } => {
                 // Preserve every native turn shell for exact provider turn

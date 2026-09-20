@@ -13,8 +13,8 @@ use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, EvalSettings, Evaluation};
 use crate::model::{
     AgentSession, AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProviderKind,
-    ProviderProbe, ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary,
-    UserInputAnswer,
+    ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
+    ProviderSessionSummary, UserInputAnswer,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -938,6 +938,10 @@ pub enum ResponsePayload {
     },
     ProviderSessions {
         sessions: Vec<ProviderSessionSummary>,
+        /// Why the catalog is empty; `Ready` means an empty list is genuine.
+        /// Pre-status daemons omit it, deserializing to `Ready`.
+        #[serde(default)]
+        status: ProviderSessionCatalogStatus,
     },
     ProviderSessionHistory {
         history: ProviderSessionHistory,

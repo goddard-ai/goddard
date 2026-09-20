@@ -526,6 +526,7 @@ pub(super) struct CommandPaletteUi {
     provider_sessions_pending: bool,
     provider_session_import: Option<ProviderResumeCursor>,
     provider_session_error: Option<String>,
+    provider_session_status: ProviderSessionCatalogStatus,
     provider_session_generation: u64,
     /// The project the run-script drill-in scoped to, and the scan it
     /// produced.
@@ -579,6 +580,7 @@ impl CommandPaletteUi {
             provider_sessions_pending: false,
             provider_session_import: None,
             provider_session_error: None,
+            provider_session_status: ProviderSessionCatalogStatus::Ready,
             provider_session_generation: 0,
             run_script_project: None,
             run_scripts: Vec::new(),
@@ -2462,7 +2464,10 @@ impl Waku {
     fn command_palette_resume_provider_candidates(&self) -> Vec<CommandPaletteItem> {
         ProviderKind::ALL
             .into_iter()
-            .filter(|provider| !self.state.disabled_providers.contains(provider))
+            .filter(|provider| {
+                provider.supports_session_catalog()
+                    && !self.state.disabled_providers.contains(provider)
+            })
             .enumerate()
             .map(|(order, provider)| CommandPaletteItem {
                 section: PaletteSection::Providers,
@@ -3372,11 +3377,15 @@ impl Waku {
     fn default_resume_provider(&self) -> ProviderKind {
         self.selected_session()
             .map(|session| session.provider)
-            .filter(|provider| !self.state.disabled_providers.contains(provider))
+            .filter(|provider| {
+                provider.supports_session_catalog()
+                    && !self.state.disabled_providers.contains(provider)
+            })
             .or_else(|| {
-                ProviderKind::ALL
-                    .into_iter()
-                    .find(|provider| !self.state.disabled_providers.contains(provider))
+                ProviderKind::ALL.into_iter().find(|provider| {
+                    provider.supports_session_catalog()
+                        && !self.state.disabled_providers.contains(provider)
+                })
             })
             .unwrap_or_default()
     }
@@ -3403,6 +3412,7 @@ impl Waku {
         self.command_palette.provider_sessions_pending = true;
         self.command_palette.provider_session_import = None;
         self.command_palette.provider_session_error = None;
+        self.command_palette.provider_session_status = ProviderSessionCatalogStatus::Ready;
         self.command_palette.provider_session_generation = self
             .command_palette
             .provider_session_generation
@@ -3429,8 +3439,9 @@ impl Waku {
                 }
                 waku.command_palette.provider_sessions_pending = false;
                 match result {
-                    Ok(sessions) => {
-                        waku.command_palette.provider_sessions = sessions;
+                    Ok(catalog) => {
+                        waku.command_palette.provider_sessions = catalog.sessions;
+                        waku.command_palette.provider_session_status = catalog.status;
                         waku.command_palette.provider_session_error = None;
                     }
                     Err(error) => {
@@ -4051,6 +4062,19 @@ impl Waku {
                     "icons/alert.svg",
                     tr!("command_palette.could_not_load_sessions"),
                     Some(error),
+                    false,
+                )
+            } else if resume_view
+                && self.command_palette.provider_session_status
+                    == ProviderSessionCatalogStatus::Unsupported
+            {
+                (
+                    "icons/search.svg",
+                    tr!("command_palette.resume_unsupported"),
+                    Some(tr!(
+                        "command_palette.resume_unsupported_hint",
+                        provider = self.command_palette.resume_provider.display_name()
+                    )),
                     false,
                 )
             } else if resume_view {

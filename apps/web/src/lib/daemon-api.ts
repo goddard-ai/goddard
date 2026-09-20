@@ -15,6 +15,7 @@ import type {
   ProviderKind,
   ProviderProbe,
   ProviderResumeCursor,
+  ProviderSessionCatalogStatus,
   ProviderSessionHistory,
   ProviderSessionSummary,
   ReviewDiffData,
@@ -142,12 +143,12 @@ export async function listProviderSessions(
   client: WakuClient,
   provider: ProviderKind,
   limit = 250,
-): Promise<ProviderSessionSummary[]> {
+): Promise<{ sessions: ProviderSessionSummary[]; status: ProviderSessionCatalogStatus | undefined }> {
   const response = expectResponse(
     await client.request({ type: 'listProviderSessions', provider, limit }),
     'providerSessions',
   )
-  return response.sessions
+  return { sessions: response.sessions, status: response.status }
 }
 
 export async function loadProviderSessionHistory(

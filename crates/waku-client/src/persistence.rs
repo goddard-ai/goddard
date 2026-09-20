@@ -21,7 +21,8 @@ use waku_protocol::i18n::AppLanguage;
 use waku_protocol::identity::DATA_DIRECTORY_NAME;
 use waku_protocol::model::{
     AgentSession, FavoriteModel, Project, ProviderKind, ProviderResumeCursor,
-    ProviderSessionHistory, ProviderSessionSummary, RuntimeMode, SessionWorkspace,
+    ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, RuntimeMode,
+    SessionWorkspace,
 };
 use waku_protocol::theme::ThemeSettings;
 
@@ -2035,6 +2036,14 @@ pub struct StateStore {
     task_state_loaded: AtomicBool,
 }
 
+/// One provider's resumable sessions merged across connected daemons, plus
+/// the catalog status every answering daemon agreed on.
+#[derive(Default)]
+pub struct ProviderSessionCatalog {
+    pub sessions: Vec<(DaemonKey, ProviderSessionSummary)>,
+    pub status: ProviderSessionCatalogStatus,
+}
+
 impl StateStore {
     pub fn default_path() -> PathBuf {
         if cfg!(debug_assertions) {
@@ -2141,11 +2150,12 @@ impl StateStore {
         &self,
         provider: ProviderKind,
         limit: usize,
-    ) -> impl FnOnce() -> io::Result<Vec<(DaemonKey, ProviderSessionSummary)>> + Send + 'static
-    {
+    ) -> impl FnOnce() -> io::Result<ProviderSessionCatalog> + Send + 'static {
         let daemons = self.daemons.clone();
         move || {
-            let mut sessions = Vec::new();
+            let mut catalog = ProviderSessionCatalog::default();
+            let mut unsupported = 0usize;
+            let mut answered = 0usize;
             let mut first_error = None;
             for (key, daemon) in daemons.connected() {
                 match daemon.client().request(
@@ -2153,8 +2163,17 @@ impl StateStore {
                     Uuid::nil(),
                     Command::ListProviderSessions { provider, limit },
                 ) {
-                    Ok(ResponsePayload::ProviderSessions { sessions: reported }) => {
-                        sessions.extend(reported.into_iter().map(|session| (key, session)))
+                    Ok(ResponsePayload::ProviderSessions {
+                        sessions: reported,
+                        status,
+                    }) => {
+                        catalog
+                            .sessions
+                            .extend(reported.into_iter().map(|session| (key, session)));
+                        answered += 1;
+                        if status == ProviderSessionCatalogStatus::Unsupported {
+                            unsupported += 1;
+                        }
                     }
                     Ok(_) => {
                         return Err(io::Error::other(
@@ -2167,11 +2186,16 @@ impl StateStore {
                     Err(_) => {}
                 }
             }
-            sessions.sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
-            sessions.truncate(limit);
-            match (sessions.is_empty(), first_error) {
+            catalog
+                .sessions
+                .sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
+            catalog.sessions.truncate(limit);
+            if catalog.sessions.is_empty() && answered > 0 && unsupported == answered {
+                catalog.status = ProviderSessionCatalogStatus::Unsupported;
+            }
+            match (catalog.sessions.is_empty(), first_error) {
                 (true, Some(error)) => Err(error),
-                _ => Ok(sessions),
+                _ => Ok(catalog),
             }
         }
     }
