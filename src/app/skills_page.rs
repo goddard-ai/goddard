@@ -15,6 +15,7 @@ use gpui::KeyBinding;
 
 use super::composer::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
+use crate::ui::ActivationExt;
 
 use super::*;
 
@@ -1041,12 +1042,12 @@ impl Waku {
             } else {
                 theme.text_tertiary
             }))
-            .on_click(cx.listener({
+            .on_activation(cx, {
                 let dir = dir.clone();
-                move |this, _, _, cx| {
+                move |this, _, cx| {
                     this.toggle_skill_enabled(dir.clone(), !enabled, cx);
                 }
-            }));
+            });
 
         let mut contents = Vec::new();
         if skill.supporting_files == 1 {
@@ -1135,9 +1136,9 @@ impl Waku {
             "icons/pencil.svg",
             tr!("skills.open_file"),
         )
-        .on_click(cx.listener({
+        .on_activation(cx, {
             let skill_file = skill_file.clone();
-            move |this, _, _, cx| {
+            move |this, _, cx| {
                 if this.daemon.is_remote() {
                     this.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
@@ -1145,16 +1146,16 @@ impl Waku {
                     crate::platform::open_with_default_app(&skill_file, cx);
                 }
             }
-        }));
+        });
 
         let reveal_button = action_button(
             SharedString::from(format!("skill-reveal-{}", skill.row_key)),
             "icons/folder.svg",
             tr!("skills.reveal"),
         )
-        .on_click(cx.listener({
+        .on_activation(cx, {
             let skill_file = skill_file.clone();
-            move |this, _, _, cx| {
+            move |this, _, cx| {
                 if this.daemon.is_remote() {
                     this.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
@@ -1162,7 +1163,7 @@ impl Waku {
                     crate::platform::reveal_in_file_manager(&skill_file, cx);
                 }
             }
-        }));
+        });
 
         let copy_feedback_id = format!("skill-copy-{}", skill.row_key);
         let copied = self.control_was_copied(&copy_feedback_id);
@@ -1179,14 +1180,14 @@ impl Waku {
                 tr!("skills.copy_path")
             },
         )
-        .on_click(cx.listener({
+        .on_activation(cx, {
             let dir = dir.clone();
             let copy_feedback_id = copy_feedback_id.clone();
-            move |this, _, _, cx| {
+            move |this, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(dir.display().to_string()));
                 this.show_control_copied(copy_feedback_id.clone(), cx);
             }
-        }));
+        });
 
         let delete_button = div()
             .id(SharedString::from(format!(

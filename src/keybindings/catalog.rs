@@ -441,8 +441,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_settings_keys ===============================================
     e("menu.select_next", All, "down", SettingsSearch),
     e("menu.select_previous", All, "up", SettingsSearch),
-    e("settings.focus_next", All, "tab", CustomCommandEditor),
-    e("settings.focus_previous", All, "shift-tab", CustomCommandEditor),
+    e("settings.focus_next", All, "tab", Settings),
+    e("settings.focus_previous", All, "shift-tab", Settings),
     // === app::init_command_palette ==============================================
     e("palette.select_next", All, "down", PaletteSearch),
     e("palette.select_previous", All, "up", PaletteSearch),
@@ -699,7 +699,7 @@ mod ctx {
     pub const Autocomplete: &str = "ComposerAutocomplete > TextInput";
     pub const AutocompleteLoading: &str = "ComposerAutocompleteLoading > TextInput";
     pub const SettingsSearch: &str = "SettingsSidebar > TextInput";
-    pub const CustomCommandEditor: &str = "CustomCommandEditor";
+    pub const Settings: &str = "Settings";
     pub const PaletteSearch: &str = "CommandPalette > TextInput";
     pub const CommandPalette: &str = "CommandPalette";
     pub const FinderSearch: &str = "FileFinder > TextInput";

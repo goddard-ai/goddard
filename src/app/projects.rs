@@ -340,6 +340,7 @@ impl ProjectsPageState {
         ) -> Entity<TextInput> {
             cx.new(|cx| {
                 TextInput::new(window, cx)
+                    .tab_index(0)
                     .accessibility_label(placeholder.clone())
                     .placeholder(placeholder)
                     .clear_on_escape()

@@ -3941,29 +3941,34 @@ impl Waku {
         });
         let settings_search = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .clear_on_escape()
                 .accessibility_label(tr!("settings.search"))
                 .placeholder(tr!("settings.search"))
         });
         let friend_code_input = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .clear_on_escape()
                 .accessibility_label(tr!("friends.code_placeholder"))
                 .placeholder(tr!("friends.code_placeholder"))
         });
         let friend_name_input = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .accessibility_label(tr!("friends.display_name"))
                 .placeholder(tr!("friends.display_name_placeholder"))
         });
         let friend_nickname_input = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .clear_on_escape()
                 .accessibility_label(tr!("friends.nickname"))
                 .placeholder(tr!("friends.nickname_placeholder"))
         });
         let archived_search = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .clear_on_escape()
                 .accessibility_label(tr!("settings.archived_search"))
                 .placeholder(tr!("settings.archived_search"))
@@ -3974,6 +3979,7 @@ impl Waku {
         let daemon_origins = state.daemon_exposure.allowed_origins_text();
         let daemon_port_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
+                .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("daemon.port"))
                 .placeholder(tr!("daemon.port_placeholder"));
@@ -3982,6 +3988,7 @@ impl Waku {
         });
         let daemon_origins_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
+                .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("daemon.allowed_origins"))
                 .placeholder(tr!("daemon.allowed_origins_placeholder"));
@@ -3990,6 +3997,7 @@ impl Waku {
         });
         let worktree_sync_branches_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
+                .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("settings.new_worktree_sync_branches"))
                 .placeholder(tr!("settings.new_worktree_sync_branches_placeholder"));
@@ -4001,6 +4009,7 @@ impl Waku {
                 cx.new(|cx| {
                     TextInput::new(window, cx)
                         .masked()
+                        .tab_index(0)
                         .select_all_on_focus_click()
                         .accessibility_label(label)
                         .placeholder(placeholder)
@@ -4023,18 +4032,21 @@ impl Waku {
         );
         let eval_vercel_team_input = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("routing.vercel_team"))
                 .placeholder(tr!("routing.optional"))
         });
         let eval_cloudflare_account_input = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("routing.cloudflare_account"))
                 .placeholder(tr!("routing.cloudflare_account_placeholder"))
         });
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .clear_on_escape()
                 .accessibility_label(tr!("skills.search"))
                 .placeholder(tr!("skills.search"))
@@ -4063,12 +4075,14 @@ impl Waku {
             cx.new(|cx| TextInput::new(window, cx).accessibility_label(tr!("a11y.task_name")));
         let provider_path_input = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("providers.binary_path"))
                 .placeholder(tr!("input.detected_automatically"))
         });
         let usage_project_filter = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .accessibility_label(tr!("input.filter_projects"))
                 .placeholder(tr!("input.filter_projects"))
         });

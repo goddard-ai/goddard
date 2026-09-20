@@ -191,6 +191,7 @@ impl KeybindingsUi {
     pub fn new(window: &mut Window, cx: &mut Context<super::Waku>) -> Self {
         let search = cx.new(|cx| {
             TextInput::new(window, cx)
+                .tab_index(0)
                 .clear_on_escape()
                 .accessibility_label(tr!("keybind.search"))
                 .placeholder(tr!("keybind.search_placeholder"))

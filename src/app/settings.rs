@@ -42,9 +42,11 @@ const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
 /// it.
 const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
-/// The Commands page's editor claims Tab for focus traversal rather than
-/// letting a field take it as text.
-const CUSTOM_COMMAND_EDITOR_CONTEXT: &str = "CustomCommandEditor";
+/// Every page, editor, and form inside the settings surface is under this
+/// identifier — the `tab`/`shift-tab` bindings below traverse all of them
+/// rather than letting a field take Tab as text. The surface stamps it next
+/// to `Waku`, which the app-wide bindings take their scope from.
+const SETTINGS_CONTEXT: &str = "Settings";
 
 actions!(waku_settings, [FocusNext, FocusPrevious]);
 
@@ -148,12 +150,8 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("down", SelectNextEntry, Some(SETTINGS_SEARCH_CONTEXT)),
         KeyBinding::new("up", SelectPreviousEntry, Some(SETTINGS_SEARCH_CONTEXT)),
-        KeyBinding::new("tab", FocusNext, Some(CUSTOM_COMMAND_EDITOR_CONTEXT)),
-        KeyBinding::new(
-            "shift-tab",
-            FocusPrevious,
-            Some(CUSTOM_COMMAND_EDITOR_CONTEXT),
-        ),
+        KeyBinding::new("tab", FocusNext, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("shift-tab", FocusPrevious, Some(SETTINGS_CONTEXT)),
     ]);
 }
 
@@ -628,8 +626,10 @@ impl Waku {
         let sidebar = self.render_settings_sidebar(window, cx);
 
         div()
-            .key_context("Waku")
+            .key_context("Waku Settings")
             .track_focus(&self.settings_focus)
+            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
             .on_action(|_: &CloseWindow, window, _| crate::platform::hide_window(window))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_project_action))
@@ -2460,9 +2460,6 @@ impl Waku {
         );
 
         div()
-            .key_context(CUSTOM_COMMAND_EDITOR_CONTEXT)
-            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
-            .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
             .w_full()
             .px(px(20.0))
             .py(px(15.0))
@@ -7223,10 +7220,10 @@ impl Waku {
             } else {
                 tr!("common.refresh")
             })
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_activation(cx, |this, _, cx| {
                 this.refresh_provider_detection(None);
                 cx.notify();
-            }));
+            });
 
         let mut provider_rows: Vec<AnyElement> = Vec::new();
         for kind in ProviderKind::ALL {
@@ -7558,11 +7555,11 @@ impl Waku {
             .text_color(theme.text_secondary)
             .hover(|element| element.bg(theme.overlay))
             .child(tr!("common.reset"))
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_activation(cx, |this, _, cx| {
                 this.provider_path_input
                     .update(cx, |input, cx| input.clear(cx));
                 this.apply_provider_path_override(cx);
-            }));
+            });
 
         div()
             .mt(px(10.0))
@@ -8119,6 +8116,7 @@ impl Waku {
                         .child(
                             div()
                                 .id(SharedString::from(format!("revoke-computer-app-{key}")))
+                                .tab_index(0)
                                 .h(px(25.0))
                                 .px(px(9.0))
                                 .rounded(px(8.0))
@@ -8130,10 +8128,11 @@ impl Waku {
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_secondary)
                                 .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
+                                .focus_visible(|element| element.border_color(theme.accent))
                                 .child(tr!("common.revoke"))
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                                .on_activation(cx, move |this, _, cx| {
                                     this.revoke_computer_app(&key, cx);
-                                })),
+                                }),
                         ),
                 );
             }
@@ -8236,6 +8235,7 @@ impl Waku {
                                 div().mt(px(11.0)).flex().items_center().gap(px(8.0)).child(
                                     div()
                                         .id("recheck-computer-permissions")
+                                        .tab_index(0)
                                         .h(px(28.0))
                                         .px(px(11.0))
                                         .rounded(px(9.0))
@@ -8247,14 +8247,17 @@ impl Waku {
                                         .cursor_default()
                                         .text_size(sp(12.5))
                                         .opacity(if pending { 0.6 } else { 1.0 })
+                                        .focus_visible(|element| {
+                                            element.border_color(theme.accent)
+                                        })
                                         .child(if pending {
                                             tr!("common.checking")
                                         } else {
                                             tr!("common.recheck")
                                         })
-                                        .on_click(cx.listener(|this, _, _, cx| {
+                                        .on_activation(cx, |this, _, cx| {
                                             this.request_computer_permissions(false, cx);
-                                        })),
+                                        }),
                                 ),
                             )
                         })
@@ -9119,12 +9122,12 @@ impl Waku {
                 tr!("integrations.sign_in"),
                 theme,
             )
-            .on_click(cx.listener({
+            .on_activation(cx, {
                 let id = id.clone();
-                move |this, _, _, cx| {
+                move |this, _, cx| {
                     this.retry_integration_auth(&id, cx);
                 }
-            }))
+            })
             .into_any_element()
         } else if configured.is_some() {
             integration_button(
@@ -9132,12 +9135,12 @@ impl Waku {
                 tr!("integrations.disconnect"),
                 theme,
             )
-            .on_click(cx.listener({
+            .on_activation(cx, {
                 let id = id.clone();
-                move |this, _, _, cx| {
+                move |this, _, cx| {
                     this.disconnect_integration(&id, cx);
                 }
-            }))
+            })
             .into_any_element()
         } else {
             integration_button(
@@ -9145,12 +9148,12 @@ impl Waku {
                 tr!("integrations.connect"),
                 theme,
             )
-            .on_click(cx.listener({
+            .on_activation(cx, {
                 let snapshot = snapshot.clone();
-                move |this, _, window, cx| {
+                move |this, window, cx| {
                     this.open_integration_editor(&snapshot, window, cx);
                 }
-            }))
+            })
             .into_any_element()
         };
 
@@ -9247,10 +9250,10 @@ impl Waku {
                 on,
                 theme,
             )
-            .on_click(cx.listener({
+            .on_activation(cx, {
                 let id = id.clone();
-                move |this, _, _, cx| this.toggle_integration_provider(&id, provider, cx)
-            }))
+                move |this, _, cx| this.toggle_integration_provider(&id, provider, cx)
+            })
             .into_any_element()
         });
         div()
@@ -9299,9 +9302,9 @@ impl Waku {
                     on,
                     theme,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_activation(cx, move |this, _, cx| {
                     this.set_editor_variant(&variant_id, cx);
-                }))
+                })
                 .into_any_element()
             });
             form = form.child(
@@ -9323,9 +9326,9 @@ impl Waku {
                 on,
                 theme,
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_activation(cx, move |this, _, cx| {
                 this.toggle_editor_provider(provider, cx);
-            }))
+            })
             .into_any_element()
         });
         form = form.child(
@@ -9363,10 +9366,10 @@ impl Waku {
                 .gap(px(8.0))
                 .child(
                     integration_button("integration-editor-cancel", tr!("common.cancel"), theme)
-                        .on_click(cx.listener(|this, _, _, cx| {
+                        .on_activation(cx, |this, _, cx| {
                             this.integration_editor = None;
                             cx.notify();
-                        })),
+                        }),
                 )
                 .child(
                     integration_button(
@@ -9374,9 +9377,9 @@ impl Waku {
                         tr!("integrations.connect"),
                         theme,
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.connect_integration(cx);
-                    })),
+                    }),
                 ),
         );
 
@@ -9870,6 +9873,7 @@ fn permission_status_row(
     } else {
         div()
             .id(id)
+            .tab_index(0)
             .h(px(25.0))
             .px(px(9.0))
             .rounded(px(8.0))
@@ -9881,10 +9885,11 @@ fn permission_status_row(
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
+            .focus_visible(|element| element.border_color(theme.accent))
             .child(tr!("computer_use.grant_access"))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_activation(cx, move |this, _, cx| {
                 this.request_computer_permissions(true, cx);
-            }))
+            })
     };
 
     Some(
@@ -9932,8 +9937,8 @@ fn permission_status_row(
 #[cfg(test)]
 mod tests {
     use super::{
-        CUSTOM_COMMAND_EDITOR_CONTEXT, FocusNext, FocusPrevious, SETTINGS_PAGES,
-        abbreviate_home_path, sync_branches_from_text,
+        FocusNext, FocusPrevious, SETTINGS_CONTEXT, SETTINGS_PAGES, abbreviate_home_path,
+        sync_branches_from_text,
     };
     use crate::input::TextInput;
     use gpui::{Context, Entity, Render, TestAppContext, Window, div, prelude::*};
@@ -9948,7 +9953,7 @@ mod tests {
     impl Render for TabHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div()
-                .key_context(CUSTOM_COMMAND_EDITOR_CONTEXT)
+                .key_context(SETTINGS_CONTEXT)
                 .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
                 .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
                 .child(self.name.clone())
@@ -9962,7 +9967,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn tab_moves_through_custom_command_editor_controls(cx: &mut TestAppContext) {
+    fn tab_moves_through_settings_form_controls(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::input::init(cx);
             super::init(cx);

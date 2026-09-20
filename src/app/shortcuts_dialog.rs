@@ -816,12 +816,12 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 bound(
                     tr!("shortcuts.next_field"),
                     settings::FocusNext,
-                    Some("CustomCommandEditor"),
+                    Some("Settings"),
                 ),
                 bound(
                     tr!("shortcuts.previous_field"),
                     settings::FocusPrevious,
-                    Some("CustomCommandEditor"),
+                    Some("Settings"),
                 ),
             ],
         ),

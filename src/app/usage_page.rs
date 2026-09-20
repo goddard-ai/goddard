@@ -11,6 +11,7 @@ use chrono::{Datelike, Local, NaiveDate};
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::ui::ActivationExt;
 use crate::usage_history::{
     self, MONTHLY_WINDOW, MonthSlice, PricingStatus, ProjectSlice, ProviderDay, UsageHistory,
     UsageProvider, UsageWindow, WINDOW_CHOICES,
@@ -413,9 +414,9 @@ impl Waku {
                         element.hover(|element| element.text_color(theme.text))
                     })
                     .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.set_usage_view(view, cx);
-                    })),
+                    }),
             );
         }
 
@@ -483,9 +484,9 @@ impl Waku {
                 tr!("usage.rescan")
             }))
             .child(refresh_glyph)
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_activation(cx, |this, _, cx| {
                 this.ensure_usage_history(true, cx);
-            }));
+            });
 
         let range_label = if monthly {
             tr!(
@@ -707,12 +708,12 @@ impl Waku {
                         element.hover(|element| element.text_color(theme.text))
                     })
                     .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         if this.usage_metric != option {
                             this.usage_metric = option;
                             cx.notify();
                         }
-                    })),
+                    }),
             );
         }
 
@@ -1112,12 +1113,12 @@ impl Waku {
                         element.hover(|element| element.text_color(theme.text))
                     })
                     .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         if this.usage_breakdown != option {
                             this.usage_breakdown = option;
                             cx.notify();
                         }
-                    })),
+                    }),
             );
         }
 
