@@ -291,8 +291,12 @@ impl Waku {
             return;
         }
         let Some(daemon) = self.daemon_for_session(session_id) else {
-            // Offline remote host: drop the mark so hydration retries when
+            // Offline remote host: the selection is use, so start its
+            // interactive connect; drop the mark so hydration retries when
             // the supervisor registers and the row is re-selected.
+            if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id) {
+                self.use_remote_host(host, cx);
+            }
             self.session_hydrations.remove(&session_id);
             return;
         };
@@ -752,6 +756,13 @@ impl Waku {
         provider: ProviderKind,
         cx: &mut Context<Self>,
     ) {
+        // Opening a remote project is use — start its interactive connect
+        // now so the daemon is warm by the first prompt.
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(project_id)
+            && self.daemons.daemon_for_project(project_id).is_none()
+        {
+            self.use_remote_host(host, cx);
+        }
         if let Some(draft_id) = self
             .state
             .sessions
@@ -860,6 +871,13 @@ impl Waku {
             return session_id;
         }
         let project_id = project_id?;
+        // Targeting a remote project is use — start its interactive
+        // connect.
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(project_id)
+            && self.daemons.daemon_for_project(project_id).is_none()
+        {
+            self.use_remote_host(host, cx);
+        }
         let runtime_mode =
             new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
         let mut session = self.state.new_session(project_id, self.state.last_provider);
@@ -877,6 +895,12 @@ impl Waku {
     /// `select_session` records: the page itself is the location history
     /// captured.
     pub(super) fn bind_projects_page_draft(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        // Docking a remote project is use — start its interactive connect.
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(project_id)
+            && self.daemons.daemon_for_project(project_id).is_none()
+        {
+            self.use_remote_host(host, cx);
+        }
         let source = self.composer_draft_key();
         let draft_id = self
             .state

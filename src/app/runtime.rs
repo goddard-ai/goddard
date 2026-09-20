@@ -60,14 +60,21 @@ pub(super) struct SshLink {
 
 /// One connect attempt against a remote host: over ssh when the record has
 /// a destination, direct websocket otherwise. Blocking — run on the
-/// background executor.
+/// background executor. `interactive` authorizes ssh to prompt; every
+/// caller that is not reacting to explicit user intent must pass `false`.
 fn connect_remote_supervisor(
     host: &waku_client::persistence::RemoteHost,
+    interactive: bool,
 ) -> anyhow::Result<RemoteDaemonLink> {
     #[cfg(unix)]
     if let Some(destination) = host.ssh_destination.as_deref() {
         let transport = crate::ssh::SshTransport::new(host.id, destination);
-        let (local_port, supervisor) = transport.connect()?;
+        let auth = if interactive {
+            crate::ssh::SshAuth::Interactive
+        } else {
+            crate::ssh::SshAuth::Batch
+        };
+        let (local_port, supervisor) = transport.connect(auth)?;
         return Ok(RemoteDaemonLink {
             supervisor,
             ssh: Some(SshLink {
@@ -80,12 +87,43 @@ fn connect_remote_supervisor(
     if host.ssh_destination.is_some() {
         anyhow::bail!("ssh remotes are not supported on this platform");
     }
+    #[cfg(not(unix))]
+    let _ = interactive;
     let supervisor = waku_client::DaemonSupervisor::connect(&host.address, host.token.clone())?;
     Ok(RemoteDaemonLink {
         supervisor,
         #[cfg(unix)]
         ssh: None,
     })
+}
+
+/// Backoff between background connect attempts: 5s doubling to a 5-minute
+/// cap, jittered inside the top half so several saved hosts do not retry
+/// in lockstep.
+fn remote_retry_delay(failures: u32) -> std::time::Duration {
+    const BASE_SECS: u64 = 5;
+    const CAP_SECS: u64 = 300;
+    let ceiling = BASE_SECS
+        .saturating_mul(1_u64 << failures.saturating_sub(1).min(6))
+        .min(CAP_SECS);
+    let floor = ceiling / 2;
+    let jitter = (Uuid::new_v4().as_u128() % u128::from((ceiling - floor).max(1))) as u64;
+    std::time::Duration::from_secs(floor + jitter)
+}
+
+/// Whether a use trigger on this host upgrades the attempt to interactive —
+/// only ssh remotes can prompt, and they are unix-only. On any other host a
+/// trigger simply retries the connect ahead of its backoff.
+fn trigger_is_interactive(host: &waku_client::persistence::RemoteHost) -> bool {
+    #[cfg(unix)]
+    {
+        host.ssh_destination.is_some()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = host;
+        false
+    }
 }
 
 /// A password/passphrase request ssh is waiting on, presented as a modal.
@@ -2137,9 +2175,13 @@ impl Waku {
             return;
         }
         let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
-            // The owning remote host has not connected yet. Leave the pending
-            // mark: its first catalog snapshot re-enters here for every busy
-            // session it reports.
+            // The owning remote host has not connected yet. Reaching for the
+            // session is use, so start its interactive connect; its first
+            // catalog snapshot re-enters here for every busy session it
+            // reports.
+            if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id) {
+                self.use_remote_host(host, cx);
+            }
             return;
         };
         let event_wake = self.event_wake_tx.clone();
@@ -2353,15 +2395,87 @@ impl Waku {
         if host.ssh_destination.is_some() {
             self.ensure_askpass_responder(cx);
         }
+        // A use trigger on this channel interrupts the backoff for one
+        // interactive attempt — the only path that may raise an ssh prompt.
+        let (trigger_tx, trigger_rx) = smol::channel::unbounded::<()>();
+        self.remote_connect_triggers.insert(host_id, trigger_tx);
+        let interactive_permit = self.ssh_interactive_permit.clone();
         cx.spawn(async move |waku, cx| {
+            let mut failures = 0_u32;
+            let mut first = true;
             loop {
-                let attempt = cx
-                    .background_executor()
-                    .spawn({
-                        let host = host.clone();
-                        async move { connect_remote_supervisor(&host) }
-                    })
-                    .await;
+                // The first attempt is immediate; later ones wait out the
+                // backoff. Both are background work and run in batch mode —
+                // only a trigger upgrades an attempt to interactive.
+                let interactive = if first {
+                    first = false;
+                    false
+                } else {
+                    futures::select_biased! {
+                        request = futures::FutureExt::fuse(trigger_rx.recv()) => match request {
+                            Ok(()) => {
+                                let _ = waku.update(cx, |waku, _| {
+                                    waku.interactive_connects_pending.remove(&host_id);
+                                });
+                                trigger_is_interactive(&host)
+                            }
+                            Err(_) => return,
+                        },
+                        _ = futures::FutureExt::fuse(
+                            cx.background_executor().timer(remote_retry_delay(failures)),
+                        ) => false,
+                    }
+                };
+                let attempt = if interactive {
+                    // Serialized so at most one attempt across all hosts can
+                    // raise an askpass prompt — which is also what binds a
+                    // request to this host.
+                    let _permit = interactive_permit.lock().await;
+                    let current = waku
+                        .update(cx, |waku, _| {
+                            if waku.remote_host_record_matches(&host) {
+                                waku.ssh_active_interactive = Some(host_id);
+                                waku.ssh_prompt_cancelled = false;
+                                true
+                            } else {
+                                false
+                            }
+                        })
+                        .unwrap_or(false);
+                    if !current {
+                        continue;
+                    }
+                    let result = cx
+                        .background_executor()
+                        .spawn({
+                            let host = host.clone();
+                            async move { connect_remote_supervisor(&host, true) }
+                        })
+                        .await;
+                    let _ = waku.update(cx, |waku, cx| {
+                        waku.ssh_active_interactive = None;
+                        #[cfg(unix)]
+                        waku.drain_ssh_prompts(cx);
+                    });
+                    result
+                } else {
+                    cx.background_executor()
+                        .spawn({
+                            let host = host.clone();
+                            async move { connect_remote_supervisor(&host, false) }
+                        })
+                        .await
+                };
+                // Triggers queued during an interactive attempt are
+                // duplicates of the one just run — honoring them would
+                // stack modals. Queued triggers survive a batch attempt:
+                // they are intent the attempt could not answer.
+                if interactive {
+                    while trigger_rx.try_recv().is_ok() {}
+                    let _ = waku.update(cx, |waku, _| {
+                        waku.interactive_connects_pending.remove(&host_id);
+                    });
+                }
                 match attempt {
                     Ok(outcome) => {
                         let _ = waku.update(cx, |waku, cx| {
@@ -2385,14 +2499,48 @@ impl Waku {
                         if !keep_trying {
                             return;
                         }
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_secs(10))
-                            .await;
+                        failures = failures.saturating_add(1);
                     }
                 }
             }
         })
         .detach();
+    }
+
+    /// A user action reached for a remote host — selecting or opening one of
+    /// its sessions or projects, submitting to it, forking it, or an
+    /// explicit retry. Connects it now; for ssh hosts the attempt may raise
+    /// the auth prompt, which is exactly what "in use" means.
+    pub(super) fn use_remote_host(&mut self, host: Uuid, cx: &mut Context<Self>) {
+        #[cfg(unix)]
+        if self.ssh_transports.contains_key(&host) {
+            // A dead master under a live supervisor is the watcher's repair
+            // — the request upgrades its next attempt to interactive.
+            if !self.remote_host_connected(host) {
+                self.ssh_repair_requests.insert(host);
+                cx.notify();
+            }
+            return;
+        }
+        if self.remote_host_connected(host) {
+            return;
+        }
+        if self.interactive_connects_pending.insert(host)
+            && let Some(trigger) = self.remote_connect_triggers.get(&host)
+        {
+            let _ = trigger.try_send(());
+        }
+        cx.notify();
+    }
+
+    /// Whether any of the host's sessions is selected or working — the bar
+    /// the transport watcher applies before it may spawn a repair.
+    #[cfg(unix)]
+    fn remote_host_in_use(&self, host: Uuid) -> bool {
+        self.state.sessions.iter().any(|session| {
+            self.daemons.session_owner(session.id) == waku_client::DaemonKey::Remote(host)
+                && (self.state.selected_session == Some(session.id) || session.status.is_busy())
+        })
     }
 
     /// A remote supervisor answered: register it so routing, task-state sync,
@@ -2412,6 +2560,11 @@ impl Waku {
         let supervisor = link.supervisor;
         self.daemons.add_remote(host, supervisor.clone());
         self.remote_errors.remove(&host);
+        self.needs_auth_hosts.remove(&host);
+        self.interactive_connects_pending.remove(&host);
+        self.remote_connect_triggers.remove(&host);
+        #[cfg(unix)]
+        self.ssh_repair_requests.remove(&host);
         self.start_task_state_sync(waku_client::DaemonKey::Remote(host), supervisor);
         let drafts = self.composer_draft_store.clone();
         let daemons = self.daemons.clone();
@@ -2499,8 +2652,13 @@ impl Waku {
         if let Some(link) = self.ssh_transports.remove(&host_id) {
             link.transport.shutdown();
         }
+        #[cfg(unix)]
+        self.ssh_repair_requests.remove(&host_id);
         self.daemons.remove_remote(host_id);
         self.remote_errors.remove(&host_id);
+        self.needs_auth_hosts.remove(&host_id);
+        self.interactive_connects_pending.remove(&host_id);
+        self.remote_connect_triggers.remove(&host_id);
         self.connect_remote_host(record, cx);
         cx.notify();
     }
@@ -2545,6 +2703,11 @@ impl Waku {
         self.daemons.remove_remote(host);
         self.remote_daemon_settings.remove(&host);
         self.remote_errors.remove(&host);
+        self.needs_auth_hosts.remove(&host);
+        self.interactive_connects_pending.remove(&host);
+        self.remote_connect_triggers.remove(&host);
+        #[cfg(unix)]
+        self.ssh_repair_requests.remove(&host);
         self.remote_catalogs.remove(&host);
         self.save_remote_catalogs();
         if self.skills_catalogs.remove(&remote).is_some() {
@@ -2602,30 +2765,81 @@ impl Waku {
     }
 
     /// Keep the ssh channel under a connected host alive: while the record
-    /// and transport exist, verify the ControlMaster and re-run provisioning
-    /// plus the forward when it died. The supervisor reconnects its client
-    /// on its own once the forward is back.
+    /// and transport exist and the host is in use, verify the ControlMaster
+    /// and re-run provisioning plus the forward when it died. Repairs run
+    /// in batch mode so they can never prompt — a use trigger upgrades one
+    /// to interactive, which is the only way a repair may ask for auth. The
+    /// supervisor reconnects its client on its own once the forward is back.
     #[cfg(unix)]
     fn watch_ssh_transport(&mut self, host_id: Uuid, cx: &mut Context<Self>) {
+        let interactive_permit = self.ssh_interactive_permit.clone();
         cx.spawn(async move |waku, cx| {
             loop {
                 cx.background_executor()
                     .timer(std::time::Duration::from_secs(5))
                     .await;
-                let link = waku
-                    .update(cx, |waku, _| waku.ssh_transports.get(&host_id).cloned())
-                    .ok()
-                    .flatten();
-                let Some(link) = link else { return };
-                let repaired = cx
-                    .background_executor()
-                    .spawn(async move {
-                        if link.transport.master_alive() {
-                            return Ok(());
-                        }
-                        link.transport.restore_forward(link.local_port)
+                let Some((link, interactive, in_use)) = waku
+                    .update(cx, |waku, _| {
+                        waku.ssh_transports.get(&host_id).cloned().map(|link| {
+                            let interactive = waku.ssh_repair_requests.contains(&host_id);
+                            (
+                                link,
+                                interactive,
+                                interactive || waku.remote_host_in_use(host_id),
+                            )
+                        })
                     })
-                    .await;
+                    .ok()
+                    .flatten()
+                else {
+                    return;
+                };
+                if !in_use {
+                    continue;
+                }
+                let repaired = if interactive {
+                    let _permit = interactive_permit.lock().await;
+                    let current = waku
+                        .update(cx, |waku, _| {
+                            if waku.ssh_transports.contains_key(&host_id) {
+                                waku.ssh_active_interactive = Some(host_id);
+                                waku.ssh_prompt_cancelled = false;
+                                true
+                            } else {
+                                false
+                            }
+                        })
+                        .unwrap_or(false);
+                    if !current {
+                        continue;
+                    }
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move {
+                            if link.transport.master_alive() {
+                                return Ok(());
+                            }
+                            link.transport
+                                .restore_forward(crate::ssh::SshAuth::Interactive, link.local_port)
+                        })
+                        .await;
+                    let _ = waku.update(cx, |waku, cx| {
+                        waku.ssh_active_interactive = None;
+                        waku.drain_ssh_prompts(cx);
+                        waku.ssh_repair_requests.remove(&host_id);
+                    });
+                    result
+                } else {
+                    cx.background_executor()
+                        .spawn(async move {
+                            if link.transport.master_alive() {
+                                return Ok(());
+                            }
+                            link.transport
+                                .restore_forward(crate::ssh::SshAuth::Batch, link.local_port)
+                        })
+                        .await
+                };
                 if let Err(error) = repaired {
                     let keep = waku
                         .update(cx, |waku, cx| {
@@ -2678,15 +2892,26 @@ impl Waku {
         .detach();
     }
 
-    /// Show ssh's prompt text. The input entity is created lazily by the
-    /// dialog's render path, which owns a `Window`.
+    /// Queue ssh's prompt text. The input entity is created lazily by the
+    /// dialog's render path, which owns a `Window`. A request is only
+    /// honored while an interactive attempt owns the prompt slot — anything
+    /// else (a cancelled attempt's ssh still finishing, a stray child) gets
+    /// an empty answer so it fails instead of hanging on a stale modal.
     #[cfg(unix)]
     fn present_ssh_prompt(
         &mut self,
         request: crate::ssh::SshAskpassRequest,
         cx: &mut Context<Self>,
     ) {
-        self.pending_ssh_prompt = Some(SshPrompt {
+        if self.ssh_active_interactive.is_none() || self.ssh_prompt_cancelled {
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = request.answer("");
+                })
+                .detach();
+            return;
+        }
+        self.pending_ssh_prompts.push_back(SshPrompt {
             prompt: request.prompt.clone(),
             request,
             input: None,
@@ -2694,13 +2919,36 @@ impl Waku {
         cx.notify();
     }
 
+    /// Auto-answer every queued askpass request with an empty line so the
+    /// waiting ssh child fails instead of hanging on a superseded prompt.
+    #[cfg(unix)]
+    fn drain_ssh_prompts(&mut self, cx: &mut Context<Self>) {
+        while let Some(prompt) = self.pending_ssh_prompts.pop_front() {
+            let request = prompt.request;
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = request.answer("");
+                })
+                .detach();
+        }
+    }
+
     /// Deliver the answer — or an empty line when cancelled — to the waiting
-    /// askpass helper and close the prompt.
+    /// askpass helper and close the prompt. A cancel latches the host
+    /// needs-auth: nothing may prompt for it again until the next use, and
+    /// this attempt's queued requests are drained rather than re-asked.
     #[cfg(unix)]
     pub(super) fn answer_ssh_prompt(&mut self, cancel: bool, cx: &mut Context<Self>) {
-        let Some(prompt) = self.pending_ssh_prompt.take() else {
+        let Some(prompt) = self.pending_ssh_prompts.pop_front() else {
             return;
         };
+        if cancel {
+            self.ssh_prompt_cancelled = true;
+            if let Some(host) = self.ssh_active_interactive {
+                self.needs_auth_hosts.insert(host);
+            }
+            self.drain_ssh_prompts(cx);
+        }
         let answer = if cancel {
             String::new()
         } else {
@@ -3518,6 +3766,14 @@ impl Waku {
             cx.notify();
             return;
         };
+        // Forking an offline remote session is use — start its interactive
+        // connect. This fork still fails below; the user retries once the
+        // daemon lands.
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
+            && self.daemons.daemon_for_session(session_id).is_none()
+        {
+            self.use_remote_host(host, cx);
+        }
         if self.state.selected_session != Some(session_id)
             || !matches!(source.status, SessionStatus::Idle | SessionStatus::Failed)
             || !source.provider.supports_conversation_fork()
@@ -5048,6 +5304,19 @@ impl Waku {
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
+        // Submitting to an offline remote host is use — start its
+        // interactive connect. The submission still fails on this pass; the
+        // user re-sends once the daemon lands.
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
+            && self.daemons.daemon_for_session(session_id).is_none()
+            && self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id)
+        {
+            self.use_remote_host(host, cx);
+        }
         let Some(session) = self
             .state
             .sessions

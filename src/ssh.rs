@@ -280,6 +280,17 @@ pub(super) fn askpass_responder_loop(sender: smol::channel::Sender<SshAskpassReq
     }
 }
 
+/// How an ssh invocation may authenticate. `Batch` forbids interaction
+/// outright — `BatchMode` plus askpass disabled — so background work can
+/// never raise a prompt. `Interactive` wires the askpass helper and caps
+/// password retries at one, so a single cancel ends the attempt instead of
+/// re-prompting; it only runs on explicit user intent.
+#[derive(Clone, Copy)]
+pub(super) enum SshAuth {
+    Batch,
+    Interactive,
+}
+
 /// One host's ControlMaster-managed ssh channel.
 #[derive(Clone)]
 pub(super) struct SshTransport {
@@ -299,10 +310,11 @@ impl SshTransport {
         ssh_dir().join(format!("{}.ctl", self.host))
     }
 
-    /// `ssh` with the control socket and askpass environment pinned. Every
-    /// invocation goes through this so a prompt can never fall back to a
-    /// terminal that does not exist.
-    fn command(&self) -> Command {
+    /// `ssh` with the control socket pinned and its authentication mode
+    /// fixed. Every invocation goes through this so a prompt can neither
+    /// fall back to a terminal that does not exist nor fire from a
+    /// background attempt.
+    fn command(&self, auth: SshAuth) -> Command {
         let mut control_path = OsString::from("ControlPath=");
         control_path.push(self.control_path());
         let mut command = Command::new("ssh");
@@ -313,12 +325,27 @@ impl SshTransport {
             .arg("ControlPersist=600")
             .arg("-o")
             .arg("ConnectTimeout=15")
-            .env("SSH_ASKPASS", askpass_script_path())
-            .env("SSH_ASKPASS_REQUIRE", "force")
-            .env("DISPLAY", "goddard:0")
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
             .stdout(Stdio::piped());
+        match auth {
+            SshAuth::Batch => {
+                command
+                    .arg("-o")
+                    .arg("BatchMode=yes")
+                    .env("SSH_ASKPASS_REQUIRE", "never")
+                    .env_remove("SSH_ASKPASS")
+                    .env_remove("DISPLAY");
+            }
+            SshAuth::Interactive => {
+                command
+                    .arg("-o")
+                    .arg("NumberOfPasswordPrompts=1")
+                    .env("SSH_ASKPASS", askpass_script_path())
+                    .env("SSH_ASKPASS_REQUIRE", "force")
+                    .env("DISPLAY", "goddard:0");
+            }
+        }
         command
     }
 
@@ -328,12 +355,12 @@ impl SshTransport {
     /// is set through `-o` only: adding `-M` on top of it promotes the
     /// master to confirmation mode, where every later session and forward
     /// is refused with "Permission denied".
-    fn ensure_master(&self) -> anyhow::Result<()> {
+    fn ensure_master(&self, auth: SshAuth) -> anyhow::Result<()> {
         if self.master_alive() {
             return Ok(());
         }
         let output = self
-            .command()
+            .command(auth)
             .arg("-o")
             .arg("ControlMaster=yes")
             .arg("-Nf")
@@ -350,11 +377,12 @@ impl SshTransport {
         Ok(())
     }
 
-    /// Whether the control master is up.
+    /// Whether the control master is up. `-O` queries the socket — it never
+    /// authenticates, so it always runs in batch mode.
     pub(super) fn master_alive(&self) -> bool {
         self.control_path().exists()
             && self
-                .command()
+                .command(SshAuth::Batch)
                 .arg("-O")
                 .arg("check")
                 .arg(&self.destination)
@@ -366,10 +394,14 @@ impl SshTransport {
 
     /// Run a script on the remote through the master connection, returning
     /// its exit code and captured output.
-    fn run_remote_status(&self, script: &str) -> anyhow::Result<(i32, String, String)> {
-        self.ensure_master()?;
+    fn run_remote_status(
+        &self,
+        auth: SshAuth,
+        script: &str,
+    ) -> anyhow::Result<(i32, String, String)> {
+        self.ensure_master(auth)?;
         let mut child = self
-            .command()
+            .command(auth)
             .arg(&self.destination)
             .arg("sh -s")
             .stdin(Stdio::piped())
@@ -392,14 +424,14 @@ impl SshTransport {
     /// when needed, then return its token plus bound loopback port. The
     /// bootstrap's exit 8 means the remote platform has no published
     /// artifact — the caller uploads the bundled binary and retries.
-    fn provision(&self) -> anyhow::Result<(String, u16)> {
+    fn provision(&self, auth: SshAuth) -> anyhow::Result<(String, u16)> {
         let script = REMOTE_BOOTSTRAP
             .replace("%VERSION%", env!("CARGO_PKG_VERSION"))
             .replace("%PROTOCOL%", &waku_client::PROTOCOL_VERSION.to_string());
-        let (code, stdout, stderr) = self.run_remote_status(&script)?;
+        let (code, stdout, stderr) = self.run_remote_status(auth, &script)?;
         if code == 8 {
-            self.upload_daemon()?;
-            let (code, stdout, stderr) = self.run_remote_status(&script)?;
+            self.upload_daemon(auth)?;
+            let (code, stdout, stderr) = self.run_remote_status(auth, &script)?;
             if code != 0 {
                 bail!(
                     "remote provisioning on {} failed after binary upload: {}",
@@ -449,9 +481,9 @@ impl SshTransport {
 
     /// Push the app's bundled daemon binary to `~/.goddard/bin`. Only viable
     /// when the remote shares this machine's OS and architecture.
-    fn upload_daemon(&self) -> anyhow::Result<()> {
-        self.ensure_master()?;
-        let uname = self.remote_uname()?;
+    fn upload_daemon(&self, auth: SshAuth) -> anyhow::Result<()> {
+        self.ensure_master(auth)?;
+        let uname = self.remote_uname(auth)?;
         if !remote_matches_local(&uname) {
             bail!(
                 "remote platform {uname} does not match this machine — install goddard-daemon there manually"
@@ -462,7 +494,7 @@ impl SshTransport {
         let bytes = std::fs::read(&binary)
             .with_context(|| format!("could not read {}", binary.display()))?;
         let mut child = self
-            .command()
+            .command(auth)
             .arg(&self.destination)
             .arg(format!(
                 "mkdir -p \"$HOME/.goddard/bin\" \
@@ -492,9 +524,9 @@ impl SshTransport {
     }
 
     /// `uname -s`/`uname -m` on the remote, for the upload platform check.
-    fn remote_uname(&self) -> anyhow::Result<String> {
+    fn remote_uname(&self, auth: SshAuth) -> anyhow::Result<String> {
         let child = self
-            .command()
+            .command(auth)
             .arg(&self.destination)
             .arg("uname -sm")
             .spawn()
@@ -512,9 +544,9 @@ impl SshTransport {
 
     /// Point a local ephemeral port at the remote daemon's loopback port on
     /// the existing master. Fails fast when the forward cannot bind.
-    fn add_forward(&self, local_port: u16, remote_port: u16) -> anyhow::Result<()> {
+    fn add_forward(&self, auth: SshAuth, local_port: u16, remote_port: u16) -> anyhow::Result<()> {
         let output = self
-            .command()
+            .command(auth)
             .arg("-O")
             .arg("forward")
             .arg("-L")
@@ -535,11 +567,14 @@ impl SshTransport {
     /// Ensure master + provisioning + forward and connect a supervisor to
     /// the forwarded daemon. Returns the local port the supervisor dialed —
     /// `restore_forward` rebinds it after the master restarts.
-    pub(super) fn connect(&self) -> anyhow::Result<(u16, waku_client::DaemonSupervisor)> {
-        self.ensure_master()?;
-        let (token, remote_port) = self.provision()?;
+    pub(super) fn connect(
+        &self,
+        auth: SshAuth,
+    ) -> anyhow::Result<(u16, waku_client::DaemonSupervisor)> {
+        self.ensure_master(auth)?;
+        let (token, remote_port) = self.provision(auth)?;
         let local_port = free_local_port()?;
-        self.add_forward(local_port, remote_port)?;
+        self.add_forward(auth, local_port, remote_port)?;
         let supervisor =
             waku_client::DaemonSupervisor::connect(&format!("127.0.0.1:{local_port}"), token)?;
         Ok((local_port, supervisor))
@@ -547,16 +582,16 @@ impl SshTransport {
 
     /// Re-establish the forward after the master restarts. The local port
     /// must stay stable so the supervisor's reconnect target never changes.
-    pub(super) fn restore_forward(&self, local_port: u16) -> anyhow::Result<()> {
-        self.ensure_master()?;
-        let (_, remote_port) = self.provision()?;
-        self.add_forward(local_port, remote_port)
+    pub(super) fn restore_forward(&self, auth: SshAuth, local_port: u16) -> anyhow::Result<()> {
+        self.ensure_master(auth)?;
+        let (_, remote_port) = self.provision(auth)?;
+        self.add_forward(auth, local_port, remote_port)
     }
 
     /// Tear down the master connection, closing every forward on it.
     pub(super) fn shutdown(&self) {
         let _ = self
-            .command()
+            .command(SshAuth::Batch)
             .arg("-O")
             .arg("exit")
             .arg(&self.destination)

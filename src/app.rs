@@ -1737,6 +1737,15 @@ pub struct Waku {
     /// Remote hosts that have not connected yet or dropped their supervisor,
     /// host id → last connection error. Cleared on a successful install.
     remote_errors: HashMap<Uuid, String>,
+    /// Remote hosts whose last interactive auth attempt the user cancelled —
+    /// latched so nothing prompts for them again until the next use.
+    needs_auth_hosts: HashSet<Uuid>,
+    /// Per-host connect wake-ups: a user action on an offline host requests
+    /// one interactive attempt ahead of the backoff.
+    remote_connect_triggers: HashMap<Uuid, smol::channel::Sender<()>>,
+    /// Hosts with a queued interactive connect request — repeated actions do
+    /// not stack prompts.
+    interactive_connects_pending: HashSet<Uuid>,
     /// Daemon settings mirrored per remote host. Binary overrides and custom
     /// commands are host-local, so `state`'s copy stays the local daemon's.
     remote_daemon_settings: HashMap<Uuid, waku_client::DaemonSettings>,
@@ -1752,9 +1761,22 @@ pub struct Waku {
     /// child funnel through the one queue fifo it serves.
     #[cfg(unix)]
     ssh_askpass_started: bool,
-    /// A password/passphrase prompt ssh is waiting on, rendered as a modal.
+    /// Password/passphrase requests ssh is waiting on, rendered as a modal
+    /// one at a time.
     #[cfg(unix)]
-    pending_ssh_prompt: Option<runtime::SshPrompt>,
+    pending_ssh_prompts: VecDeque<runtime::SshPrompt>,
+    /// The host whose interactive attempt currently owns the askpass slot;
+    /// `None` means arriving requests are auto-answered empty.
+    ssh_active_interactive: Option<Uuid>,
+    /// The user cancelled the active attempt's prompt — its remaining
+    /// requests are auto-answered and the host latches needs-auth.
+    ssh_prompt_cancelled: bool,
+    /// Serializes interactive ssh attempts app-wide so at most one can
+    /// prompt — which is also what binds a request to its host.
+    ssh_interactive_permit: std::sync::Arc<futures::lock::Mutex<()>>,
+    /// Hosts whose live ssh transport needs a repair the user asked for —
+    /// the watcher upgrades that attempt to interactive.
+    ssh_repair_requests: HashSet<Uuid>,
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
@@ -5080,13 +5102,20 @@ impl Waku {
                 daemon,
                 daemons,
                 remote_errors: HashMap::new(),
+                needs_auth_hosts: HashSet::new(),
+                remote_connect_triggers: HashMap::new(),
+                interactive_connects_pending: HashSet::new(),
                 remote_daemon_settings: HashMap::new(),
                 #[cfg(unix)]
                 ssh_transports: HashMap::new(),
                 #[cfg(unix)]
                 ssh_askpass_started: false,
                 #[cfg(unix)]
-                pending_ssh_prompt: None,
+                pending_ssh_prompts: VecDeque::new(),
+                ssh_active_interactive: None,
+                ssh_prompt_cancelled: false,
+                ssh_interactive_permit: std::sync::Arc::new(futures::lock::Mutex::new(())),
+                ssh_repair_requests: HashSet::new(),
                 remote_catalogs,
                 remote_catalogs_path,
                 daemon_hostname,

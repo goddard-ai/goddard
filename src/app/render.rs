@@ -1316,12 +1316,12 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.pending_ssh_prompt.is_none() {
+        if self.pending_ssh_prompts.is_empty() {
             return None;
         }
         if self
-            .pending_ssh_prompt
-            .as_ref()
+            .pending_ssh_prompts
+            .front()
             .is_some_and(|prompt| prompt.input.is_none())
         {
             let input = cx.new(|cx| {
@@ -1337,9 +1337,9 @@ impl Waku {
                 }
             })
             .detach();
-            self.pending_ssh_prompt.as_mut().unwrap().input = Some(input);
+            self.pending_ssh_prompts.front_mut().unwrap().input = Some(input);
         }
-        let prompt = self.pending_ssh_prompt.as_ref().unwrap();
+        let prompt = self.pending_ssh_prompts.front().unwrap();
         let input = prompt.input.clone().unwrap();
         if !input.read(cx).focus().is_focused(window) {
             let focus = input.read(cx).focus();
