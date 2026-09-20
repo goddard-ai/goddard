@@ -140,6 +140,10 @@ export async function collectChangelog(): Promise<void> {
     }
 
     if (category.heading === "Experiments") {
+      body = body.replace(
+        /^- (?:\*\*)?\[Experimental\](?:\*\*)?\s*/,
+        "- ",
+      );
       body = body.replace(/^- /, "- **[Experimental]** ");
     }
 
