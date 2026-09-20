@@ -423,7 +423,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("text.select_word_forward", NotMacOS, "ctrl-shift-right", TextInput),
     e("text.redo", NotMacOS, "ctrl-y", TextInput),
     // === ui::menu::init ======================================================
-    e("menu.dismiss", All, "escape", WakuMenu),
+    e("menu.dismiss", All, "escape", Menu),
     e("menu.select_next", All, "down", MenuPanelField),
     e("menu.select_previous", All, "up", MenuPanelField),
     e("menu.next_tab", All, "tab", MenuPanelField),
@@ -522,7 +522,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.send_file.confirm", All, "enter", SendFileDialog),
     e("dialog.send_file.dismiss", All, "escape", SendFileDialog),
     // === app::init_annotation_keys ========================================================
-    e("menu.dismiss", All, "escape", WakuAnnotation),
+    e("menu.dismiss", All, "escape", Annotation),
     // === app::init_image_preview_keys ======================================================
     e("dialog.image_preview.dismiss", All, "escape", ImagePreview),
     // === app::init_sidebar_keys =============================================================
@@ -531,7 +531,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("menu.select_next", All, "down", SkillsSearch),
     e("menu.select_previous", All, "up", SkillsSearch),
     // === app::init_drafts_keys ================================================================
-    e("text.undo", All, "secondary-z", Waku),
+    e("text.undo", All, "secondary-z", Workspace),
     e("drafts.dismiss_layer", All, "escape", DraftsPage),
     // === app::init_shortcuts_dialog_keys ======================================================
     e("dialog.shortcuts.dismiss", All, "escape", ShortcutsDialog),
@@ -554,8 +554,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("app.command_palette", NotMacOS, "secondary-k", NotTerminal),
     e("app.file_finder", All, "secondary-p", ""),
     e("app.fps_counter", All, "secondary-alt-shift-f", ""),
-    e("workspace.navigate_back", All, "secondary-[", Waku),
-    e("workspace.navigate_forward", All, "secondary-]", Waku),
+    e("workspace.navigate_back", All, "secondary-[", Workspace),
+    e("workspace.navigate_forward", All, "secondary-]", Workspace),
     e("sidebar.task.1", All, "secondary-1", ""),
     e("sidebar.task.2", All, "secondary-2", ""),
     e("sidebar.task.3", All, "secondary-3", ""),
@@ -592,16 +592,16 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("projects.focus_filter", All, "secondary-f", GitSettingsPage),
     e("projects.dismiss_layer", All, "escape", GitSettingsPage),
     e("inbox.dismiss", All, "escape", InboxPage),
-    e("workspace.previous_turn", All, "secondary-alt-up", WakuNotTerminal),
-    e("workspace.next_turn", All, "secondary-alt-down", WakuNotTerminal),
-    e("workspace.latest_unseen", All, "ctrl-`", Waku),
-    e("workspace.latest_unseen", All, "secondary-d", Waku),
-    e("workspace.mark_unread_next", All, "secondary-shift-d", Waku),
-    e("workspace.mark_unread", All, "secondary-alt-u", Waku),
-    e("switcher.task_forward", All, "ctrl-tab", Waku),
-    e("switcher.task_backward", All, "ctrl-shift-tab", Waku),
-    e("switcher.task_cancel", All, "ctrl-escape", Waku),
-    e("switcher.task_cancel", All, "ctrl-shift-escape", Waku),
+    e("workspace.previous_turn", All, "secondary-alt-up", WorkspaceNotTerminal),
+    e("workspace.next_turn", All, "secondary-alt-down", WorkspaceNotTerminal),
+    e("workspace.latest_unseen", All, "ctrl-`", Workspace),
+    e("workspace.latest_unseen", All, "secondary-d", Workspace),
+    e("workspace.mark_unread_next", All, "secondary-shift-d", Workspace),
+    e("workspace.mark_unread", All, "secondary-alt-u", Workspace),
+    e("switcher.task_forward", All, "ctrl-tab", Workspace),
+    e("switcher.task_backward", All, "ctrl-shift-tab", Workspace),
+    e("switcher.task_cancel", All, "ctrl-escape", Workspace),
+    e("switcher.task_cancel", All, "ctrl-shift-escape", Workspace),
     e("switcher.task_forward", All, "down", TaskSwitcher),
     e("switcher.task_forward", All, "right", TaskSwitcher),
     e("switcher.task_backward", All, "up", TaskSwitcher),
@@ -612,8 +612,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("switcher.task_cancel", All, "escape", TaskSwitcher),
     e("switcher.project_forward", All, "secondary-n", ""),
     e("switcher.project_backward", All, "secondary-shift-n", ""),
-    e("switcher.project_cancel", All, "secondary-escape", Waku),
-    e("switcher.project_cancel", All, "secondary-shift-escape", Waku),
+    e("switcher.project_cancel", All, "secondary-escape", Workspace),
+    e("switcher.project_cancel", All, "secondary-shift-escape", Workspace),
     e("switcher.project_cancel", All, "secondary-escape", ProjectSwitcher),
     e("switcher.project_cancel", All, "secondary-shift-escape", ProjectSwitcher),
     e("switcher.project_forward", All, "down", ProjectSwitcher),
@@ -646,18 +646,18 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("font.ui_increase", All, "secondary-=", NotBrowser),
     e("font.ui_increase", All, "secondary-shift-=", NotBrowser),
     e("font.ui_decrease", All, "secondary--", NotBrowser),
-    e("workspace.stop_turn", All, "escape", WakuNotTerminal),
-    e("workspace.stop_turn_now", All, "alt-escape", Waku),
-    e("workspace.archive_task", All, "secondary-shift-a", Waku),
-    e("workspace.pin_task", All, "secondary-alt-p", Waku),
-    e("workspace.copy_selection", All, "secondary-c", Waku),
-    e("workspace.copy_workdir", All, "secondary-shift-c", Waku),
-    e("find.open", All, "secondary-f", Waku),
-    e("find.open", All, "secondary-f", WakuTextInput),
-    e("find.open_replace", All, "secondary-alt-f", Waku),
-    e("find.next", All, "secondary-g", Waku),
-    e("find.previous", All, "secondary-shift-g", Waku),
-    e("editor.go_to_line", All, "ctrl-g", WakuNotTerminal),
+    e("workspace.stop_turn", All, "escape", WorkspaceNotTerminal),
+    e("workspace.stop_turn_now", All, "alt-escape", Workspace),
+    e("workspace.archive_task", All, "secondary-shift-a", Workspace),
+    e("workspace.pin_task", All, "secondary-alt-p", Workspace),
+    e("workspace.copy_selection", All, "secondary-c", Workspace),
+    e("workspace.copy_workdir", All, "secondary-shift-c", Workspace),
+    e("find.open", All, "secondary-f", Workspace),
+    e("find.open", All, "secondary-f", WorkspaceTextInput),
+    e("find.open_replace", All, "secondary-alt-f", Workspace),
+    e("find.next", All, "secondary-g", Workspace),
+    e("find.previous", All, "secondary-shift-g", Workspace),
+    e("editor.go_to_line", All, "ctrl-g", WorkspaceNotTerminal),
     e("find.close", All, "escape", FileEditorPane),
     e("find.close", All, "escape", FindBar),
     e("editor.exit_panel_fullscreen", All, "escape", PanelFullscreenNotTerminal),
@@ -694,8 +694,8 @@ use PlatformSet::*;
 #[allow(non_upper_case_globals)]
 mod ctx {
     pub const TextInput: &str = "TextInput";
-    pub const WakuMenu: &str = "WakuMenu";
-    pub const MenuPanelField: &str = "WakuMenu > TextInput";
+    pub const Menu: &str = "Menu";
+    pub const MenuPanelField: &str = "Menu > TextInput";
     pub const Autocomplete: &str = "ComposerAutocomplete > TextInput";
     pub const AutocompleteLoading: &str = "ComposerAutocompleteLoading > TextInput";
     pub const SettingsSearch: &str = "SettingsSidebar > TextInput";
@@ -718,7 +718,7 @@ mod ctx {
     pub const GoalDialog: &str = "GoalDialog";
     pub const SendFileInput: &str = "SendFileDialog > TextInput";
     pub const SendFileDialog: &str = "SendFileDialog";
-    pub const WakuAnnotation: &str = "WakuAnnotation";
+    pub const Annotation: &str = "Annotation";
     pub const ImagePreview: &str = "ImagePreview";
     pub const SessionRenameField: &str = "SessionRename > TextInput";
     pub const SkillsSearch: &str = "SkillsPane > TextInput";
@@ -726,25 +726,25 @@ mod ctx {
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
     pub const TerminalCommandBar: &str = "TerminalCommandBar";
     pub const NotTerminal: &str = "!Terminal";
-    pub const Waku: &str = "Waku";
+    pub const Workspace: &str = "Workspace";
     pub const ProjectsPage: &str = "ProjectsPage";
     pub const AutomationsPage: &str = "AutomationsPage";
     pub const GitSettingsPage: &str = "GitSettingsPage";
     pub const InboxPage: &str = "InboxPage";
     pub const DraftsPage: &str = "DraftsPage";
-    pub const WakuNotTerminal: &str = "Waku && !Terminal";
+    pub const WorkspaceNotTerminal: &str = "Workspace && !Terminal";
     /// Where the composer session is reachable without covering the
     /// surfaces that own their own chords: the terminal (pty input) and
     /// the tabbed pages (their ⌘⌥ tab chords).
     pub const ComposerScope: &str =
-        "Waku && !Terminal && !ProjectsPage && !AutomationsPage";
+        "Workspace && !Terminal && !ProjectsPage && !AutomationsPage";
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";
     pub const Terminal: &str = "Terminal";
     pub const ReviewDiffOrEditor: &str = "ReviewDiff || FileEditorPane";
     pub const NotBrowser: &str = "!Browser";
-    pub const WakuTextInput: &str = "Waku > TextInput";
+    pub const WorkspaceTextInput: &str = "Workspace > TextInput";
     pub const FileEditorPane: &str = "FileEditorPane";
     pub const FindBar: &str = "FindBar";
     pub const PanelFullscreenNotTerminal: &str = "PanelFullscreen && !Terminal";

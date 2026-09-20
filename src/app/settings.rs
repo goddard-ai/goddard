@@ -47,7 +47,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 /// Every page, editor, and form inside the settings surface is under this
 /// identifier — the `tab`/`shift-tab` bindings below traverse all of them
 /// rather than letting a field take Tab as text. The surface stamps it next
-/// to `Waku`, which the app-wide bindings take their scope from.
+/// to `Workspace`, which the app-wide bindings take their scope from.
 const SETTINGS_CONTEXT: &str = "Settings";
 
 actions!(waku_settings, [FocusNext, FocusPrevious]);
@@ -630,7 +630,7 @@ impl Waku {
         let sidebar = self.render_settings_sidebar(window, cx);
 
         div()
-            .key_context("Waku Settings")
+            .key_context("Workspace Settings")
             .track_focus(&self.settings_focus)
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
@@ -6875,7 +6875,7 @@ impl Waku {
     /// The Appearance page's family dropdown: a filter field pinned above a
     /// virtualized list of installed families. The field holds real focus
     /// while arrows move a drawn cursor — `up`/`down`/`enter` reach this card
-    /// as actions under the `WakuMenu > TextInput` bindings.
+    /// as actions under the `Menu > TextInput` bindings.
     fn font_family_selector(&self, target: FontTarget, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let selector = self.font_selector(target);

@@ -570,8 +570,8 @@ pub(crate) fn bind_keys(cx: &mut App) {
         ),
         KeyBinding::new("secondary-p", ToggleFileFinder, None),
         KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
-        KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
-        KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
+        KeyBinding::new("secondary-[", NavigateBack, Some("Workspace")),
+        KeyBinding::new("secondary-]", NavigateForward, Some("Workspace")),
         // ⌘1–⌘9 jump to the nth visible task in the sidebar; holding
         // ⌘ shows the same numbers as chips on the rows.
         KeyBinding::new("secondary-1", SelectSidebarSession { index: 0 }, None),
@@ -625,47 +625,47 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary-alt-1",
             SelectFavoriteModel { index: 0 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-2",
             SelectFavoriteModel { index: 1 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-3",
             SelectFavoriteModel { index: 2 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-4",
             SelectFavoriteModel { index: 3 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-5",
             SelectFavoriteModel { index: 4 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-6",
             SelectFavoriteModel { index: 5 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-7",
             SelectFavoriteModel { index: 6 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-8",
             SelectFavoriteModel { index: 7 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-alt-9",
             SelectFavoriteModel { index: 8 },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         // ⌘E cycles the composer session's reasoning effort through the
         // current model's ladder; ⌘⇧E walks it in reverse.
@@ -674,21 +674,21 @@ pub(crate) fn bind_keys(cx: &mut App) {
             CycleReasoningEffort {
                 direction: EffortCycleDirection::Forward,
             },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         KeyBinding::new(
             "secondary-shift-e",
             CycleReasoningEffort {
                 direction: EffortCycleDirection::Backward,
             },
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         // ⌥Tab rotates the composer session's combo through the starred
         // selections plus the most recently used one.
         KeyBinding::new(
             "alt-tab",
             CycleFavoriteModel,
-            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own
@@ -712,28 +712,28 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary-alt-up",
             GoToPreviousTurn,
-            Some("Waku && !Terminal"),
+            Some("Workspace && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-down",
             GoToNextTurn,
-            Some("Waku && !Terminal"),
+            Some("Workspace && !Terminal"),
         ),
         // Same spelling VS Code gives its terminal toggle; unclaimed
         // in text fields, so it fires with the composer focused too.
         // ⌘D reads as "done" and is the left-hand-only alternative.
-        KeyBinding::new("ctrl-`", GoToNextUnreadCompletion, Some("Waku")),
-        KeyBinding::new("secondary-d", GoToNextUnreadCompletion, Some("Waku")),
+        KeyBinding::new("ctrl-`", GoToNextUnreadCompletion, Some("Workspace")),
+        KeyBinding::new("secondary-d", GoToNextUnreadCompletion, Some("Workspace")),
         // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
         // moves down the sidebar to the next non-busy task.
-        KeyBinding::new("secondary-shift-d", MarkUnreadAndGoToNextIdle, Some("Waku")),
+        KeyBinding::new("secondary-shift-d", MarkUnreadAndGoToNextIdle, Some("Workspace")),
         // ⌘⌥U is the sidebar's "Mark as Unread" on the viewed task,
         // without ⌘⇧D's jump to the next one waiting.
-        KeyBinding::new("secondary-alt-u", MarkSessionUnread, Some("Waku")),
-        KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
-        KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
-        KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),
-        KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Waku")),
+        KeyBinding::new("secondary-alt-u", MarkSessionUnread, Some("Workspace")),
+        KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Workspace")),
+        KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Workspace")),
+        KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Workspace")),
+        KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Workspace")),
         KeyBinding::new("down", SwitchTaskForward, Some("TaskSwitcher")),
         KeyBinding::new("right", SwitchTaskForward, Some("TaskSwitcher")),
         KeyBinding::new("up", SwitchTaskBackward, Some("TaskSwitcher")),
@@ -753,10 +753,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘N-then-⌘⇧N from slipping to "New task in…" — which still gets
         // the keystroke when no draft can take the switcher.
         KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
-        KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
-        KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
+        KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Workspace")),
+        KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Workspace")),
         // Re-bound on the overlay context so the chord cancels when
-        // the switcher's focus path does not pass "Waku" (the
+        // the switcher's focus path does not pass "Workspace" (the
         // settings branch renders the layer as its sibling).
         KeyBinding::new(
             "secondary-escape",
@@ -897,34 +897,34 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "escape",
             CancelTurn { immediate: false },
-            Some("Waku && !Terminal"),
+            Some("Workspace && !Terminal"),
         ),
-        KeyBinding::new("alt-escape", CancelTurn { immediate: true }, Some("Waku")),
-        KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Waku")),
-        KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Waku")),
-        KeyBinding::new("secondary-c", CopySelection, Some("Waku")),
-        KeyBinding::new("secondary-shift-c", CopyWorkingDirectory, Some("Waku")),
+        KeyBinding::new("alt-escape", CancelTurn { immediate: true }, Some("Workspace")),
+        KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Workspace")),
+        KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Workspace")),
+        KeyBinding::new("secondary-c", CopySelection, Some("Workspace")),
+        KeyBinding::new("secondary-shift-c", CopyWorkingDirectory, Some("Workspace")),
         // Find and replace in the right panel's file editor, on the
         // conventional VS Code bindings. The primary shortcut + G cycles matches from
         // the editor without moving focus to the bar.
-        KeyBinding::new("secondary-f", OpenFind, Some("Waku")),
+        KeyBinding::new("secondary-f", OpenFind, Some("Workspace")),
         // The text input's macOS-style Ctrl-F caret binding is more
-        // specific than Waku's root context. Reassert the platform
+        // specific than Workspace's root context. Reassert the platform
         // primary shortcut for inputs inside this window so Ctrl-F
         // remains find-in-page on Linux/Windows while Cmd-F keeps the
         // native behavior on macOS.
-        KeyBinding::new("secondary-f", OpenFind, Some("Waku > TextInput")),
-        KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Waku")),
-        KeyBinding::new("secondary-g", FindNext, Some("Waku")),
-        KeyBinding::new("secondary-shift-g", FindPrevious, Some("Waku")),
+        KeyBinding::new("secondary-f", OpenFind, Some("Workspace > TextInput")),
+        KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Workspace")),
+        KeyBinding::new("secondary-g", FindNext, Some("Workspace")),
+        KeyBinding::new("secondary-shift-g", FindPrevious, Some("Workspace")),
         // VS Code's other half of the pair: ctrl-g opens go-to-line. The
         // terminal keeps the keystroke — ^G is real input to a pty.
-        KeyBinding::new("ctrl-g", OpenGoToLine, Some("Waku && !Terminal")),
+        KeyBinding::new("ctrl-g", OpenGoToLine, Some("Workspace && !Terminal")),
         // Scoped to the editor pane: escape closes the bar there and
         // falls through to CancelTurn anywhere else.
         KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
         KeyBinding::new("escape", CloseFind, Some("FindBar")),
-        // Between FileEditorPane and Waku: escape in a maximized
+        // Between FileEditorPane and Workspace: escape in a maximized
         // panel tab exits the mode once no find bar claims it,
         // instead of reaching CancelTurn. A terminal tab keeps the
         // keystroke for the pty even while maximized.
@@ -946,7 +946,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
         KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
         KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
-        // Browser surface. Deeper than "Waku", so while focus is on the
+        // Browser surface. Deeper than "Workspace", so while focus is on the
         // page or its address bar the browser reads the platform's
         // conventional navigation shortcuts; the same keys elsewhere
         // keep their app meanings. The clipboard trio is rebound

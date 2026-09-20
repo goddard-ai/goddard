@@ -60,7 +60,7 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
     "Terminal",
     "Browser",
     "BrowserAddress",
-    "WakuMenu",
+    "Menu",
     "CommandPalette",
     "TaskSwitcher",
     "ProjectSwitcher",

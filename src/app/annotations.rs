@@ -47,11 +47,11 @@ use super::*;
 
 /// Key context the comment editor card declares, so Escape reaches it as an
 /// action whether the field or the card's own controls hold focus.
-const ANNOTATION_CONTEXT: &str = "WakuAnnotation";
+const ANNOTATION_CONTEXT: &str = "Annotation";
 
 /// Bind the editor card's own keys. Without this, Escape under the card —
 /// focus on the trash button rather than the field — would fall through to
-/// the root `Waku` context's `CancelTurn` and kill a running turn.
+/// the root `Workspace` context's `CancelTurn` and kill a running turn.
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new(
         "escape",

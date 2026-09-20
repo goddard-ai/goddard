@@ -592,7 +592,7 @@ impl Render for Waku {
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
-            .key_context("Waku")
+            .key_context("Workspace")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_task_in_action))

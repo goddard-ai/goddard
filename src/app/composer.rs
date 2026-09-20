@@ -7252,7 +7252,7 @@ pub(super) fn model_picker_panel<R>(
         .flex()
         // The filter field keeps focus and the selected row is only drawn,
         // never focused — the same split Zed's picker uses. These arrive as
-        // actions bound to `WakuMenu > TextInput`, which is the only way to
+        // actions bound to `Menu > TextInput`, which is the only way to
         // claim a key out from under a focused text field.
         .on_action(move |_: &SelectNextEntry, _, cx| {
             let on_move = on_move_down.clone();

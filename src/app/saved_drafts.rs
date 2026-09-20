@@ -23,7 +23,7 @@ pub fn init(cx: &mut App) {
         // ⌘Z outside a field (or inside one whose own undo history is spent)
         // resolves to the same `Undo` action text fields dispatch — the
         // workspace handler below claims it to restore a used draft.
-        KeyBinding::new("secondary-z", Undo, Some("Waku")),
+        KeyBinding::new("secondary-z", Undo, Some("Workspace")),
         KeyBinding::new("escape", DismissDraftsLayer, Some(DRAFTS_PAGE_CONTEXT)),
     ]);
 }
