@@ -1,0 +1,1 @@
+- The Resume… provider list no longer offers disabled providers, and Resume opens on an enabled provider when the current session's provider is turned off

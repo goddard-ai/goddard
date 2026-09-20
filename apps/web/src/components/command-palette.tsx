@@ -105,6 +105,12 @@ export function CommandPalette({
     if (previous?.isConnected) previous.focus()
   }
 
+  function enabledResumeProvider(): ProviderKind {
+    const disabled = settings.data?.disabled_providers ?? []
+    if (!disabled.includes(currentProvider)) return currentProvider
+    return PROVIDERS.find(({ id }) => !disabled.includes(id))?.id ?? currentProvider
+  }
+
   useEffect(() => {
     if (!open) {
       restorePreviousFocus()
@@ -114,7 +120,7 @@ export function CommandPalette({
       ? document.activeElement
       : null
     setView(initialView)
-    setResumeProvider(currentProvider)
+    setResumeProvider(enabledResumeProvider())
     setQuery('')
     setMatches([])
     setMatchesQuery(null)
@@ -203,7 +209,7 @@ export function CommandPalette({
   }, [client, open, resumeProvider, view])
 
   function openResumeView() {
-    setResumeProvider(currentProvider)
+    setResumeProvider(enabledResumeProvider())
     setView('resume')
     setQuery('')
     setPreviousItems([])
@@ -253,7 +259,7 @@ export function CommandPalette({
   }
 
   const selectableResumeProviders = PROVIDERS.filter(({ id }) =>
-    id === resumeProvider || !settings.data?.disabled_providers.includes(id))
+    !settings.data?.disabled_providers.includes(id))
   const nextItems = view === 'resume'
     ? buildResumeItems({
         taskState,

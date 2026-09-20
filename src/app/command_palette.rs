@@ -2462,10 +2462,7 @@ impl Waku {
     fn command_palette_resume_provider_candidates(&self) -> Vec<CommandPaletteItem> {
         ProviderKind::ALL
             .into_iter()
-            .filter(|provider| {
-                *provider == self.command_palette.resume_provider
-                    || !self.state.disabled_providers.contains(provider)
-            })
+            .filter(|provider| !self.state.disabled_providers.contains(provider))
             .enumerate()
             .map(|(order, provider)| CommandPaletteItem {
                 section: PaletteSection::Providers,
@@ -3375,6 +3372,7 @@ impl Waku {
     fn default_resume_provider(&self) -> ProviderKind {
         self.selected_session()
             .map(|session| session.provider)
+            .filter(|provider| !self.state.disabled_providers.contains(provider))
             .or_else(|| {
                 ProviderKind::ALL
                     .into_iter()
