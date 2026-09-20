@@ -1903,13 +1903,15 @@ impl Waku {
         }
 
         // Same reachability as ⌘S outside the file editor: a session's
-        // workspace or a selected project supplies the repository.
+        // workspace or a selected project supplies the repository. The chord
+        // itself belongs to SaveFile — its handler falls through to the
+        // branch picker — so the hint advertises that action's binding.
         if self.selected_workspace_path().is_some() || self.selected_project().is_some() {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.sync_branch"),
                 "icons/git-branch.svg",
-                None,
+                Some(ShortcutHint::action(&SaveFile)),
                 PaletteAction::SyncBranch,
                 "sync branch pull rebase merge upstream tracking checkout update git",
                 next(),
