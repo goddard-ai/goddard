@@ -92,6 +92,41 @@ impl Waku {
             }))
     }
 
+    /// Send `command` only after a native confirmation names what it
+    /// destroys. The button rows hand over no window, so the prompt rides
+    /// the window handle — a declined answer or a closed window sends
+    /// nothing.
+    fn friends_confirm_command(
+        &mut self,
+        message: String,
+        detail: Option<String>,
+        confirm: String,
+        command: waku_client::Command,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(answer) = self.window_handle.update(cx, |_, window, cx| {
+            window.prompt(
+                gpui::PromptLevel::Warning,
+                &message,
+                detail.as_deref(),
+                &[
+                    gpui::PromptButton::cancel(tr!("common.cancel")),
+                    gpui::PromptButton::ok(confirm),
+                ],
+                cx,
+            )
+        }) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            if answer.await.ok() != Some(1) {
+                return;
+            }
+            let _ = this.update(cx, |this, cx| this.friends_command(command, cx));
+        })
+        .detach();
+    }
+
     pub(super) fn render_friends_settings(
         &mut self,
         search: &SettingSearch,
@@ -425,6 +460,7 @@ impl Waku {
                 continue;
             };
             let edit_id = node_id.clone();
+            let remove_name = display.clone();
             let mut row = div()
                 .id(SharedString::from(format!("friend-row-{node_id}")))
                 .mt(px(10.0))
@@ -515,7 +551,10 @@ impl Waku {
                         tr!("friends.remove"),
                         &theme,
                         move |this, cx| {
-                            this.friends_command(
+                            this.friends_confirm_command(
+                                tr!("friends.confirm_remove", name = remove_name.clone()),
+                                Some(tr!("friends.confirm_remove_detail")),
+                                tr!("common.remove"),
                                 waku_client::Command::RemoveFriend {
                                     node_id: remove_id.clone(),
                                 },
@@ -675,6 +714,7 @@ impl Waku {
         for client in &pairing.clients {
             let client_id = client.client_id;
             let name = client.name.clone();
+            let revoke_name = name.clone();
             let ago = format_time_ago(unix_time_millis().saturating_sub(client.added_at_ms) / 1_000);
             if search.matched(&name, "").is_none() {
                 continue;
@@ -707,7 +747,10 @@ impl Waku {
                         tr!("pairing.revoke"),
                         &theme,
                         move |this, cx| {
-                            this.friends_command(
+                            this.friends_confirm_command(
+                                tr!("pairing.confirm_revoke", name = revoke_name.clone()),
+                                Some(tr!("pairing.confirm_revoke_detail")),
+                                tr!("common.revoke"),
                                 waku_client::Command::RevokePairedClient { client_id },
                                 cx,
                             );
@@ -1124,6 +1167,7 @@ impl Waku {
                 .find(|share| share.peer_id == node_id && share.repo_path == project.path);
             let project_path = project.path.clone();
             let origin_url = shared.map(|share| share.origin_url.clone());
+            let unshare_message = tr!("friends.confirm_unshare", name = project.name.clone());
             let peer = node_id.to_owned();
             children.push(
                 div()
@@ -1146,11 +1190,14 @@ impl Waku {
                         *theme,
                         cx,
                         move |this, _window, cx| {
-                            if origin_url.is_some() {
-                                this.friends_command(
+                            if let Some(origin) = origin_url.clone() {
+                                this.friends_confirm_command(
+                                    unshare_message.clone(),
+                                    Some(tr!("friends.confirm_unshare_detail")),
+                                    tr!("friends.unshare"),
                                     waku_client::Command::UnshareProjectWithFriend {
                                         node_id: peer.clone(),
-                                        origin_url: origin_url.clone().unwrap_or_default(),
+                                        origin_url: origin,
                                     },
                                     cx,
                                 );
@@ -1564,7 +1611,7 @@ impl Waku {
                         .text_color(theme.text)
                         .child(tr!(
                             "friends.sync_link_title",
-                            name = repo_name,
+                            name = repo_name.clone(),
                             peer = link.peer_name.clone()
                         )),
                 )
@@ -1715,6 +1762,11 @@ impl Waku {
 
         // Teardown.
         let disable_link = link_id.clone();
+        let disable_message = tr!(
+            "friends.confirm_disable_sync",
+            name = repo_name,
+            peer = link.peer_name.clone()
+        );
         children.push(
             div()
                 .mt(px(10.0))
@@ -1725,7 +1777,10 @@ impl Waku {
                     tr!("friends.disable_sync"),
                     theme,
                     move |this, cx| {
-                        this.friends_command(
+                        this.friends_confirm_command(
+                            disable_message.clone(),
+                            Some(tr!("friends.confirm_disable_sync_detail")),
+                            tr!("friends.disable_sync"),
                             waku_client::Command::DisableFriendSync {
                                 link_id: disable_link.clone(),
                             },
@@ -1808,6 +1863,7 @@ impl Waku {
             SyncAlertKind::Conflict => {
                 let merge_id = alert_id.clone();
                 let abort_id = alert_id.clone();
+                let abort_branch = alert.branch.clone();
                 let dismiss_id = alert_id.clone();
                 let resolve_alert = alert.clone();
                 row = row
@@ -1838,7 +1894,10 @@ impl Waku {
                         tr!("friends.abort_sync"),
                         theme,
                         move |this, cx| {
-                            this.friends_command(
+                            this.friends_confirm_command(
+                                tr!("friends.confirm_abort_sync", branch = abort_branch.clone()),
+                                Some(tr!("friends.confirm_abort_sync_detail")),
+                                tr!("friends.abort_sync"),
                                 waku_client::Command::FriendSyncAlertAction {
                                     alert_id: abort_id.clone(),
                                     action: FriendSyncAlertAction::Abort,

@@ -1412,6 +1412,7 @@ impl Waku {
             .into_any_element();
         };
         let now = unix_time();
+        let delete_name = automation.name.clone();
         let runs = self.automation_runs(key, id);
         let webhook_url = self.automation_webhook_url(key, &automation);
         let (_, _, status_label) = automation
@@ -1656,8 +1657,26 @@ impl Waku {
                         "icons/trash.svg",
                         tr!("automations.delete"),
                         theme.danger,
-                        Box::new(move |this, _window, cx| {
-                            this.remove_automation(key, id, cx);
+                        Box::new(move |_this, window, cx| {
+                            let answer = window.prompt(
+                                gpui::PromptLevel::Warning,
+                                &tr!("automations.confirm_delete", name = delete_name.clone()),
+                                Some(&tr!("automations.confirm_delete_detail")),
+                                &[
+                                    gpui::PromptButton::cancel(tr!("common.cancel")),
+                                    gpui::PromptButton::ok(tr!("common.delete")),
+                                ],
+                                cx,
+                            );
+                            cx.spawn(async move |this, cx| {
+                                if answer.await.ok() != Some(1) {
+                                    return;
+                                }
+                                let _ = this.update(cx, |this, cx| {
+                                    this.remove_automation(key, id, cx);
+                                });
+                            })
+                            .detach();
                         }),
                     )),
             )

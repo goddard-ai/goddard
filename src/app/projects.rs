@@ -1088,12 +1088,15 @@ impl Waku {
         .detach();
     }
 
-    /// Record `approve`/`reject` on the proposed commit `sha`.
+    /// Record `approve`/`reject` on the proposed commit `sha`. Reject pushes
+    /// a revert onto the shared `qa` branch, so it confirms first — the
+    /// prompt names the commit it's about to revert.
     fn projects_review_decide(
         &mut self,
         project_id: Uuid,
         sha: String,
         approve: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(cwd) = self
@@ -1105,12 +1108,48 @@ impl Waku {
         else {
             return;
         };
-        let operation = if approve {
-            waku_client::WorkspaceOperation::ReviewApprove { cwd, sha }
-        } else {
-            waku_client::WorkspaceOperation::ReviewReject { cwd, sha }
-        };
-        self.projects_review_op(project_id, operation, cx);
+        if approve {
+            self.projects_review_op(
+                project_id,
+                waku_client::WorkspaceOperation::ReviewApprove { cwd, sha },
+                cx,
+            );
+            return;
+        }
+        let commit = self
+            .projects_page_states
+            .get(&project_id)
+            .and_then(|state| match &state.review {
+                github::GitHubFetch::Loaded(Some(queue)) => queue
+                    .entries
+                    .iter()
+                    .find(|entry| entry.commit.sha == sha)
+                    .map(|entry| {
+                        format!("{} {}", entry.commit.short_sha, entry.commit.subject)
+                    }),
+                _ => None,
+            })
+            .unwrap_or_else(|| sha.clone());
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &tr!("projects.confirm_reject", commit = commit),
+            Some(&tr!("projects.confirm_reject_detail")),
+            &[
+                gpui::PromptButton::cancel(tr!("common.cancel")),
+                gpui::PromptButton::ok(tr!("projects.review_reject")),
+            ],
+            cx,
+        );
+        let operation = waku_client::WorkspaceOperation::ReviewReject { cwd, sha };
+        cx.spawn(async move |waku, cx| {
+            if answer.await.ok() != Some(1) {
+                return;
+            }
+            let _ = waku.update(cx, |waku, cx| {
+                waku.projects_review_op(project_id, operation, cx);
+            });
+        })
+        .detach();
     }
 
     /// Fast-forward the base branch to the approved frontier.
@@ -2539,14 +2578,14 @@ impl Waku {
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(tip))
             .child(icon(path, 12.0, color))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
-                this.projects_review_decide(project_id, click_sha.clone(), approve, cx);
+                this.projects_review_decide(project_id, click_sha.clone(), approve, window, cx);
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     cx.stop_propagation();
-                    this.projects_review_decide(project_id, sha.clone(), approve, cx);
+                    this.projects_review_decide(project_id, sha.clone(), approve, window, cx);
                 }
             }))
     }
@@ -2804,9 +2843,9 @@ impl Waku {
             let weak = weak.clone();
             items.push(MenuItem::new(
                 tr!("projects.review_approve"),
-                move |_, cx| {
+                move |window, cx| {
                     let _ = weak.update(cx, |this, cx| {
-                        this.projects_review_decide(project_id, sha.clone(), true, cx);
+                        this.projects_review_decide(project_id, sha.clone(), true, window, cx);
                     });
                 },
             ));
@@ -2815,9 +2854,9 @@ impl Waku {
             let sha = shas[0].clone();
             items.push(MenuItem::new(
                 tr!("projects.review_reject"),
-                move |_, cx| {
+                move |window, cx| {
                     let _ = weak.update(cx, |this, cx| {
-                        this.projects_review_decide(project_id, sha.clone(), false, cx);
+                        this.projects_review_decide(project_id, sha.clone(), false, window, cx);
                     });
                 },
             ));

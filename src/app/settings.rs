@@ -8418,6 +8418,7 @@ impl Waku {
         } else {
             for (index, grant) in self.state.computer_use_allowed_apps.iter().enumerate() {
                 let key = grant.key();
+                let revoke_name = grant.app_name.clone();
                 let is_last = index + 1 == self.state.computer_use_allowed_apps.len();
                 let app_icon = self.computer_use_app_icon(&grant.bundle_id, cx);
                 allowed_apps = allowed_apps.child(
@@ -8476,8 +8477,27 @@ impl Waku {
                                 .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
                                 .focus_visible(|element| element.border_color(theme.accent))
                                 .child(tr!("common.revoke"))
-                                .on_activation(cx, move |this, _, cx| {
-                                    this.revoke_computer_app(&key, cx);
+                                .on_activation(cx, move |_this, window, cx| {
+                                    let answer = window.prompt(
+                                        gpui::PromptLevel::Warning,
+                                        &tr!("computer_use.confirm_revoke", name = revoke_name.clone()),
+                                        Some(&tr!("computer_use.confirm_revoke_detail")),
+                                        &[
+                                            gpui::PromptButton::cancel(tr!("common.cancel")),
+                                            gpui::PromptButton::ok(tr!("common.revoke")),
+                                        ],
+                                        cx,
+                                    );
+                                    let key = key.clone();
+                                    cx.spawn(async move |this, cx| {
+                                        if answer.await.ok() != Some(1) {
+                                            return;
+                                        }
+                                        let _ = this.update(cx, |this, cx| {
+                                            this.revoke_computer_app(&key, cx);
+                                        });
+                                    })
+                                    .detach();
                                 }),
                         ),
                 );
@@ -9483,8 +9503,28 @@ impl Waku {
             )
             .on_activation(cx, {
                 let id = id.clone();
-                move |this, _, cx| {
-                    this.disconnect_integration(&id, cx);
+                let disconnect_name = snapshot.info.name.clone();
+                move |_this, window, cx| {
+                    let answer = window.prompt(
+                        gpui::PromptLevel::Warning,
+                        &tr!("integrations.confirm_disconnect", name = disconnect_name.clone()),
+                        Some(&tr!("integrations.confirm_disconnect_detail")),
+                        &[
+                            gpui::PromptButton::cancel(tr!("common.cancel")),
+                            gpui::PromptButton::ok(tr!("integrations.disconnect")),
+                        ],
+                        cx,
+                    );
+                    let id = id.clone();
+                    cx.spawn(async move |this, cx| {
+                        if answer.await.ok() != Some(1) {
+                            return;
+                        }
+                        let _ = this.update(cx, |this, cx| {
+                            this.disconnect_integration(&id, cx);
+                        });
+                    })
+                    .detach();
                 }
             })
             .into_any_element()

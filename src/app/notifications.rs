@@ -358,11 +358,14 @@ impl Waku {
 
     /// The optimistic-write spine: flip the local state now, fire the daemon
     /// call, and let the next poll reconcile. A failure drops the
-    /// conditional marker so the next tick refetches the truth.
+    /// conditional marker so the next tick refetches the truth — and puts
+    /// back the removed thread when the write was a Done, so a rejected
+    /// delete never loses the row to the next poll.
     fn notification_write(
         &mut self,
         key: String,
         operation: WorkspaceOperation,
+        restore: Option<(usize, NotificationThread)>,
         cx: &mut Context<Self>,
     ) {
         self.notifications.mutating.insert(key.clone());
@@ -375,6 +378,11 @@ impl Waku {
             let _ = waku.update(cx, |waku, cx| {
                 waku.notifications.mutating.remove(&key);
                 if result.is_err() {
+                    if let Some((index, thread)) = restore {
+                        let index = index.min(waku.notifications.threads.len());
+                        waku.notifications.threads.insert(index, thread);
+                        waku.notifications.rebuild_unread_subjects();
+                    }
                     waku.notifications.etag = None;
                     waku.notifications.last_modified = None;
                     waku.notifications.next_poll = Instant::now();
@@ -405,26 +413,75 @@ impl Waku {
             WorkspaceOperation::MarkNotificationRead {
                 thread_id: thread_id.to_owned(),
             },
+            None,
             cx,
         );
         cx.notify();
     }
 
     /// Done removes the thread outright — irreversible on GitHub, so it is
-    /// only ever a per-row action, never a bulk one.
-    pub(super) fn notification_mark_done(&mut self, thread_id: &str, cx: &mut Context<Self>) {
+    /// only ever a per-row action, never a bulk one, and it asks first.
+    /// The prompt names the thread; a decline leaves the inbox untouched.
+    pub(super) fn notification_mark_done(
+        &mut self,
+        thread_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.notifications.mutating.contains(thread_id) {
             return;
         }
+        let Some(thread) = self
+            .notifications
+            .threads
+            .iter()
+            .find(|thread| thread.id == thread_id)
+            .cloned()
+        else {
+            return;
+        };
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &tr!("notifications.confirm_done", title = thread.title.clone()),
+            Some(&tr!("notifications.confirm_done_detail")),
+            &[
+                gpui::PromptButton::cancel(tr!("common.cancel")),
+                gpui::PromptButton::ok(tr!("notifications.mark_done")),
+            ],
+            cx,
+        );
+        cx.spawn(async move |waku, cx| {
+            if answer.await.ok() != Some(1) {
+                return;
+            }
+            let _ = waku.update(cx, |waku, cx| {
+                waku.notification_done_confirmed(thread, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The confirmed half of Done: drop the row optimistically and carry the
+    /// thread into the write so a failed delete puts it straight back.
+    fn notification_done_confirmed(&mut self, thread: NotificationThread, cx: &mut Context<Self>) {
+        if self.notifications.mutating.contains(&thread.id) {
+            return;
+        }
+        let position = self
+            .notifications
+            .threads
+            .iter()
+            .position(|entry| entry.id == thread.id);
         self.notifications
             .threads
-            .retain(|thread| thread.id != thread_id);
+            .retain(|entry| entry.id != thread.id);
         self.notifications.rebuild_unread_subjects();
         self.notification_write(
-            thread_id.to_owned(),
+            thread.id.clone(),
             WorkspaceOperation::MarkNotificationDone {
-                thread_id: thread_id.to_owned(),
+                thread_id: thread.id.clone(),
             },
+            position.map(|index| (index, thread)),
             cx,
         );
         cx.notify();
@@ -449,6 +506,7 @@ impl Waku {
             WorkspaceOperation::MarkRepoNotificationsRead {
                 repo: repo.to_owned(),
             },
+            None,
             cx,
         );
         cx.notify();
@@ -465,6 +523,7 @@ impl Waku {
         self.notification_write(
             "all".to_owned(),
             WorkspaceOperation::MarkAllNotificationsRead,
+            None,
             cx,
         );
         cx.notify();
@@ -1271,7 +1330,7 @@ impl Waku {
                 tr!("notifications.mark_done"),
                 &theme,
                 thread.id.clone(),
-                Rc::new(move |this, _, cx| this.notification_mark_done(&id, cx)),
+                Rc::new(move |this, window, cx| this.notification_mark_done(&id, window, cx)),
                 cx,
             ));
         }
@@ -1358,7 +1417,7 @@ impl Waku {
                     "up" => this.inbox_focus_neighbor(&key_id, -1, window, cx),
                     "down" => this.inbox_focus_neighbor(&key_id, 1, window, cx),
                     "r" => this.notification_mark_read(&key_id, cx),
-                    "x" => this.notification_mark_done(&key_id, cx),
+                    "x" => this.notification_mark_done(&key_id, window, cx),
                     "f" => this.notification_fix(&key_id, window, cx),
                     _ => return,
                 }

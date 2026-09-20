@@ -2386,6 +2386,9 @@ pub struct Waku {
     git_panel_conflict_files_scrollbar: Rc<ScrollbarState>,
     /// The "nothing staged" prompt's open flag.
     git_panel_unstaged_prompt: bool,
+    /// The land confirmation's target — the base branch and the commit count
+    /// the modal names.
+    git_panel_land_prompt: Option<waku_client::git::LandTarget>,
     /// The commit-diff modal, when a commit row is open.
     git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
     /// Focus target the Git panel's modals share — only one is ever open.
@@ -2394,6 +2397,8 @@ pub struct Waku {
     /// handles per modal keep a stacked pair from fighting over one.
     git_panel_unstaged_cancel_focus: FocusHandle,
     git_panel_unstaged_confirm_focus: FocusHandle,
+    git_panel_land_cancel_focus: FocusHandle,
+    git_panel_land_confirm_focus: FocusHandle,
     git_panel_conflict_abort_focus: FocusHandle,
     git_panel_conflict_merge_focus: FocusHandle,
     git_panel_conflict_resolve_focus: FocusHandle,
@@ -5417,10 +5422,13 @@ impl Waku {
                 git_panel_conflict_files_scroll: ScrollHandle::new(),
                 git_panel_conflict_files_scrollbar: ScrollbarState::new(),
                 git_panel_unstaged_prompt: false,
+                git_panel_land_prompt: None,
                 git_panel_commit_diff: None,
                 git_panel_modal_focus: cx.focus_handle(),
                 git_panel_unstaged_cancel_focus: cx.focus_handle(),
                 git_panel_unstaged_confirm_focus: cx.focus_handle(),
+                git_panel_land_cancel_focus: cx.focus_handle(),
+                git_panel_land_confirm_focus: cx.focus_handle(),
                 git_panel_conflict_abort_focus: cx.focus_handle(),
                 git_panel_conflict_merge_focus: cx.focus_handle(),
                 git_panel_conflict_resolve_focus: cx.focus_handle(),

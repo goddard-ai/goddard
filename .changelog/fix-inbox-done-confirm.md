@@ -1,0 +1,1 @@
+- The GitHub inbox's Done action now confirms first — it's irreversible on GitHub's side — and a failed Done write puts the thread back immediately instead of waiting for the next poll to restore it

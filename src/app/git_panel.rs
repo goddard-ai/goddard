@@ -521,6 +521,7 @@ impl Waku {
         self.git_panel_commit_hover = None;
         self.git_panel_sync_conflict = None;
         self.git_panel_unstaged_prompt = false;
+        self.git_panel_land_prompt = None;
         self.git_panel_commit_diff = None;
     }
 
@@ -2897,8 +2898,10 @@ impl Waku {
 
     /// The land affordance under the action button: rebase onto the base
     /// branch and fast-forward it. Quieter than the primary action — landing
-    /// is deliberate, not the default next step — and disabled while any
-    /// panel operation is in flight.
+    /// is deliberate, not the default next step — and gated by a
+    /// confirmation naming the base it rewrites, since the worktree is not
+    /// the only checkout it touches. Disabled while any panel operation is
+    /// in flight.
     fn render_git_panel_land_button(
         &self,
         target: &LandTarget,
@@ -2947,16 +2950,20 @@ impl Waku {
                 tr!("git_panel.land_onto", base = target.branch.clone())
             });
         if enabled {
+            let click_target = target.clone();
+            let key_target = target.clone();
             button = button
                 .bg(theme.inset)
                 .hover(|style| style.bg(theme.overlay))
                 .active(|style| style.opacity(0.8))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.land_git_panel_workspace(PullStrategy::Rebase, cx);
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.git_panel_land_prompt = Some(click_target.clone());
+                    cx.notify();
                 }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.land_git_panel_workspace(PullStrategy::Rebase, cx);
+                        this.git_panel_land_prompt = Some(key_target.clone());
+                        cx.notify();
                         cx.stop_propagation();
                     }
                 }));
@@ -4101,7 +4108,7 @@ impl Waku {
         )
     }
 
-    /// The panel's three modals, drawn above the workspace.
+    /// The panel's modals, drawn above the workspace.
     pub(super) fn render_git_panel_overlays(
         &mut self,
         window: &mut Window,
@@ -4111,7 +4118,10 @@ impl Waku {
         // where the pointer was last; the scrim keeps the panel unclickable
         // in the meantime. Once focus is anywhere inside the card — a button
         // tabbed to it — leave it alone instead of re-grabbing each frame.
-        if self.git_panel_sync_conflict.is_some() || self.git_panel_unstaged_prompt {
+        if self.git_panel_sync_conflict.is_some()
+            || self.git_panel_unstaged_prompt
+            || self.git_panel_land_prompt.is_some()
+        {
             let modal_focus = &self.git_panel_modal_focus;
             if !modal_focus.contains_focused(window, cx) {
                 window.focus(modal_focus, cx);
@@ -4119,6 +4129,7 @@ impl Waku {
         }
         let mut overlays = Vec::new();
         overlays.extend(self.render_git_panel_unstaged_modal(window, cx));
+        overlays.extend(self.render_git_panel_land_modal(window, cx));
         overlays.extend(self.render_git_panel_conflict_modal(window, cx));
         overlays
     }
@@ -4161,9 +4172,10 @@ impl Waku {
     }
 
     /// Enter on the modal card runs its primary action — Commit all for the
-    /// nothing-staged prompt, Resolve in chat for the conflicted sync — the
-    /// same primary the archive dialog's bare Enter confirms. The commit-diff
-    /// modal has no primary, so Enter there is a no-op.
+    /// nothing-staged prompt, Land for the land prompt, Resolve in chat for
+    /// the conflicted sync — the same primary the archive dialog's bare
+    /// Enter confirms. The commit-diff modal has no primary, so Enter there
+    /// is a no-op.
     fn confirm_git_panel_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.git_panel_commit_diff.is_some() {
             return;
@@ -4173,6 +4185,9 @@ impl Waku {
         } else if self.git_panel_unstaged_prompt {
             self.git_panel_unstaged_prompt = false;
             self.run_git_panel_commit(true, cx);
+        } else if self.git_panel_land_prompt.take().is_some() {
+            self.land_git_panel_workspace(PullStrategy::Rebase, cx);
+            cx.notify();
         }
     }
 
@@ -4183,6 +4198,8 @@ impl Waku {
             self.git_panel_sync_conflict = None;
         } else if self.git_panel_unstaged_prompt {
             self.git_panel_unstaged_prompt = false;
+        } else if self.git_panel_land_prompt.is_some() {
+            self.git_panel_land_prompt = None;
         } else {
             return;
         }
@@ -4265,6 +4282,81 @@ impl Waku {
                 ),
         );
         Some(self.git_panel_modal_layer("git-panel-unstaged-modal", card, cx))
+    }
+
+    /// "Land onto <base>": the button's click armed this prompt because the
+    /// run rewrites more than the worktree — it rebases, then fast-forwards
+    /// the base branch itself.
+    fn render_git_panel_land_modal(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let target = self.git_panel_land_prompt.as_ref()?;
+        let theme = Theme::current(cx);
+        let description = if target.ahead == 1 {
+            tr!("git_panel.land_confirm_description_one", base = target.branch.clone())
+        } else {
+            tr!(
+                "git_panel.land_confirm_description",
+                base = target.branch.clone(),
+                count = target.ahead
+            )
+        };
+        let confirm = modal_button(
+            "git-panel-land-confirm",
+            tr!("git_panel.land_onto", base = target.branch.clone()),
+            true,
+            &self.git_panel_land_confirm_focus,
+            theme,
+            cx,
+            |this, _, cx| {
+                this.git_panel_land_prompt = None;
+                this.land_git_panel_workspace(PullStrategy::Rebase, cx);
+            },
+        );
+        let cancel = modal_button(
+            "git-panel-land-cancel",
+            tr!("common.cancel"),
+            false,
+            &self.git_panel_land_cancel_focus,
+            theme,
+            cx,
+            |this, _, cx| {
+                this.dismiss_git_panel_modal(cx);
+            },
+        );
+        let card = self.git_panel_modal_card(cx).child(
+            div()
+                .px(px(16.0))
+                .py(px(14.0))
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .text_size(sp(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("git_panel.land_confirm_title")),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .line_height(sp(17.0))
+                        .text_color(theme.text_secondary)
+                        .child(description),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(px(6.0))
+                        .child(cancel)
+                        .child(confirm),
+                ),
+        );
+        Some(self.git_panel_modal_layer("git-panel-land-modal", card, cx))
     }
 
     /// The sync conflicted: Resolve in chat, Merge instead (rebase only), or

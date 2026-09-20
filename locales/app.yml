@@ -488,6 +488,10 @@ integrations.connect:
   en: Connect
 integrations.disconnect:
   en: Disconnect
+integrations.confirm_disconnect:
+  en: "Disconnect %{name}?"
+integrations.confirm_disconnect_detail:
+  en: The sign-in and provider assignments are removed — connect again to use it.
 integrations.sign_in:
   en: Sign in
 integrations.agents:
@@ -1244,6 +1248,10 @@ computer_use.always_allowed_apps_description:
   en: Goddard pins these grants to the app's bundle ID and signing team
 computer_use.no_always_allowed_apps:
   en: No apps are always allowed. Task-scoped grants stay in memory only
+computer_use.confirm_revoke:
+  en: "Revoke %{name}'s access?"
+computer_use.confirm_revoke_detail:
+  en: Sessions stop being able to drive this app until it's allowed again.
 computer_use.access_granted:
   en: Access Granted
 computer_use.grant_access:
@@ -1470,6 +1478,10 @@ notifications.mark_read:
   en: Mark as read
 notifications.mark_done:
   en: Mark as done
+notifications.confirm_done:
+  en: "Mark %{title} as done?"
+notifications.confirm_done_detail:
+  en: Done deletes the thread on GitHub — it can't be undone.
 notifications.mark_repo_read:
   en: Mark all read
 notifications.mark_all_read:
@@ -1705,6 +1717,10 @@ projects.confirm_delete_many:
   en: "Delete %{count} branches?"
 projects.confirm_delete_detail:
   en: Unmerged work on the branch will be lost.
+projects.confirm_reject:
+  en: "Reject and revert %{commit}?"
+projects.confirm_reject_detail:
+  en: A revert commit is pushed onto the shared qa branch — anyone synced to it picks the revert up.
 projects.open_pull_request:
   en: Open pull request
 projects.view_pull_request:
@@ -3302,6 +3318,12 @@ git_panel.resolve_merge_onto_prompt:
   en: "The merge of `%{base}` into this worktree stopped on conflicts. Resolve the conflicts in the working tree and complete the merge."
 git_panel.auto_resolving_rebase_in_chat:
   en: "Rebasing onto %{base} stopped on conflicts — resolving in the task's chat"
+git_panel.land_confirm_title:
+  en: Land onto base?
+git_panel.land_confirm_description:
+  en: "Rebase this checkout onto %{base} and fast-forward %{base} to the result — %{count} commits land on the branch."
+git_panel.land_confirm_description_one:
+  en: "Rebase this checkout onto %{base} and fast-forward %{base} to the result — 1 commit lands on the branch."
 
 sync_branch.current:
   en: Current branch
@@ -4054,6 +4076,10 @@ pairing.paired_hint:
   en: Devices that hold a token for this daemon. Revoking drops their access.
 pairing.revoke:
   en: Revoke
+pairing.confirm_revoke:
+  en: "Revoke %{name}?"
+pairing.confirm_revoke_detail:
+  en: The device loses access right away — it has to pair again to reconnect.
 pairing.added:
   en: "paired %{ago} ago"
 pairing.none:
@@ -4082,6 +4108,10 @@ friends.send_dialog_send:
   en: Send
 friends.remove:
   en: Remove
+friends.confirm_remove:
+  en: "Remove %{name}?"
+friends.confirm_remove_detail:
+  en: They leave your friends list — pairing again is the way back.
 friends.transfers:
   en: Transfers
 friends.status_pending:
@@ -4124,6 +4154,10 @@ friends.merge_instead:
   en: Merge instead
 friends.abort_sync:
   en: Abort
+friends.confirm_abort_sync:
+  en: "Abort the sync on %{branch}?"
+friends.confirm_abort_sync_detail:
+  en: The stopped sync is thrown away and the branch pauses until you sync it manually.
 friends.dismiss:
   en: Dismiss
 friends.sync_now:
@@ -4140,10 +4174,20 @@ friends.matches_project:
   en: "matches %{name}"
 friends.no_local_match:
   en: no local checkout
+friends.unshare:
+  en: Unshare
+friends.confirm_unshare:
+  en: "Stop sharing %{name}?"
+friends.confirm_unshare_detail:
+  en: The friend loses access to this project — its sync links and shared sessions stop.
 friends.enable_sync:
   en: Enable sync
 friends.disable_sync:
   en: Disable sync
+friends.confirm_disable_sync:
+  en: "Disable sync for %{name} with %{peer}?"
+friends.confirm_disable_sync_detail:
+  en: The link is torn down on both sides — branches stop updating until it's set up again.
 friends.sync_link_title:
   en: "Syncing %{name} with %{peer}"
 friends.sync_waiting:
@@ -4310,6 +4354,10 @@ automations.resume:
   en: Resume
 automations.delete:
   en: Delete
+automations.confirm_delete:
+  en: "Delete %{name}?"
+automations.confirm_delete_detail:
+  en: The automation and its run history are deleted.
 automations.save:
   en: Save
 automations.create:

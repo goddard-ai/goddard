@@ -1,0 +1,1 @@
+- Removing a friend and revoking a paired device now ask first — a confirmation names the friend or device instead of dropping them on one click
