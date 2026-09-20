@@ -1668,6 +1668,7 @@ impl Backend for WakuBackend {
                     WorkspaceOperation::Commit { .. }
                         | WorkspaceOperation::Push { .. }
                         | WorkspaceOperation::Land { .. }
+                        | WorkspaceOperation::RebaseOnto { .. }
                 );
                 let review_move = match &operation {
                     WorkspaceOperation::ReviewApprove { cwd, .. } => {

@@ -91,6 +91,9 @@ enum PaletteSection {
     // The "New task in…" picker's directory listing; never in Commands view.
     Directories,
     Templates,
+    // The "Change base branch" picker's branch listing; never in Commands
+    // view.
+    Branches,
 }
 
 impl PaletteSection {
@@ -108,6 +111,7 @@ impl PaletteSection {
             Self::Scripts => "command_palette.scripts",
             Self::Directories => "command_palette.directories",
             Self::Templates => "command_palette.templates",
+            Self::Branches => "command_palette.branches",
         })
     }
 
@@ -117,7 +121,11 @@ impl PaletteSection {
             Self::CustomCommands | Self::Prompts => 1,
             Self::Tasks => 2,
             Self::Settings => 3,
-            Self::Projects | Self::Scripts | Self::Directories | Self::Templates => 4,
+            Self::Projects
+            | Self::Scripts
+            | Self::Directories
+            | Self::Templates
+            | Self::Branches => 4,
         }
     }
 }
@@ -189,6 +197,12 @@ enum PaletteAction {
     OpenOnGitHub,
     MoveToWorktree,
     LandChanges,
+    ChangeBaseBranch,
+    RebaseOntoBranch {
+        workspace: PathBuf,
+        branch: String,
+        onto: Option<String>,
+    },
     SyncBranch,
     CompactContext,
     ToggleUsage,
@@ -232,6 +246,8 @@ enum CommandPaletteView {
     NewTaskIn,
     IssueProjects,
     IssueTemplates,
+    /// The "Change base branch" branch picker.
+    RebaseBase,
     /// The "Save as prompt template" step: the query field is the file's
     /// command name, confirmed with Enter.
     SavePrompt,
@@ -244,6 +260,18 @@ enum IssueTemplateFetch {
     ShowTemplates,
     OpenDialog,
     Toast(String),
+}
+
+/// The "Change base branch" drill-in's target and branch scan.
+/// `current_base` is the session's recorded base — the row the picker
+/// marks, and the `rebase --onto` upstream when another branch is picked.
+struct RebaseBasePicker {
+    workspace: PathBuf,
+    current_base: Option<String>,
+    /// The branch checked out in the worktree — it can never be a base.
+    current_branch: Option<String>,
+    branches: Vec<crate::git_branch::BranchEntry>,
+    pending: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -515,6 +543,10 @@ pub(super) struct CommandPaletteUi {
     issue_templates_pending: bool,
     issue_blank_enabled: bool,
     issue_generation: u64,
+    /// The worktree the "Change base branch" drill-in is rebasing, and the
+    /// daemon's branch scan behind the picker.
+    rebase_base: Option<RebaseBasePicker>,
+    rebase_generation: u64,
     /// The composer text the "Save as prompt template" step parks on entry —
     /// captured up front so a composer draft change mid-pick can't alter
     /// what lands in the file.
@@ -557,6 +589,8 @@ impl CommandPaletteUi {
             issue_templates_pending: false,
             issue_blank_enabled: true,
             issue_generation: 0,
+            rebase_base: None,
+            rebase_generation: 0,
             save_prompt_body: None,
             selected: 0,
             scroll: ScrollHandle::new(),
@@ -854,6 +888,94 @@ impl Waku {
                     let query = waku.command_palette.search.read(cx).content().to_owned();
                     waku.refresh_command_palette_results(&query, false, cx);
                 }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The "Change base branch" drill-in: snapshot the composer session's
+    /// worktree and recorded base, then scan its branches off the UI
+    /// thread, generation-guarded like the run-script fetch.
+    fn open_command_palette_rebase_base_view(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.composer_session() else {
+            return;
+        };
+        if !session.has_started() || session.is_busy() {
+            return;
+        }
+        let SessionWorkspace::Worktree { base_branch, .. } = &session.workspace else {
+            return;
+        };
+        let current_base = base_branch.clone();
+        let Some(workspace) = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        let generation = self.command_palette.rebase_generation.wrapping_add(1);
+        self.command_palette.rebase_generation = generation;
+        self.command_palette.rebase_base = Some(RebaseBasePicker {
+            workspace: workspace.clone(),
+            current_base: current_base.clone(),
+            current_branch: None,
+            branches: Vec::new(),
+            pending: true,
+        });
+        self.command_palette.view = CommandPaletteView::RebaseBase;
+        let placeholder = match &current_base {
+            Some(base) => tr!("command_palette.rebase_base_placeholder", base = base.clone()),
+            None => tr!("command_palette.rebase_base_placeholder_unknown"),
+        };
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            if let Some(picker) = self.command_palette.rebase_base.as_mut() {
+                picker.pending = false;
+            }
+            self.refresh_command_palette_results("", false, cx);
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(waku_client::WorkspaceOperation::InspectBranches {
+                        cwd: workspace,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open
+                    || waku.command_palette.rebase_generation != generation
+                    || waku.command_palette.view != CommandPaletteView::RebaseBase
+                {
+                    return;
+                }
+                let Some(picker) = waku.command_palette.rebase_base.as_mut() else {
+                    return;
+                };
+                picker.pending = false;
+                match result {
+                    Ok(waku_client::WorkspaceResult::Branches {
+                        snapshot: Some(snapshot),
+                    }) => {
+                        picker.current_branch = snapshot.current;
+                        picker.branches = snapshot.branches;
+                    }
+                    Ok(_) => {}
+                    Err(error) => waku.show_toast(error.to_string()),
+                }
+                let query = waku.command_palette.search.read(cx).content().to_owned();
+                waku.refresh_command_palette_results(&query, false, cx);
                 cx.notify();
             });
         })
@@ -1375,6 +1497,7 @@ impl Waku {
             CommandPaletteView::IssueTemplates => {
                 self.open_command_palette_issue_projects_view(cx)
             }
+            CommandPaletteView::RebaseBase => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::SavePrompt => self.leave_command_palette_drill_in_view(cx),
         }
     }
@@ -1396,6 +1519,19 @@ impl Waku {
             }
             CommandPaletteView::IssueTemplates => {
                 tr!("command_palette.issue_template_placeholder")
+            }
+            CommandPaletteView::RebaseBase => {
+                match self
+                    .command_palette
+                    .rebase_base
+                    .as_ref()
+                    .and_then(|picker| picker.current_base.as_deref())
+                {
+                    Some(base) => {
+                        tr!("command_palette.rebase_base_placeholder", base = base.to_owned())
+                    }
+                    None => tr!("command_palette.rebase_base_placeholder_unknown"),
+                }
             }
             CommandPaletteView::SavePrompt => tr!("command_palette.save_prompt_placeholder"),
         };
@@ -1422,6 +1558,7 @@ impl Waku {
                 | CommandPaletteView::NewTaskIn
                 | CommandPaletteView::IssueProjects
                 | CommandPaletteView::IssueTemplates
+                | CommandPaletteView::RebaseBase
                 | CommandPaletteView::SavePrompt
         ) {
             self.refresh_command_palette_results(query, false, cx);
@@ -1691,6 +1828,40 @@ impl Waku {
                         base_branch: Some(base),
                         ..
                     } => Some(format!("→ {base}")),
+                    _ => None,
+                });
+            commands.push(item);
+        }
+
+        // Rebase is a started worktree's base change: drafts still pick
+        // theirs in the branch picker, and a busy session or a sync in
+        // flight must not have its history rewritten under it.
+        if self.git_panel_operation.is_none()
+            && self.git_panel_sync_conflict.is_none()
+            && !self.branch_operation_pending
+            && self.composer_session().is_some_and(|session| {
+                session.has_started()
+                    && !session.is_busy()
+                    && matches!(&session.workspace, SessionWorkspace::Worktree { .. })
+                    && self.workspace_path_for_session(session).is_some()
+            })
+        {
+            let mut item = CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.change_base_branch"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::ChangeBaseBranch,
+                "change base branch rebase onto worktree git history",
+                next(),
+            );
+            item.detail = self
+                .composer_session()
+                .and_then(|session| match &session.workspace {
+                    SessionWorkspace::Worktree {
+                        base_branch: Some(base),
+                        ..
+                    } => Some(tr!("command_palette.based_on", base = base.clone())),
                     _ => None,
                 });
             commands.push(item);
@@ -2456,6 +2627,93 @@ impl Waku {
         self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
+    /// The change-base picker's rows: the recorded base leads, marked as
+    /// current — picking it again is a no-op the executor turns into a
+    /// notice — then every other local branch in the composer's recency
+    /// order. The worktree's own checked-out branch can never be a base.
+    fn command_palette_rebase_base_candidates(&self) -> Vec<CommandPaletteItem> {
+        let Some(picker) = self.command_palette.rebase_base.as_ref() else {
+            return Vec::new();
+        };
+        let selected = picker.current_base.clone().unwrap_or_default();
+        let branches = composer::visible_branch_entries(
+            &picker.branches,
+            &selected,
+            "",
+            unix_time(),
+        );
+        let mut order = 0usize;
+        let mut items = Vec::new();
+        if let Some(base) = &picker.current_base {
+            items.push(CommandPaletteItem {
+                section: PaletteSection::Branches,
+                label: base.clone(),
+                detail: Some(tr!("command_palette.current_base")),
+                icon: PaletteIcon::Asset("icons/git-branch.svg"),
+                shortcut: None,
+                action: PaletteAction::RebaseOntoBranch {
+                    workspace: picker.workspace.clone(),
+                    branch: base.clone(),
+                    onto: picker.current_base.clone(),
+                },
+                content_match: None,
+                search_text: format!("{base} base branch rebase onto"),
+                order,
+                recency: 0,
+            });
+            order += 1;
+        }
+        items.extend(
+            branches
+                .into_iter()
+                .filter(|branch| {
+                    Some(&branch.name) != picker.current_base.as_ref()
+                        && Some(&branch.name) != picker.current_branch.as_ref()
+                })
+                .map(|branch| {
+                    let item = CommandPaletteItem {
+                        section: PaletteSection::Branches,
+                        label: branch.name.clone(),
+                        detail: None,
+                        icon: PaletteIcon::Asset("icons/git-branch.svg"),
+                        shortcut: None,
+                        action: PaletteAction::RebaseOntoBranch {
+                            workspace: picker.workspace.clone(),
+                            branch: branch.name.clone(),
+                            onto: picker.current_base.clone(),
+                        },
+                        content_match: None,
+                        search_text: format!("{} base branch rebase onto", branch.name),
+                        order,
+                        recency: 0,
+                    };
+                    order += 1;
+                    item
+                }),
+        );
+        items
+    }
+
+    fn refresh_command_palette_rebase_base_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_rebase_base_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
     /// Same ordering as the run-script step — current, then recent, then
     /// newly added — minus projects that cannot host an issue at all.
     /// A remote project's repo check is its daemon's, not this filesystem's,
@@ -2858,6 +3116,10 @@ impl Waku {
             }
             CommandPaletteView::IssueTemplates => {
                 self.refresh_command_palette_issue_template_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::RebaseBase => {
+                self.refresh_command_palette_rebase_base_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::SavePrompt => {
@@ -3310,6 +3572,10 @@ impl Waku {
                 self.open_command_palette_save_prompt_view(cx);
                 return;
             }
+            PaletteAction::ChangeBaseBranch => {
+                self.open_command_palette_rebase_base_view(cx);
+                return;
+            }
             PaletteAction::SavePromptAs(slug) => {
                 // The helper decides whether the naming step stays open —
                 // a validation failure keeps the typed name editable.
@@ -3387,6 +3653,27 @@ impl Waku {
             PaletteAction::LandChanges => {
                 self.settings_page = None;
                 self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
+            }
+            PaletteAction::RebaseOntoBranch {
+                workspace,
+                branch,
+                onto,
+            } => {
+                self.settings_page = None;
+                // Re-picking the recorded base changes nothing — say so
+                // rather than run a rebase that moves nothing.
+                if onto.as_deref() == Some(branch.as_str()) {
+                    self.show_toast(tr!("command_palette.rebase_base_unchanged", base = branch));
+                } else {
+                    self.start_git_panel_rebase(
+                        workspace,
+                        branch,
+                        onto,
+                        waku_client::git::PullStrategy::Rebase,
+                        true,
+                        cx,
+                    );
+                }
             }
             PaletteAction::SyncBranch => {
                 self.settings_page = None;
@@ -3505,6 +3792,7 @@ impl Waku {
             | PaletteAction::CreateGitHubIssue
             | PaletteAction::ChooseIssueProject(_)
             | PaletteAction::OpenSavePrompt
+            | PaletteAction::ChangeBaseBranch
             | PaletteAction::SavePromptAs(_) => {
                 unreachable!("view-navigation actions are handled before closing the palette")
             }
@@ -3572,6 +3860,11 @@ impl Waku {
             CommandPaletteView::IssueTemplates => {
                 self.command_palette.issue_templates_pending
             }
+            CommandPaletteView::RebaseBase => self
+                .command_palette
+                .rebase_base
+                .as_ref()
+                .is_some_and(|picker| picker.pending),
             CommandPaletteView::ResumeProviders
             | CommandPaletteView::RunScriptProjects
             | CommandPaletteView::IssueProjects
@@ -3596,7 +3889,14 @@ impl Waku {
                 && self.command_palette.new_task_directories_pending)
             || (issue_templates_view
                 && self.command_palette.results.is_empty()
-                && self.command_palette.issue_templates_pending);
+                && self.command_palette.issue_templates_pending)
+            || (view == CommandPaletteView::RebaseBase
+                && self.command_palette.results.is_empty()
+                && self
+                    .command_palette
+                    .rebase_base
+                    .as_ref()
+                    .is_some_and(|picker| picker.pending));
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
@@ -3625,6 +3925,8 @@ impl Waku {
                         tr!("command_palette.loading_directories")
                     } else if issue_templates_view {
                         tr!("command_palette.loading_issue_templates")
+                    } else if view == CommandPaletteView::RebaseBase {
+                        tr!("command_palette.loading_branches")
                     } else {
                         tr!("command_palette.loading_sessions")
                     },
@@ -3678,6 +3980,13 @@ impl Waku {
                     "icons/folder-search.svg",
                     tr!("command_palette.no_directories"),
                     Some(tr!("command_palette.no_directories_hint")),
+                    false,
+                )
+            } else if view == CommandPaletteView::RebaseBase {
+                (
+                    "icons/git-branch.svg",
+                    tr!("command_palette.no_branches"),
+                    Some(tr!("command_palette.no_branches_hint")),
                     false,
                 )
             } else {

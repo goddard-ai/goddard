@@ -10,7 +10,7 @@ use anyhow::{Context as _, bail};
 
 use waku_protocol::git::{
     CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
-    PullStrategy, SyncInProgress, UpstreamStatus,
+    PullStrategy, RebaseOutcome, SyncInProgress, UpstreamStatus,
 };
 
 use crate::git_branch::remote_url;
@@ -285,6 +285,67 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
         base,
         commits,
         ahead,
+    })
+}
+
+/// Move the checkout onto a different base branch without landing:
+/// `git rebase --onto <base> <upstream>` replays the commits after
+/// `upstream` — the recorded old base, or the merge-base of HEAD and `base`
+/// when it is absent or no longer resolves — while `PullStrategy::Merge`
+/// merges `base` in instead. Unlike [`land`] nothing is fast-forwarded, and
+/// a HEAD that already contains `base` reports `Rebased` without touching
+/// history. Both strategies require a clean tree. A stopped integration
+/// reports `Conflict` and leaves the rebase or merge in progress;
+/// re-running while stopped reports the same conflict again.
+pub fn rebase_onto(
+    cwd: &Path,
+    base: &str,
+    onto: Option<&str>,
+    strategy: PullStrategy,
+) -> anyhow::Result<RebaseOutcome> {
+    ensure_repository(cwd)?;
+    if let Some(in_progress) = sync_in_progress(cwd)? {
+        return Ok(RebaseOutcome::Conflict {
+            base: base.to_owned(),
+            in_progress,
+            files: conflicted_paths(cwd)?,
+        });
+    }
+    if !ref_exists(cwd, &format!("refs/heads/{base}"))? {
+        bail!("unknown base branch {base}");
+    }
+    if is_ancestor(cwd, base, "HEAD")? {
+        return Ok(RebaseOutcome::Rebased {
+            base: base.to_owned(),
+        });
+    }
+    if has_tracked_changes(cwd)? {
+        bail!("commit or stash your changes before changing the base branch");
+    }
+    let output = match strategy {
+        PullStrategy::Rebase => {
+            let upstream = match onto {
+                Some(onto) if ref_exists(cwd, onto)? => onto.to_owned(),
+                _ => git_optional_stdout(cwd, &["merge-base", "HEAD", base])?
+                    .filter(|sha| !sha.is_empty())
+                    .context("no common history with the new base")?,
+            };
+            git_capture(cwd, &["rebase", "--onto", base, &upstream])?
+        }
+        PullStrategy::Merge => git_capture(cwd, &["merge", "--no-edit", base])?,
+    };
+    if !output.status.success() {
+        if let Some(in_progress) = sync_in_progress(cwd)? {
+            return Ok(RebaseOutcome::Conflict {
+                base: base.to_owned(),
+                in_progress,
+                files: conflicted_paths(cwd)?,
+            });
+        }
+        bail!("{}", command_error(&output));
+    }
+    Ok(RebaseOutcome::Rebased {
+        base: base.to_owned(),
     })
 }
 
@@ -1027,6 +1088,153 @@ mod tests {
                 branch: "main".to_owned(),
                 ahead: 1,
             })
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// Give the repository a `feature` branch one commit ahead of the
+    /// init commit `main` and the detached worktree still sit on.
+    fn feature_branch(repository: &Path) {
+        run_git(repository, &["switch", "-q", "-c", "feature"]);
+        std::fs::write(repository.join("feature.txt"), "feature work\n").unwrap();
+        run_git(repository, &["add", "feature.txt"]);
+        run_git(repository, &["commit", "-qm", "feature advances"]);
+        run_git(repository, &["switch", "-q", "main"]);
+    }
+
+    #[test]
+    fn rebase_onto_replays_only_the_session_commits() {
+        let (root, repository, worktree) = land_repository();
+        feature_branch(&repository);
+        let main_tip = git_stdout(&repository, &["rev-parse", "main"]).unwrap();
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            RebaseOutcome::Rebased {
+                base: "feature".to_owned()
+            }
+        );
+        // HEAD sits on the new base with the session commit replayed on
+        // top; the old base never moved.
+        assert!(worktree.join("feature.txt").exists());
+        run_git(&worktree, &["merge-base", "--is-ancestor", "feature", "HEAD"]);
+        assert_eq!(
+            git_stdout(&worktree, &["log", "-1", "--format=%s"]).unwrap(),
+            "session work"
+        );
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            main_tip
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rebase_onto_falls_back_to_the_merge_base() {
+        let (root, repository, worktree) = land_repository();
+        feature_branch(&repository);
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = rebase_onto(&worktree, "feature", None, PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            RebaseOutcome::Rebased {
+                base: "feature".to_owned()
+            }
+        );
+        run_git(&worktree, &["merge-base", "--is-ancestor", "feature", "HEAD"]);
+        assert_eq!(
+            git_stdout(&worktree, &["log", "-1", "--format=%s"]).unwrap(),
+            "session work"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rebase_onto_reports_the_stopped_rebase_and_recovers_on_abort() {
+        let (root, repository, worktree) = land_repository();
+        run_git(&repository, &["switch", "-q", "-c", "feature"]);
+        std::fs::write(repository.join("file.txt"), "feature changed\n").unwrap();
+        run_git(&repository, &["commit", "-qam", "feature changes"]);
+        run_git(&repository, &["switch", "-q", "main"]);
+        std::fs::write(worktree.join("file.txt"), "session changed\n").unwrap();
+        run_git(&worktree, &["commit", "-qam", "session changes"]);
+
+        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            RebaseOutcome::Conflict {
+                base: "feature".to_owned(),
+                in_progress: SyncInProgress::Rebase,
+                files: vec!["file.txt".to_owned()],
+            }
+        );
+        // Re-running while stopped reports the conflict again.
+        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        assert!(matches!(outcome, RebaseOutcome::Conflict { .. }));
+
+        abort_sync(&worktree).unwrap();
+        assert_eq!(
+            git_stdout(&worktree, &["status", "--porcelain"]).unwrap(),
+            ""
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rebase_onto_merges_the_new_base_in_instead() {
+        let (root, repository, worktree) = land_repository();
+        feature_branch(&repository);
+        commit_in(&worktree, "work.txt", "session\n");
+
+        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Merge).unwrap();
+        assert_eq!(
+            outcome,
+            RebaseOutcome::Rebased {
+                base: "feature".to_owned()
+            }
+        );
+        // The merge commit carries two parents: the session tip and
+        // `feature` — and the session's own commit still landed.
+        git_stdout(&worktree, &["rev-parse", "--verify", "HEAD^2"]).unwrap();
+        assert!(worktree.join("feature.txt").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rebase_onto_refuses_a_dirty_worktree_and_an_unknown_base() {
+        let (root, repository, worktree) = land_repository();
+        feature_branch(&repository);
+        commit_in(&worktree, "work.txt", "session\n");
+        std::fs::write(worktree.join("file.txt"), "uncommitted\n").unwrap();
+
+        assert!(rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).is_err());
+        // Untracked files never block: dropping the tracked change moves.
+        run_git(&worktree, &["checkout", "--", "file.txt"]);
+        std::fs::write(worktree.join("scratch.txt"), "untracked\n").unwrap();
+        assert!(matches!(
+            rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap(),
+            RebaseOutcome::Rebased { .. }
+        ));
+
+        assert!(rebase_onto(&worktree, "missing", None, PullStrategy::Rebase).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rebase_onto_reports_rebased_when_the_base_is_already_contained() {
+        let (root, repository, worktree) = land_repository();
+        feature_branch(&repository);
+        run_git(&worktree, &["merge", "-q", "--no-edit", "feature"]);
+
+        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            RebaseOutcome::Rebased {
+                base: "feature".to_owned()
+            }
         );
         std::fs::remove_dir_all(root).ok();
     }

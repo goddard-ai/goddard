@@ -182,6 +182,26 @@ command_palette.open_on_github:
   en: Open on GitHub
 command_palette.land_changes:
   en: Land changes
+command_palette.change_base_branch:
+  en: Change base branch…
+command_palette.based_on:
+  en: based on %{base}
+command_palette.branches:
+  en: Branches
+command_palette.current_base:
+  en: current base
+command_palette.rebase_base_placeholder:
+  en: "Rebase off %{base} onto…"
+command_palette.rebase_base_placeholder_unknown:
+  en: Rebase onto…
+command_palette.rebase_base_unchanged:
+  en: Already based on %{base}
+command_palette.loading_branches:
+  en: Loading branches…
+command_palette.no_branches:
+  en: No other branches
+command_palette.no_branches_hint:
+  en: Create another branch first
 command_palette.create_draft:
   en: Create draft
 command_palette.view_drafts:
@@ -3268,6 +3288,20 @@ git_panel.resolve_land_merge_prompt:
   en: "The merge of `%{base}` into this worktree stopped on conflicts. Resolve the conflicts in the working tree and complete the merge. Then land the result by fast-forwarding `%{base}` to this HEAD: use `git worktree list` to find where `%{base}` is checked out and run `git -C <path> merge --ff-only HEAD` there — or `git branch -f %{base} HEAD` when it is not checked out anywhere. Do not switch branches in that other checkout."
 git_panel.auto_resolving_in_chat:
   en: "Landing onto %{base} stopped on conflicts — resolving in the task's chat"
+git_panel.rebasing:
+  en: Rebasing…
+git_panel.rebasing_onto:
+  en: "Rebasing onto %{base}…"
+git_panel.rebased_onto:
+  en: Rebased onto %{base}
+git_panel.rebase_onto_conflict_description:
+  en: Rebasing onto %{base} stopped midway — the conflicts are still in the working tree.
+git_panel.resolve_rebase_onto_prompt:
+  en: "The rebase of this worktree onto `%{base}` stopped on conflicts. Resolve the conflicts in the working tree and run `git rebase --continue` until the rebase completes."
+git_panel.resolve_merge_onto_prompt:
+  en: "The merge of `%{base}` into this worktree stopped on conflicts. Resolve the conflicts in the working tree and complete the merge."
+git_panel.auto_resolving_rebase_in_chat:
+  en: "Rebasing onto %{base} stopped on conflicts — resolving in the task's chat"
 
 sync_branch.current:
   en: Current branch

@@ -1,0 +1,1 @@
+- New "Change base branch…" command (⌘K) for a task's worktree: it shows the current base, offers the repo's other local branches, and replays the task's own commits onto the pick with `git rebase --onto` — the worktree must be committed first, conflicts open the usual resolve-in-chat dialog, and the pick becomes the branch Land targets

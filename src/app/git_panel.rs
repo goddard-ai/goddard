@@ -15,7 +15,7 @@ use gpui::{
 
 use waku_client::git::{
     CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
-    PullStrategy, SyncInProgress, UpstreamStatus,
+    PullStrategy, RebaseOutcome, SyncInProgress, UpstreamStatus,
 };
 use waku_client::workspace::{WorkspaceOperation, WorkspaceResult};
 
@@ -87,6 +87,7 @@ pub(super) enum GitPanelPending {
     Pushing,
     Syncing(PullStrategy),
     Landing,
+    Rebasing,
     AbortingSync,
 }
 
@@ -99,6 +100,7 @@ impl GitPanelPending {
             GitPanelPending::Syncing(PullStrategy::Rebase) => tr!("git_panel.syncing_rebase"),
             GitPanelPending::Syncing(PullStrategy::Merge) => tr!("git_panel.syncing_merge"),
             GitPanelPending::Landing => tr!("git_panel.landing"),
+            GitPanelPending::Rebasing => tr!("git_panel.rebasing"),
             GitPanelPending::AbortingSync => tr!("git_panel.aborting"),
         }
     }
@@ -127,28 +129,41 @@ pub(super) enum SyncConflict {
         /// Working-tree paths still carrying conflict markers.
         files: Vec<String>,
     },
+    /// A "Change base branch" rebase that stopped midway. `base` is the new
+    /// base being moved onto — it becomes the session's recorded base only
+    /// once the conflict is handed to a chat or retried as a merge, never
+    /// on abort.
+    Rebase {
+        in_progress: SyncInProgress,
+        base: String,
+        workspace: PathBuf,
+        /// Working-tree paths still carrying conflict markers.
+        files: Vec<String>,
+    },
 }
 
 impl SyncConflict {
     fn in_progress(&self) -> SyncInProgress {
         match self {
-            SyncConflict::Pull { in_progress, .. } | SyncConflict::Land { in_progress, .. } => {
-                *in_progress
-            }
+            SyncConflict::Pull { in_progress, .. }
+            | SyncConflict::Land { in_progress, .. }
+            | SyncConflict::Rebase { in_progress, .. } => *in_progress,
         }
     }
 
     fn workspace(&self) -> PathBuf {
         match self {
-            SyncConflict::Pull { workspace, .. } | SyncConflict::Land { workspace, .. } => {
-                workspace.clone()
-            }
+            SyncConflict::Pull { workspace, .. }
+            | SyncConflict::Land { workspace, .. }
+            | SyncConflict::Rebase { workspace, .. } => workspace.clone(),
         }
     }
 
     fn files(&self) -> &[String] {
         match self {
-            SyncConflict::Pull { files, .. } | SyncConflict::Land { files, .. } => files,
+            SyncConflict::Pull { files, .. }
+            | SyncConflict::Land { files, .. }
+            | SyncConflict::Rebase { files, .. } => files,
         }
     }
 }
@@ -177,6 +192,16 @@ fn sync_conflict_prompt(conflict: &SyncConflict) -> String {
             base,
             ..
         } => tr!("git_panel.resolve_land_merge_prompt", base = base),
+        SyncConflict::Rebase {
+            in_progress: SyncInProgress::Rebase,
+            base,
+            ..
+        } => tr!("git_panel.resolve_rebase_onto_prompt", base = base),
+        SyncConflict::Rebase {
+            in_progress: SyncInProgress::Merge,
+            base,
+            ..
+        } => tr!("git_panel.resolve_merge_onto_prompt", base = base),
     }
 }
 
@@ -1282,6 +1307,64 @@ impl Waku {
         .detach();
     }
 
+    /// `git rebase --onto <base> <onto>` in `workspace` — the "Change base
+    /// branch" palette pick. `onto` is the session's recorded old base; the
+    /// daemon falls back to the merge-base when it is absent or stale. A
+    /// stopped run raises the same modal a conflicted land does.
+    ///
+    /// `progress_toast` raises a spinner toast that resolves to the outcome —
+    /// how the palette reports, where no button shows the pending label.
+    pub(super) fn start_git_panel_rebase(
+        &mut self,
+        workspace: PathBuf,
+        base: String,
+        onto: Option<String>,
+        strategy: PullStrategy,
+        progress_toast: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((op_id, workspace)) =
+            self.begin_workspace_op(GitPanelPending::Rebasing, workspace, cx)
+        else {
+            return;
+        };
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
+        if progress_toast {
+            let toast_id = self.show_progress_toast(
+                tr!("git_panel.rebasing_onto", base = base.clone()),
+                PROGRESS_TOAST_DURATION,
+            );
+            if let Some(operation) = self.git_panel_operation.as_mut() {
+                operation.toast_id = Some(toast_id);
+            }
+            cx.notify();
+        }
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::RebaseOnto {
+                        cwd: workspace,
+                        base,
+                        onto,
+                        strategy,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                waku.finish_git_panel_op(op_id, result, cx);
+            });
+        })
+        .detach();
+    }
+
     /// Merge instead: leave the stopped rebase, then re-integrate as a merge
     /// — `pull --no-rebase` for a conflicted pull, `git merge <base>` inside
     /// the worktree for a land, which keeps the conflicts where the agent
@@ -1328,6 +1411,14 @@ impl Waku {
                                 client.request(WorkspaceOperation::Land {
                                     cwd: workspace,
                                     base: Some(base),
+                                    strategy: PullStrategy::Merge,
+                                })
+                            }
+                            SyncConflict::Rebase { base, .. } => {
+                                client.request(WorkspaceOperation::RebaseOnto {
+                                    cwd: workspace,
+                                    base,
+                                    onto: None,
                                     strategy: PullStrategy::Merge,
                                 })
                             }
@@ -1395,6 +1486,15 @@ impl Waku {
             _ => None,
         };
         let prompt = sync_conflict_prompt(&conflict);
+        // Handing a stopped base-change rebase to chat commits to the new
+        // base: the agent finishes the rebase there, so the recorded base
+        // follows now rather than waiting on an unobservable `--continue`.
+        if let SyncConflict::Rebase {
+            base, workspace, ..
+        } = &conflict
+        {
+            self.set_workspace_base_branch(workspace, base, cx);
+        }
         if let Some(workspace) = new_chat_workspace {
             self.create_task_in_directory(workspace, window, cx);
         }
@@ -1413,6 +1513,9 @@ impl Waku {
     fn auto_resolve_sync_conflict(&mut self, conflict: SyncConflict, cx: &mut Context<Self>) {
         let workspace = conflict.workspace();
         let prompt = sync_conflict_prompt(&conflict);
+        if let SyncConflict::Rebase { base, .. } = &conflict {
+            self.set_workspace_base_branch(&workspace, base, cx);
+        }
         self.create_task_in_directory_unfocused(workspace, cx);
         if let Some(submission) = self.submission_with_attachments(&prompt, cx)
             && let Some(session_id) = self.state.selected_session
@@ -1428,26 +1531,40 @@ impl Waku {
 
     /// The `auto_resolve_land_conflicts` path around the conflict modal:
     /// send the same resolution prompt Resolve in chat pastes to the
-    /// session that owns the stopped land's workspace — queued behind a
-    /// running turn like any follow-up. `false` when no session owns it, so
-    /// the caller can raise the modal instead.
+    /// session that owns the stopped integration's workspace — queued
+    /// behind a running turn like any follow-up. `false` when no session
+    /// owns it, so the caller can raise the modal instead.
     fn send_land_conflict_to_chat(
         &mut self,
         conflict: &SyncConflict,
         cx: &mut Context<Self>,
     ) -> bool {
-        let SyncConflict::Land {
-            base, workspace, ..
-        } = conflict
-        else {
-            return false;
+        let (base, workspace, toast) = match conflict {
+            SyncConflict::Land {
+                base, workspace, ..
+            } => (
+                base,
+                workspace,
+                tr!("git_panel.auto_resolving_in_chat", base = base.clone()),
+            ),
+            SyncConflict::Rebase {
+                base, workspace, ..
+            } => (
+                base,
+                workspace,
+                tr!("git_panel.auto_resolving_rebase_in_chat", base = base.clone()),
+            ),
+            SyncConflict::Pull { .. } => return false,
         };
         let Some(session_id) = self.land_conflict_session(workspace) else {
             return false;
         };
         let prompt = sync_conflict_prompt(conflict);
         self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
-        self.show_toast(tr!("git_panel.auto_resolving_in_chat", base = base.clone()));
+        if matches!(conflict, SyncConflict::Rebase { .. }) {
+            self.set_workspace_base_branch(workspace, base, cx);
+        }
+        self.show_toast(toast);
         true
     }
 
@@ -1598,6 +1715,45 @@ impl Waku {
                     self.invalidate_workspace_queries(cx);
                 }
             },
+            Ok(WorkspaceResult::Rebase { outcome }) => match outcome {
+                RebaseOutcome::Conflict {
+                    base,
+                    in_progress,
+                    files,
+                } => {
+                    self.dismiss_operation_toast(op.toast_id);
+                    self.git_panel_conflict_files_scroll
+                        .set_offset(gpui::Point::default());
+                    let conflict = SyncConflict::Rebase {
+                        in_progress,
+                        base,
+                        workspace: op.workspace.clone(),
+                        files,
+                    };
+                    let sent_to_owner = self.state.auto_resolve_land_conflicts
+                        && self.send_land_conflict_to_chat(&conflict, cx);
+                    if !sent_to_owner {
+                        if self.state.auto_resolve_in_chat {
+                            self.auto_resolve_sync_conflict(conflict, cx);
+                        } else {
+                            self.git_panel_sync_conflict = Some(conflict);
+                        }
+                    }
+                    self.invalidate_workspace_queries(cx);
+                    cx.notify();
+                }
+                RebaseOutcome::Rebased { base } => {
+                    self.settle_operation_toast(
+                        op.toast_id,
+                        tr!("git_panel.rebased_onto", base = base),
+                        ToastTone::Success,
+                    );
+                    self.set_workspace_base_branch(&op.workspace, &base, cx);
+                    self.invalidate_workspace_queries(cx);
+                    self.refresh_git_panel(cx);
+                    self.refresh_git_panel_commits(cx);
+                }
+            },
             Ok(_) => {
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = None;
@@ -1637,6 +1793,37 @@ impl Waku {
                 cx.notify();
             }
         }
+    }
+
+    /// Record `base` as the base branch of every session rooted at
+    /// `workspace`. A completed base-change rebase — or a conflicted one
+    /// handed to a chat to finish — makes it the branch `Land` targets from
+    /// here on. Sessions sharing the worktree move together.
+    fn set_workspace_base_branch(&mut self, workspace: &Path, base: &str, cx: &mut Context<Self>) {
+        let session_ids: Vec<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                matches!(&session.workspace, SessionWorkspace::Worktree { .. })
+                    && self.workspace_path_for_session(session) == Some(workspace)
+            })
+            .map(|session| session.id)
+            .collect();
+        let mut changed = false;
+        for session_id in session_ids {
+            if let Some(session) = self.state.session_mut(session_id)
+                && let SessionWorkspace::Worktree { base_branch, .. } = &mut session.workspace
+                && base_branch.as_deref() != Some(base)
+            {
+                *base_branch = Some(base.to_owned());
+                changed = true;
+            }
+        }
+        if changed {
+            self.save();
+        }
+        cx.notify();
     }
 
     /// Records that every session rooted at `workspace` landed its work on
@@ -4104,6 +4291,9 @@ impl Waku {
             SyncConflict::Pull { .. } => tr!("git_panel.conflict_description"),
             SyncConflict::Land { base, .. } => {
                 tr!("git_panel.land_conflict_description", base = base.clone())
+            }
+            SyncConflict::Rebase { base, .. } => {
+                tr!("git_panel.rebase_onto_conflict_description", base = base.clone())
             }
         };
         let resolve = modal_button(

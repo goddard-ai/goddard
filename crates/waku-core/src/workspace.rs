@@ -281,6 +281,14 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         } => WorkspaceResult::Land {
             outcome: crate::git_panel::land(&cwd, base.as_deref(), strategy)?,
         },
+        WorkspaceOperation::RebaseOnto {
+            cwd,
+            base,
+            onto,
+            strategy,
+        } => WorkspaceResult::Rebase {
+            outcome: crate::git_panel::rebase_onto(&cwd, &base, onto.as_deref(), strategy)?,
+        },
         WorkspaceOperation::ListCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::commits(&cwd, skip, limit)?,
         },

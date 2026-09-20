@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
     AgentInvocation, ArchivePreview, BranchSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot,
-    CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy, ReviewQueue,
+    CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy, RebaseOutcome,
+    ReviewQueue,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -807,6 +808,23 @@ pub enum WorkspaceOperation {
         base: Option<String>,
         strategy: PullStrategy,
     },
+    /// Move the checkout onto a different base branch without landing:
+    /// `git rebase --onto <base> <onto>` replays the commits past `onto` —
+    /// the session's recorded old base, with the merge-base of HEAD and
+    /// `base` as the daemon's fallback when it is absent or stale.
+    /// `PullStrategy::Merge` merges `base` in instead of replaying. The
+    /// base is not fast-forwarded and the working tree must be clean.
+    /// `Conflict` means the integration is still in progress and owns the
+    /// conflicted working tree.
+    RebaseOnto {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        /// The new base — a local branch.
+        base: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        onto: Option<String>,
+        strategy: PullStrategy,
+    },
     /// `git log` for HEAD, paged: `skip` leading entries are skipped and at
     /// most `limit` are returned.
     ListCommits {
@@ -1129,6 +1147,9 @@ pub enum WorkspaceResult {
     },
     Land {
         outcome: LandOutcome,
+    },
+    Rebase {
+        outcome: RebaseOutcome,
     },
     Commits {
         entries: Vec<CommitEntry>,

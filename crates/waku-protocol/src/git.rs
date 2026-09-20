@@ -239,6 +239,26 @@ pub enum PullOutcome {
     },
 }
 
+/// How a `RebaseOnto` operation ended. `base` names the branch the checkout
+/// was being moved onto, which the conflict modal and prompts quote back to
+/// the user.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RebaseOutcome {
+    /// HEAD now sits on top of `base` — the replay or merge completed.
+    Rebased { base: String },
+    /// The rebase or merge stopped on conflicts; the integration is still
+    /// in progress and the checkout owns the conflict markers.
+    Conflict {
+        base: String,
+        in_progress: SyncInProgress,
+        /// Working-tree paths still carrying conflict markers. `[]` matches
+        /// older writers that did not send the field.
+        #[serde(default)]
+        files: Vec<String>,
+    },
+}
+
 /// How a `Land` operation ended. `base` names the branch it resolved, which
 /// the conflict modal and prompts quote back to the user.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

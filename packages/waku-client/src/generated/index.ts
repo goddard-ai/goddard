@@ -127,6 +127,7 @@ export type { PullRequestSummary } from "./PullRequestSummary";
 export type { PullStrategy } from "./PullStrategy";
 export type { QueuedMessage } from "./QueuedMessage";
 export type { ReasoningBlock } from "./ReasoningBlock";
+export type { RebaseOutcome } from "./RebaseOutcome";
 export type { ReplayCursor } from "./ReplayCursor";
 export type { RepoBranch } from "./RepoBranch";
 export type { RepoWorktree } from "./RepoWorktree";
