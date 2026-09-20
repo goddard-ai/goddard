@@ -791,6 +791,7 @@ sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
 sandbox.sandbox_vm: 沙箱 VM
 sandbox.sandbox_vm_description: 在隔离的 Linux 虚拟机中运行
+sandbox.sandbox_vm_unsupported: 沙箱任务需要 Codex 或 Claude — {provider} 暂时无法在 VM 中启动。
 sandbox.badge: 沙箱中
 agent_preset.standard: 标准模式
 agent_preset.code: 代码模式

@@ -2100,6 +2100,8 @@ sandbox.sandbox_vm:
   en: Sandbox VM
 sandbox.sandbox_vm_description:
   en: Run in an isolated Linux VM
+sandbox.sandbox_vm_unsupported:
+  en: Sandboxed tasks need Codex or Claude — {provider} can't start in a VM yet.
 sandbox.badge:
   en: Sandboxed
 agent_preset.standard:

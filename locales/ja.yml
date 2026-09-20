@@ -802,6 +802,7 @@ sandbox.this_mac: この Mac
 sandbox.this_mac_description: この Mac でコマンドと編集を実行
 sandbox.sandbox_vm: サンドボックス VM
 sandbox.sandbox_vm_description: 分離された Linux VM で実行
+sandbox.sandbox_vm_unsupported: サンドボックス環境で実行できるのは Codex と Claude のみです — {provider} はまだ VM で起動できません。
 sandbox.badge: サンドボックス環境
 
 agent_preset.standard: 標準モード

@@ -116,9 +116,12 @@ fn guest_spec(provider: ProviderKind) -> Option<GuestSpec> {
 }
 
 /// Which providers can run inside the sandbox VM today. Others fail honestly
-/// rather than silently running on the host.
+/// rather than silently running on the host — and `ProviderKind::
+/// supports_sandbox` answers the same question for clients, so keep the
+/// guest spec table and the protocol flag in the same set.
 pub fn sandbox_capable(provider: ProviderKind) -> bool {
-    guest_spec(provider).is_some()
+    debug_assert_eq!(guest_spec(provider).is_some(), provider.supports_sandbox());
+    provider.supports_sandbox()
 }
 
 /// The shuru CLI itself: `GODDARD_SHURU_BIN` wins for development, then the

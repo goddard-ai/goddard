@@ -2379,6 +2379,8 @@ impl Waku {
             .unwrap_or_default();
         let sandboxed = session.is_some_and(|session| session.sandboxed);
         let sandbox_enabled = self.state.sandbox_experiment_enabled;
+        let provider = session.map(|session| session.provider).unwrap_or_default();
+        let provider_sandboxable = provider.supports_sandbox();
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
         let started = session.is_some_and(AgentSession::has_started);
@@ -2509,6 +2511,17 @@ impl Waku {
                             true,
                         ),
                     ] {
+                        // A provider without a guest build still lists the
+                        // choice — the row explains why starting it would
+                        // fail rather than silently disabling.
+                        let description = if value && !provider_sandboxable {
+                            tr!(
+                                "sandbox.sandbox_vm_unsupported",
+                                provider = provider.display_name()
+                            )
+                        } else {
+                            description
+                        };
                         let selected = value == sandboxed;
                         let weak = weak.clone();
                         let choice_row = choice_row.clone();

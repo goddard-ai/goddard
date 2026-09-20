@@ -104,6 +104,13 @@ impl ProviderKind {
         }
     }
 
+    /// Whether this provider's CLI can run inside the sandbox VM. The
+    /// daemon enforces it and clients explain it, so the answer lives on
+    /// the wire type both sides share.
+    pub fn supports_sandbox(self) -> bool {
+        matches!(self, Self::Codex | Self::Claude)
+    }
+
     pub fn short_name(self) -> &'static str {
         match self {
             Self::Antigravity => "Antigravity",
