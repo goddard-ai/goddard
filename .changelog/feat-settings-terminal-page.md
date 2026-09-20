@@ -1,0 +1,1 @@
+- Settings gains a dedicated Terminal page — font size, link-click modifier, mouse-aware links, and copy-on-select — while the math/Markdown/token-speed display options moved to Appearance and General now groups its rows under Sessions, Git, and Notifications headers

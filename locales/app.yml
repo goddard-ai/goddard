@@ -440,10 +440,14 @@ settings.computer_use:
   en: Computer Use
 settings.commands:
   en: Commands
+settings.terminal:
+  en: Terminal
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command token speed tokens per second rate footer draft composer unsent preview
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull
 settings.appearance_keywords:
-  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel
+  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer
+settings.terminal_keywords:
+  en: terminal shell console font size text monospace link modifier command option alt ctrl click open mouse mode program vim htop copy select selection clipboard paste
 settings.providers_keywords:
   en: providers agents models cli version install detect claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills:
@@ -484,6 +488,14 @@ settings.integrations:
   en: Integrations
 settings.integrations_keywords:
   en: integrations mcp servers tools linear github notion figma sentry stripe supabase vercel atlassian monday slack connect oauth api key agents
+settings.group_sessions:
+  en: Sessions
+settings.group_git:
+  en: Git
+settings.group_notifications:
+  en: Notifications
+settings.group_transcript:
+  en: Transcript
 integrations.description:
   en: Connect a service once and Goddard gives it to your agents through its local MCP proxy. Credentials stay in the keychain — agents see only the local endpoint.
 integrations.loading:

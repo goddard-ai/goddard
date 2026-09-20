@@ -2254,6 +2254,12 @@ impl Waku {
                 "settings preferences custom commands terminal shell run script palette",
             ),
             (
+                SettingsPage::Terminal,
+                "settings.terminal",
+                "icons/terminal-square.svg",
+                "settings preferences terminal shell font size link modifier click copy select",
+            ),
+            (
                 SettingsPage::Usage,
                 "settings.usage",
                 "icons/chart-column.svg",

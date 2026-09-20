@@ -625,6 +625,7 @@ pub enum PersistedSettingsPage {
     Daemon,
     ComputerUse,
     Commands,
+    Terminal,
     Appearance,
     Git,
     Jev,

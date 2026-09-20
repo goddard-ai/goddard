@@ -54,7 +54,7 @@ actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 15] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 16] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -108,6 +108,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 15] = [
         "settings.commands",
         "icons/terminal.svg",
         "settings.commands_keywords",
+    ),
+    (
+        SettingsPage::Terminal,
+        "settings.terminal",
+        "icons/terminal-square.svg",
+        "settings.terminal_keywords",
     ),
     (
         SettingsPage::Usage,
@@ -242,12 +248,13 @@ pub(super) fn visible_settings_pages(
 /// sidebar order. The other pages are self-contained surfaces (tables,
 /// master/detail panes) with their own filters — they never appear in
 /// search results rather than rendering degenerate inside a section.
-const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 9] = [
+const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 10] = [
     SettingsPage::General,
     SettingsPage::Appearance,
     SettingsPage::Providers,
     SettingsPage::Friends,
     SettingsPage::Commands,
+    SettingsPage::Terminal,
     SettingsPage::Daemon,
     SettingsPage::ComputerUse,
     SettingsPage::Jev,
@@ -570,9 +577,9 @@ fn link_modifier_label(modifier: TerminalLinkModifier) -> &'static str {
     }
 }
 
-/// A standalone-card settings row — the General page's shape — kept or
-/// dropped by the search. Pass an empty `div()` as the control for text-only
-/// cards.
+/// A standalone-card settings row — the General and Terminal pages' shape —
+/// kept or dropped by the search. Pass an empty `div()` as the control for
+/// text-only cards. Vertical spacing belongs to the caller's column.
 #[track_caller]
 fn setting_card(
     title: impl Into<SharedString>,
@@ -586,7 +593,6 @@ fn setting_card(
     let matched = search.matched(&title, &description)?;
     Some(
         div()
-            .mt(px(15.0))
             .w_full()
             .min_h(px(60.0))
             .px(px(20.0))
@@ -604,13 +610,12 @@ fn setting_card(
 
 /// One shared card around whichever rows the search kept, hairlines between
 /// visible rows only. `None` when the query removed every row, so an empty
-/// shell never renders.
+/// shell never renders. Vertical spacing belongs to the caller's column.
 #[track_caller]
 fn settings_row_card(rows: Vec<Option<AnyElement>>, theme: Theme) -> Option<Div> {
     let mut rows = rows.into_iter().flatten().peekable();
     rows.peek()?;
     let mut card = div()
-        .mt(px(15.0))
         .w_full()
         .flex()
         .flex_col()
@@ -624,6 +629,34 @@ fn settings_row_card(rows: Vec<Option<AnyElement>>, theme: Theme) -> Option<Div>
         }
     }
     Some(card)
+}
+
+/// One labeled cluster of cards on a settings page — a small tertiary header
+/// over a card column. `None` when the search emptied the group, so a header
+/// never floats over nothing.
+fn settings_group(
+    title: impl Into<SharedString>,
+    cards: Vec<AnyElement>,
+    theme: Theme,
+) -> Option<AnyElement> {
+    if cards.is_empty() {
+        return None;
+    }
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .px(px(4.0))
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(title.into()),
+            )
+            .child(div().flex().flex_col().gap(px(10.0)).children(cards))
+            .into_any_element(),
+    )
 }
 
 /// The archived rows the search query and project filter leave visible,
@@ -1132,6 +1165,7 @@ impl Waku {
                         SettingsPage::Daemon => tr!("settings.daemon"),
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
                         SettingsPage::Commands => tr!("settings.commands"),
+                        SettingsPage::Terminal => tr!("settings.terminal"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
                         SettingsPage::Git => tr!("settings.git"),
                         SettingsPage::Jev => tr!("settings.jev"),
@@ -1150,6 +1184,7 @@ impl Waku {
                 SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
                 SettingsPage::Commands => self.render_commands_settings(&search, cx),
+                SettingsPage::Terminal => self.render_terminal_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                 SettingsPage::Git => self.render_git_settings(window, cx),
                 SettingsPage::Jev => self.render_jev_settings(&search, cx),
@@ -1266,6 +1301,7 @@ impl Waku {
                 SettingsPage::Providers => self.render_providers_settings(&search, cx),
                 SettingsPage::Friends => self.render_friends_settings(&search, cx),
                 SettingsPage::Commands => self.render_commands_settings(&search, cx),
+                SettingsPage::Terminal => self.render_terminal_settings(&search, cx),
                 SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
                 SettingsPage::Jev => self.render_jev_settings(&search, cx),
@@ -1397,238 +1433,47 @@ impl Waku {
             cx,
             move |this, _, cx| this.set_analytics_enabled(!analytics_enabled, cx),
         );
-        div()
-            .children(setting_card(
+        // Ungrouped head: what the app is, plus the app-level toggles that
+        // belong to no feature area.
+        let mut head_cards: Vec<AnyElement> = [
+            setting_card(
                 tr!("settings.local_by_default"),
                 tr!("settings.local_by_default_description"),
                 div(),
                 theme,
                 search,
-            ))
-            .children(setting_card(
+            ),
+            setting_card(
                 tr!("settings.share_anonymous_usage_data"),
                 tr!("settings.share_anonymous_usage_data_description"),
                 analytics_toggle,
                 theme,
                 search,
-            ))
-            .children(setting_card(
-                tr!("settings.render_math"),
-                tr!("settings.render_math_description"),
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if updater_available {
+            let enabled = self.automatic_updates_enabled;
+            head_cards.extend(setting_card(
+                tr!("settings.automatic_updates"),
+                tr!("settings.automatic_updates_description"),
                 toggle_switch(
-                    "render-math-toggle",
-                    self.state.render_math,
+                    "automatic-updates-toggle",
+                    enabled,
                     false,
                     theme,
                     cx,
-                    {
-                        let enabled = self.state.render_math;
-                        move |this, _, cx| this.set_render_math(!enabled, cx)
-                    },
+                    move |this, _, cx| this.set_automatic_updates_enabled(!enabled, cx),
                 ),
                 theme,
                 search,
-            ))
-            .children(setting_card(
-                tr!("settings.show_response_token_speed"),
-                tr!("settings.show_response_token_speed_description"),
-                toggle_switch(
-                    "response-token-speed-toggle",
-                    self.state.show_response_token_speed,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.show_response_token_speed;
-                        move |this, _, cx| this.set_show_response_token_speed(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children(setting_card(
-                tr!("settings.markdown_preview"),
-                tr!("settings.markdown_preview_description"),
-                toggle_switch(
-                    "markdown-preview-toggle",
-                    self.state.markdown_preview,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.markdown_preview;
-                        move |this, _, cx| this.set_markdown_preview(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children({
-                let navigation = self.state.archive_navigation;
-                let weak = cx.entity().downgrade();
-                let navigation_handle = self.menu_handle("archive-navigation-selector", cx);
-                let navigation_selector = dropdown_menu(
-                    MenuChip::new("archive-navigation-selector")
-                        .label(tr!(navigation.label_key()))
-                        .outlined()
-                        .selected(navigation_handle.is_open())
-                        .w(px(220.0))
-                        .justify_between(),
-                    "archive-navigation-selector-menu",
-                    &navigation_handle,
-                    MenuAlign::BelowRight,
-                    move |_| {
-                        ArchiveNavigation::ALL
-                            .into_iter()
-                            .map(|option| {
-                                let weak = weak.clone();
-                                MenuItem::new(tr!(option.label_key()), move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_archive_navigation(option, cx);
-                                    });
-                                })
-                                .selected(option == navigation)
-                            })
-                            .collect()
-                    },
-                );
-                setting_card(
-                    tr!("settings.archive_navigation"),
-                    tr!("settings.archive_navigation_description"),
-                    navigation_selector,
-                    theme,
-                    search,
-                )
-            })
-            .children({
-                let dormant_after = self.state.dormant_after_days;
-                let weak = cx.entity().downgrade();
-                let dormant_handle = self.menu_handle("dormant-after-selector", cx);
-                let dormant_selector = dropdown_menu(
-                    MenuChip::new("dormant-after-selector")
-                        .label(dormant_after_label(dormant_after))
-                        .outlined()
-                        .selected(dormant_handle.is_open())
-                        .w(px(220.0))
-                        .justify_between(),
-                    "dormant-after-selector-menu",
-                    &dormant_handle,
-                    MenuAlign::BelowRight,
-                    move |_| {
-                        waku_client::persistence::DORMANT_AFTER_DAYS_OPTIONS
-                            .into_iter()
-                            .map(|option| {
-                                let weak = weak.clone();
-                                MenuItem::new(dormant_after_label(option), move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_dormant_after_days(option, cx);
-                                    });
-                                })
-                                .selected(option == dormant_after)
-                            })
-                            .collect()
-                    },
-                );
-                setting_card(
-                    tr!("settings.dormant_after"),
-                    tr!("settings.dormant_after_description"),
-                    dormant_selector,
-                    theme,
-                    search,
-                )
-            })
-            .children(setting_card(
-                tr!("settings.sync_with_merge"),
-                tr!("settings.sync_with_merge_description"),
-                toggle_switch(
-                    "sync-with-merge-toggle",
-                    self.state.sync_with_merge,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.sync_with_merge;
-                        move |this, _, cx| this.set_sync_with_merge(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children(setting_card(
-                tr!("settings.auto_resolve_in_chat"),
-                tr!("settings.auto_resolve_in_chat_description"),
-                toggle_switch(
-                    "auto-resolve-in-chat-toggle",
-                    self.state.auto_resolve_in_chat,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.auto_resolve_in_chat;
-                        move |this, _, cx| this.set_auto_resolve_in_chat(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children(setting_card(
-                tr!("settings.auto_resolve_land_conflicts"),
-                tr!("settings.auto_resolve_land_conflicts_description"),
-                toggle_switch(
-                    "auto-resolve-land-conflicts-toggle",
-                    self.state.auto_resolve_land_conflicts,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.auto_resolve_land_conflicts;
-                        move |this, _, cx| {
-                            this.set_auto_resolve_land_conflicts(!enabled, cx)
-                        }
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children(setting_card(
-                tr!("settings.sidebar_shortcut_tags"),
-                tr!(
-                    "settings.sidebar_shortcut_tags_description",
-                    keys = crate::platform::primary_shortcut("⌘1–⌘9", "Ctrl+1–Ctrl+9"),
-                    modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
-                ),
-                toggle_switch(
-                    "sidebar-shortcut-tags-toggle",
-                    self.state.sidebar_shortcut_tags,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.sidebar_shortcut_tags;
-                        move |this, _, cx| this.set_sidebar_shortcut_tags(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children(setting_card(
-                tr!("settings.sidebar_composer_drafts"),
-                tr!("settings.sidebar_composer_drafts_description"),
-                toggle_switch(
-                    "sidebar-composer-drafts-toggle",
-                    self.state.sidebar_composer_drafts,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.sidebar_composer_drafts;
-                        move |this, _, cx| this.set_sidebar_composer_drafts(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ))
-            .children({
+            ));
+        }
+
+        let mut session_cards: Vec<AnyElement> = [
+            {
                 let default_workspace = self.state.default_workspace;
                 let weak = cx.entity().downgrade();
                 let workspace_handle = self.menu_handle("default-workspace-selector", cx);
@@ -1664,8 +1509,148 @@ impl Waku {
                     theme,
                     search,
                 )
-            })
-            .children(setting_card(
+            },
+            {
+                let navigation = self.state.archive_navigation;
+                let weak = cx.entity().downgrade();
+                let navigation_handle = self.menu_handle("archive-navigation-selector", cx);
+                let navigation_selector = dropdown_menu(
+                    MenuChip::new("archive-navigation-selector")
+                        .label(tr!(navigation.label_key()))
+                        .outlined()
+                        .selected(navigation_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "archive-navigation-selector-menu",
+                    &navigation_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        ArchiveNavigation::ALL
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(tr!(option.label_key()), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_archive_navigation(option, cx);
+                                    });
+                                })
+                                .selected(option == navigation)
+                            })
+                            .collect()
+                    },
+                );
+                setting_card(
+                    tr!("settings.archive_navigation"),
+                    tr!("settings.archive_navigation_description"),
+                    navigation_selector,
+                    theme,
+                    search,
+                )
+            },
+            {
+                let dormant_after = self.state.dormant_after_days;
+                let weak = cx.entity().downgrade();
+                let dormant_handle = self.menu_handle("dormant-after-selector", cx);
+                let dormant_selector = dropdown_menu(
+                    MenuChip::new("dormant-after-selector")
+                        .label(dormant_after_label(dormant_after))
+                        .outlined()
+                        .selected(dormant_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "dormant-after-selector-menu",
+                    &dormant_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        waku_client::persistence::DORMANT_AFTER_DAYS_OPTIONS
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(dormant_after_label(option), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_dormant_after_days(option, cx);
+                                    });
+                                })
+                                .selected(option == dormant_after)
+                            })
+                            .collect()
+                    },
+                );
+                setting_card(
+                    tr!("settings.dormant_after"),
+                    tr!("settings.dormant_after_description"),
+                    dormant_selector,
+                    theme,
+                    search,
+                )
+            },
+            setting_card(
+                tr!("settings.sidebar_shortcut_tags"),
+                tr!(
+                    "settings.sidebar_shortcut_tags_description",
+                    keys = crate::platform::primary_shortcut("⌘1–⌘9", "Ctrl+1–Ctrl+9"),
+                    modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                ),
+                toggle_switch(
+                    "sidebar-shortcut-tags-toggle",
+                    self.state.sidebar_shortcut_tags,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.sidebar_shortcut_tags;
+                        move |this, _, cx| this.set_sidebar_shortcut_tags(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
+                tr!("settings.sidebar_composer_drafts"),
+                tr!("settings.sidebar_composer_drafts_description"),
+                toggle_switch(
+                    "sidebar-composer-drafts-toggle",
+                    self.state.sidebar_composer_drafts,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.sidebar_composer_drafts;
+                        move |this, _, cx| this.set_sidebar_composer_drafts(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if cfg!(target_os = "macos") {
+            // The platform recognizer reads the trackpad's touch stream,
+            // which macOS only hands over when no system gesture claims
+            // three-finger horizontal swipes.
+            let enabled = self.state.three_finger_swipe_navigation;
+            session_cards.extend(setting_card(
+                tr!("settings.three_finger_swipe_navigation"),
+                tr!("settings.three_finger_swipe_navigation_description"),
+                toggle_switch(
+                    "three-finger-swipe-toggle",
+                    enabled,
+                    false,
+                    theme,
+                    cx,
+                    move |this, window, cx| {
+                        this.set_three_finger_swipe_navigation(!enabled, window, cx)
+                    },
+                ),
+                theme,
+                search,
+            ));
+        }
+
+        let git_cards: Vec<AnyElement> = [
+            setting_card(
                 tr!("settings.new_worktree_default_branch"),
                 tr!("settings.new_worktree_default_branch_description"),
                 toggle_switch(
@@ -1681,13 +1666,12 @@ impl Waku {
                 ),
                 theme,
                 search,
-            ))
-            .children({
+            ),
+            {
                 let title = tr!("settings.new_worktree_sync_default_branch");
                 let description = tr!("settings.new_worktree_sync_default_branch_description");
                 search.matched(&title, &description).map(|matched| {
                     div()
-                        .mt(px(15.0))
                         .w_full()
                         .min_h(px(60.0))
                         .px(px(20.0))
@@ -1721,259 +1705,374 @@ impl Waku {
                                 }
                             },
                         ))
+                        .into_any_element()
                 })
-            })
-            .when(cfg!(target_os = "macos"), |element| {
-                // The platform recognizer reads the trackpad's touch stream,
-                // which macOS only hands over when no system gesture claims
-                // three-finger horizontal swipes.
-                let enabled = self.state.three_finger_swipe_navigation;
-                element.children(setting_card(
-                    tr!("settings.three_finger_swipe_navigation"),
-                    tr!("settings.three_finger_swipe_navigation_description"),
-                    toggle_switch(
-                        "three-finger-swipe-toggle",
-                        enabled,
-                        false,
-                        theme,
-                        cx,
-                        move |this, window, cx| {
-                            this.set_three_finger_swipe_navigation(!enabled, window, cx)
-                        },
-                    ),
-                    theme,
-                    search,
-                ))
-            })
-            .children({
-                let enabled = self.state.completion_sound_enabled;
-                let selected_sound = self.state.completion_sound;
-                let volume = self.state.completion_sound_volume;
-                let volume_shown = self.completion_volume_slider.shown(volume);
-                let volume_slider = slider::slider(
-                    "completion-volume-slider",
-                    &self.completion_volume_slider,
-                    crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
-                    volume,
-                    cx,
-                    |this, volume, _, cx| this.set_completion_sound_volume(volume, cx),
-                );
-                let weak = cx.entity().downgrade();
-                let sound_handle = self.menu_handle("completion-sound-selector", cx);
-                let sound_selector = dropdown_menu(
-                    MenuChip::new("completion-sound-selector")
-                        .label(selected_sound.label())
-                        .outlined()
-                        .selected(sound_handle.is_open())
-                        .w(px(116.0))
-                        .justify_between(),
-                    "completion-sound-selector-menu",
-                    &sound_handle,
-                    MenuAlign::BelowRight,
-                    move |_| {
-                        CompletionSound::ALL
-                            .into_iter()
-                            .map(|sound| {
-                                let weak = weak.clone();
-                                MenuItem::new(sound.label(), move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_completion_sound(sound, cx);
-                                    });
-                                })
-                                .selected(sound == selected_sound)
-                                .on_highlight(move |_, _| {
-                                    crate::platform::play_completion_sound(sound, volume);
-                                })
-                            })
-                            .collect()
-                    },
-                );
-                let toggle_row = settings_row(
-                    tr!("settings.completion_sound"),
-                    tr!("settings.completion_sound_description"),
-                    toggle_switch(
-                        "completion-sound-toggle",
-                        enabled,
-                        false,
-                        theme,
-                        cx,
-                        move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
-                    ),
-                    theme,
-                    search,
-                );
-                let sound_row = if !enabled {
-                    None
-                } else {
-                    let title = tr!("settings.completion_sound_name");
-                    search.matched(&title, "").map(|matched| {
-                        div()
-                            .w_full()
-                            .min_h(px(52.0))
-                            .px(px(20.0))
-                            .py(px(10.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(24.0))
-                            .child(settings_title_jump(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(settings_search_text(
-                                        title,
-                                        matched.title_ranges.clone(),
-                                        theme,
-                                    )),
-                                &matched,
-                                theme,
-                            ))
-                            .child(sound_selector)
-                    })
-                };
-                let volume_row = if !enabled {
-                    None
-                } else {
-                    let title = tr!("settings.completion_sound_volume");
-                    search.matched(&title, "").map(|matched| {
-                        div()
-                            .w_full()
-                            .min_h(px(52.0))
-                            .px(px(20.0))
-                            .py(px(10.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(12.0))
-                            .child(settings_title_jump(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(settings_search_text(
-                                        title,
-                                        matched.title_ranges.clone(),
-                                        theme,
-                                    )),
-                                &matched,
-                                theme,
-                            ))
-                            .child(volume_slider.w(px(140.0)).flex_none())
-                            .child(
-                                div()
-                                    .w(px(32.0))
-                                    .flex_none()
-                                    .flex()
-                                    .justify_end()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(format!("{}%", (volume_shown * 100.0).round() as i32)),
-                            )
-                    })
-                };
-                settings_row_card(
-                    vec![
-                        toggle_row,
-                        sound_row.map(|row| row.into_any_element()),
-                        volume_row.map(|row| row.into_any_element()),
-                    ],
-                    theme,
-                )
-            })
-            .children(setting_card(
-                tr!("settings.terminal_open_links_in_mouse_mode"),
-                tr!(
-                    "settings.terminal_open_links_in_mouse_mode_description",
-                    modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
-                ),
+            },
+            setting_card(
+                tr!("settings.sync_with_merge"),
+                tr!("settings.sync_with_merge_description"),
                 toggle_switch(
-                    "terminal-open-links-in-mouse-mode-toggle",
-                    self.state.terminal_open_links_in_mouse_mode,
+                    "sync-with-merge-toggle",
+                    self.state.sync_with_merge,
                     false,
                     theme,
                     cx,
                     {
-                        let enabled = self.state.terminal_open_links_in_mouse_mode;
-                        move |this, _, cx| this.set_terminal_open_links_in_mouse_mode(!enabled, cx)
+                        let enabled = self.state.sync_with_merge;
+                        move |this, _, cx| this.set_sync_with_merge(!enabled, cx)
                     },
                 ),
                 theme,
                 search,
-            ))
-            .children({
-                let selected_modifier = self.state.terminal_link_modifier;
-                let weak = cx.entity().downgrade();
-                let modifier_handle = self.menu_handle("terminal-link-modifier-selector", cx);
-                let modifier_selector = dropdown_menu(
-                    MenuChip::new("terminal-link-modifier-selector")
-                        .label(link_modifier_label(selected_modifier))
-                        .outlined()
-                        .selected(modifier_handle.is_open())
-                        .w(px(220.0))
-                        .justify_between(),
-                    "terminal-link-modifier-selector-menu",
-                    &modifier_handle,
-                    MenuAlign::BelowRight,
-                    move |_| {
-                        TerminalLinkModifier::ALL
-                            .into_iter()
-                            .map(|option| {
-                                let weak = weak.clone();
-                                MenuItem::new(link_modifier_label(option), move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_terminal_link_modifier(option, cx);
-                                    });
-                                })
-                                .selected(option == selected_modifier)
-                            })
-                            .collect()
-                    },
-                );
-                setting_card(
-                    tr!("settings.terminal_link_modifier"),
-                    tr!("settings.terminal_link_modifier_description"),
-                    modifier_selector,
-                    theme,
-                    search,
-                )
-            })
-            .children(setting_card(
-                tr!("settings.terminal_copy_on_select"),
-                tr!("settings.terminal_copy_on_select_description"),
+            ),
+            setting_card(
+                tr!("settings.auto_resolve_in_chat"),
+                tr!("settings.auto_resolve_in_chat_description"),
                 toggle_switch(
-                    "terminal-copy-on-select-toggle",
-                    self.state.terminal_copy_on_select,
+                    "auto-resolve-in-chat-toggle",
+                    self.state.auto_resolve_in_chat,
                     false,
                     theme,
                     cx,
                     {
-                        let enabled = self.state.terminal_copy_on_select;
-                        move |this, _, cx| this.set_terminal_copy_on_select(!enabled, cx)
+                        let enabled = self.state.auto_resolve_in_chat;
+                        move |this, _, cx| this.set_auto_resolve_in_chat(!enabled, cx)
                     },
                 ),
                 theme,
                 search,
-            ))
-            .when(updater_available, |column| {
-                let enabled = self.automatic_updates_enabled;
-                column.children(setting_card(
-                    tr!("settings.automatic_updates"),
-                    tr!("settings.automatic_updates_description"),
-                    toggle_switch(
-                        "automatic-updates-toggle",
-                        enabled,
-                        false,
-                        theme,
-                        cx,
-                        move |this, _, cx| this.set_automatic_updates_enabled(!enabled, cx),
-                    ),
+            ),
+            setting_card(
+                tr!("settings.auto_resolve_land_conflicts"),
+                tr!("settings.auto_resolve_land_conflicts_description"),
+                toggle_switch(
+                    "auto-resolve-land-conflicts-toggle",
+                    self.state.auto_resolve_land_conflicts,
+                    false,
                     theme,
-                    search,
-                ))
-            })
+                    cx,
+                    {
+                        let enabled = self.state.auto_resolve_land_conflicts;
+                        move |this, _, cx| {
+                            this.set_auto_resolve_land_conflicts(!enabled, cx)
+                        }
+                    },
+                ),
+                theme,
+                search,
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let notification_cards: Vec<AnyElement> = [{
+            let enabled = self.state.completion_sound_enabled;
+            let selected_sound = self.state.completion_sound;
+            let volume = self.state.completion_sound_volume;
+            let volume_shown = self.completion_volume_slider.shown(volume);
+            let volume_slider = slider::slider(
+                "completion-volume-slider",
+                &self.completion_volume_slider,
+                crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
+                volume,
+                cx,
+                |this, volume, _, cx| this.set_completion_sound_volume(volume, cx),
+            );
+            let weak = cx.entity().downgrade();
+            let sound_handle = self.menu_handle("completion-sound-selector", cx);
+            let sound_selector = dropdown_menu(
+                MenuChip::new("completion-sound-selector")
+                    .label(selected_sound.label())
+                    .outlined()
+                    .selected(sound_handle.is_open())
+                    .w(px(116.0))
+                    .justify_between(),
+                "completion-sound-selector-menu",
+                &sound_handle,
+                MenuAlign::BelowRight,
+                move |_| {
+                    CompletionSound::ALL
+                        .into_iter()
+                        .map(|sound| {
+                            let weak = weak.clone();
+                            MenuItem::new(sound.label(), move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_completion_sound(sound, cx);
+                                });
+                            })
+                            .selected(sound == selected_sound)
+                            .on_highlight(move |_, _| {
+                                crate::platform::play_completion_sound(sound, volume);
+                            })
+                        })
+                        .collect()
+                },
+            );
+            let toggle_row = settings_row(
+                tr!("settings.completion_sound"),
+                tr!("settings.completion_sound_description"),
+                toggle_switch(
+                    "completion-sound-toggle",
+                    enabled,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
+                ),
+                theme,
+                search,
+            );
+            let sound_row = if !enabled {
+                None
+            } else {
+                let title = tr!("settings.completion_sound_name");
+                search.matched(&title, "").map(|matched| {
+                    div()
+                        .w_full()
+                        .min_h(px(52.0))
+                        .px(px(20.0))
+                        .py(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(settings_title_jump(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(sound_selector)
+                })
+            };
+            let volume_row = if !enabled {
+                None
+            } else {
+                let title = tr!("settings.completion_sound_volume");
+                search.matched(&title, "").map(|matched| {
+                    div()
+                        .w_full()
+                        .min_h(px(52.0))
+                        .px(px(20.0))
+                        .py(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(settings_title_jump(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(volume_slider.w(px(140.0)).flex_none())
+                        .child(
+                            div()
+                                .w(px(32.0))
+                                .flex_none()
+                                .flex()
+                                .justify_end()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(format!("{}%", (volume_shown * 100.0).round() as i32)),
+                        )
+                })
+            };
+            settings_row_card(
+                vec![
+                    toggle_row,
+                    sound_row.map(|row| row.into_any_element()),
+                    volume_row.map(|row| row.into_any_element()),
+                ],
+                theme,
+            )
+            .map(|card| card.into_any_element())
+        }]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        div()
+            .mt(px(15.0))
+            .flex()
+            .flex_col()
+            .gap(px(20.0))
+            .children((!head_cards.is_empty()).then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .children(head_cards)
+                    .into_any_element()
+            }))
+            .children(
+                [
+                    settings_group(tr!("settings.group_sessions"), session_cards, theme),
+                    settings_group(tr!("settings.group_git"), git_cards, theme),
+                    settings_group(
+                        tr!("settings.group_notifications"),
+                        notification_cards,
+                        theme,
+                    ),
+                ]
+                .into_iter()
+                .flatten(),
+            )
+            .into_any_element()
+    }
+
+    /// The Terminal page — the integrated terminal's preferences. The font
+    /// size row duplicates the Appearance page's selector under different
+    /// element ids: a search query can co-render both pages, and matching
+    /// rows there need independent interactivity state.
+    fn render_terminal_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+
+        let selected_font_size = self.state.terminal_font_size();
+        let weak = cx.entity().downgrade();
+        let font_size_handle = self.menu_handle("terminal-settings-font-size-selector", cx);
+        let font_size_selector = dropdown_menu(
+            MenuChip::new("terminal-settings-font-size-selector")
+                .label(font_size_label(selected_font_size))
+                .outlined()
+                .selected(font_size_handle.is_open())
+                .w(px(116.0))
+                .justify_between(),
+            "terminal-settings-font-size-selector-menu",
+            &font_size_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                FONT_SIZES
+                    .into_iter()
+                    .map(|size| {
+                        let weak = weak.clone();
+                        MenuItem::new(font_size_label(size), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_terminal_font_size(size, cx);
+                            });
+                        })
+                        .selected(size == selected_font_size)
+                    })
+                    .collect()
+            },
+        );
+
+        let selected_modifier = self.state.terminal_link_modifier;
+        let weak = cx.entity().downgrade();
+        let modifier_handle = self.menu_handle("terminal-link-modifier-selector", cx);
+        let modifier_selector = dropdown_menu(
+            MenuChip::new("terminal-link-modifier-selector")
+                .label(link_modifier_label(selected_modifier))
+                .outlined()
+                .selected(modifier_handle.is_open())
+                .w(px(220.0))
+                .justify_between(),
+            "terminal-link-modifier-selector-menu",
+            &modifier_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                TerminalLinkModifier::ALL
+                    .into_iter()
+                    .map(|option| {
+                        let weak = weak.clone();
+                        MenuItem::new(link_modifier_label(option), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_terminal_link_modifier(option, cx);
+                            });
+                        })
+                        .selected(option == selected_modifier)
+                    })
+                    .collect()
+            },
+        );
+
+        div()
+            .mt(px(15.0))
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .children(
+                [
+                    setting_card(
+                        tr!("settings.terminal_font_size"),
+                        tr!("settings.terminal_font_size_description"),
+                        font_size_selector,
+                        theme,
+                        search,
+                    ),
+                    setting_card(
+                        tr!("settings.terminal_open_links_in_mouse_mode"),
+                        tr!(
+                            "settings.terminal_open_links_in_mouse_mode_description",
+                            modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                        ),
+                        toggle_switch(
+                            "terminal-open-links-in-mouse-mode-toggle",
+                            self.state.terminal_open_links_in_mouse_mode,
+                            false,
+                            theme,
+                            cx,
+                            {
+                                let enabled = self.state.terminal_open_links_in_mouse_mode;
+                                move |this, _, cx| {
+                                    this.set_terminal_open_links_in_mouse_mode(!enabled, cx)
+                                }
+                            },
+                        ),
+                        theme,
+                        search,
+                    ),
+                    setting_card(
+                        tr!("settings.terminal_link_modifier"),
+                        tr!("settings.terminal_link_modifier_description"),
+                        modifier_selector,
+                        theme,
+                        search,
+                    ),
+                    setting_card(
+                        tr!("settings.terminal_copy_on_select"),
+                        tr!("settings.terminal_copy_on_select_description"),
+                        toggle_switch(
+                            "terminal-copy-on-select-toggle",
+                            self.state.terminal_copy_on_select,
+                            false,
+                            theme,
+                            cx,
+                            {
+                                let enabled = self.state.terminal_copy_on_select;
+                                move |this, _, cx| {
+                                    this.set_terminal_copy_on_select(!enabled, cx)
+                                }
+                            },
+                        ),
+                        theme,
+                        search,
+                    ),
+                ]
+                .into_iter()
+                .flatten(),
+            )
             .into_any_element()
     }
 
@@ -4460,22 +4559,7 @@ impl Waku {
                 .filter(|experiment| experiment.group == group)
                 .filter_map(|experiment| self.experiment_card(experiment, theme, search, cx))
                 .collect();
-            // A group the search emptied out loses its header too.
-            (!cards.is_empty()).then(|| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .px(px(4.0))
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!(group.title_key())),
-                    )
-                    .child(div().flex().flex_col().gap(px(10.0)).children(cards))
-                    .into_any_element()
-            })
+            settings_group(tr!(group.title_key()), cards, theme)
         });
         div()
             .when(!search.active(), |element| {
@@ -5003,7 +5087,7 @@ impl Waku {
         )];
         credential_rows_with_backend.append(&mut credential_rows);
         let credentials = settings_row_card(credential_rows_with_backend, theme).map(|card| {
-            card.when(!search.active(), |card| {
+            card.mt(px(15.0)).when(!search.active(), |card| {
                 card.child(
                     div()
                         .px(px(20.0))
@@ -5064,7 +5148,7 @@ impl Waku {
             })
             .collect();
         let classes = settings_row_card(class_row_elements, theme).map(|card| {
-            card.when(!search.active(), |card| {
+            card.mt(px(15.0)).when(!search.active(), |card| {
                 let has_status = self.route_suggest_result.is_some();
                 let suggest_status =
                     self.route_suggest_result
@@ -7011,9 +7095,80 @@ impl Waku {
             ),
         ]);
 
-        settings_row_card(rows, theme)
-            .map(|card| card.into_any_element())
-            .unwrap_or_else(|| div().into_any_element())
+        // Rendered-content prefs get their own labeled card under the theme
+        // card rather than joining its hairline-separated rows.
+        let transcript_card = settings_row_card(
+            vec![
+                settings_row(
+                    tr!("settings.render_math"),
+                    tr!("settings.render_math_description"),
+                    toggle_switch(
+                        "render-math-toggle",
+                        self.state.render_math,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.render_math;
+                            move |this, _, cx| this.set_render_math(!enabled, cx)
+                        },
+                    ),
+                    theme,
+                    search,
+                ),
+                settings_row(
+                    tr!("settings.show_response_token_speed"),
+                    tr!("settings.show_response_token_speed_description"),
+                    toggle_switch(
+                        "response-token-speed-toggle",
+                        self.state.show_response_token_speed,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.show_response_token_speed;
+                            move |this, _, cx| this.set_show_response_token_speed(!enabled, cx)
+                        },
+                    ),
+                    theme,
+                    search,
+                ),
+                settings_row(
+                    tr!("settings.markdown_preview"),
+                    tr!("settings.markdown_preview_description"),
+                    toggle_switch(
+                        "markdown-preview-toggle",
+                        self.state.markdown_preview,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.markdown_preview;
+                            move |this, _, cx| this.set_markdown_preview(!enabled, cx)
+                        },
+                    ),
+                    theme,
+                    search,
+                ),
+            ],
+            theme,
+        );
+
+        div()
+            .mt(px(15.0))
+            .flex()
+            .flex_col()
+            .gap(px(20.0))
+            .children(settings_row_card(rows, theme))
+            .children(settings_group(
+                tr!("settings.group_transcript"),
+                transcript_card
+                    .map(|card| card.into_any_element())
+                    .into_iter()
+                    .collect(),
+                theme,
+            ))
+            .into_any_element()
     }
 
     /// The Appearance page's collapsible sample: a miniature transcript —

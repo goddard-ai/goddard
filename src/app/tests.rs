@@ -3126,6 +3126,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Archived,
         SettingsPage::Git,
         SettingsPage::Commands,
+        SettingsPage::Terminal,
         SettingsPage::Usage,
         SettingsPage::Daemon,
         SettingsPage::ComputerUse,
