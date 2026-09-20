@@ -1395,6 +1395,9 @@ impl Waku {
                             work_item_refs,
                             ctx: &ctx,
                             menu,
+                            sent_by_task_link: message
+                                .sent_by_task
+                                .filter(|id| self.sent_by_task_openable(*id)),
                             waku: cx.entity().downgrade(),
                             composer: self.composer.clone(),
                             landed_notice: None,

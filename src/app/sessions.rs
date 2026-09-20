@@ -183,6 +183,23 @@ impl Waku {
         self.select_session(session_id, cx);
     }
 
+    /// Whether a "Sent by agent" chip's source task can still be opened: it
+    /// exists and isn't archived. Deleted tasks are gone from `sessions`, and
+    /// an archived one stays put — tapping the chip is provenance, not intent
+    /// to bring the task back, so it skips the unarchive-on-activation path.
+    pub(super) fn sent_by_task_openable(&self, task_id: Uuid) -> bool {
+        self.state
+            .sessions
+            .iter()
+            .any(|session| session.id == task_id && session.archived_at.is_none())
+    }
+
+    pub(super) fn open_sent_by_task(&mut self, task_id: Uuid, cx: &mut Context<Self>) {
+        if self.sent_by_task_openable(task_id) {
+            self.select_session(task_id, cx);
+        }
+    }
+
     pub(super) fn select_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         self.state.selected_project = Some(project_id);
         self.create_session_for(project_id, self.state.last_provider, cx);

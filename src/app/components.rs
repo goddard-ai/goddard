@@ -372,6 +372,10 @@ pub(super) struct MessageRender<'a> {
     pub(super) work_item_refs: Vec<ComposerWorkItem>,
     pub(super) ctx: &'a MarkdownCtx<'a>,
     pub(super) menu: ContextMenuHandle,
+    /// The "Sent by agent" chip's live link target: `sent_by_task` resolved
+    /// against session state before layout — `None` when the source task is
+    /// archived or deleted, leaving the chip inert.
+    pub(super) sent_by_task_link: Option<Uuid>,
     pub(super) waku: gpui::WeakEntity<Waku>,
     pub(super) composer: Entity<ComposerInput>,
     /// Disclosure state for a `TranscriptNotice::Landed` row — `None` in the
@@ -835,6 +839,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         work_item_refs,
         ctx,
         menu,
+        sent_by_task_link,
         waku,
         composer,
         landed_notice,
@@ -861,23 +866,46 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 .gap(px(3.0))
                 .group(group_name.clone());
             if message.sent_by_task.is_some() {
-                column = column.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .px(px(7.0))
-                        .py(px(2.0))
-                        .rounded_full()
-                        .bg(theme.overlay)
-                        .child(icon("icons/bot.svg", 10.0, theme.text_tertiary))
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_tertiary)
-                                .child(tr!("transcript.sent_by_agent")),
-                        ),
-                );
+                // The chip looks the same whether or not its source task can
+                // still be opened; a live target only adds activation.
+                let chip = div()
+                    .id(SharedString::from(format!("sent-by-agent-{message_id}")))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .px(px(7.0))
+                    .py(px(2.0))
+                    .rounded_full()
+                    .bg(theme.overlay)
+                    .child(icon("icons/bot.svg", 10.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("transcript.sent_by_agent")),
+                    )
+                    .when_some(sent_by_task_link, |chip, task_id| {
+                        let click_waku = waku.clone();
+                        let key_waku = waku.clone();
+                        chip.cursor_pointer()
+                            .tab_index(0)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .on_click(move |_, _, cx| {
+                                let _ = click_waku.update(cx, |this, cx| {
+                                    this.open_sent_by_task(task_id, cx);
+                                });
+                                cx.stop_propagation();
+                            })
+                            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    let _ = key_waku.update(cx, |this, cx| {
+                                        this.open_sent_by_task(task_id, cx);
+                                    });
+                                    cx.stop_propagation();
+                                }
+                            })
+                    });
+                column = column.child(chip);
             }
             if let Some(attachments) = render_sent_message_attachments(
                 message_id,
