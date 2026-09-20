@@ -181,39 +181,268 @@ fn checkpoint_install_argv(spec: &GuestSpec) -> Vec<String> {
     vec!["sh".to_owned(), "-c".to_owned(), spec.install.to_owned()]
 }
 
-/// Build the provider checkpoint once — the download happens in a throwaway
-/// VM with open network, and every later session boots straight from the
-/// saved disk state.
-fn ensure_checkpoint(shuru: &Path, spec: &GuestSpec) -> anyhow::Result<()> {
-    if checkpoint_names(shuru)?
-        .iter()
-        .any(|name| name == spec.checkpoint)
-    {
+/// Build a checkpoint layer once — the download happens in a throwaway VM
+/// with open network, and every later session boots straight from the saved
+/// disk state. `from` chains onto an earlier checkpoint (base image when
+/// `None`).
+fn ensure_layer(
+    shuru: &Path,
+    name: &str,
+    from: Option<&str>,
+    install: &[String],
+) -> anyhow::Result<()> {
+    if checkpoint_names(shuru)?.iter().any(|n| n == name) {
         return Ok(());
     }
     eprintln!(
-        "goddard-daemon: building sandbox checkpoint {} (first sandboxed task downloads its toolchain)",
-        spec.checkpoint
+        "goddard-daemon: building sandbox checkpoint {name} (first sandboxed task downloads its toolchain)"
     );
-    let status = crate::command_env::plain_command(shuru)
-        .arg("checkpoint")
-        .arg("create")
-        .arg(spec.checkpoint)
+    let mut command = crate::command_env::plain_command(shuru);
+    command.arg("checkpoint").arg("create").arg(name);
+    if let Some(from) = from {
+        command.arg("--from").arg(from);
+    }
+    command
         .arg("--allow-net")
         .arg("--")
-        .args(checkpoint_install_argv(spec))
+        .args(install)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    let status = command
         .status()
-        .with_context(|| format!("could not build sandbox checkpoint {}", spec.checkpoint))?;
+        .with_context(|| format!("could not build sandbox checkpoint {name}"))?;
     if !status.success() {
         bail!(
-            "sandbox checkpoint {} failed to build — the provider toolchain could not be installed",
-            spec.checkpoint
+            "sandbox checkpoint {name} failed to build — the toolchain could not be installed"
         );
     }
     Ok(())
+}
+
+/// A project toolchain the worktree's manifests ask for — installed into a
+/// checkpoint layer with mise so sessions never install at runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSpec {
+    tool: &'static str,
+    version: String,
+}
+
+/// Where mise keeps its toolchains inside the guest. Pinned outside HOME so
+/// it resolves identically no matter which HOME a spawn env carries.
+const MISE_DATA_DIR: &str = "/opt/mise";
+const MISE_CONFIG_DIR: &str = "/opt/mise-config";
+
+/// Scan the worktree's manifests for the runtimes a task will need. Cheap
+/// file reads on the spawn path — a handful of existence checks and small
+/// file parses, never a recursive walk.
+fn detect_runtimes(worktree: &Path) -> Vec<RuntimeSpec> {
+    let has = |name: &str| worktree.join(name).is_file();
+    let read = |name: &str| std::fs::read_to_string(worktree.join(name)).ok();
+    let tool_versions = read(".tool-versions")
+        .map(|content| parse_tool_versions(&content))
+        .unwrap_or_default();
+    let mise_tools = read("mise.toml")
+        .map(|content| parse_mise_tools(&content))
+        .unwrap_or_default();
+    let pinned = |tool: &str| -> Option<String> {
+        tool_versions
+            .get(tool)
+            .or_else(|| mise_tools.get(tool))
+            .cloned()
+    };
+
+    let mut specs = Vec::new();
+    if has("deno.json") || has("deno.jsonc") {
+        specs.push(RuntimeSpec {
+            tool: "deno",
+            version: pinned("deno").unwrap_or_else(|| "latest".to_owned()),
+        });
+    }
+    if has("bun.lock") || has("bun.lockb") {
+        specs.push(RuntimeSpec {
+            tool: "bun",
+            version: pinned("bun").unwrap_or_else(|| "latest".to_owned()),
+        });
+    }
+    if has("package.json") {
+        let version = pinned("node")
+            .or_else(|| {
+                read(".nvmrc").map(|content| {
+                    let v = content.trim().trim_start_matches('v');
+                    if v.starts_with("lts") {
+                        "lts".to_owned()
+                    } else {
+                        v.to_owned()
+                    }
+                })
+            })
+            .or_else(|| {
+                read("package.json").and_then(|content| {
+                    serde_json::from_str::<Value>(&content)
+                        .ok()?
+                        .pointer("/engines/node")
+                        .and_then(Value::as_str)
+                        .and_then(|range| {
+                            // "20.x", "^20", ">=20" — take the pinned major;
+                            // anything vaguer gets the LTS fallback.
+                            range
+                                .split(['.', 'x', ' '])
+                                .find_map(|part| {
+                                    let digits: String =
+                                        part.chars().filter(|c| c.is_ascii_digit()).collect();
+                                    (!digits.is_empty()).then_some(digits)
+                                })
+                        })
+                })
+            })
+            .unwrap_or_else(|| "lts".to_owned());
+        specs.push(RuntimeSpec {
+            tool: "node",
+            version,
+        });
+    }
+    if has("pyproject.toml")
+        || has("requirements.txt")
+        || has("uv.lock")
+        || has(".python-version")
+    {
+        let version = pinned("python")
+            .or_else(|| read(".python-version").map(|v| v.trim().to_owned()))
+            .unwrap_or_else(|| "3".to_owned());
+        specs.push(RuntimeSpec {
+            tool: "python",
+            version,
+        });
+    }
+    if has("Cargo.toml") {
+        let version = pinned("rust")
+            .or_else(|| {
+                read("rust-toolchain.toml").and_then(|content| {
+                    content
+                        .lines()
+                        .find_map(|line| {
+                            let line = line.trim();
+                            line.strip_prefix("channel")
+                                .and_then(|rest| rest.split('"').nth(1))
+                                .map(str::to_owned)
+                        })
+                })
+            })
+            .or_else(|| read("rust-toolchain").map(|v| v.trim().to_owned()))
+            .unwrap_or_else(|| "stable".to_owned());
+        specs.push(RuntimeSpec {
+            tool: "rust",
+            version,
+        });
+    }
+    if has("go.mod") {
+        let version = pinned("go")
+            .or_else(|| {
+                read("go.mod").and_then(|content| {
+                    content.lines().find_map(|line| {
+                        line.trim()
+                            .strip_prefix("go ")
+                            .map(|v| v.trim().to_owned())
+                    })
+                })
+            })
+            .unwrap_or_else(|| "latest".to_owned());
+        specs.push(RuntimeSpec {
+            tool: "go",
+            version,
+        });
+    }
+    specs
+}
+
+fn parse_tool_versions(content: &str) -> HashMap<&'static str, String> {
+    const TOOLS: &[&str] = &["node", "python", "rust", "go", "bun", "deno"];
+    let mut map = HashMap::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        if let (Some(tool), Some(version)) = (parts.next(), parts.next())
+            && TOOLS.contains(&tool)
+        {
+            map.insert(*TOOLS.iter().find(|t| **t == tool).unwrap(), version.to_owned());
+        }
+    }
+    map
+}
+
+/// The `[tools]` table of a mise.toml — `node = "lts"` pairs. Loose line
+/// parsing keeps this dependency-free; a malformed file just yields nothing.
+fn parse_mise_tools(content: &str) -> HashMap<&'static str, String> {
+    const TOOLS: &[&str] = &["node", "python", "rust", "go", "bun", "deno"];
+    let mut map = HashMap::new();
+    let mut in_tools = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_tools = line == "[tools]";
+            continue;
+        }
+        if !in_tools {
+            continue;
+        }
+        if let Some((name, value)) = line.split_once('=')
+            && let Some(tool) = TOOLS.iter().find(|t| **t == name.trim())
+        {
+            let version = value.trim().trim_matches('"').trim_matches('\'');
+            if !version.is_empty() {
+                map.insert(*tool, version.to_owned());
+            }
+        }
+    }
+    map
+}
+
+/// The checkpoint a session boots: the provider layer alone, or a runtime
+/// layer stacked on it named for exactly what it contains.
+fn session_checkpoint(spec: &GuestSpec, runtimes: &[RuntimeSpec]) -> String {
+    if runtimes.is_empty() {
+        return spec.checkpoint.to_owned();
+    }
+    let mut name = spec.checkpoint.to_owned();
+    for runtime in runtimes {
+        let version: String = runtime
+            .version
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '-' })
+            .collect();
+        name.push_str(&format!("-{}-{}", runtime.tool, version));
+    }
+    name
+}
+
+/// The mise install script for a runtime layer — mise itself lands in a
+/// fixed prefix, then each requested toolchain installs to `MISE_DATA_DIR`
+/// so the spawn env can point at it unconditionally.
+fn runtime_install_argv(runtimes: &[RuntimeSpec]) -> Vec<String> {
+    let installs: String = runtimes
+        .iter()
+        .map(|r| format!("mise use -g {}@{}; ", r.tool, r.version))
+        .collect();
+    vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        format!(
+            "set -eux; \
+             apt-get update -qq; \
+             apt-get install -y -qq curl ca-certificates; \
+             curl -fsSL https://mise.jdx.dev/install.sh | sh; \
+             install -m 755 /.local/bin/mise /usr/local/bin/mise; \
+             mkdir -p {MISE_DATA_DIR} {MISE_CONFIG_DIR}; \
+             export MISE_DATA_DIR={MISE_DATA_DIR} MISE_CONFIG_DIR={MISE_CONFIG_DIR} \
+                 MISE_GLOBAL_CONFIG_FILE={MISE_CONFIG_DIR}/config.toml; \
+             {installs}\
+             mise ls"
+        ),
+    ]
 }
 
 /// Environment variables that mean something only on the host: the agent
@@ -273,7 +502,25 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
     })?;
     let shuru = shuru_binary()?;
     ensure_os_image(&shuru)?;
-    ensure_checkpoint(&shuru, &spec)?;
+    // The provider layer, then the toolchain layer the worktree's manifests
+    // ask for — both cached checkpoints, so a later session boots straight
+    // from saved disk state.
+    ensure_layer(
+        &shuru,
+        spec.checkpoint,
+        None,
+        &checkpoint_install_argv(&spec),
+    )?;
+    let runtimes = detect_runtimes(worktree);
+    let checkpoint = session_checkpoint(&spec, &runtimes);
+    if !runtimes.is_empty() {
+        ensure_layer(
+            &shuru,
+            &checkpoint,
+            Some(spec.checkpoint),
+            &runtime_install_argv(&runtimes),
+        )?;
+    }
 
     let mut secrets = Vec::new();
     let mut scrub = Vec::new();
@@ -301,7 +548,7 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
         // shuru only mounts host paths beneath its own working directory —
         // run it from the worktree's parent so the mount validates.
         cwd: worktree.parent().unwrap_or(worktree).to_path_buf(),
-        checkpoint: spec.checkpoint.to_owned(),
+        checkpoint,
         mounts: vec![(worktree.to_path_buf(), GUEST_WORKSPACE.to_owned())],
         allow_hosts: spec
             .allow_hosts
@@ -635,11 +882,22 @@ impl ShuruVm {
             );
         }
         for (name, value) in [
-            ("PATH", "/usr/local/sbin:/usr/local/bin:/usr/bin:/sbin:/bin"),
+            (
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/opt/mise/shims:/usr/bin:/sbin:/bin",
+            ),
             ("HOME", "/root"),
             ("USER", "root"),
             ("SHELL", "/bin/sh"),
             ("TMPDIR", "/tmp"),
+            // Toolchain layers install mise and its runtimes into fixed
+            // prefixes — always set so a session without layers is harmless.
+            ("MISE_DATA_DIR", MISE_DATA_DIR),
+            ("MISE_CONFIG_DIR", MISE_CONFIG_DIR),
+            (
+                "MISE_GLOBAL_CONFIG_FILE",
+                "/opt/mise-config/config.toml",
+            ),
         ] {
             env.insert(name.to_owned(), Value::String(value.to_owned()));
         }
@@ -854,6 +1112,7 @@ fn exit_status(code: i32) -> ExitStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn env_scrub_strips_secrets_agent_and_host_only_vars() {
@@ -889,6 +1148,78 @@ mod tests {
         assert_eq!(text, "hello world");
         // And again — the stream stays ended.
         assert_eq!(reader.read(&mut [0; 8]).unwrap(), 0);
+    }
+
+    #[test]
+    fn detects_runtimes_from_manifests() {
+        let dir = std::env::temp_dir().join(format!("waku-rt-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(detect_runtimes(&dir).is_empty());
+
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        std::fs::write(dir.join(".nvmrc"), "v22\n").unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        std::fs::write(
+            dir.join("rust-toolchain.toml"),
+            "[toolchain]\nchannel = \"1.85.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("go.mod"), "module x\n\ngo 1.23\n").unwrap();
+        std::fs::write(dir.join(".python-version"), "3.12\n").unwrap();
+        let specs = detect_runtimes(&dir);
+        let tools: Vec<(&str, &str)> = specs
+            .iter()
+            .map(|s| (s.tool, s.version.as_str()))
+            .collect();
+        assert_eq!(
+            tools,
+            [
+                ("node", "22"),
+                ("python", "3.12"),
+                ("rust", "1.85.0"),
+                ("go", "1.23")
+            ]
+        );
+
+        // .tool-versions and mise.toml pin over file-specific defaults.
+        std::fs::write(
+            dir.join(".tool-versions"),
+            "node 20.11.0\npython 3.13\n",
+        )
+        .unwrap();
+        let specs = detect_runtimes(&dir);
+        let node = specs.iter().find(|s| s.tool == "node").unwrap();
+        assert_eq!(node.version, "20.11.0");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn mise_toml_pins_tool_versions() {
+        let tools = parse_mise_tools("[tools]\nnode = \"lts\"\npython = \"3.13\"\n[settings]\nx = 1\n");
+        assert_eq!(tools.get("node").map(String::as_str), Some("lts"));
+        assert_eq!(tools.get("python").map(String::as_str), Some("3.13"));
+        assert!(tools.get("x").is_none());
+    }
+
+    #[test]
+    fn checkpoint_names_encode_the_layers() {
+        let spec = guest_spec(ProviderKind::Codex).unwrap();
+        assert_eq!(session_checkpoint(&spec, &[]), "waku-provider-codex");
+        let name = session_checkpoint(
+            &spec,
+            &[
+                RuntimeSpec {
+                    tool: "node",
+                    version: "lts".into(),
+                },
+                RuntimeSpec {
+                    tool: "python",
+                    version: "3.12".into(),
+                },
+            ],
+        );
+        assert_eq!(name, "waku-provider-codex-node-lts-python-3.12");
     }
 
     /// Real end-to-end against the installed shuru binary and the
