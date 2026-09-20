@@ -176,6 +176,7 @@ export type { ThreadGoalStatus } from "./ThreadGoalStatus";
 export type { TokenTotals } from "./TokenTotals";
 export type { TranscriptBlock } from "./TranscriptBlock";
 export type { TranscriptNotice } from "./TranscriptNotice";
+export type { TranscriptNoticeStatus } from "./TranscriptNoticeStatus";
 export type { TransferDirection } from "./TransferDirection";
 export type { TransferInfo } from "./TransferInfo";
 export type { TransferStatus } from "./TransferStatus";

@@ -1167,39 +1167,46 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             column
         }
         MessageRole::Assistant => {
-            let group_name = SharedString::from(format!("assistant-message-{message_id}"));
-            let body = render_markdown_message_body(&content, markdown, theme, ctx);
-            let mut column = div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .py(px(4.0))
-                .gap(px(3.0))
-                .group(group_name.clone())
-                .child(body);
-            // Turn-backed responses render one footer after every ordered row
-            // in the turn. Only legacy/unkeyed assistant messages retain an
-            // inline footer because they have no turn boundary to target.
-            if message.turn_id.is_none()
-                && let Some(copy_content) = assistant_footer_copy_content
-            {
-                column = column.child(render_message_footer(
-                    theme,
-                    message,
-                    assistant_footer_time.unwrap_or(message.created_at),
-                    copy_content,
-                    copied,
-                    show_response_token_speed,
-                    group_name,
-                    false,
-                    false,
-                    assistant_message_action,
-                    None,
-                    waku.clone(),
-                ));
+            // Synthesized fallbacks ("Stopped", "Turn completed") stand in
+            // for a reply the turn never produced; the kind's leading icon
+            // keeps them from reading as agent prose.
+            if let Some(TranscriptNotice::Status { kind }) = &message.notice {
+                status_notice_row(*kind, &content, theme, ctx)
+            } else {
+                let group_name = SharedString::from(format!("assistant-message-{message_id}"));
+                let body = render_markdown_message_body(&content, markdown, theme, ctx);
+                let mut column = div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .py(px(4.0))
+                    .gap(px(3.0))
+                    .group(group_name.clone())
+                    .child(body);
+                // Turn-backed responses render one footer after every ordered row
+                // in the turn. Only legacy/unkeyed assistant messages retain an
+                // inline footer because they have no turn boundary to target.
+                if message.turn_id.is_none()
+                    && let Some(copy_content) = assistant_footer_copy_content
+                {
+                    column = column.child(render_message_footer(
+                        theme,
+                        message,
+                        assistant_footer_time.unwrap_or(message.created_at),
+                        copy_content,
+                        copied,
+                        show_response_token_speed,
+                        group_name,
+                        false,
+                        false,
+                        assistant_message_action,
+                        None,
+                        waku.clone(),
+                    ));
+                }
+                column
             }
-            column
         }
         MessageRole::System => match &message.notice {
             Some(TranscriptNotice::Landed {
@@ -1216,22 +1223,34 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 &waku,
                 ctx,
             ),
-            _ => div().w_full().flex().justify_center().child(
-                div()
-                    .px(px(10.0))
-                    .py(px(4.0))
-                    .rounded_full()
-                    .bg(theme.overlay)
-                    .text_size(sp(12.5))
-                    .line_height(sp(16.0))
-                    .child(md::render::plain_text(
-                        content.clone(),
-                        ctx.families().ui.clone(),
-                        FontWeight::NORMAL,
-                        theme.text_tertiary,
-                        ctx,
-                    )),
-            ),
+            _ => {
+                let status_icon = match &message.notice {
+                    Some(TranscriptNotice::Status { kind }) => Some(status_notice_icon(*kind)),
+                    _ => None,
+                };
+                div().w_full().flex().justify_center().child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .px(px(10.0))
+                        .py(px(4.0))
+                        .rounded_full()
+                        .bg(theme.overlay)
+                        .text_size(sp(12.5))
+                        .line_height(sp(16.0))
+                        .when_some(status_icon, |row, path| {
+                            row.child(icon(path, 11.0, theme.text_tertiary))
+                        })
+                        .child(md::render::plain_text(
+                            content.clone(),
+                            ctx.families().ui.clone(),
+                            FontWeight::NORMAL,
+                            theme.text_tertiary,
+                            ctx,
+                        )),
+                )
+            }
         },
     };
 
@@ -1253,6 +1272,51 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             )
         },
     )
+}
+
+/// Which icon a [`TranscriptNotice::Status`] leads with — one Lucide glyph
+/// per [`TranscriptNoticeStatus`].
+fn status_notice_icon(status: TranscriptNoticeStatus) -> &'static str {
+    match status {
+        TranscriptNoticeStatus::Stopped => "icons/hand.svg",
+        TranscriptNoticeStatus::Completed => "icons/circle-check.svg",
+        TranscriptNoticeStatus::StoppedBeforeResponse => "icons/octagon-x.svg",
+        TranscriptNoticeStatus::OutOfContext => "icons/battery-low.svg",
+        TranscriptNoticeStatus::Declined => "icons/ban.svg",
+        TranscriptNoticeStatus::StoppedWithReason => "icons/octagon-alert.svg",
+        TranscriptNoticeStatus::Exited => "icons/unplug.svg",
+        TranscriptNoticeStatus::StartFailed => "icons/circle-alert.svg",
+        TranscriptNoticeStatus::Error => "icons/alert.svg",
+        TranscriptNoticeStatus::Goal => "icons/goal.svg",
+    }
+}
+
+/// A [`TranscriptNotice::Status`] rendered in the assistant column: the
+/// kind's icon leading the notice text at pill weight so it reads as
+/// chrome, not a reply.
+#[track_caller]
+fn status_notice_row(
+    status: TranscriptNoticeStatus,
+    content: &str,
+    theme: &Theme,
+    ctx: &MarkdownCtx,
+) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .py(px(4.0))
+        .text_size(sp(12.5))
+        .line_height(sp(16.0))
+        .child(icon(status_notice_icon(status), 12.0, theme.text_tertiary))
+        .child(md::render::plain_text(
+            content.to_owned(),
+            ctx.families().ui.clone(),
+            FontWeight::NORMAL,
+            theme.text_tertiary,
+            ctx,
+        ))
 }
 
 /// How many commits an expanded landed notice lists before folding the rest

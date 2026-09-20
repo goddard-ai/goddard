@@ -2129,6 +2129,24 @@ impl AgentSession {
         id
     }
 
+    /// [`push_message`] carrying a structured [`TranscriptNotice`] so clients
+    /// draw the bespoke row instead of bare `content` text.
+    pub fn push_notice_message(
+        &mut self,
+        role: MessageRole,
+        content: impl Into<String>,
+        notice: TranscriptNotice,
+    ) -> Uuid {
+        let mut message = match self.active_turn_id() {
+            Some(turn_id) => Message::new_for_turn(role, content, turn_id),
+            None => Message::new(role, content),
+        };
+        message.notice = Some(notice);
+        let id = message.id;
+        self.messages.push(message);
+        id
+    }
+
     pub fn push_user_message_with_presentation(
         &mut self,
         content: impl Into<String>,
@@ -2305,6 +2323,37 @@ pub enum TranscriptNotice {
         commits: Vec<CommitEntry>,
         ahead: u64,
     },
+    /// A synthesized status line standing in for a reply the turn never
+    /// produced ("Stopped", "Turn completed") or recording a session event
+    /// ("Goal set"). `kind` picks the leading icon; `content` still carries
+    /// the rendered text for clients that predate the variant.
+    Status { kind: TranscriptNoticeStatus },
+}
+
+/// Which icon a [`TranscriptNotice::Status`] row leads with.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TranscriptNoticeStatus {
+    /// The user stopped the turn before the agent replied.
+    Stopped,
+    /// The turn finished cleanly without a reply.
+    Completed,
+    /// The turn failed before the agent replied.
+    StoppedBeforeResponse,
+    /// The provider ended the turn out of context.
+    OutOfContext,
+    /// The provider refused the turn.
+    Declined,
+    /// The provider stopped for a reported reason.
+    StoppedWithReason,
+    /// The provider process exited mid-turn.
+    Exited,
+    /// The agent runtime failed to start.
+    StartFailed,
+    /// Any other provider-reported failure.
+    Error,
+    /// A goal was set on the session.
+    Goal,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

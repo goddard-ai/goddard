@@ -8,7 +8,10 @@
 
 use gpui::{KeyBinding, actions};
 
-use crate::model::{GoalOperation, MessageRole, ThreadGoal, ThreadGoalStatus};
+use crate::model::{
+    GoalOperation, MessageRole, ThreadGoal, ThreadGoalStatus, TranscriptNotice,
+    TranscriptNoticeStatus,
+};
 use crate::usage::format_tokens;
 
 use super::*;
@@ -167,7 +170,13 @@ impl Waku {
         };
         session.set_title_from_prompt(objective);
         let notice = tr!("goal.set_notice", objective = notice_objective(objective));
-        session.push_message(MessageRole::System, notice);
+        session.push_notice_message(
+            MessageRole::System,
+            notice,
+            TranscriptNotice::Status {
+                kind: TranscriptNoticeStatus::Goal,
+            },
+        );
         session.updated_at = crate::model::unix_time();
         self.state.mark_session_dirty(session_id);
         cx.notify();

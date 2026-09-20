@@ -40,7 +40,8 @@ use crate::model::{
     ContextUsage, DriverEvent, FavoriteModel, Message, MessageAttachment, MessageRole,
     PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe, ProviderResumeCursor,
     ProviderSessionHistory, ProviderSessionSummary, QueuedMessage, ReasoningBlock, RuntimeMode,
-    SessionStatus, SessionWorkspace, TranscriptBlock, TranscriptNotice, TurnStatus, UserInputAnswer,
+    SessionStatus, SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus,
+    TurnStatus, UserInputAnswer,
     UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;

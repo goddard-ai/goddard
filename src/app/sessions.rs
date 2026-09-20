@@ -4013,7 +4013,13 @@ impl Waku {
             if let Some(session) = self.state.session_mut(session_id) {
                 session.status = SessionStatus::Idle;
                 if needs_fallback {
-                    session.push_message(MessageRole::Assistant, tr!("session.stopped"));
+                    session.push_notice_message(
+                        MessageRole::Assistant,
+                        tr!("session.stopped"),
+                        TranscriptNotice::Status {
+                            kind: TranscriptNoticeStatus::Stopped,
+                        },
+                    );
                 }
             }
             self.finish_active_turn_with_analytics(

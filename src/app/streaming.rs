@@ -755,9 +755,28 @@ impl Waku {
                         SessionStatus::Failed
                     };
                     if needs_fallback {
-                        session.push_message(
+                        let kind = if success {
+                            TranscriptNoticeStatus::Completed
+                        } else {
+                            match summary_i18n.as_ref().map(|i18n| i18n.key.as_str()) {
+                                Some("session.agent_ran_out_of_context") => {
+                                    TranscriptNoticeStatus::OutOfContext
+                                }
+                                Some("session.agent_declined_turn") => {
+                                    TranscriptNoticeStatus::Declined
+                                }
+                                Some("session.agent_stopped_reason") => {
+                                    TranscriptNoticeStatus::StoppedWithReason
+                                }
+                                Some(_) => TranscriptNoticeStatus::Error,
+                                None if summary.is_some() => TranscriptNoticeStatus::Error,
+                                None => TranscriptNoticeStatus::StoppedBeforeResponse,
+                            }
+                        };
+                        session.push_notice_message(
                             MessageRole::Assistant,
                             summary_i18n
+                                .as_ref()
                                 .map(|i18n| i18n.render())
                                 .or_else(|| summary.clone())
                                 .unwrap_or_else(|| {
@@ -767,6 +786,7 @@ impl Waku {
                                         tr!("session.stopped_before_response")
                                     }
                                 }),
+                            TranscriptNotice::Status { kind },
                         );
                     }
                 }
@@ -873,7 +893,13 @@ impl Waku {
                         session.status = SessionStatus::Failed;
                     }
                     if should_append {
-                        session.push_message(MessageRole::Assistant, error);
+                        session.push_notice_message(
+                            MessageRole::Assistant,
+                            error,
+                            TranscriptNotice::Status {
+                                kind: TranscriptNoticeStatus::Error,
+                            },
+                        );
                     }
                 }
             }
@@ -889,6 +915,11 @@ impl Waku {
                 runtime.driver.cancel_computer_use();
                 runtime.computer_use_previews.clear();
                 let needs_fallback = !self.turn_has_assistant_message(session_id);
+                let failure_kind = if runtime.last_driver_error.is_some() {
+                    TranscriptNoticeStatus::Error
+                } else {
+                    TranscriptNoticeStatus::Exited
+                };
                 let failure_message = runtime
                     .last_driver_error
                     .take()
@@ -899,7 +930,13 @@ impl Waku {
                     session.status = SessionStatus::Failed;
                     session.updated_at = unix_time();
                     if needs_fallback {
-                        session.push_message(MessageRole::Assistant, failure_message);
+                        session.push_notice_message(
+                            MessageRole::Assistant,
+                            failure_message,
+                            TranscriptNotice::Status {
+                                kind: failure_kind,
+                            },
+                        );
                     }
                     true
                 } else {

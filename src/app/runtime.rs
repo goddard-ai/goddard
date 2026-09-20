@@ -6004,7 +6004,13 @@ impl Waku {
                 let message = tr!("errors.start_agent", error = error);
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.status = SessionStatus::Failed;
-                    session.push_message(MessageRole::Assistant, message);
+                    session.push_notice_message(
+                        MessageRole::Assistant,
+                        message,
+                        TranscriptNotice::Status {
+                            kind: TranscriptNoticeStatus::StartFailed,
+                        },
+                    );
                 }
                 self.finish_active_turn_with_analytics(
                     session_id,

@@ -1,0 +1,1 @@
+- System notices in the transcript — "Stopped", "Turn completed", provider failures, goal changes — now lead with a status icon so they read as chrome, not agent replies
