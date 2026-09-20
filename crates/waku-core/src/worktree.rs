@@ -247,12 +247,22 @@ fn add_named(
             || registered.contains(&dir.join(&repository_name))
     };
     let checkout = |name: &str| worktree_root.join(name).join(&repository_name);
-    let add = |path: &Path| -> anyhow::Result<bool> {
-        let mut lfs_skipped = add_detached(repository, path, base_ref)?;
-        if let Some(state) = carried_state {
-            lfs_skipped |= carry_state(path, state)?;
+    let add = |name: &str| -> anyhow::Result<(PathBuf, bool)> {
+        let path = checkout(name);
+        let result = (|| -> anyhow::Result<bool> {
+            let mut lfs_skipped = add_detached(repository, &path, base_ref)?;
+            if let Some(state) = carried_state {
+                lfs_skipped |= carry_state(&path, state)?;
+            }
+            Ok(lfs_skipped)
+        })();
+        match result {
+            Ok(lfs_skipped) => Ok((path, lfs_skipped)),
+            Err(error) => {
+                cleanup_failed_add(repository, &path);
+                Err(error)
+            }
         }
-        Ok(lfs_skipped)
     };
 
     match name.and_then(sanitize_name) {
@@ -260,8 +270,7 @@ fn add_named(
             if taken(&name) {
                 bail!("a worktree named `{name}` already exists");
             }
-            let path = checkout(&name);
-            let lfs_skipped = add(&path)?;
+            let (path, lfs_skipped) = add(&name)?;
             materialized(path, project_relative, name, lfs_skipped)
         }
         None => {
@@ -272,8 +281,7 @@ fn add_named(
                 if taken(&name) {
                     continue;
                 }
-                let path = checkout(&name);
-                let lfs_skipped = add(&path)?;
+                let (path, lfs_skipped) = add(&name)?;
                 return materialized(path, project_relative, name, lfs_skipped);
             }
             // A UUID fallback keeps the last resort independent of
@@ -286,11 +294,46 @@ fn add_named(
             if taken(&name) {
                 bail!("could not allocate a unique Git worktree name");
             }
-            let path = checkout(&name);
-            let lfs_skipped = add(&path)?;
+            let (path, lfs_skipped) = add(&name)?;
             materialized(path, project_relative, name, lfs_skipped)
         }
     }
+}
+
+/// A `worktree add` that dies mid-checkout is mostly reverted by Git —
+/// but the `<name>` claim directory the nested path implies survives, and
+/// a step failing after Git succeeded (carrying state in, say) leaves a
+/// whole registered worktree. Both would hold the name `taken` on retry,
+/// so drop them best-effort: `worktree remove` clears a completed
+/// registration, `prune` a stale one, and removing the claim directory
+/// frees the name — unless that parent *is* the flat-layout namespace.
+fn cleanup_failed_add(repository: &Path, worktree: &Path) {
+    let run_git = |args: &[&str]| {
+        let _ = crate::command_env::search_path_command("git")
+            .args(args)
+            .current_dir(repository)
+            .output();
+    };
+    let worktree_arg = worktree.to_string_lossy().into_owned();
+    run_git(&["worktree", "remove", "--force", &worktree_arg]);
+    run_git(&["worktree", "prune"]);
+    fs::remove_dir_all(worktree).ok();
+    if let Some(name_dir) = worktree.parent()
+        && !is_worktree_namespace(repository, name_dir)
+    {
+        fs::remove_dir_all(name_dir).ok();
+    }
+}
+
+/// Whether `dir` is the shared `<repository>/../worktrees/<repository>`
+/// namespace — the parent of every nested worktree and, under the former
+/// flat layout, of a worktree itself. Cleanup may empty but never remove
+/// it.
+fn is_worktree_namespace(repository: &Path, dir: &Path) -> bool {
+    worktree_root(repository).is_ok_and(|(root, _)| {
+        let resolve = |path: &Path| dunce::canonicalize(path).unwrap_or(path.to_path_buf());
+        resolve(&root) == resolve(dir)
+    })
 }
 
 /// Remove a linked worktree. `path` may be a project subdirectory inside the
@@ -328,16 +371,10 @@ pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
     // drop it so the name frees up, but never remove the repository's
     // `worktrees/<repository-name>` namespace itself — a former flat-layout
     // checkout's parent *is* that namespace.
-    if let Some(parent) = worktree_root.parent() {
-        let namespace = repository
-            .parent()
-            .zip(repository.file_name())
-            .map(|(root, name)| root.join("worktrees").join(name));
-        let is_namespace =
-            namespace.is_some_and(|root| dunce::canonicalize(&root).unwrap_or(root) == parent);
-        if !is_namespace {
-            let _ = fs::remove_dir(parent);
-        }
+    if let Some(parent) = worktree_root.parent()
+        && !is_worktree_namespace(&repository, parent)
+    {
+        let _ = fs::remove_dir(parent);
     }
     Ok(())
 }
@@ -421,9 +458,12 @@ pub fn ensure(
     };
     let checked_out = match branch {
         Some(branch) if local_branch_exists(&repository, branch)? => {
-            add_branch(&repository, &worktree_path, branch).with_context(|| {
-                format!("could not recreate worktree {}", worktree_path.display())
-            })?;
+            if let Err(error) = add_branch(&repository, &worktree_path, branch) {
+                cleanup_failed_add(&repository, &worktree_path);
+                return Err(error).with_context(|| {
+                    format!("could not recreate worktree {}", worktree_path.display())
+                });
+            }
             Some(branch.to_owned())
         }
         _ => {
@@ -434,19 +474,25 @@ pub fn ensure(
                 Some((commit, parent)) => parent.clone().unwrap_or_else(|| commit.clone()),
                 None => default_base_ref(&repository)?,
             };
-            add_detached(&repository, &worktree_path, &base).with_context(|| {
-                format!("could not recreate worktree {}", worktree_path.display())
-            })?;
+            if let Err(error) = add_detached(&repository, &worktree_path, &base) {
+                cleanup_failed_add(&repository, &worktree_path);
+                return Err(error).with_context(|| {
+                    format!("could not recreate worktree {}", worktree_path.display())
+                });
+            }
             None
         }
     };
-    if let Some((commit, Some(_))) = &snapshot {
-        carry_state(&worktree_path, commit).with_context(|| {
+    if let Some((commit, Some(_))) = &snapshot
+        && let Err(error) = carry_state(&worktree_path, commit)
+    {
+        cleanup_failed_add(&repository, &worktree_path);
+        return Err(error).with_context(|| {
             format!(
                 "could not restore the worktree's uncommitted state in {}",
                 worktree_path.display()
             )
-        })?;
+        });
     }
     if !path.is_dir() {
         bail!(
@@ -973,6 +1019,35 @@ mod tests {
             fs::read_to_string(worktree_root.join("asset.bin")).unwrap(),
             git_stdout(&repository, &["show", "feature:asset.bin"]).unwrap() + "\n"
         );
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_failed_create_frees_the_worktree_name() {
+        let repository = repository();
+        let project_relative = Path::new("packages/app");
+        // Failing the carry step leaves a fully registered worktree behind —
+        // the worst debris an attempt can make. Its cleanup must free the
+        // name, or the retry below fails on `taken` instead.
+        let failed = add_named(
+            &repository,
+            project_relative,
+            Some("retryable"),
+            "feature",
+            Some("not-a-commit"),
+        );
+        assert!(failed.is_err());
+
+        let created = add_named(
+            &repository,
+            project_relative,
+            Some("retryable"),
+            "feature",
+            None,
+        )
+        .unwrap();
+        assert_eq!(created.name, "retryable");
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
     }
