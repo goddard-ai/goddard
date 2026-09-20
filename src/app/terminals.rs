@@ -349,8 +349,16 @@ impl Waku {
                 }
                 // Command status or cwd changed — the sidebar row reads
                 // both straight off the view; the cwd fingerprint makes
-                // the repo scan re-run on its own.
-                TerminalViewEvent::ActivityChanged => cx.notify(),
+                // the repo scan re-run on its own. A `cd` in the terminal
+                // on screen also re-roots the panel's files.
+                TerminalViewEvent::ActivityChanged => {
+                    if this.selected_terminal == Some(terminal_id)
+                        && this.sync_right_panel_files_root(cx)
+                    {
+                        this.refresh_right_panel_working_tree(cx);
+                    }
+                    cx.notify()
+                }
                 TerminalViewEvent::GenerateCommand {
                     generation,
                     request,
@@ -701,6 +709,11 @@ impl Waku {
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
+        // The detached strip may have parked while this terminal `cd`'d
+        // elsewhere, or another terminal's cwd was the resolved root.
+        if self.sync_right_panel_files_root(cx) {
+            self.refresh_right_panel_working_tree(cx);
+        }
         let focus = self
             .right_panel_terminals
             .get(&terminal_id)

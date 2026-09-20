@@ -62,10 +62,16 @@ pub(super) struct FileFinderUi {
     open: bool,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
-    /// `Rc::as_ptr` identity of the index `files` was filtered out of, so the
+    /// The root `files` was listed from — the selected session's workspace,
+    /// or the selected terminal's cwd. A drift clears the projection; the
+    /// next refresh relists under the new root.
+    root: Option<PathBuf>,
+    /// `Arc::as_ptr` identity of the index `files` was filtered out of, so the
     /// files-only projection is rebuilt once per index swap rather than per
     /// keystroke.
     index: usize,
+    /// A listing for `root` is in flight — the placeholder draws its spinner.
+    loading: bool,
     files: Rc<Vec<FileEntry>>,
     results: Vec<Scored<FileEntry>>,
     selected: usize,
@@ -80,7 +86,9 @@ impl FileFinderUi {
             open: false,
             focus_generation: 0,
             previous_focus: None,
+            root: None,
             index: 0,
+            loading: false,
             files: Rc::new(Vec::new()),
             results: Vec::new(),
             selected: 0,
@@ -139,10 +147,14 @@ impl Waku {
     }
 
     fn open_file_finder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // No selected task means no working directory to search.
-        if self.selected_workspace_path().is_none() {
+        // The finder's scope is the panel's files root — a session workspace
+        // or the terminal's cwd. With neither, there is nothing to search.
+        if self.resolve_right_panel_files_root(cx).is_none() {
             return;
         }
+        // Land the panel's files slice on that same root first, so a confirm
+        // opens the file under the root its listing came from.
+        self.sync_right_panel_files_root(cx);
         // One picker at a time; closing first restores the palette's recorded
         // focus so the finder captures the element that was really focused.
         if self.command_palette.is_open() {
@@ -237,23 +249,48 @@ impl Waku {
         cx.notify();
     }
 
-    /// Recompute the drawn rows from the mirrored file index. Runs on a
+    /// Recompute the drawn rows from the files root's listing. Runs on a
     /// keystroke and when the index lands or swaps underneath an open finder —
-    /// never from `render`.
+    /// never from `render`. A root that drifted under an open finder clears
+    /// the projection and relists, so results never name another directory's
+    /// files.
     pub(super) fn refresh_file_finder_results(&mut self, cx: &mut Context<Self>) {
         if !self.file_finder.open {
             return;
         }
-        let index_ptr = Rc::as_ptr(&self.mention_file_index) as usize;
-        if self.file_finder.index != index_ptr {
-            self.file_finder.index = index_ptr;
-            self.file_finder.files = Rc::new(
-                self.mention_file_index
-                    .iter()
-                    .filter(|entry| !entry.is_dir)
-                    .cloned()
-                    .collect(),
-            );
+        let root = self.resolve_right_panel_files_root(cx);
+        if root != self.file_finder.root {
+            self.file_finder.root = root;
+            self.file_finder.index = 0;
+            self.file_finder.files = Rc::new(Vec::new());
+            self.file_finder.results.clear();
+            self.file_finder.selected = 0;
+            self.file_finder.scroll.scroll_to_item(0);
+        }
+        if let Some(root) = self.file_finder.root.clone() {
+            match self.mention_files.read(&root) {
+                Query::Ready(entries) => {
+                    self.file_finder.loading = false;
+                    let index_ptr = Arc::as_ptr(&entries) as usize;
+                    if self.file_finder.index != index_ptr {
+                        self.file_finder.index = index_ptr;
+                        self.file_finder.files = Rc::new(
+                            entries
+                                .iter()
+                                .filter(|entry| !entry.is_dir)
+                                .cloned()
+                                .collect(),
+                        );
+                    }
+                }
+                Query::Pending => self.file_finder.loading = true,
+                Query::Missing(token) => {
+                    self.file_finder.loading = true;
+                    self.fetch_mention_files(token, root, cx);
+                }
+            }
+        } else {
+            self.file_finder.loading = false;
         }
         let query = self.file_finder.search.read(cx).content().to_owned();
         let (path_query, _, _) = split_position_suffix(&query);
@@ -338,7 +375,7 @@ impl Waku {
             .file_finder
             .selected
             .min(self.file_finder.results.len().saturating_sub(1));
-        let loading = self.mention_file_index_loading;
+        let loading = self.file_finder.loading;
         let show_placeholder = self.file_finder.results.is_empty();
         let results_height =
             file_finder_results_height(self.file_finder.results.len(), show_placeholder)

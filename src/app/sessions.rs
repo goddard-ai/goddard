@@ -798,15 +798,13 @@ impl Waku {
     /// expire on a timer, they are dropped at the moments the answer plausibly
     /// moved — coming back to the window, or a turn finishing.
     pub(super) fn invalidate_workspace_queries(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        let Some(workspace_path) = self.resolve_right_panel_files_root(cx) else {
             return;
         };
         self.branch_snapshots.invalidate(&workspace_path);
         self.invalidate_workspace_remote_files(&workspace_path);
         self.invalidate_base_push_state(&workspace_path);
+        self.mention_files.invalidate(&workspace_path);
         self.sidebar_branch_scan_fingerprint.set(None);
         self.sidebar_branch_scan_generation
             .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
@@ -815,6 +813,9 @@ impl Waku {
             .set(self.sidebar_checkout_scan_generation.get().wrapping_add(1));
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
+        if self.file_finder.is_open() {
+            self.refresh_file_finder_results(cx);
+        }
         // The panel's working-tree snapshot moved with the same moments.
         if self.git_panel.is_some() {
             self.refresh_git_panel(cx);

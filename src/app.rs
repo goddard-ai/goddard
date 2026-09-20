@@ -1148,10 +1148,31 @@ struct RightPanelSessionState {
     file_tree_width: f32,
     file_editors: HashMap<String, RightPanelFileEditor>,
     ref_editors: HashMap<String, RightPanelRefEditor>,
+    /// The directory this state's file surfaces and editors are rooted at —
+    /// the session's workspace, or the terminal cwd the detached context was
+    /// last resolved to. `None` means the files slice is still empty.
+    files_root: Option<PathBuf>,
     diff_source: ReviewDiffSource,
     diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     diff_selected_file: Option<usize>,
     diff_expanded_paths: HashSet<String>,
+}
+
+/// The files half of a panel strip parked while a different root is on
+/// screen: the File/Files surfaces plus every relative-path-keyed store, all
+/// of which only mean something under one root. Keyed by that root so a
+/// terminal's `cd` — like a session switch — sets the old directory's files
+/// aside rather than pointing them at the new one.
+struct ParkedPanelFiles {
+    /// Extracted surfaces with their original strip indices, so a restore
+    /// puts each tab back where it was.
+    surfaces: Vec<(usize, RightPanelSurface)>,
+    /// Position in `surfaces` that was active, when a file surface was.
+    active_surface: Option<usize>,
+    files_selected_path: Option<String>,
+    expanded_paths: HashSet<PathBuf>,
+    file_editors: HashMap<String, RightPanelFileEditor>,
+    file_tree_width: f32,
 }
 
 impl RightPanelSessionState {
@@ -1168,6 +1189,7 @@ impl RightPanelSessionState {
             file_tree_width: DEFAULT_FILE_TREE_WIDTH,
             file_editors: HashMap::new(),
             ref_editors: HashMap::new(),
+            files_root: None,
             diff_source: ReviewDiffSource::default(),
             diff_snapshot: None,
             diff_selected_file: None,
@@ -2665,6 +2687,14 @@ pub struct Waku {
     right_panel_file_editors: HashMap<String, RightPanelFileEditor>,
     /// Read-only editors behind `FileAtRef` surfaces, keyed `"{git_ref}:{path}"`.
     right_panel_ref_editors: HashMap<String, RightPanelRefEditor>,
+    /// The root the active files slice belongs to — the selected session's
+    /// workspace, or the selected terminal's cwd. Swapped with the rest of
+    /// the panel state; `sync_right_panel_files_root` re-roots it when the
+    /// resolved answer drifts.
+    right_panel_files_root: Option<PathBuf>,
+    /// Files slices set aside by a re-root, keyed by the root they belong
+    /// to — a `cd` back picks up exactly what that directory had open.
+    right_panel_parked_files: HashMap<PathBuf, ParkedPanelFiles>,
     /// Per-tab chrome for open pull-request surfaces, keyed `(session id, PR
     /// number)` — scroll, focus, and the tab's own comment composer. Not
     /// swapped through `RightPanelSessionState`; the key scopes it instead.
@@ -5730,6 +5760,8 @@ impl Waku {
                 right_panel_file_tree_width: DEFAULT_FILE_TREE_WIDTH,
                 right_panel_file_editors: HashMap::new(),
                 right_panel_ref_editors: HashMap::new(),
+                right_panel_files_root: None,
+                right_panel_parked_files: HashMap::new(),
                 right_panel_pr_states: HashMap::new(),
                 file_search: None,
                 go_to_line: None,

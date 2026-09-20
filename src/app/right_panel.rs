@@ -1928,7 +1928,8 @@ mod tests {
 
 impl Waku {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
-        match transcript_link_route(target, self.selected_workspace_path()) {
+        let files_root = self.resolve_right_panel_files_root(cx);
+        match transcript_link_route(target, files_root.as_deref()) {
             TranscriptLinkRoute::ProjectFile(relative_path) => {
                 // A `file:line` target rides the same pending slot the finder
                 // uses: the editor takes focus and the jump lands once the
@@ -1966,8 +1967,8 @@ impl Waku {
         let path = Path::new(path.trim());
         let resolved = if path.is_absolute() {
             path.to_path_buf()
-        } else if let Some(workspace) = self.selected_workspace_path() {
-            workspace.join(path)
+        } else if let Some(root) = self.resolve_right_panel_files_root(cx) {
+            root.join(path)
         } else {
             return;
         };
@@ -1985,8 +1986,8 @@ impl Waku {
         let path = Path::new(path.trim());
         let resolved = if path.is_absolute() {
             path.to_path_buf()
-        } else if let Some(workspace) = self.selected_workspace_path() {
-            workspace.join(path)
+        } else if let Some(root) = self.resolve_right_panel_files_root(cx) {
+            root.join(path)
         } else {
             return;
         };
@@ -2068,6 +2069,10 @@ impl Waku {
             self.refresh_right_panel_working_tree(cx);
         }
         self.ensure_right_panel_terminals(cx);
+        // A restored state's recorded root may no longer resolve — a
+        // worktree moved, or the detached strip comes back to a terminal
+        // that has since `cd`'d. Reconcile before anything reads the slice.
+        self.sync_right_panel_files_root(cx);
         self.retain_right_panel_browsers();
         // A side-chat tab persists only while its session does — an unsent
         // one is never catalogued, and one deleted elsewhere stays gone.
@@ -2149,6 +2154,7 @@ impl Waku {
             file_tree_width: self.right_panel_file_tree_width,
             file_editors: std::mem::take(&mut self.right_panel_file_editors),
             ref_editors: std::mem::take(&mut self.right_panel_ref_editors),
+            files_root: self.right_panel_files_root.take(),
             diff_source: self.right_panel_diff_source,
             diff_snapshot: self.right_panel_diff_snapshot.take(),
             diff_selected_file: self.right_panel_diff_selected_file.take(),
@@ -2176,6 +2182,7 @@ impl Waku {
         self.right_panel_file_tree_width = state.file_tree_width;
         self.right_panel_file_editors = state.file_editors;
         self.right_panel_ref_editors = state.ref_editors;
+        self.right_panel_files_root = state.files_root;
         self.right_panel_diff_generation = self.right_panel_diff_generation.wrapping_add(1);
         self.right_panel_diff_selection.clear();
         self.right_panel_diff_source = state.diff_source;
@@ -4452,8 +4459,8 @@ impl Waku {
             )
         };
         let github_url = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
+            .right_panel_files_root
+            .clone()
             .and_then(|workspace| {
                 let snapshot = self.branch_snapshot_for_workspace(&workspace, cx)?;
                 match self.remote_file_for(&workspace, &relative_path, cx) {
@@ -4961,15 +4968,12 @@ impl Waku {
     /// for a big one — so it never runs in a frame. The editor keeps whatever
     /// it is already showing until the read lands.
     ///
-    /// The result is applied only if the same session is still selected and the
-    /// editor is still the one that asked, so a read started before a project
-    /// or session switch cannot write another workspace's text into the view.
+    /// The result is applied only if the same files root is still active and
+    /// the editor is still the one that asked, so a read started before a
+    /// session switch or a terminal re-root cannot write another directory's
+    /// text into the view.
     fn read_right_panel_file_into_editor(&mut self, relative_path: String, cx: &mut Context<Self>) {
-        let project_path = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf);
-        let (Some(project_path), Some(session_id)) = (project_path, self.state.selected_session)
-        else {
+        let Some(project_path) = self.right_panel_files_root.clone() else {
             // Nothing to read from. Say so in the editor rather than leaving it
             // looking like an empty file.
             if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
@@ -5035,14 +5039,10 @@ impl Waku {
                 })
                 .await;
             waku.update(cx, |waku, cx| {
-                if waku.state.selected_session != Some(session_id)
-                    || waku
-                        .selected_workspace_path()
-                        .is_none_or(|path| path != project_path)
-                {
-                    // The editor moved into another session's stored state, or
-                    // the project changed. Clear the flag so a later reload can
-                    // ask again, and drop the text.
+                if waku.right_panel_files_root.as_deref() != Some(project_path.as_path()) {
+                    // The editor moved into another context's stored state, or
+                    // the files root changed. Clear the flag so a later reload
+                    // can ask again, and drop the text.
                     if let Some(editor) = waku.right_panel_file_editors.get_mut(&relative_path) {
                         editor.reading = false;
                     }
@@ -5690,10 +5690,7 @@ impl Waku {
             self.open_sync_branch(window, cx);
             return;
         };
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        let Some(project_path) = self.right_panel_files_root.clone() else {
             return;
         };
         let Some(editor) = self.right_panel_file_editors.get(&relative_path) else {
@@ -5710,9 +5707,6 @@ impl Waku {
         }
 
         let content = editor.state.read(cx).content().to_owned();
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
         let epoch = if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
             editor.reading = false;
             editor.read_epoch += 1;
@@ -5745,11 +5739,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                if waku.state.selected_session != Some(session_id)
-                    || waku
-                        .selected_workspace_path()
-                        .is_none_or(|path| path != project_path)
-                {
+                if waku.right_panel_files_root.as_deref() != Some(project_path.as_path()) {
                     return;
                 }
                 match result {
@@ -6699,17 +6689,134 @@ impl Waku {
         }
     }
 
-    /// Re-walks the project's working tree.
+    /// The directory the Files surface and its editors are rooted at right
+    /// now: the selected session's workspace, or the selected terminal's
+    /// live cwd. A detached context with no terminal on screen keeps the
+    /// root its files already have — the Projects page must not dissolve a
+    /// terminal's open files just by passing through.
+    pub(super) fn resolve_right_panel_files_root(&self, cx: &App) -> Option<PathBuf> {
+        if let Some(workspace) = self.selected_workspace_path() {
+            return Some(workspace.to_path_buf());
+        }
+        if let Some(terminal_id) = self.selected_terminal {
+            return self.terminal_cwd(terminal_id, cx);
+        }
+        self.right_panel_files_root.clone()
+    }
+
+    /// Re-root the files slice when the resolved root drifts — a `cd` in the
+    /// selected terminal, a different terminal coming forward, a worktree
+    /// moving. The outgoing slice parks under its root the way a session's
+    /// panel state parks under its id, so a dirty editor is never pointed at
+    /// a different file; the incoming root's slice returns exactly as it was
+    /// left. Returns whether a swap ran.
+    pub(super) fn sync_right_panel_files_root(&mut self, cx: &mut Context<Self>) -> bool {
+        let resolved = self.resolve_right_panel_files_root(cx);
+        if resolved == self.right_panel_files_root {
+            return false;
+        }
+        let slice = self.take_right_panel_files_slice();
+        if let Some(old_root) = self.right_panel_files_root.take() {
+            self.right_panel_parked_files.insert(old_root, slice);
+        }
+        // The parked entry is consumed: the same root opening twice would
+        // otherwise hand out a second copy of its editors.
+        let slice = resolved
+            .as_ref()
+            .and_then(|root| self.right_panel_parked_files.remove(root))
+            .unwrap_or_else(|| ParkedPanelFiles {
+                surfaces: Vec::new(),
+                active_surface: None,
+                files_selected_path: None,
+                expanded_paths: HashSet::new(),
+                file_editors: HashMap::new(),
+                file_tree_width: DEFAULT_FILE_TREE_WIDTH,
+            });
+        self.restore_right_panel_files_slice(slice);
+        self.right_panel_files_root = resolved;
+        // Search and jump state pointed into editors that just swapped out.
+        self.reset_file_search_for_session(cx);
+        self.reset_go_to_line_for_session(cx);
+        self.right_panel_pending_file_focus = None;
+        cx.notify();
+        true
+    }
+
+    /// Pull every relative-path-keyed piece of the strip out for parking:
+    /// the File/Files surfaces with their indices, then the stores those
+    /// surfaces name. `active_surface` is re-pointed at the surface that
+    /// slid into the removed slot, matching the close path's arithmetic.
+    fn take_right_panel_files_slice(&mut self) -> ParkedPanelFiles {
+        let mut surfaces = Vec::new();
+        for index in (0..self.right_panel_surfaces.len()).rev() {
+            if matches!(
+                self.right_panel_surfaces[index],
+                RightPanelSurface::Files | RightPanelSurface::File(_)
+            ) {
+                surfaces.push((index, self.right_panel_surfaces.remove(index)));
+            }
+        }
+        surfaces.reverse();
+        let parked_active = self
+            .right_panel_active_surface
+            .and_then(|active| surfaces.iter().position(|(index, _)| *index == active));
+        if let Some(active) = self.right_panel_active_surface {
+            let removed_before = surfaces.iter().filter(|(index, _)| *index < active).count();
+            self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
+                None
+            } else {
+                Some((active - removed_before).min(self.right_panel_surfaces.len() - 1))
+            };
+        }
+        ParkedPanelFiles {
+            surfaces,
+            active_surface: parked_active,
+            files_selected_path: self.right_panel_files_selected_path.take(),
+            expanded_paths: std::mem::take(&mut self.right_panel_expanded_paths),
+            file_editors: std::mem::take(&mut self.right_panel_file_editors),
+            file_tree_width: self.right_panel_file_tree_width,
+        }
+    }
+
+    /// Return a parked slice to the strip. Surfaces re-insert in ascending
+    /// order at their recorded indices, which reproduces their original
+    /// positions; the strip's active index shifts once per surface landing
+    /// at or before it, then a parked-active file tab takes the slot back.
+    fn restore_right_panel_files_slice(&mut self, parked: ParkedPanelFiles) {
+        self.right_panel_files_selected_path = parked.files_selected_path;
+        self.right_panel_expanded_paths = parked.expanded_paths;
+        self.right_panel_file_editors = parked.file_editors;
+        self.right_panel_file_tree_width = parked.file_tree_width;
+        let mut restored_active = None;
+        for (position, (index, surface)) in parked.surfaces.into_iter().enumerate() {
+            let index = index.min(self.right_panel_surfaces.len());
+            self.right_panel_surfaces.insert(index, surface);
+            if parked.active_surface == Some(position) {
+                restored_active = Some(index);
+            }
+            if let Some(active) = self.right_panel_active_surface
+                && index <= active
+            {
+                self.right_panel_active_surface = Some(active + 1);
+            }
+        }
+        if let Some(active) = restored_active.or(self.right_panel_active_surface) {
+            self.right_panel_active_surface = Some(active);
+            self.reveal_right_panel_tab(active);
+        } else if !self.right_panel_surfaces.is_empty() {
+            self.right_panel_active_surface = Some(0);
+        }
+    }
+
+    /// Re-walks the files root's working tree.
     ///
     /// `read_dir` plus a `stat` per entry, recursively over expanded
     /// directories — filesystem I/O, so it runs on the background executor and
     /// the panel keeps drawing the previous listing until the result lands.
     /// Called when the tree's inputs change, never from a frame.
-    fn refresh_right_panel_working_tree(&mut self, cx: &mut Context<Self>) {
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+    pub(super) fn refresh_right_panel_working_tree(&mut self, cx: &mut Context<Self>) {
+        self.sync_right_panel_files_root(cx);
+        let Some(project_path) = self.right_panel_files_root.clone() else {
             self.right_panel_working_tree.clear();
             return;
         };
@@ -6759,9 +6866,8 @@ impl Waku {
                         .await;
                     waku.update(cx, |waku, cx| {
                         if waku.working_trees.fulfill(token, entries.clone())
-                            && waku
-                                .selected_workspace_path()
-                                .is_some_and(|path| path == project_path)
+                            && waku.right_panel_files_root.as_deref()
+                                == Some(project_path.as_path())
                         {
                             waku.right_panel_working_tree = entries;
                             waku.resolve_right_panel_pending_tree_reveal();

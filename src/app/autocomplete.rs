@@ -266,37 +266,12 @@ impl Waku {
                     self.mention_file_index = Rc::new(Vec::new());
                     self.mention_file_index_path = None;
                 }
-                let path = project_path.clone();
-                let Some(workspace) = self.workspace_client_for_path(&path) else {
+                if self.workspace_client_for_path(&project_path).is_none() {
                     self.mention_file_index_loading = false;
+                    self.mention_files.abandon(token);
                     return;
-                };
-                cx.spawn(async move |waku, cx| {
-                    let files = cx
-                        .background_executor()
-                        .spawn(async move {
-                            match workspace.request(
-                                waku_client::WorkspaceOperation::ListProjectFiles {
-                                    root: path,
-                                    cap: FILE_INDEX_CAP,
-                                },
-                            ) {
-                                Ok(waku_client::WorkspaceResult::ProjectFiles { entries }) => {
-                                    entries
-                                }
-                                Ok(_) | Err(_) => Vec::new(),
-                            }
-                        })
-                        .await;
-                    waku.update(cx, |waku, cx| {
-                        if waku.mention_files.fulfill(token, files) {
-                            waku.refresh_composer_sources(cx);
-                            cx.notify();
-                        }
-                    })
-                    .ok();
-                })
-                .detach();
+                }
+                self.fetch_mention_files(token, project_path.clone(), cx);
             }
         }
 
@@ -308,6 +283,46 @@ impl Waku {
         // So does the palette's Prompts section — keep an open palette's
         // results in step with late-arriving discovery.
         self.refresh_open_command_palette(cx);
+    }
+
+    /// Run the daemon's file listing for `root`, claiming `token`'s fetch.
+    /// The composer reads the workspace key; the `Cmd+P` finder reads
+    /// whatever files root it resolved — both land in the same cache. The
+    /// fulfill re-runs the composer mirror and an open finder's refresh so
+    /// either consumer picks up the arrival.
+    pub(super) fn fetch_mention_files(
+        &mut self,
+        token: crate::query::FetchToken<PathBuf>,
+        root: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace_client_for_path(&root) else {
+            self.mention_files.abandon(token);
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let files = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace.request(waku_client::WorkspaceOperation::ListProjectFiles {
+                        root,
+                        cap: FILE_INDEX_CAP,
+                    }) {
+                        Ok(waku_client::WorkspaceResult::ProjectFiles { entries }) => entries,
+                        Ok(_) | Err(_) => Vec::new(),
+                    }
+                })
+                .await;
+            waku.update(cx, |waku, cx| {
+                if waku.mention_files.fulfill(token, files) {
+                    waku.refresh_composer_sources(cx);
+                    waku.refresh_file_finder_results(cx);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Invalidate and re-request both indexes for the selected workspace.
