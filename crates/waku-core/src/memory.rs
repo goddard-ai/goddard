@@ -852,6 +852,7 @@ fn headless_prompt(
         integrations: Vec::new(),
         provider_cursor: None,
         eval: None,
+        sandbox: None,
     };
     let handle = driver::start_local(provider, options, sender)
         .context("could not start the memory distillation driver")?;

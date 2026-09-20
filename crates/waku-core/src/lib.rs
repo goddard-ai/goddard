@@ -100,6 +100,7 @@ pub mod repo;
 pub mod repo_map;
 pub mod review;
 pub mod routing;
+pub mod sandbox;
 pub mod settings;
 pub mod share;
 pub mod shell_command;

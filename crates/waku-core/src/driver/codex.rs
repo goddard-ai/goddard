@@ -230,6 +230,7 @@ impl CodexDriver {
             integrations,
             provider_cursor,
             eval: _,
+            sandbox,
         } = options;
         let provider_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Codex { thread_id }) => Some(thread_id),
@@ -255,6 +256,7 @@ impl CodexDriver {
             .map(|config| config.server_path.clone());
         let title_binary = binary.clone();
         let title_cwd = cwd.clone();
+        let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
         configure_computer_use_command(&mut command, computer_use.as_ref());
@@ -271,14 +273,20 @@ impl CodexDriver {
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
-        let mut command = crate::command_env::guard_command(command);
+        // Inside the guest the VM dying with the session is the teardown
+        // guarantee the host-side guardian script provides locally.
+        let mut command = if sandbox.is_some() {
+            command
+        } else {
+            crate::command_env::guard_command(command)
+        };
         let command = command
             .current_dir(&cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child =
-            crate::command_env::spawn(command).context("failed to start `codex app-server`")?;
+        let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
+            .context("failed to start `codex app-server`")?;
 
         let stdin = child
             .stdin
@@ -835,6 +843,7 @@ impl CodexDriver {
                                         if let Some(request) = request {
                                             let binary = title_binary.clone();
                                             let cwd = title_cwd.clone();
+                                            let sandbox = title_sandbox.clone();
                                             let commands = reader_commands.clone();
                                             let _ = thread::Builder::new()
                                                 .name("waku-codex-title".into())
@@ -843,6 +852,7 @@ impl CodexDriver {
                                                         &binary,
                                                         &cwd,
                                                         &request.prompt,
+                                                        sandbox.as_ref(),
                                                     ) {
                                                         let _ = commands.send(
                                                             CommandMessage::GeneratedTitle(title),
@@ -1221,7 +1231,12 @@ fn codex_title_turn_params(thread_id: &str, user_message: &str) -> Value {
 /// Codex app-server can persist a thread name but does not generate one. Match
 /// Codex Desktop's client-owned behavior with an isolated ephemeral turn, then
 /// hand the result back to the main writer for `thread/name/set`.
-fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Result<String> {
+fn generate_codex_title(
+    binary: &Path,
+    cwd: &Path,
+    prompt: &str,
+    sandbox: Option<&Arc<crate::sandbox::ShuruVm>>,
+) -> anyhow::Result<String> {
     let mut command = crate::command_env::command(binary);
     let command = command
         .args(["app-server", "--stdio"])
@@ -1229,8 +1244,8 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child =
-        crate::command_env::spawn(command).context("failed to start Codex title generation")?;
+    let mut child = crate::sandbox::spawn(command, sandbox)
+        .context("failed to start Codex title generation")?;
     let mut stdin = child
         .stdin
         .take()
@@ -2625,6 +2640,7 @@ mod tests {
             let driver = CodexDriver::start(
                 DriverStartOptions {
                     eval: None,
+                    sandbox: None,
                     binary: binary.clone(),
                     cwd: directory.clone(),
                     mode: RuntimeMode::Ask,
@@ -2714,6 +2730,7 @@ mod tests {
             let driver = CodexDriver::start(
                 DriverStartOptions {
                     eval: None,
+                    sandbox: None,
                     binary: binary.clone(),
                     cwd: cwd.clone(),
                     mode: RuntimeMode::Ask,
@@ -3049,6 +3066,7 @@ mod tests {
             &binary,
             &std::env::temp_dir(),
             "Find why provider-generated task titles never replace the first prompt and fix it.",
+            None,
         )
         .expect("Codex should generate a task title");
         assert!(!title.is_empty());

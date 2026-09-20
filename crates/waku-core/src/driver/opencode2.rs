@@ -430,6 +430,7 @@ impl OpenCode2Driver {
             integrations,
             provider_cursor,
             eval,
+            sandbox: _,
         } = options;
 
         let resumed = match provider_cursor {
@@ -3452,6 +3453,7 @@ mod tests {
         let driver = OpenCode2Driver::start(
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -3521,6 +3523,7 @@ mod tests {
             let driver = OpenCode2Driver::start(
                 DriverStartOptions {
                     eval: None,
+                    sandbox: None,
                     binary: binary.clone(),
                     cwd: test_directory.clone(),
                     mode: RuntimeMode::FullAccess,

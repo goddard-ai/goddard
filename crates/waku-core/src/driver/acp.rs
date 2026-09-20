@@ -144,6 +144,7 @@ impl AcpDriver {
             integrations: _,
             provider_cursor,
             eval,
+            sandbox: _,
         } = options;
         let fork_context = match &provider_cursor {
             Some(ProviderResumeCursor::Cursor { fork_context, .. }) => fork_context.clone(),
@@ -3465,6 +3466,7 @@ mod tests {
             ProviderKind::Grok,
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3522,6 +3524,7 @@ mod tests {
             ProviderKind::Cursor,
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3584,6 +3587,7 @@ mod tests {
             ProviderKind::Kimi,
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3657,6 +3661,7 @@ mod tests {
             ProviderKind::Droid,
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,

@@ -264,6 +264,10 @@ pub struct DriverStartOptions {
     /// reviewer route through it; `None` keeps the ask-the-user fallback.
     /// Daemon-owned — never crosses the wire.
     pub eval: Option<waku_protocol::eval::EvalSettings>,
+    /// When `Some`, the provider CLI runs inside this session's shuru VM and
+    /// the driver spawns it through the sandbox JSON-RPC channel instead of a
+    /// local `std::process::Command`. Daemon-owned — never crosses the wire.
+    pub sandbox: Option<Arc<crate::sandbox::ShuruVm>>,
 }
 
 /// The subset of `DriverStartOptions` a user can change without starting a new

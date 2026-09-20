@@ -102,6 +102,7 @@ impl AmpDriver {
             integrations: _,
             provider_cursor,
             eval: _,
+            sandbox: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
             return Err(anyhow!("Amp currently supports Full access only"));
@@ -585,6 +586,7 @@ mod tests {
         let driver = AmpDriver::start(
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -647,6 +649,7 @@ mod tests {
         let driver = AmpDriver::start(
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

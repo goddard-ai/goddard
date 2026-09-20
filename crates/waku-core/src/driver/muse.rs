@@ -151,6 +151,7 @@ impl MuseDriver {
             integrations: _,
             provider_cursor,
             eval,
+            sandbox: _,
         } = options;
 
         let (resumed_id, resume_cursor) = match provider_cursor {
@@ -1785,6 +1786,7 @@ mod tests {
     fn options(cwd: &Path) -> DriverStartOptions {
         DriverStartOptions {
             eval: None,
+            sandbox: None,
             binary: PathBuf::new(),
             cwd: cwd.to_path_buf(),
             mode: RuntimeMode::Ask,

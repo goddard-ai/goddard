@@ -216,6 +216,7 @@ impl OpenCodeDriver {
             integrations,
             provider_cursor,
             eval,
+            sandbox: _,
         } = options;
         let resume_session_id = match provider_cursor {
             Some(ProviderResumeCursor::OpenCode { session_id }) => {
@@ -1783,6 +1784,7 @@ server.serve_forever()
                 integrations: Vec::new(),
                 provider_cursor: None,
                 eval: None,
+                sandbox: None,
             },
             events,
         )
@@ -1913,6 +1915,7 @@ server.serve_forever()
                 integrations: Vec::new(),
                 provider_cursor: None,
                 eval: None,
+                sandbox: None,
             },
             events,
         )
@@ -2005,6 +2008,7 @@ server.serve_forever()
                 integrations: Vec::new(),
                 provider_cursor: None,
                 eval: None,
+                sandbox: None,
             },
             events,
         )

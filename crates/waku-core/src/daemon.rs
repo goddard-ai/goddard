@@ -1821,6 +1821,7 @@ impl Backend for WakuBackend {
                         .transpose()
                         .context("daemon received an invalid provider cursor")?,
                     eval: None,
+                    sandbox: None,
                 };
                 let handle =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
@@ -2584,6 +2585,7 @@ impl WakuBackend {
                 integrations: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
+                sandbox: None,
             },
             event_sender,
         )?;
@@ -2823,6 +2825,7 @@ impl WakuBackend {
                 integrations: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
+                sandbox: None,
             },
             event_sender,
         )?;
@@ -3019,6 +3022,31 @@ impl WakuBackend {
         // delivery instead see nothing here because their entries were
         // written at connect time.
         options.integrations = self.integrations.launch_integrations(provider);
+        // A sandboxed session runs its provider inside a shuru VM — never on
+        // the host. Every setup failure fails the task rather than silently
+        // falling back to a local process.
+        if self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| session.sandboxed)
+        {
+            if !daemon_settings.sandbox_experiment_enabled {
+                bail!(
+                    "this task was created with the Sandbox VM environment, but the sandbox experiment is off"
+                );
+            }
+            let launch = crate::sandbox::launch_for_provider(provider, &options.cwd)
+                .context("could not prepare the sandbox VM")?;
+            options.binary = launch.binary;
+            options.cwd = launch.cwd;
+            options.sandbox = Some(launch.vm);
+            // The agent surface's daemon address is this host's loopback —
+            // unreachable from inside the guest.
+            options.agent = None;
+        }
         // A launch that never came up keeps no credential.
         let handle = match driver::start_local(provider, options, event_sender) {
             Ok(handle) => handle,
@@ -3159,6 +3187,7 @@ impl WakuBackend {
                 integrations: Vec::new(),
                 provider_cursor: session.provider_cursor.clone(),
                 eval: None,
+                sandbox: None,
             };
             (provider, options)
         };

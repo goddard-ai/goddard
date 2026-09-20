@@ -183,6 +183,7 @@ impl ClaudeDriver {
             integrations: _,
             provider_cursor,
             eval: _,
+            sandbox: _,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
             Some(ProviderResumeCursor::Claude {
@@ -1935,6 +1936,7 @@ mod tests {
         let driver = ClaudeDriver::start(
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -2007,6 +2009,7 @@ mod tests {
         let driver = ClaudeDriver::start(
             DriverStartOptions {
                 eval: None,
+                sandbox: None,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
