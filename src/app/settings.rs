@@ -198,6 +198,8 @@ pub(super) struct RemoteHostEditor {
     /// `user@host` or a `~/.ssh/config` alias. When filled, the connection
     /// goes over the platform `ssh` and the direct fields are unused.
     destination: Entity<TextInput>,
+    /// Eye-toggle state for the masked token field.
+    token_revealed: bool,
     /// `Host` aliases from `~/.ssh/config`, loaded in the background after
     /// the editor opens; each chips-row entry fills the destination field.
     ssh_hosts: Vec<String>,
@@ -2075,6 +2077,7 @@ impl Waku {
             address,
             token,
             destination,
+            token_revealed: false,
             ssh_hosts: Vec::new(),
             missing_fields: false,
         });
@@ -2095,6 +2098,17 @@ impl Waku {
         let focus = name.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         cx.notify();
+    }
+
+    /// Flip the remote-host token field between bullets and plaintext —
+    /// it starts masked, like every other secret field.
+    fn toggle_remote_host_token(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = &mut self.remote_host_editor {
+            editor.token_revealed = !editor.token_revealed;
+            let masked = !editor.token_revealed;
+            editor.token.update(cx, |input, _| input.set_masked(masked));
+            cx.notify();
+        }
     }
 
     fn save_remote_host_editor(&mut self, cx: &mut Context<Self>) {
@@ -3786,6 +3800,46 @@ impl Waku {
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .child(label)
         };
+        let reveal_token_button = div()
+            .id("remote-host-token-reveal")
+            .tab_index(0)
+            .size(px(27.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_color(theme.text_secondary)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon(
+                if editor.token_revealed {
+                    "icons/eye-off.svg"
+                } else {
+                    "icons/eye.svg"
+                },
+                12.0,
+                theme.text_tertiary,
+            ))
+            .tooltip(Tooltip::text(if editor.token_revealed {
+                tr!("daemon.hide_token")
+            } else {
+                tr!("daemon.reveal_token")
+            }))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_remote_host_token(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.toggle_remote_host_token(cx);
+                    cx.stop_propagation();
+                }
+            }));
         div()
             .mt(px(12.0))
             .pt(px(4.0))
@@ -3862,7 +3916,11 @@ impl Waku {
             .child(
                 div()
                     .mt(px(5.0))
-                    .child(TextField::new("remote-host-token", editor.token.clone()).w_full()),
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(TextField::new("remote-host-token", editor.token.clone()).flex_1())
+                    .child(reveal_token_button),
             )
             .when(editor.missing_fields, |element| {
                 element.child(

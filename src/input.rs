@@ -1017,6 +1017,12 @@ impl TextInput {
         self
     }
 
+    /// Flip the masked paint after construction — a visibility toggle
+    /// next to a secret field. Unmasking restores normal layout indices.
+    pub fn set_masked(&mut self, masked: bool) {
+        self.masked = masked;
+    }
+
     /// Make Enter submit this multi-line field instead of inserting a
     /// newline; Shift+Enter still breaks the line.
     pub fn submit_on_enter(mut self) -> Self {
