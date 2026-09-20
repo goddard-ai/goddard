@@ -4,6 +4,8 @@
  * Right-panel file provenance for a draft annotation: the workspace-relative
  * path, the byte range the pinned highlight covers in the file's text, and
  * the 1-based lines covering it at selection time for the prompt's
- * `[Selected lines N-M]` marker.
+ * `[Selected lines N-M]` marker. `source` snapshots those bytes when the pin
+ * was made on the rendered markdown preview, where the span text holds the
+ * rendered passage rather than the file's own slice.
  */
-export type ComposerDraftFileAnnotation = { path: string, start: number, end: number, start_line: number, end_line: number, };
+export type ComposerDraftFileAnnotation = { path: string, start: number, end: number, start_line: number, end_line: number, source?: string | null, };

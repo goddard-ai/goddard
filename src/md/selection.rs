@@ -500,12 +500,21 @@ fn clamp_boundary(text: &str, offset: usize) -> usize {
 /// the file's current text — where the pinned highlight paints — and
 /// `start_line`/`end_line` are the 1-based lines covering it at selection
 /// time, carried for the `[Selected lines N-M]` prompt marker.
+///
+/// `source` snapshots the bytes `range` covered when the passage was pinned
+/// on the rendered markdown preview rather than the editor's own text: the
+/// span text is the *rendered* flat text there, so the source view's
+/// liveness check validates the range against this snapshot instead. `None`
+/// for editor selections, whose span text already is the source slice, and
+/// for a preview pin that could not be mapped back (an empty `range` then
+/// never validates — the highlight lives on the preview alone).
 #[derive(Clone, Debug)]
 pub struct FileAnnotation {
     pub path: String,
     pub range: Range<usize>,
     pub start_line: usize,
     pub end_line: usize,
+    pub source: Option<Rc<str>>,
 }
 
 /// A highlighted passage of transcript text carrying a user comment.

@@ -40,6 +40,7 @@ impl From<&FileAnnotation> for ComposerDraftFileAnnotation {
             end: file.range.end,
             start_line: file.start_line,
             end_line: file.end_line,
+            source: file.source.as_deref().map(str::to_owned),
         }
     }
 }
@@ -51,6 +52,7 @@ impl From<ComposerDraftFileAnnotation> for FileAnnotation {
             range: file.start..file.end,
             start_line: file.start_line,
             end_line: file.end_line,
+            source: file.source.map(Rc::from),
         }
     }
 }

@@ -46,7 +46,9 @@ pub struct ComposerDraftAnnotationSpan {
 /// Right-panel file provenance for a draft annotation: the workspace-relative
 /// path, the byte range the pinned highlight covers in the file's text, and
 /// the 1-based lines covering it at selection time for the prompt's
-/// `[Selected lines N-M]` marker.
+/// `[Selected lines N-M]` marker. `source` snapshots those bytes when the pin
+/// was made on the rendered markdown preview, where the span text holds the
+/// rendered passage rather than the file's own slice.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct ComposerDraftFileAnnotation {
     pub path: String,
@@ -54,6 +56,8 @@ pub struct ComposerDraftFileAnnotation {
     pub end: usize,
     pub start_line: usize,
     pub end_line: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// A commented highlight staged with the draft — a passage of an assistant

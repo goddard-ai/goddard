@@ -838,6 +838,24 @@ impl MarkdownView {
             .clone()
     }
 
+    /// The source byte range of the top-level block `index` — the same index
+    /// an element ordinal encodes, see [`block_index_of_ordinal`]. Lets a
+    /// selection made on rendered text point back into the source, the way
+    /// the file preview maps its annotations onto the underlying file.
+    pub fn block_source_range(&self, index: usize) -> Option<Range<usize>> {
+        let all = &self.parser.tree().blocks;
+        let settled = if self.tail.is_empty() {
+            all.len()
+        } else {
+            self.parser.display_tail_start()
+        };
+        if index < settled {
+            all.get(index).map(|top| top.range.clone())
+        } else {
+            self.tail.get(index - settled).map(|top| top.range.clone())
+        }
+    }
+
     /// Display blocks in document order: the settled prefix, then the mended
     /// tail when one is active.
     fn blocks(&self) -> impl Iterator<Item = &Block> + '_ {
@@ -1777,6 +1795,12 @@ const BLOCK_ORDINAL_STRIDE_BITS: u32 = 16;
 
 fn block_ordinal_base(block_ix: usize) -> usize {
     block_ix << BLOCK_ORDINAL_STRIDE_BITS
+}
+
+/// The top-level block an element ordinal was issued under — the inverse of
+/// the `block_index << 16 | position_within_block` scheme described above.
+pub fn block_index_of_ordinal(ordinal: usize) -> usize {
+    ordinal >> BLOCK_ORDINAL_STRIDE_BITS
 }
 
 /// Find every non-empty regex match in the text elements produced by the
@@ -2868,6 +2892,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(0, 7..10), (1 << 16, 0..3), ((2 << 16) + 1, 0..3)]
         );
+    }
+
+    #[test]
+    fn block_source_range_maps_display_indices_back_to_source() {
+        let source = "# Title\n\nsay hi\n";
+        let mut view = MarkdownView::new();
+        view.set_text(source, false);
+        assert_eq!(
+            view.block_source_range(0).map(|range| source[range].trim()),
+            Some("# Title")
+        );
+        assert_eq!(
+            view.block_source_range(1).map(|range| source[range].trim()),
+            Some("say hi")
+        );
+        assert_eq!(view.block_source_range(2), None);
+        // The same index an element ordinal encodes.
+        assert_eq!(block_index_of_ordinal((1 << 16) + 3), 1);
     }
 
     fn runs_of(source: &str) -> Vec<InlineRun> {

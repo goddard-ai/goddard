@@ -2309,6 +2309,15 @@ impl Waku {
         cx.notify();
     }
 
+    /// The file surface shows `relative_path`'s rendered markdown preview
+    /// rather than its source editor — the toggle is global, so the preview
+    /// is active for every markdown file while it is on. Callers use this to
+    /// pick which selection surface (and which annotation anchors) a file
+    /// action should read.
+    pub(super) fn file_markdown_preview_active(&self, relative_path: &str) -> bool {
+        file_highlighter_language(relative_path) == "markdown" && self.state.markdown_preview
+    }
+
     /// The file the active editor surface is showing, whether via a File tab
     /// or the Files browser's selection — regardless of whether the panel is
     /// currently visible, which is a per-caller decision: save works on a
@@ -4302,7 +4311,7 @@ impl Waku {
         let body = if image_mode {
             self.render_file_image_preview(&relative_path, cx)
         } else if preview {
-            self.render_file_markdown_preview(&relative_path, &editor_state, cx)
+            self.render_file_markdown_preview(&relative_path, &editor_state, window, cx)
         } else {
             self.render_file_editor_body(
                 &relative_path,
@@ -5217,10 +5226,17 @@ impl Waku {
     /// parse is cached per path, so re-rendering an unchanged document costs
     /// `Rc` clones, not a re-parse. Reads only in-memory editor state: the
     /// render path may not touch the filesystem.
+    ///
+    /// Selection and comments work like the transcript's: the render context
+    /// runs on `file_preview_selection` with the editor's annotation store
+    /// swapped in, so the file's pinned highlights paint, hover and reopen
+    /// here exactly as they do in the source view — where
+    /// [`Self::sync_file_annotation_washes`] feeds the same set to the field.
     fn render_file_markdown_preview(
         &mut self,
         relative_path: &str,
         editor_state: &Entity<TextInput>,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -5232,11 +5248,15 @@ impl Waku {
         }
         let (_, view) = cache.as_mut().expect("entry ensured above");
         view.set_text(editor_state.read(cx).content(), false);
+        let mut preview_selection = self.file_preview_selection.clone();
+        if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
+            preview_selection.annotations = editor.annotations.clone();
+        }
         let ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
             MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
-            self.file_preview_selection.clone(),
+            preview_selection.clone(),
         )
         .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
@@ -5244,12 +5264,22 @@ impl Waku {
         .with_link_handler(self.markdown_link_handler.clone());
         let document = md::render::markdown(view, &ctx);
 
+        let preview_focus = self.transcript_control_focus("file-preview", cx);
+        let preview_focus_click = preview_focus.clone();
         let selection_input = {
-            let selection = self.file_preview_selection.clone();
+            let selection = preview_selection.clone();
             canvas(
                 |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
                 move |_, region, window, _| {
-                    md::render::install_selection_input(region, window, &selection, None)
+                    // ⌥-click arms the pressed line as the release fallback
+                    // and fires ⌘L on mouse-up — the transcript's "select and
+                    // annotate" gesture, here pinning on the rendered file.
+                    md::render::install_selection_input(
+                        region,
+                        window,
+                        &selection,
+                        Some(Box::new(AddToChat)),
+                    )
                 },
             )
             .absolute()
@@ -5257,8 +5287,19 @@ impl Waku {
             .left_0()
             .size_full()
         };
+        let annotation_offer = self.render_preview_annotation_offer(relative_path, window, cx);
+        let annotation_editor = self.render_preview_annotation_editor(relative_path, cx);
+        let annotation_tooltip = self.render_preview_annotation_tooltip(relative_path, cx);
 
         div()
+            .key_context("FileEditorPane")
+            .track_focus(&preview_focus)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_, _, window, cx| {
+                    window.focus(&preview_focus_click, cx);
+                }),
+            )
             .flex_1()
             .min_h_0()
             .relative()
@@ -5271,7 +5312,7 @@ impl Waku {
                     .track_scroll(&self.file_preview_scroll_handle)
                     // Painted before the document, so the frame's selection
                     // registry holds exactly this frame's text elements.
-                    .child(md::render::frame_reset(self.file_preview_selection.clone()))
+                    .child(md::render::frame_reset(preview_selection.clone()))
                     .child(
                         div()
                             .when(fullscreen, |element| {
@@ -5291,10 +5332,18 @@ impl Waku {
                     ),
             )
             .child(selection_input)
+            // After the selection canvas so its hit-tests see this frame's
+            // registry; bubble dispatch runs listeners in reverse paint
+            // order, so a press on a highlight reaches the annotation
+            // handlers before the selection's drag begins.
+            .child(self.preview_annotation_input(&preview_selection, relative_path, cx))
             .child(scrollbar::vertical(
                 &self.file_preview_scroll_handle,
                 &self.file_preview_scrollbar,
             ))
+            .children(annotation_offer)
+            .children(annotation_editor)
+            .children(annotation_tooltip)
     }
 
     /// Picks up an external edit to a file the user has not modified here.

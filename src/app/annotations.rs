@@ -37,7 +37,7 @@ use gpui::{
 };
 
 use crate::input::Clear;
-use crate::md::render::{TranscriptSelection, text_range_bounds};
+use crate::md::render::{MarkdownView, TranscriptSelection, text_range_bounds};
 use crate::md::selection::{Annotations, FileAnnotation, Span, TextKey, TranscriptAnnotation};
 use crate::ui::ActivationExt;
 use crate::ui::menu::{DismissMenu, FloatingSurface, MenuAlign};
@@ -277,8 +277,20 @@ impl Waku {
     /// floating surface to anchor to. `None` when the annotated row is
     /// virtualized away or the text no longer matches its snapshot.
     fn spans_anchor(&self, spans: &[Span]) -> Option<Bounds<Pixels>> {
-        let registry = self.transcript_selection.registry.borrow();
         let viewport = self.active_transcript_rows().viewport_bounds();
+        self.spans_anchor_in(&self.transcript_selection, viewport, spans)
+    }
+
+    /// [`Self::spans_anchor`] against another selection's registry — the file
+    /// preview's, whose elements paint into `file_preview_selection` and clip
+    /// against its own scroll handle rather than the transcript's.
+    fn spans_anchor_in(
+        &self,
+        selection: &TranscriptSelection,
+        viewport: Bounds<Pixels>,
+        spans: &[Span],
+    ) -> Option<Bounds<Pixels>> {
+        let registry = selection.registry.borrow();
         for span in spans {
             let Some(entry) = registry
                 .entries()
@@ -314,8 +326,19 @@ impl Waku {
     /// than under its first line. `None` under the same conditions as
     /// [`Self::spans_anchor`].
     fn spans_anchor_union(&self, spans: &[Span]) -> Option<Bounds<Pixels>> {
-        let registry = self.transcript_selection.registry.borrow();
         let viewport = self.active_transcript_rows().viewport_bounds();
+        self.spans_anchor_union_in(&self.transcript_selection, viewport, spans)
+    }
+
+    /// [`Self::spans_anchor_union`] against another selection's registry —
+    /// see [`Self::spans_anchor_in`].
+    fn spans_anchor_union_in(
+        &self,
+        selection: &TranscriptSelection,
+        viewport: Bounds<Pixels>,
+        spans: &[Span],
+    ) -> Option<Bounds<Pixels>> {
+        let registry = selection.registry.borrow();
         let mut union: Option<Bounds<Pixels>> = None;
         for span in spans {
             let Some(entry) = registry
@@ -429,22 +452,78 @@ impl Waku {
         })
     }
 
+    /// First on-screen glyph rect of an annotation's rendered spans in the
+    /// file preview — the anchor for its hover tooltip there. `None` when the
+    /// passage scrolled out of the preview viewport or the rendered text
+    /// moved under it.
+    fn preview_annotation_anchor(
+        &self,
+        relative_path: &str,
+        annotation_id: u64,
+    ) -> Option<Bounds<Pixels>> {
+        let annotations = self
+            .right_panel_file_editors
+            .get(relative_path)?
+            .annotations
+            .borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        let viewport = self.file_preview_scroll_handle.bounds();
+        self.spans_anchor_in(&self.file_preview_selection, viewport, &annotation.spans)
+    }
+
+    /// Bounding box of every on-screen glyph rect of an annotation's rendered
+    /// spans in the file preview — the anchor for its comment editor there.
+    /// `None` under the same conditions as [`Self::preview_annotation_anchor`].
+    fn preview_annotation_editor_anchor(
+        &self,
+        relative_path: &str,
+        annotation_id: u64,
+    ) -> Option<Bounds<Pixels>> {
+        let annotations = self
+            .right_panel_file_editors
+            .get(relative_path)?
+            .annotations
+            .borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        let viewport = self.file_preview_scroll_handle.bounds();
+        self.spans_anchor_union_in(&self.file_preview_selection, viewport, &annotation.spans)
+    }
+
     /// ⌘L with the pill's selection on screen is the same as clicking it.
     /// Without an annotatable selection the chord keeps its global meaning,
     /// so the context bindings forward to FocusComposer. A focused file
-    /// editor's selection wins — its FileEditorPane binding only fires there.
+    /// pane's selection wins — its FileEditorPane binding only fires there,
+    /// whether the pane is showing the editor or the markdown preview.
     pub(super) fn add_to_chat_action(
         &mut self,
         _: &AddToChat,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(path) = self
-            .visible_right_panel_file_path()
-            .filter(|path| self.file_editor_selection_focused(path, window, cx))
-        {
-            self.annotate_file_selection(&path, window, cx);
-        } else if self.annotatable_selection().is_some() {
+        if let Some(path) = self.visible_right_panel_file_path() {
+            if self.file_markdown_preview_active(&path) {
+                // As in the source view, a lingering selection only counts
+                // while the pane it was made in holds focus — otherwise ⌘L
+                // under the transcript would annotate an off-screen grab.
+                let preview_focused = self
+                    .transcript_control_focus("file-preview", cx)
+                    .is_focused(window);
+                if preview_focused && self.annotatable_preview_selection(&path).is_some() {
+                    self.annotate_preview_selection(&path, window, cx);
+                    return;
+                }
+            } else if self.file_editor_selection_focused(&path, window, cx) {
+                self.annotate_file_selection(&path, window, cx);
+                return;
+            }
+        }
+        if self.annotatable_selection().is_some() {
             self.annotate_selection(window, cx);
         } else {
             self.focus_composer_action(&FocusComposer, window, cx);
@@ -554,6 +633,7 @@ impl Waku {
                     range,
                     start_line,
                     end_line,
+                    source: None,
                 }),
             });
             annotations.hovered = None;
@@ -572,6 +652,151 @@ impl Waku {
         // closes — hand focus back to the field the selection came from.
         if let Some(editor) = self.annotation_editor.as_mut() {
             editor.previous_focus = Some(field_focus);
+        }
+    }
+
+    /// The markdown preview's settled selection when it can be annotated:
+    /// non-empty, not mid-drag, and every span keyed to `relative_path`'s own
+    /// rendered row. The preview's selection state is shared across files, so
+    /// spans left over from another path do not count.
+    fn annotatable_preview_selection(&self, relative_path: &str) -> Option<Vec<Span>> {
+        let selection = self.file_preview_selection.selection.borrow();
+        if selection.is_dragging() || selection.is_empty() {
+            return None;
+        }
+        let row = format!("file-preview-{relative_path}");
+        let spans = selection.spans();
+        spans
+            .iter()
+            .all(|span| span.key.row.as_ref() == row)
+            .then(|| spans.to_vec())
+    }
+
+    /// The file byte range the preview selection pins: its boundary spans
+    /// each locate verbatim inside their top-level block's source range.
+    /// `None` when either edge fails — the rendered slice crosses markdown
+    /// syntax the source does not spell the same way — in which case the
+    /// annotation still records its covering blocks' line span and pins on
+    /// the preview alone.
+    fn preview_annotation_source_range(
+        &self,
+        relative_path: &str,
+        spans: &[Span],
+        content: &str,
+    ) -> Option<Range<usize>> {
+        let cache = self.file_preview_markdown.borrow();
+        let (path, view) = cache.as_ref()?;
+        if path != relative_path {
+            return None;
+        }
+        let start = preview_span_source_range(view, content, spans.first()?)?;
+        let end = preview_span_source_range(view, content, spans.last()?)?;
+        Some(start.start..end.end)
+    }
+
+    /// The source range covering the selection's first through last
+    /// top-level blocks — the line marker's fallback when the precise pin
+    /// fails.
+    fn preview_annotation_block_range(
+        &self,
+        relative_path: &str,
+        spans: &[Span],
+    ) -> Option<Range<usize>> {
+        let cache = self.file_preview_markdown.borrow();
+        let (path, view) = cache.as_ref()?;
+        if path != relative_path {
+            return None;
+        }
+        let start =
+            view.block_source_range(md::render::block_index_of_ordinal(spans.first()?.key.index))?;
+        let end =
+            view.block_source_range(md::render::block_index_of_ordinal(spans.last()?.key.index))?;
+        Some(start.start..end.end)
+    }
+
+    /// The preview counterpart of [`Self::annotate_file_selection`]: the
+    /// spans pin on the file's shared annotation set in rendered coordinates
+    /// — what the preview's wash and hit-tests read — while the provenance
+    /// records where they came from: the exact source range when both
+    /// boundary spans map, else an empty range that never validates in the
+    /// source view. The comment editor opens anchored to the rendered
+    /// highlight, and focus returns to the preview on close.
+    fn annotate_preview_selection(
+        &mut self,
+        relative_path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(spans) = self.annotatable_preview_selection(relative_path) else {
+            return;
+        };
+        let preview_focus = self.transcript_control_focus("file-preview", cx);
+        let Some((content, store)) =
+            self.right_panel_file_editors
+                .get(relative_path)
+                .map(|editor| {
+                    (
+                        editor.state.read(cx).content().to_owned(),
+                        editor.annotations.clone(),
+                    )
+                })
+        else {
+            return;
+        };
+        let range = self.preview_annotation_source_range(relative_path, &spans, &content);
+        let Some(line_range) = range
+            .clone()
+            .or_else(|| self.preview_annotation_block_range(relative_path, &spans))
+        else {
+            return;
+        };
+        let start_line = 1 + content
+            .get(..line_range.start)
+            .unwrap_or_default()
+            .matches('\n')
+            .count();
+        let end_line = start_line
+            + content
+                .get(line_range)
+                .unwrap_or_default()
+                .matches('\n')
+                .count();
+        let source = range
+            .clone()
+            .and_then(|range| content.get(range).map(|slice| Rc::from(slice)));
+        let id = self.annotation_next_id;
+        self.annotation_next_id = self.annotation_next_id.wrapping_add(1);
+        {
+            let mut annotations = store.borrow_mut();
+            annotations.items.push(TranscriptAnnotation {
+                id,
+                message_id: Uuid::nil(),
+                spans,
+                comment: String::new(),
+                file: Some(FileAnnotation {
+                    path: relative_path.to_owned(),
+                    range: range.unwrap_or_default(),
+                    start_line,
+                    end_line,
+                    source,
+                }),
+            });
+            annotations.hovered = None;
+        }
+        self.file_preview_selection.selection.borrow_mut().clear();
+        self.annotation_hover = None;
+        self.schedule_composer_draft_save(cx);
+        self.open_annotation_editor(
+            id,
+            true,
+            AnnotationTarget::File(relative_path.to_owned()),
+            window,
+            cx,
+        );
+        // The pill is gone by the time the editor closes — hand focus back
+        // to the preview the selection came from.
+        if let Some(editor) = self.annotation_editor.as_mut() {
+            editor.previous_focus = Some(preview_focus);
         }
     }
 
@@ -1043,6 +1268,44 @@ impl Waku {
         )
     }
 
+    /// The floating "Add to chat" pill over a settled markdown-preview
+    /// selection — the same control, anchored to the preview's painted spans.
+    pub(super) fn render_preview_annotation_offer(
+        &self,
+        relative_path: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let spans = self.annotatable_preview_selection(relative_path)?;
+        let viewport = self.file_preview_scroll_handle.bounds();
+        let anchor = self.spans_anchor_in(&self.file_preview_selection, viewport, &spans)?;
+        // Resolve the chord as if the preview were focused — the same
+        // FileEditorPane binding the editor's pill shows.
+        let preview_focus = self.transcript_control_focus("file-preview", cx);
+        let shortcut_label =
+            ShortcutHint::action_in(&AddToChat, &preview_focus).resolve(window, cx);
+        let path = relative_path.to_owned();
+        let button = self.add_to_chat_button(
+            "preview-annotation-add-to-chat",
+            "preview-annotation-add-to-chat",
+            shortcut_label,
+            cx,
+            move |this, window, cx| this.annotate_preview_selection(&path, window, cx),
+        );
+        Some(
+            deferred(FloatingSurface::new(
+                motion::surface_enter("annotate-preview-selection-enter", button)
+                    .into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
     /// The shared comment-editor card. The caller anchors it below the
     /// annotation's visible extent — transcript spans or file range.
     fn annotation_editor_card(
@@ -1137,8 +1400,22 @@ impl Waku {
         if editor.target != AnnotationTarget::File(relative_path.to_owned()) {
             return None;
         }
-        let anchor =
-            self.file_annotation_editor_anchor(relative_path, editor.annotation_id, cx)?;
+        let anchor = self.file_annotation_editor_anchor(relative_path, editor.annotation_id, cx)?;
+        Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
+    }
+
+    /// The same floating comment editor over a preview annotation, anchored
+    /// below its visible extent in the rendered document.
+    pub(super) fn render_preview_annotation_editor(
+        &self,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let editor = self.annotation_editor.as_ref()?;
+        if editor.target != AnnotationTarget::File(relative_path.to_owned()) {
+            return None;
+        }
+        let anchor = self.preview_annotation_editor_anchor(relative_path, editor.annotation_id)?;
         Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
     }
 
@@ -1239,6 +1516,41 @@ impl Waku {
             return None;
         }
         let anchor = self.file_annotation_anchor(relative_path, hover.id, cx)?;
+        Some(self.annotation_tooltip_card(anchor, comment, cx))
+    }
+
+    /// The same comment tooltip over a preview annotation's highlight.
+    pub(super) fn render_preview_annotation_tooltip(
+        &self,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self.annotation_hover.as_ref().filter(|hover| {
+            hover.visible && hover.target == AnnotationTarget::File(relative_path.to_owned())
+        })?;
+        if self
+            .annotation_editor
+            .as_ref()
+            .is_some_and(|editor| editor.annotation_id == hover.id)
+        {
+            return None;
+        }
+        let comment = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .and_then(|editor| {
+                editor
+                    .annotations
+                    .borrow()
+                    .items
+                    .iter()
+                    .find(|annotation| annotation.id == hover.id)
+                    .map(|annotation| annotation.comment.clone())
+            })?;
+        if comment.trim().is_empty() {
+            return None;
+        }
+        let anchor = self.preview_annotation_anchor(relative_path, hover.id)?;
         Some(self.annotation_tooltip_card(anchor, comment, cx))
     }
 
@@ -1684,6 +1996,127 @@ impl Waku {
         });
     }
 
+    /// The markdown preview's annotation mouse listeners — the
+    /// registry-based counterpart of [`Self::install_file_annotation_input`],
+    /// hit-testing the frame's painted highlight spans instead of the
+    /// field's byte ranges. `selection` is the preview's state with the
+    /// file's annotation store swapped in, so hover and presses read the same
+    /// set the editor view does; the `File` target matches too — only one of
+    /// the two views is ever on screen.
+    fn install_preview_annotation_input(
+        region: HitboxId,
+        window: &mut Window,
+        _cx: &mut App,
+        selection: &TranscriptSelection,
+        relative_path: &str,
+        waku: &WeakEntity<Waku>,
+    ) {
+        window.on_mouse_event({
+            let selection = selection.clone();
+            let path = relative_path.to_owned();
+            let waku = waku.clone();
+            move |event: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble
+                    || event.button != MouseButton::Left
+                    || !region.is_hovered(window)
+                {
+                    return;
+                }
+                if let Some(id) = annotation_hit_at(&selection, event.position) {
+                    let _ = waku.update(cx, |this, _| {
+                        this.annotation_press = Some(AnnotationPress {
+                            id,
+                            position: event.position,
+                            target: AnnotationTarget::File(path.clone()),
+                        });
+                    });
+                }
+            }
+        });
+
+        window.on_mouse_event({
+            let selection = selection.clone();
+            let path = relative_path.to_owned();
+            let waku = waku.clone();
+            move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || event.dragging() || !region.is_hovered(window)
+                {
+                    return;
+                }
+                let hit = annotation_hit_at(&selection, event.position);
+                let changed = {
+                    let mut annotations = selection.annotations.borrow_mut();
+                    if annotations.hovered == hit {
+                        false
+                    } else {
+                        annotations.hovered = hit;
+                        true
+                    }
+                };
+                if changed {
+                    let _ = waku.update(cx, |this, cx| {
+                        this.annotation_hover_changed(
+                            hit.map(|id| (id, AnnotationTarget::File(path.clone()))),
+                            cx,
+                        );
+                    });
+                    window.refresh();
+                }
+            }
+        });
+
+        window.on_mouse_event({
+            let selection = selection.clone();
+            let path = relative_path.to_owned();
+            let waku = waku.clone();
+            move |event: &MouseUpEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                    return;
+                }
+                let press = waku
+                    .update(cx, |this, _| {
+                        this.annotation_press
+                            .take_if(|press| press.target == AnnotationTarget::File(path.clone()))
+                    })
+                    .ok()
+                    .flatten();
+                let Some(press) = press else {
+                    return;
+                };
+                // A drag that started on a highlight ends with a selection,
+                // not a press — only a clean click reopens the editor.
+                if !selection.selection.borrow().is_empty() {
+                    return;
+                }
+                let moved = event.position - press.position;
+                if moved.x.abs() > px(4.0) || moved.y.abs() > px(4.0) {
+                    return;
+                }
+                if annotation_hit_at(&selection, event.position) != Some(press.id) {
+                    return;
+                }
+                // As on the transcript, an ⌥-click's armed line fallback is
+                // released and cleared so the selection's own mouse-up does
+                // not stack a new annotation over the one this click
+                // reopens.
+                let mut settled = selection.selection.borrow_mut();
+                if settled.release() {
+                    settled.clear();
+                }
+                drop(settled);
+                let _ = waku.update(cx, |this, cx| {
+                    this.open_annotation_editor(
+                        press.id,
+                        false,
+                        AnnotationTarget::File(path.clone()),
+                        window,
+                        cx,
+                    )
+                });
+            }
+        });
+    }
+
     fn annotation_hover_changed(
         &mut self,
         hit: Option<(u64, AnnotationTarget)>,
@@ -1788,6 +2221,31 @@ impl Waku {
         .size_full()
     }
 
+    /// The preview's listener canvas — see
+    /// [`Self::install_preview_annotation_input`]. `selection` is the
+    /// preview's state carrying the file's annotation store; rendered inside
+    /// the preview's scroll container so the region only covers the document.
+    pub(super) fn preview_annotation_input(
+        &self,
+        selection: &TranscriptSelection,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let path = relative_path.to_owned();
+        let selection = selection.clone();
+        let waku = cx.entity().downgrade();
+        canvas(
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, cx| {
+                Self::install_preview_annotation_input(region, window, cx, &selection, &path, &waku)
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
     /// Push the file editor's live annotation ranges into the field's paint
     /// set. Runs from render — the field's `last_layout` and the annotation
     /// ranges are both in-memory — and costs a few short string compares per
@@ -1847,9 +2305,32 @@ fn file_annotation_live(annotation: &TranscriptAnnotation, content: &str) -> boo
     let Some(span) = annotation.spans.first() else {
         return false;
     };
+    // A preview-pinned annotation validates against the source bytes its
+    // range covered; an editor selection's span text already is that slice.
+    let expected = file.source.as_deref().unwrap_or(&span.text);
     content
         .get(file.range.clone())
-        .is_some_and(|slice| slice == &*span.text)
+        .is_some_and(|slice| slice == expected)
+}
+
+/// A preview span's selected bytes located in the file's text: the span's
+/// element ordinal names its top-level block, whose source range is searched
+/// for the selected rendered text — verbatim for plain runs, `None` when the
+/// selection crosses markdown syntax the render drops (emphasis markers,
+/// fences, link destinations), so an unmappable span degrades to its block's
+/// line span rather than pinning the wrong bytes.
+fn preview_span_source_range(
+    view: &MarkdownView,
+    content: &str,
+    span: &Span,
+) -> Option<Range<usize>> {
+    let block = view.block_source_range(md::render::block_index_of_ordinal(span.key.index))?;
+    let selected = span.text.get(span.range.clone())?;
+    if selected.is_empty() {
+        return None;
+    }
+    let local = content.get(block.clone())?.find(selected)?;
+    Some(block.start + local..block.start + local + selected.len())
 }
 
 /// The annotation whose highlight contains `position`, consulting the frame's
@@ -1988,6 +2469,7 @@ mod tests {
                 range,
                 start_line,
                 end_line,
+                source: None,
             }),
         }
     }
@@ -2172,5 +2654,59 @@ mod tests {
         // A transcript annotation is never file-live.
         let transcript = annotation(2, "text", "");
         assert!(!file_annotation_live(&transcript, content));
+    }
+
+    #[test]
+    fn preview_pin_validates_its_range_against_the_source_snapshot() {
+        // Pinned on the preview: the span text is the *rendered* passage, so
+        // the source view validates `range` against the snapshot the pin
+        // took — here a link whose rendered label is not the source slice.
+        let content = "a [label](https://x) b\n";
+        let mut pinned = file_annotation(1, "doc.md", "label", 2..20, 1, 1, "");
+        pinned.file.as_mut().expect("file").source = Some(Rc::from("[label](https://x)"));
+        assert!(file_annotation_live(&pinned, content));
+        assert!(!file_annotation_live(&pinned, "a [label](https://y) b\n"));
+        // An unmappable pin — empty range, no snapshot — never validates in
+        // the source view; its highlight lives on the preview alone.
+        let unmapped = file_annotation(2, "doc.md", "rendered text", 0..0, 1, 1, "");
+        assert!(!file_annotation_live(&unmapped, content));
+    }
+
+    /// A preview span as `annotate_preview_selection` sees it: rendered flat
+    /// text keyed by an element ordinal that encodes its top-level block.
+    fn preview_span(block: usize, text: &str, range: Range<usize>) -> Span {
+        Span {
+            key: TextKey::new("file-preview-doc.md", block << 16),
+            range,
+            text: Rc::from(text),
+            block_break: false,
+            copy: Rc::default(),
+        }
+    }
+
+    #[test]
+    fn preview_span_maps_rendered_text_back_to_source() {
+        let content = "# Title\n\nsay **hi** there\n";
+        let mut view = MarkdownView::new();
+        view.set_text(content, false);
+        // The heading's rendered text drops '#' but still locates verbatim.
+        let span = preview_span(0, "Title", 0..5);
+        assert_eq!(
+            preview_span_source_range(&view, content, &span).map(|range| &content[range]),
+            Some("Title")
+        );
+        // A verbatim run inside dropped emphasis markers still maps.
+        let span = preview_span(1, "say hi there", 4..6);
+        assert_eq!(
+            preview_span_source_range(&view, content, &span).map(|range| &content[range]),
+            Some("hi")
+        );
+        // The whole rendered line crosses the '**' the render dropped, so it
+        // cannot be pinned — the caller falls back to the block's line span.
+        let span = preview_span(1, "say hi there", 0..12);
+        assert_eq!(preview_span_source_range(&view, content, &span), None);
+        // An ordinal past the document's blocks maps nowhere.
+        let span = preview_span(9, "Title", 0..5);
+        assert_eq!(preview_span_source_range(&view, content, &span), None);
     }
 }
