@@ -4612,10 +4612,6 @@ impl Waku {
                             {
                                 this.submit_big_picture_submission(submission, cx);
                             }
-                        } else if this.projects_page.is_some() {
-                            // The docked composer is the same entity; on the
-                            // page Enter means "new task on this project".
-                            this.projects_submit(prompt, cx);
                         } else if let Some(session_id) =
                             this.selected_session().and_then(|session| {
                                 this.response_fork_preparations
@@ -4657,10 +4653,6 @@ impl Waku {
                             {
                                 this.steer_big_picture_submission(submission, cx);
                             }
-                        } else if this.projects_page.is_some() {
-                            // Nothing on the page can be steered — a steered
-                            // draft is a send there.
-                            this.projects_submit(prompt, cx);
                         } else if empty_draft {
                             if this
                                 .composer_session()

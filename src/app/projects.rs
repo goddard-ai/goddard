@@ -507,29 +507,11 @@ impl Waku {
         self.settings_page = None;
         self.notifications.open = false;
         // The page claims the main area — a selected terminal gives way and
-        // the Terminals group folds, same as picking a chat does. A selected
-        // task gives way too: park the transcript's draft, panel, and scroll
-        // position the same way a terminal takeover does, and drop any
-        // activation still in flight so it cannot hand the area back.
+        // the Terminals group folds, same as picking a chat does. The
+        // selected task stays selected underneath, the same contract the
+        // Drafts, Automations, and Inbox pages share: closing the page
+        // uncovers it, and any activation clears the page.
         self.selected_terminal = None;
-        if self.state.selected_session.is_some() {
-            self.capture_and_save_current_composer_draft(cx);
-            self.store_selected_right_panel_state();
-            self.store_transcript_scroll_position();
-            self.state.selected_session = None;
-            // The session's strip is parked; the no-task context's own panel
-            // state comes back rather than inheriting the session's. Its
-            // focus requests are dropped — the page's filter takes the
-            // keyboard below.
-            let detached = std::mem::replace(
-                &mut self.right_panel_detached_state,
-                RightPanelSessionState::empty(false),
-            );
-            self.restore_right_panel_state(detached, cx);
-            self.right_panel_pending_terminal_focus = None;
-            self.right_panel_pending_browser_focus = None;
-            self.save();
-        }
         self.pending_session_activation = None;
         self.drafts_page = false;
         self.automations_page = false;
@@ -540,9 +522,6 @@ impl Waku {
         {
             self.sidebar_rows_fingerprint.set(None);
         }
-        // The docked composer answers to the page's draft — activation
-        // clears `projects_page`, so the page marker lands after the bind.
-        self.bind_projects_page_draft(project_id, cx);
         self.projects_page = Some(project_id);
         self.last_projects_page_project = Some(project_id);
         self.projects_ensure_state(project_id, window, cx);
@@ -1700,75 +1679,6 @@ impl Waku {
         })
         .detach();
     }
-
-    /// Submit the page's composer: a normal task on the page's project whose
-    /// prompt carries the visible context — project, tab, and filter.
-    pub(super) fn projects_submit(&mut self, prompt: &str, cx: &mut Context<Self>) {
-        if self.projects_page.is_none() {
-            return;
-        }
-        let Some(submission) = self.submission_with_attachments(prompt, cx) else {
-            return;
-        };
-        // Enter and steer already cleared the field; the send-button path
-        // needs it done here.
-        self.composer.update(cx, |input, cx| input.clear(cx));
-        self.submit_projects_page_submission(submission, prompt, cx);
-    }
-
-    pub(super) fn submit_projects_page_submission(
-        &mut self,
-        mut submission: ComposerSubmission,
-        typed: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(project_id) = self.projects_page else {
-            return;
-        };
-        let Some(state) = self.projects_page_states.get(&project_id) else {
-            return;
-        };
-        let project = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == project_id);
-        let Some(project) = project else {
-            return;
-        };
-        let project_name = project.display_name();
-        let project_path = project.path.clone();
-        let tab = state.tab;
-        let filter = state.filter_text(tab, cx);
-        let filter = filter.trim().to_owned();
-
-        let mut context = format!("- Project: {project_name} ({})", project_path.display());
-        context.push_str(&format!("\n- Tab: {}", tab.label()));
-        if !filter.is_empty() {
-            context.push_str(&format!("\n- Filter: {filter}"));
-        }
-
-        // The stored prompt carries the context block; the bubble keeps the
-        // user's own words with the context readable in the same turn.
-        let typed = typed.trim();
-        submission.prompt = format!(
-            "Context for this request:\n{context}\n\n{}",
-            submission.prompt
-        );
-        let display_body = if typed.is_empty() {
-            submission.display_content.clone().unwrap_or_default()
-        } else {
-            typed.to_owned()
-        };
-        submission.display_content = Some(format!("{context}\n\n{display_body}"));
-
-        self.close_projects_page(cx);
-        self.create_session_for(project_id, self.state.last_provider, cx);
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        self.submit_composer_submission_to(session_id, submission, cx);
-    }
 }
 
 impl Waku {
@@ -1859,8 +1769,7 @@ impl Waku {
                         element.child(self.render_projects_toolbar(project_id, tab, cx))
                     })
                     .child(content)
-                    .children(self.render_projects_bulk_bar(project_id, tab, cx))
-                    .child(self.render_projects_composer(project_id, window, cx)),
+                    .children(self.render_projects_bulk_bar(project_id, tab, cx)),
             )
             .into_any_element()
     }
@@ -3795,120 +3704,6 @@ impl Waku {
                 }))
                 .into_any_element(),
         )
-    }
-
-    /// The docked composer: the page's context chips over the same card the
-    /// chat column mounts — one shared `ComposerInput`, so drafts, paste,
-    /// attachments, and the controls row all behave identically.
-    fn render_projects_composer(
-        &mut self,
-        project_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = Theme::current(cx);
-        let Some(state) = self.projects_page_states.get(&project_id) else {
-            return div().into_any_element();
-        };
-        let tab = state.tab;
-        let filter = state.filter_text(tab, cx).trim().to_owned();
-        let selected = state.selected_in(tab);
-        let project_name = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == project_id)
-            .map(|project| project.display_name())
-            .unwrap_or_default();
-
-        let chip = |id: &'static str,
-                    label: String,
-                    removable: bool,
-                    cx: &mut Context<Self>|
-         -> AnyElement {
-            div()
-                .id(id)
-                .h(px(22.0))
-                .px(px(7.0))
-                .rounded(px(6.0))
-                .bg(theme.inset)
-                .flex()
-                .items_center()
-                .gap(px(5.0))
-                .text_size(sp(14.0))
-                .text_color(theme.text_secondary)
-                .child(label)
-                .when(removable, |element| {
-                    element
-                        .child(icon("icons/x.svg", 9.0, theme.text_tertiary))
-                        .cursor_default()
-                        .hover(|style| style.bg(theme.overlay))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(state) = this.projects_page_states.get_mut(&project_id) {
-                                match id {
-                                    "projects-chip-filter" => {
-                                        let tab = state.tab;
-                                        state.filter_input(tab).update(cx, |input, cx| {
-                                            input.clear(cx);
-                                        });
-                                    }
-                                    "projects-chip-selection" => {
-                                        state.selection.clear();
-                                        state.anchor = None;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            cx.notify();
-                        }))
-                })
-                .into_any_element()
-        };
-
-        let mut chips = div()
-            .flex_none()
-            .w_full()
-            .px(px(10.0))
-            .pb(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .flex_wrap()
-            .child(chip("projects-chip-project", project_name, false, cx))
-            .child(chip("projects-chip-tab", tab.label(), false, cx));
-        if !filter.is_empty() {
-            chips = chips.child(chip(
-                "projects-chip-filter",
-                tr!("projects.chip_filter", filter = filter.clone()),
-                true,
-                cx,
-            ));
-        }
-        if selected > 0 {
-            chips = chips.child(chip(
-                "projects-chip-selection",
-                tr!("projects.chip_selected", count = selected),
-                true,
-                cx,
-            ));
-        }
-
-        // The same card the chat column docks — chips carry the page's
-        // context above it. Big Picture remounts the one composer entity
-        // inside its own layer; mounting it here too would collide.
-        div()
-            .flex_none()
-            .w_full()
-            .pt(px(4.0))
-            .flex()
-            .flex_col()
-            .child(chips)
-            .when(!self.big_picture.is_open(), |element| {
-                element
-                    .child(self.render_composer(window, cx))
-                    .child(self.render_workspace_footer(cx))
-            })
-            .into_any_element()
     }
 
     // ----- Settings → Git page -----

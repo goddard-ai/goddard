@@ -263,8 +263,8 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if self.projects_page.is_some() {
-            // On the page the chip re-points the page itself; the draft
-            // hand-off rides the rebind inside `show_projects_page`.
+            // The page mounts no composer, so a pick here can only be a
+            // stale event — re-point the page rather than navigate.
             self.switch_projects_page_project(project_id, window, cx);
             return;
         }

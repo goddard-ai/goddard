@@ -946,57 +946,6 @@ impl Waku {
         Some(session_id)
     }
 
-    /// The Projects page docks the same composer a chat does; its workspace,
-    /// branch, and model controls target the project's draft — the unstarted
-    /// task New Task would reuse. Activation runs without the visit
-    /// `select_session` records: the page itself is the location history
-    /// captured.
-    pub(super) fn bind_projects_page_draft(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
-        // Docking a remote project is use — start its interactive connect.
-        if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(project_id)
-            && self.daemons.daemon_for_project(project_id).is_none()
-        {
-            self.use_remote_host(host, cx);
-        }
-        let source = self.composer_draft_key();
-        let draft_id = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.project_id == project_id && !session.has_started())
-            .map(|session| session.id)
-            .unwrap_or_else(|| {
-                let runtime_mode =
-                    new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
-                let sandboxed = new_task_sandboxed(
-                    self.selected_session(),
-                    self.state.last_sandboxed,
-                    self.state.sandbox_experiment_enabled,
-                    self.state.sandbox_default_enabled,
-                );
-                let mut session = self.state.new_session(project_id, self.state.last_provider);
-                session.runtime_mode = runtime_mode;
-                session.sandboxed = sandboxed;
-                let id = session.id;
-                self.track_task_created(&session, "interactive");
-                self.state.push_session(session);
-                id
-            });
-        // Reused and fresh drafts alike route to the project's daemon —
-        // claiming also repairs drafts made before ownership was recorded.
-        self.daemons
-            .claim_session(draft_id, self.daemons.project_owner(project_id));
-        self.activate_session(draft_id, cx);
-        // A draft typed against the page's previous project follows the
-        // switch into the new project's empty slot — the composer's project
-        // picker hands text off the same way.
-        if let Some(crate::persistence::ComposerDraftKey::NewSession(_)) = source {
-            self.move_composer_draft_after_project_change(source, cx);
-        }
-        // A remotely synced draft may still be waiting on its detail fetch.
-        self.ensure_session_loaded(draft_id, cx);
-    }
-
     pub(super) fn select_workspace(&mut self, workspace: SessionWorkspace, cx: &mut Context<Self>) {
         let Some(session_id) = self.state.selected_session else {
             return;
@@ -2132,8 +2081,18 @@ impl Waku {
             return;
         }
         self.settings_page = None;
+        // On the Projects page the destination is the project on screen,
+        // not the session the page covers — the page keeps it selected
+        // underneath like every other page does.
         let current_project = self
-            .selected_project()
+            .projects_page
+            .or(self.state.selected_project)
+            .and_then(|id| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == id)
+            })
             .map(|project| (project.id, project.is_projectless()));
         match current_project {
             Some((_, true)) => self.create_projectless_session(cx),
@@ -2926,8 +2885,7 @@ impl Waku {
         };
         // The composer only exists once a project is on screen; settings
         // replaces the workspace root wholesale, a selected terminal owns the
-        // main area's keystrokes, and the Projects page's own filter and
-        // composer own theirs.
+        // main area's keystrokes, and the Projects page's filter owns theirs.
         if self.selected_project().is_none()
             || self.settings_page.is_some()
             || self.selected_terminal.is_some()

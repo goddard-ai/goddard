@@ -1763,14 +1763,6 @@ projects.not_a_repo:
   en: This project is not a git repository
 projects.not_a_github_repo:
   en: This project is not a GitHub repository
-projects.chip_filter:
-  en: "Filter: %{filter}"
-projects.chip_selected:
-  en: "%{count} selected"
-projects.composer_placeholder:
-  en: Describe a task…
-projects.send:
-  en: Send
 projects.col_name:
   en: Name
 projects.col_branch:

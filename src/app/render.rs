@@ -795,10 +795,10 @@ impl Render for Waku {
                     .children(permission)
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
-                    // Projects page docks its own composer instead. While the
-                    // overlay is open a spacer holds the lane at its last
-                    // measured height so the transcript's frame — and with it
-                    // the scroll anchor — does not shift.
+                    // pages own no composer at all. While the overlay is
+                    // open a spacer holds the lane at its last measured
+                    // height so the transcript's frame — and with it the
+                    // scroll anchor — does not shift.
                     .when(
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()

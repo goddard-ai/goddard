@@ -624,11 +624,6 @@ projects.open_pull_request: 打开拉取请求
 projects.view_pull_request: "查看 PR %{number}"
 projects.not_a_repo: 此项目不是 Git 仓库
 projects.not_a_github_repo: 此项目不是 GitHub 仓库
-projects.chip_filter: "筛选：%{filter}"
-projects.chip_selected: "已选择 %{count} 项"
-projects.composer_placeholder: 描述任务…
-projects.send: 发送
-
 onboarding.open_project_to_begin: 打开一个项目即可开始
 onboarding.description: Goddard 会在你选择的文件夹中运行编程智能体。代码、任务和历史记录都保留在这台电脑上
 onboarding.web_description: 请选择守护进程主机上的路径，或在不使用项目的情况下开始。
