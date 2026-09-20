@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::sessions::CANCEL_DRAIN_TIMEOUT;
 
 const MAX_BACKGROUND_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_SETTLED_BACKGROUND_ITEMS: usize = 24;
@@ -7,6 +8,10 @@ const OUTPUT_CACHE_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 /// last detached work settled. Claude re-enters the model a few seconds after
 /// the settle; a first token that slow is a wake in progress, not a no-show.
 const BACKGROUND_RESUME_GRACE: Duration = Duration::from_secs(30);
+/// How long a foreground item may show Stopping while the provider finishes
+/// the kill. Past the grace the stop is treated as unconfirmed and the item
+/// settles the way an interrupted turn's work would.
+const FOREGROUND_STOPPING_GRACE: Duration = Duration::from_secs(15);
 const BACKGROUND_SUMMARY_MENU_ID: &str = "background-work-summary";
 const OPEN_IN_MENU_ID: &str = "open-in-app";
 const TASK_ID_COPY_CONTROL_ID: &str = "background-summary-copy-task-id";
@@ -291,7 +296,15 @@ impl BackgroundWorkRegistry {
         let keys = self
             .items
             .values()
-            .filter(|item| !item.background && item.status.is_live())
+            .filter(|item| {
+                !item.background
+                    && item.status.is_live()
+                    // A cancel already asked the provider to kill this item:
+                    // leave it in Stopping until the exit report lands
+                    // rather than declaring a still-dying process Stopped.
+                    && !(status == BackgroundWorkStatus::Stopped
+                        && item.status == BackgroundWorkStatus::Stopping)
+            })
             .map(|item| item.key.clone())
             .collect::<Vec<_>>();
         let now = unix_time_millis();
@@ -306,6 +319,39 @@ impl BackgroundWorkRegistry {
                 self.remove(&key);
             }
         }
+    }
+
+    /// Settles foreground items whose stop request the provider never
+    /// confirmed — accepted the kill, then went silent. Bounded by the
+    /// `updated_at` the StopRequested stamped, so a slow kill still reads as
+    /// stopping rather than dead.
+    fn settle_unconfirmed_stops(&mut self, grace: Duration) -> bool {
+        let cutoff = unix_time_millis().saturating_sub(grace.as_millis() as u64);
+        let keys = self
+            .items
+            .values()
+            .filter(|item| {
+                !item.background
+                    && item.status == BackgroundWorkStatus::Stopping
+                    && item.updated_at_ms <= cutoff
+            })
+            .map(|item| item.key.clone())
+            .collect::<Vec<_>>();
+        let now = unix_time_millis();
+        let mut changed = false;
+        for key in keys {
+            if key.kind == BackgroundWorkKind::Subagent {
+                if let Some(item) = self.items.get_mut(&key) {
+                    item.status = BackgroundWorkStatus::Stopped;
+                    item.can_stop = false;
+                    item.updated_at_ms = now;
+                }
+            } else {
+                self.remove(&key);
+            }
+            changed = true;
+        }
+        changed
     }
 
     /// Foreground items the provider must still be told to stop when the turn
@@ -663,6 +709,30 @@ impl Waku {
         {
             self.last_background_work_tick = Instant::now();
             cx.notify();
+        }
+
+        // Foreground stops the provider accepted but never confirmed settle
+        // here rather than showing Stopping forever.
+        let mut stops_changed = false;
+        for registry in self.background_work.values_mut() {
+            stops_changed |= registry.settle_unconfirmed_stops(FOREGROUND_STOPPING_GRACE);
+        }
+        if stops_changed {
+            cx.notify();
+        }
+
+        // A provider that never resolves the cancelled prompt leaves its
+        // drain entry to time out here; queued follow-ups then run against
+        // the driver — dead or alive — rather than waiting forever.
+        let expired_drains = self
+            .cancel_drains
+            .iter()
+            .filter(|(_, since)| since.elapsed() >= CANCEL_DRAIN_TIMEOUT)
+            .map(|(session_id, _)| *session_id)
+            .collect::<Vec<_>>();
+        for session_id in expired_drains {
+            self.cancel_drains.remove(&session_id);
+            self.drain_queued_message(session_id, cx);
         }
 
         // A parked turn waits for its provider to wake it, which Claude does
@@ -2399,5 +2469,76 @@ mod tests {
                 "foreground"
             )]
         );
+    }
+
+    #[test]
+    fn cancel_keeps_stopping_foreground_work_until_exit() {
+        let mut registry = BackgroundWorkRegistry::default();
+        let mut stopping = item("stopping", BackgroundWorkStatus::Stopping, false);
+        stopping.can_stop = true;
+        registry.upsert(stopping);
+        registry.upsert(item("plain", BackgroundWorkStatus::Running, false));
+
+        registry.settle_foreground(BackgroundWorkStatus::Stopped);
+        // The item with a stop in flight stays Stopping until the provider
+        // reports the exit; the rest of the turn's work settles now.
+        assert_eq!(
+            registry.items[&BackgroundWorkKey::new(BackgroundWorkKind::Process, "stopping")].status,
+            BackgroundWorkStatus::Stopping
+        );
+        assert!(!registry.items.contains_key(&BackgroundWorkKey::new(
+            BackgroundWorkKind::Process,
+            "plain"
+        )));
+    }
+
+    #[test]
+    fn completed_settlement_clears_stopping_work() {
+        // Only the cancelled turn's settle defers to a stop in flight; a
+        // normal finish still closes every foreground item.
+        let mut registry = BackgroundWorkRegistry::default();
+        registry.upsert(item("stopping", BackgroundWorkStatus::Stopping, false));
+        registry.settle_foreground(BackgroundWorkStatus::Completed);
+        assert!(!registry.items.contains_key(&BackgroundWorkKey::new(
+            BackgroundWorkKind::Process,
+            "stopping"
+        )));
+    }
+
+    #[test]
+    fn unconfirmed_stops_settle_after_grace() {
+        let mut registry = BackgroundWorkRegistry::default();
+        let mut stale = item("stale", BackgroundWorkStatus::Stopping, false);
+        stale.updated_at_ms =
+            unix_time_millis().saturating_sub(FOREGROUND_STOPPING_GRACE.as_millis() as u64 + 1);
+        registry.upsert(stale);
+        let mut stale_agent = BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "agent",
+            "agent".to_owned(),
+            BackgroundWorkStatus::Stopping,
+        );
+        stale_agent.updated_at_ms =
+            unix_time_millis().saturating_sub(FOREGROUND_STOPPING_GRACE.as_millis() as u64 + 1);
+        registry.upsert(stale_agent);
+        registry.upsert(item("fresh", BackgroundWorkStatus::Stopping, false));
+
+        assert!(registry.settle_unconfirmed_stops(FOREGROUND_STOPPING_GRACE));
+        // Processes leave the registry the way a settled turn's items do;
+        // subagents keep a Stopped record.
+        assert!(!registry.items.contains_key(&BackgroundWorkKey::new(
+            BackgroundWorkKind::Process,
+            "stale"
+        )));
+        assert_eq!(
+            registry.items[&BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "agent")].status,
+            BackgroundWorkStatus::Stopped
+        );
+        // A stop still within its grace keeps showing Stopping.
+        assert_eq!(
+            registry.items[&BackgroundWorkKey::new(BackgroundWorkKind::Process, "fresh")].status,
+            BackgroundWorkStatus::Stopping
+        );
+        assert!(!registry.settle_unconfirmed_stops(FOREGROUND_STOPPING_GRACE));
     }
 }

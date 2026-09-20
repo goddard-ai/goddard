@@ -8,6 +8,11 @@ fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
     !matches!(provider, ProviderKind::Amp)
 }
 
+/// How long a cancelled turn's wire drain may park follow-ups before the
+/// entry is treated as dead. A provider that never resolves the cancelled
+/// prompt must not hold the queue forever.
+pub(crate) const CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(15);
+
 fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode) -> RuntimeMode {
     current
         .map(|session| session.runtime_mode)
@@ -3945,6 +3950,17 @@ impl Waku {
         self.cancel_session_turn(session_id, cx);
     }
 
+    /// Whether the session's retained driver is still settling the cancelled
+    /// turn on the wire — the worker is parked inside the in-flight prompt
+    /// until the provider finishes killing its foreground work. Past
+    /// `CANCEL_DRAIN_TIMEOUT` the entry is dead: a provider that never
+    /// resolves the cancelled prompt must not park the queue forever.
+    pub(super) fn session_is_draining_cancel(&self, session_id: Uuid) -> bool {
+        self.cancel_drains
+            .get(&session_id)
+            .is_some_and(|since| since.elapsed() < CANCEL_DRAIN_TIMEOUT)
+    }
+
     pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
         // Worktree/checkpoint preparation has no safe interrupt contract. The
@@ -4064,8 +4080,17 @@ impl Waku {
         if retain_runtime && keep_runtime {
             if let Some(runtime) = runtime.take() {
                 self.runtimes.insert(session_id, runtime);
+                // The driver is still parked inside the cancelled turn's
+                // in-flight prompt: until the provider resolves it — killing
+                // its foreground terminal on the way — commands sent to the
+                // driver queue invisibly. Submissions take the visible
+                // follow-up queue until the settle lands.
+                if has_active_turn {
+                    self.cancel_drains.insert(session_id, Instant::now());
+                }
             }
         } else if let Some(runtime) = runtime {
+            self.cancel_drains.remove(&session_id);
             runtime.driver.close();
         }
         self.remeasure_transcript_tail();

@@ -700,6 +700,14 @@ impl Waku {
                 summary,
                 summary_i18n,
             } => {
+                // The cancelled turn's settle is what frees a driver parked
+                // inside its in-flight prompt: follow-ups queued behind the
+                // drain can finally reach it. This clears before the
+                // finished-turn early return — that turn was already closed
+                // by the cancel itself.
+                if allow_queue_drain && self.cancel_drains.remove(&session_id).is_some() {
+                    self.pending_queue_drains.push(session_id);
+                }
                 self.settle_foreground_work(
                     session_id,
                     if success {
@@ -912,6 +920,11 @@ impl Waku {
                 }
             }
             DriverEvent::ProcessExited => {
+                // The parked driver died mid-drain: queued follow-ups go to
+                // the fresh runtime the next submission spawns.
+                if allow_queue_drain && self.cancel_drains.remove(&session_id).is_some() {
+                    self.pending_queue_drains.push(session_id);
+                }
                 self.mark_background_work_lost(session_id);
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
                 self.finish_streaming_assistant(session_id);

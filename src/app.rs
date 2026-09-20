@@ -2281,6 +2281,13 @@ pub struct Waku {
     /// being collected; it then reuses the runtime after the event drain has
     /// re-inserted it.
     pending_queue_drains: Vec<Uuid>,
+    /// Sessions whose retained driver is still settling the cancelled turn on
+    /// the wire — the worker is parked inside the in-flight prompt until the
+    /// provider finishes killing its foreground work. Submissions during the
+    /// drain take the queued-follow-up path instead of sitting unprocessed in
+    /// the driver's command channel, and the entry clears on the next
+    /// `TurnFinished`/`ProcessExited` or a bounded timeout.
+    cancel_drains: HashMap<Uuid, Instant>,
     /// Archived sessions whose worktrees still need snapshotting and removal.
     /// Entries wait here while the session could still write into the
     /// worktree — a settling turn, an in-flight submission preparation, live
@@ -5396,6 +5403,7 @@ impl Waku {
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),
+                cancel_drains: HashMap::new(),
                 pending_workspace_cleanups: HashSet::new(),
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),

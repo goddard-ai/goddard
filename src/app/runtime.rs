@@ -3149,6 +3149,8 @@ impl Waku {
     }
 
     fn interrupt_orphaned_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // No runtime survives this interrupt, so nothing is draining.
+        self.cancel_drains.remove(&session_id);
         let project_paths = self
             .state
             .projects
@@ -5060,6 +5062,9 @@ impl Waku {
         session_id: Uuid,
         prepared: PreparedDriver,
     ) -> DriverHandle {
+        // A fresh driver is not mid-drain of a cancelled turn; clear any
+        // entry the replaced runtime left behind.
+        self.cancel_drains.remove(&session_id);
         let handle = prepared.handle.clone();
         self.runtimes.insert(
             session_id,
@@ -5434,6 +5439,9 @@ impl Waku {
             // Messages submitted while the session moved into a worktree
             // wait for the rebind, then start in the new directory.
             || self.worktree_move_pending.contains(&session_id)
+            // Messages queued behind a cancelled turn's wire drain wait for
+            // the provider's settle to free the driver first.
+            || self.session_is_draining_cancel(session_id)
         {
             return;
         }
@@ -5507,6 +5515,15 @@ impl Waku {
         // the message so the turn starts in the worktree rather than racing
         // the rebind — the finish path drains once the workspace settles.
         if self.worktree_move_pending.contains(&session_id) {
+            self.enqueue_follow_up_submission(session_id, submission, cx);
+            self.defer_queue_drain(session_id);
+            return;
+        }
+        // The retained driver is still settling the cancelled turn on the
+        // wire: a prompt sent now would sit unprocessed inside the driver's
+        // command channel. Queue it visibly instead; the settle's arrival
+        // starts the drain.
+        if self.session_is_draining_cancel(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;

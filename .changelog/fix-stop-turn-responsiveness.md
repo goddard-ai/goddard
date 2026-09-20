@@ -1,0 +1,1 @@
+- Stopping a turn no longer leaves the chat looking frozen: foreground commands show Stopping until the agent confirms they exited, follow-ups typed while the provider finishes winding down sit visibly in the queued-message card instead of vanishing into the driver, and closing terminals or restarting runtimes no longer stalls the session behind the old process's teardown
