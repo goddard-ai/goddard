@@ -3541,22 +3541,25 @@ impl Waku {
                                     .child(format!("· {name} · {state_label}")),
                             )
                         })
-                        .when_some(updated_chevron, |element, chevron| element.child(chevron))
-                        .when(has_unread, |element| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .size(px(12.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
-                            )
-                        }),
+                        .when_some(updated_chevron, |element, chevron| element.child(chevron)),
                 )
                 .child(div().flex_1()),
         )
         .when_some(compose, |element, compose| element.child(compose))
+        // The folded group's unread dot takes the same right-edge slot a
+        // session row's indicator does, past the always-reserved compose
+        // box so it stays put whether or not hover reveals the button.
+        .when(has_unread, |element| {
+            element.child(
+                div()
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+            )
+        })
         .when(first, |element| {
             element.child(self.render_sidebar_header_actions(cx))
         })

@@ -1,0 +1,1 @@
+- A collapsed sidebar group's unread dot now sits at the row's right edge like a session row's indicator instead of trailing the group label
