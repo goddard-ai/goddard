@@ -11,9 +11,6 @@ Cursor, OpenCode, and nine other agent CLIs** side by side from one interface â€
 each task gets a real transcript, a diff view, a terminal, a file browser, and
 Git tooling, while the agent CLI does the actual work underneath.
 
-(If you knew it as **Waku** â€” same app, renamed. That's why download URLs say
-`goddardai.org` and internal pieces are named `waku-*`.)
-
 It is written in Rust on top of [GPUI](https://github.com/zed-industries/zed)
 (the framework that powers the Zed editor), which is why it stays smooth on
 long transcripts and high-refresh displays where Electron and web clients tend
