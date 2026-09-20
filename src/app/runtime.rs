@@ -291,6 +291,7 @@ pub(super) fn prepare_submission(
     sync_branches: Vec<String>,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
+    let mut lfs_warning = None;
     let workspace = match workspace {
         SessionWorkspace::NewWorktree { base_branch } => {
             if project.is_projectless() {
@@ -307,6 +308,9 @@ pub(super) fn prepare_submission(
                     waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
                     _ => anyhow::bail!("the daemon returned an invalid worktree response"),
                 };
+            lfs_warning = created
+                .lfs_skipped
+                .then(|| tr!("session.worktree_lfs_skipped"));
             SessionWorkspace::Worktree {
                 path: created.path,
                 name: created.name,
@@ -436,6 +440,7 @@ pub(super) fn prepare_submission(
     Ok(PreparedSubmission {
         workspace,
         checkpoint_warning,
+        lfs_warning,
         worktree_restored,
         driver,
         route_decision,
@@ -4989,6 +4994,7 @@ impl Waku {
         let PreparedSubmission {
             workspace,
             checkpoint_warning: _,
+            lfs_warning: _,
             worktree_restored,
             driver,
             route_decision: _,
@@ -5812,6 +5818,7 @@ impl Waku {
         let PreparedSubmission {
             workspace,
             checkpoint_warning,
+            lfs_warning,
             worktree_restored,
             driver: prepared_driver,
             route_decision,
@@ -5940,6 +5947,9 @@ impl Waku {
         // anchor, and the working indicator all landed at accept time. Only
         // preparation's own output surfaces here.
         if selected && let Some(warning) = checkpoint_warning {
+            self.show_toast(warning);
+        }
+        if selected && let Some(warning) = lfs_warning {
             self.show_toast(warning);
         }
         let session = self

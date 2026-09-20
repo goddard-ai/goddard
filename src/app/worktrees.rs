@@ -166,6 +166,9 @@ impl Waku {
                             if waku.state.selected_session == Some(session_id) {
                                 waku.ensure_right_panel_terminals(cx);
                             }
+                            if created.lfs_skipped {
+                                waku.show_toast(tr!("session.worktree_lfs_skipped"));
+                            }
                             waku.save();
                         }
                     }
@@ -355,7 +358,11 @@ impl Waku {
             self.reload_clean_right_panel_file_editors(cx);
             self.ensure_right_panel_terminals(cx);
         }
-        self.show_toast(tr!("session.moved_to_worktree", name = created.name));
+        if created.lfs_skipped {
+            self.show_toast(tr!("session.worktree_lfs_skipped"));
+        } else {
+            self.show_toast(tr!("session.moved_to_worktree", name = created.name));
+        }
         self.drain_queued_message(session_id, cx);
         cx.notify();
     }

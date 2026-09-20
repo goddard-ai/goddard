@@ -2797,6 +2797,8 @@ session.view_now:
   en: View now
 session.worktree_recreated:
   en: The worktree was missing, so it was recreated — uncommitted changes may be gone
+session.worktree_lfs_skipped:
+  en: The worktree was created, but Git LFS files are pointer stubs — run `git lfs pull` in it to fetch their content
 session.agy_ended:
   en: The Antigravity session has ended
 session.agy_relaunch:

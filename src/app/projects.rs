@@ -1446,7 +1446,14 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| match result {
-                Ok(_) => waku.projects_refresh(project_id, cx),
+                Ok(result) => {
+                    if let waku_client::WorkspaceResult::WorktreeCreated { worktree } = &result
+                        && worktree.lfs_skipped
+                    {
+                        waku.show_toast(tr!("session.worktree_lfs_skipped"));
+                    }
+                    waku.projects_refresh(project_id, cx);
+                }
                 Err(error) => {
                     waku.show_toast(tr!("errors.create_worktree", error = error.to_string()));
                     cx.notify();

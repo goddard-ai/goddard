@@ -4,4 +4,10 @@ export type CreatedWorktree = { path: string,
 /**
  * The linked worktree's directory name — its identity in clients.
  */
-name: string, };
+name: string,
+/**
+ * LFS-tracked files materialized as pointer stubs because the `lfs`
+ * filters could not run — `git lfs pull` in the worktree fetches the
+ * real content.
+ */
+lfs_skipped: boolean, };

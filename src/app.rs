@@ -847,6 +847,10 @@ struct PendingCheckpointCapture {
 struct PreparedSubmission {
     workspace: SessionWorkspace,
     checkpoint_warning: Option<String>,
+    /// A worktree created for this submission came up with LFS pointer
+    /// stubs because the `lfs` filters could not run — worth a toast naming
+    /// `git lfs pull` as the fix.
+    lfs_warning: Option<String>,
     /// The session's worktree directory was missing and got recreated from
     /// its branch or latest checkpoint — worth a toast, since uncommitted
     /// work past that point is gone.

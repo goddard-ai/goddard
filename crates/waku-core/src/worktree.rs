@@ -11,7 +11,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output};
 
 use anyhow::{Context as _, bail};
 use uuid::Uuid;
@@ -247,12 +247,12 @@ fn add_named(
             || registered.contains(&dir.join(&repository_name))
     };
     let checkout = |name: &str| worktree_root.join(name).join(&repository_name);
-    let add = |path: &Path| -> anyhow::Result<()> {
-        add_detached(repository, path, base_ref)?;
+    let add = |path: &Path| -> anyhow::Result<bool> {
+        let mut lfs_skipped = add_detached(repository, path, base_ref)?;
         if let Some(state) = carried_state {
-            carry_state(path, state)?;
+            lfs_skipped |= carry_state(path, state)?;
         }
-        Ok(())
+        Ok(lfs_skipped)
     };
 
     match name.and_then(sanitize_name) {
@@ -261,8 +261,8 @@ fn add_named(
                 bail!("a worktree named `{name}` already exists");
             }
             let path = checkout(&name);
-            add(&path)?;
-            materialized(path, project_relative, name)
+            let lfs_skipped = add(&path)?;
+            materialized(path, project_relative, name, lfs_skipped)
         }
         None => {
             // Each attempt draws a fresh random pair rather than suffixing
@@ -273,8 +273,8 @@ fn add_named(
                     continue;
                 }
                 let path = checkout(&name);
-                add(&path)?;
-                return materialized(path, project_relative, name);
+                let lfs_skipped = add(&path)?;
+                return materialized(path, project_relative, name, lfs_skipped);
             }
             // A UUID fallback keeps the last resort independent of
             // human-readable name collisions.
@@ -287,8 +287,8 @@ fn add_named(
                 bail!("could not allocate a unique Git worktree name");
             }
             let path = checkout(&name);
-            add(&path)?;
-            materialized(path, project_relative, name)
+            let lfs_skipped = add(&path)?;
+            materialized(path, project_relative, name, lfs_skipped)
         }
     }
 }
@@ -494,6 +494,7 @@ fn materialized(
     path: PathBuf,
     project_relative: &Path,
     name: String,
+    lfs_skipped: bool,
 ) -> anyhow::Result<CreatedWorktree> {
     let project_path = path.join(project_relative);
     if !project_path.is_dir() {
@@ -505,6 +506,7 @@ fn materialized(
     Ok(CreatedWorktree {
         path: project_path,
         name,
+        lfs_skipped,
     })
 }
 
@@ -512,42 +514,92 @@ fn materialized(
 /// every carried change unstaged. A two-tree `read-tree` merge advances the
 /// index and files together — deletions included — then a mixed reset drops
 /// the index back to HEAD so nothing arrives committed or staged.
-fn carry_state(worktree: &Path, snapshot: &str) -> anyhow::Result<()> {
-    git_stdout(worktree, &["read-tree", "-m", "-u", "HEAD", snapshot])
-        .context("could not carry the checkout's changes into the worktree")?;
+fn carry_state(worktree: &Path, snapshot: &str) -> anyhow::Result<bool> {
+    let (output, lfs_skipped) = git_with_lfs_fallback(worktree, |command| {
+        command.args(["read-tree", "-m", "-u", "HEAD", snapshot]);
+    })?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(command_error(&output))
+            .context("could not carry the checkout's changes into the worktree"));
+    }
     git_stdout(worktree, &["reset", "--quiet"]).context("could not unstage the carried changes")?;
-    Ok(())
+    Ok(lfs_skipped)
 }
 
-fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::search_path_command("git")
-        .args(["worktree", "add", "--detach"])
-        .arg(path)
-        .arg(base_ref)
-        .current_dir(repository)
-        .output()
-        .context("failed to execute git worktree add")?;
+fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Result<bool> {
+    let (output, lfs_skipped) = git_with_lfs_fallback(repository, |command| {
+        command
+            .args(["worktree", "add", "--detach"])
+            .arg(path)
+            .arg(base_ref);
+    })?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
     }
-    Ok(())
+    Ok(lfs_skipped)
 }
 
 /// `git worktree add <path> <branch>` checks the branch out rather than
 /// detaching, restoring a worktree the user had placed on a branch. The
 /// branch must be verified first: a missing name would silently create one.
-fn add_branch(repository: &Path, path: &Path, branch: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::search_path_command("git")
-        .args(["worktree", "add"])
-        .arg(path)
-        .arg(branch)
-        .current_dir(repository)
-        .output()
-        .context("failed to execute git worktree add")?;
+fn add_branch(repository: &Path, path: &Path, branch: &str) -> anyhow::Result<bool> {
+    let (output, lfs_skipped) = git_with_lfs_fallback(repository, |command| {
+        command.args(["worktree", "add"]).arg(path).arg(branch);
+    })?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
     }
-    Ok(())
+    Ok(lfs_skipped)
+}
+
+/// Run a `git` command that writes working-tree files, retrying once with
+/// the `lfs` filters disabled when the first attempt dies inside them.
+/// Checkout — `worktree add`, `read-tree -u` — runs a repo's configured
+/// `filter.lfs` commands for every LFS-tracked file, and `git lfs install`
+/// configures `filter.lfs.process` globally: a `git-lfs` the daemon cannot
+/// spawn then fails the whole operation, even though the user's terminal
+/// resolves it. Disabling the filter for the retry lets the files
+/// materialize as LFS pointer stubs, which `git lfs pull` fills in later.
+/// `GIT_LFS_SKIP_SMUDGE` cannot substitute — git-lfs reads it, and
+/// git-lfs is exactly what cannot run. The returned flag reports that the
+/// skip retry succeeded, so the caller can warn about stub content.
+fn git_with_lfs_fallback(
+    cwd: &Path,
+    configure: impl Fn(&mut Command),
+) -> anyhow::Result<(Output, bool)> {
+    let run = |skip_lfs: bool| {
+        let mut command = crate::command_env::search_path_command("git");
+        if skip_lfs {
+            command.args([
+                "-c",
+                "filter.lfs.smudge=",
+                "-c",
+                "filter.lfs.process=",
+                "-c",
+                "filter.lfs.required=false",
+            ]);
+        }
+        configure(&mut command);
+        command.current_dir(cwd).output()
+    };
+    let output = run(false).context("failed to execute git")?;
+    if output.status.success() || !lfs_filter_failed(&output) {
+        return Ok((output, false));
+    }
+    let retried = run(true).context("failed to execute git")?;
+    let skipped = retried.status.success();
+    Ok((retried, skipped))
+}
+
+/// Whether a failed command died inside the `lfs` filter machinery: git's
+/// per-file "smudge filter lfs failed", the subprocess-startup errors that
+/// name `git-lfs` when the filter command cannot even launch, and the older
+/// smudge-only "external filter 'git-lfs …' failed" form.
+fn lfs_filter_failed(output: &Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr.contains("smudge filter lfs failed")
+        || stderr.contains("subprocess 'git-lfs")
+        || stderr.contains("filter 'git-lfs")
 }
 
 /// Whether `reference` resolves to a commit — `rev-parse --verify` exits
@@ -863,6 +915,64 @@ mod tests {
         remove(&named.path, false).unwrap();
         let recreated = create(&project, Some("My Worktree"), None, false, &[]).unwrap();
         assert_eq!(recreated.name, "My Worktree");
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn creates_a_worktree_with_lfs_stubs_when_the_filter_cannot_run() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        // The config `git lfs install` writes, pointed at a binary that does
+        // not exist — what a GUI-launched daemon sees when git-lfs only
+        // lives under a package-manager prefix. The process filter covers
+        // the clean direction too, so it is configured only after the LFS
+        // file is committed.
+        run_git(
+            &repository,
+            &[
+                "config",
+                "filter.lfs.smudge",
+                "git-lfs-missing-for-test smudge -- %f",
+            ],
+        );
+        run_git(&repository, &["config", "filter.lfs.clean", "cat"]);
+        run_git(&repository, &["config", "filter.lfs.required", "true"]);
+        fs::write(repository.join(".gitattributes"), "*.bin filter=lfs\n").unwrap();
+        fs::write(repository.join("asset.bin"), "lfs content\n").unwrap();
+        run_git(&repository, &["add", "."]);
+        run_git(
+            &repository,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "lfs asset",
+            ],
+        );
+        run_git(
+            &repository,
+            &[
+                "config",
+                "filter.lfs.process",
+                "git-lfs-missing-for-test filter-process",
+            ],
+        );
+
+        // Without the fallback `worktree add` dies in the filter; instead
+        // the checkout materializes with the committed content — the raw
+        // pointer text when the clean side ran, which is what a real
+        // git-lfs install produces.
+        let created = create(&project, Some("lfs-stubbed"), Some("feature"), false, &[]).unwrap();
+        assert!(created.lfs_skipped);
+        let worktree_root = created.path.ancestors().nth(2).unwrap();
+        assert_eq!(
+            fs::read_to_string(worktree_root.join("asset.bin")).unwrap(),
+            git_stdout(&repository, &["show", "feature:asset.bin"]).unwrap() + "\n"
+        );
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
     }

@@ -329,4 +329,9 @@ pub struct CreatedWorktree {
     pub path: PathBuf,
     /// The linked worktree's directory name — its identity in clients.
     pub name: String,
+    /// LFS-tracked files materialized as pointer stubs because the `lfs`
+    /// filters could not run — `git lfs pull` in the worktree fetches the
+    /// real content.
+    #[serde(default)]
+    pub lfs_skipped: bool,
 }

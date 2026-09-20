@@ -181,6 +181,7 @@ impl Waku {
         let PreparedSubmission {
             workspace,
             checkpoint_warning,
+            lfs_warning,
             worktree_restored,
             driver: _,
             route_decision: _,
@@ -199,6 +200,9 @@ impl Waku {
             self.show_toast(tr!("session.worktree_recreated"));
         }
         if selected && let Some(warning) = checkpoint_warning {
+            self.show_toast(warning);
+        }
+        if selected && let Some(warning) = lfs_warning {
             self.show_toast(warning);
         }
         let prompt = self.resolve_provider_submission(ProviderKind::Antigravity, &prompt);
