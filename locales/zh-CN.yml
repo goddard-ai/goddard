@@ -349,6 +349,9 @@ settings.auto_resolve_in_chat: 在聊天中解决同步冲突
 settings.auto_resolve_in_chat_description: 当拉取或合入因冲突而停止时，在检出目录上开启一个新聊天并自动发送解决步骤
 settings.auto_resolve_land_conflicts: 在聊天中解决合入冲突
 settings.auto_resolve_land_conflicts_description: 当合入因变基或合并冲突而停止时，将解决提示发送到该任务的聊天，而不是显示冲突对话框
+settings.default_workspace: 默认工作区
+settings.default_workspace_description: 新任务启动时所在的工作区。“上次使用的工作区”会打开每个项目上次选择的工作区；在编辑器中另选工作区仍会对该任务生效
+settings.default_workspace_last_used: 上次使用的工作区
 settings.new_worktree_default_branch: 新工作树始终基于默认分支
 settings.new_worktree_default_branch_description: 创建新工作树时始终从仓库默认分支分叉，而不是沿用上次使用的基准分支
 settings.new_worktree_sync_default_branch: 新工作树更新默认分支

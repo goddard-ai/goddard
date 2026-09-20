@@ -93,6 +93,35 @@ impl ArchiveNavigation {
     }
 }
 
+/// Which workspace a fresh task draft opens with.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultWorkspace {
+    /// The mode last chosen for the project — Local when no choice was
+    /// ever made there.
+    #[default]
+    LastUsed,
+    /// The project's own checkout, whatever mode was last chosen there.
+    Local,
+    /// A new worktree forked from the base branch last picked for the
+    /// project — the repository's default branch when none was.
+    NewWorktree,
+}
+
+impl DefaultWorkspace {
+    pub const ALL: [Self; 3] = [Self::LastUsed, Self::Local, Self::NewWorktree];
+
+    /// Local and New worktree are the picker's own row names, so they share
+    /// its keys; only Last used is settings-specific.
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::LastUsed => "settings.default_workspace_last_used",
+            Self::Local => "workspace.local",
+            Self::NewWorktree => "workspace.new_worktree",
+        }
+    }
+}
+
 /// One of the bundled sounds the desktop can play when a task the user is
 /// not looking at finishes its turn.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -666,6 +695,10 @@ pub struct AppSettings {
     /// prompt to the owning task's chat instead of showing the conflict
     /// dialog.
     pub auto_resolve_land_conflicts: bool,
+    /// Which workspace a fresh task draft opens with: the mode last chosen
+    /// for the project, always the local checkout, or always a new
+    /// worktree.
+    pub default_workspace: DefaultWorkspace,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     pub new_worktree_default_branch: bool,
@@ -782,6 +815,7 @@ impl Default for AppSettings {
             sync_with_merge: false,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
+            default_workspace: DefaultWorkspace::default(),
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
@@ -951,6 +985,11 @@ struct AppState {
     /// to that project's next fresh task.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     project_workspaces: HashMap<Uuid, SessionWorkspace>,
+    /// The base branch last picked for a planned worktree in each project.
+    /// Kept apart from the workspace-mode memory so picking Local on one
+    /// draft does not erase it.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    project_worktree_bases: HashMap<Uuid, String>,
     #[serde(default = "default_sidebar_visibility")]
     sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
@@ -1043,6 +1082,11 @@ pub struct PersistedState {
     /// are stored; a materialized worktree is a result, not a choice.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub project_workspaces: HashMap<Uuid, SessionWorkspace>,
+    /// The base branch last picked for a planned worktree in each project.
+    /// Kept apart from `project_workspaces` so picking Local on one draft
+    /// does not erase it.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub project_worktree_bases: HashMap<Uuid, String>,
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
@@ -1084,6 +1128,11 @@ pub struct PersistedState {
     /// dialog.
     #[serde(default)]
     pub auto_resolve_land_conflicts: bool,
+    /// Which workspace a fresh task draft opens with: the mode last chosen
+    /// for the project, always the local checkout, or always a new
+    /// worktree.
+    #[serde(default)]
+    pub default_workspace: DefaultWorkspace,
     /// Fork a planned worktree from the repository's default branch instead
     /// of reopening the base branch last picked for the project.
     #[serde(default)]
@@ -1332,6 +1381,7 @@ impl PersistedState {
             remembered_model_traits: Vec::new(),
             recent_model_uses: Vec::new(),
             project_workspaces: HashMap::new(),
+            project_worktree_bases: HashMap::new(),
             favorite_models: Vec::new(),
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
@@ -1345,6 +1395,7 @@ impl PersistedState {
             sync_with_merge: false,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
+            default_workspace: DefaultWorkspace::default(),
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
@@ -1450,7 +1501,9 @@ impl PersistedState {
 
     /// Records the workspace mode chosen for a draft in `project_id`; the
     /// project's next fresh task reopens with it. A materialized `Worktree`
-    /// is the result of a choice, not a choice, so it is never stored.
+    /// is the result of a choice, not a choice, so it is never stored. A
+    /// picked base branch lands in `project_worktree_bases`, where choosing
+    /// Local later cannot erase it.
     pub fn remember_workspace(&mut self, project_id: Uuid, workspace: &SessionWorkspace) {
         match workspace {
             SessionWorkspace::Local | SessionWorkspace::NewWorktree { .. } => {
@@ -1458,6 +1511,13 @@ impl PersistedState {
                     .insert(project_id, workspace.clone());
             }
             SessionWorkspace::Worktree { .. } => {}
+        }
+        if let SessionWorkspace::NewWorktree {
+            base_branch: Some(base),
+        } = workspace
+        {
+            self.project_worktree_bases
+                .insert(project_id, base.clone());
         }
     }
 
@@ -1469,15 +1529,13 @@ impl PersistedState {
         if self.new_worktree_default_branch {
             return None;
         }
-        match self.project_workspaces.get(&project_id) {
-            Some(SessionWorkspace::NewWorktree { base_branch }) => base_branch.clone(),
-            _ => None,
-        }
+        self.project_worktree_bases.get(&project_id).cloned()
     }
 
     /// The workspace mode a fresh draft for `project_id` opens with — the
-    /// last one chosen there. Projectless and unknown projects stay local:
-    /// they have no repository to fork a worktree from.
+    /// `default_workspace` setting, which `LastUsed` resolves to the mode
+    /// last chosen for the project. Projectless and unknown projects stay
+    /// local: they have no repository to fork a worktree from.
     pub fn workspace_for_new_session(&self, project_id: Uuid) -> SessionWorkspace {
         let has_repository = self
             .projects
@@ -1486,19 +1544,20 @@ impl PersistedState {
         if !has_repository {
             return SessionWorkspace::Local;
         }
-        match self.project_workspaces.get(&project_id) {
-            Some(SessionWorkspace::NewWorktree { base_branch }) => SessionWorkspace::NewWorktree {
-                // `None` resolves the repository's default branch on the
-                // daemon; `new_worktree_default_branch` drops the base last
-                // picked so a fresh task always forks from it.
-                base_branch: if self.new_worktree_default_branch {
-                    None
-                } else {
-                    base_branch.clone()
-                },
+        let worktree = || SessionWorkspace::NewWorktree {
+            // `None` resolves the repository's default branch on the
+            // daemon; `new_worktree_default_branch` empties the remembered
+            // base so a fresh task always forks from it.
+            base_branch: self.remembered_base_branch(project_id),
+        };
+        match self.default_workspace {
+            DefaultWorkspace::Local => SessionWorkspace::Local,
+            DefaultWorkspace::NewWorktree => worktree(),
+            DefaultWorkspace::LastUsed => match self.project_workspaces.get(&project_id) {
+                Some(SessionWorkspace::NewWorktree { .. }) => worktree(),
+                Some(SessionWorkspace::Local) | None => SessionWorkspace::Local,
+                Some(SessionWorkspace::Worktree { .. }) => SessionWorkspace::Local,
             },
-            Some(workspace @ SessionWorkspace::Local) => workspace.clone(),
-            _ => SessionWorkspace::Local,
         }
     }
 
@@ -1662,6 +1721,7 @@ impl PersistedState {
             sync_with_merge: self.sync_with_merge,
             auto_resolve_in_chat: self.auto_resolve_in_chat,
             auto_resolve_land_conflicts: self.auto_resolve_land_conflicts,
+            default_workspace: self.default_workspace,
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
             new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
@@ -1714,6 +1774,7 @@ impl PersistedState {
             remembered_model_traits: self.remembered_model_traits.clone(),
             recent_model_uses: self.recent_model_uses.clone(),
             project_workspaces: self.project_workspaces.clone(),
+            project_worktree_bases: self.project_worktree_bases.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
             git_panel_visible: self.git_panel_visible,
@@ -1755,6 +1816,7 @@ impl PersistedState {
         self.sync_with_merge = settings.sync_with_merge;
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.auto_resolve_land_conflicts = settings.auto_resolve_land_conflicts;
+        self.default_workspace = settings.default_workspace;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
         self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
@@ -1806,6 +1868,7 @@ impl PersistedState {
         self.remembered_model_traits = app_state.remembered_model_traits;
         self.recent_model_uses = app_state.recent_model_uses;
         self.project_workspaces = app_state.project_workspaces;
+        self.project_worktree_bases = app_state.project_worktree_bases;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
         self.git_panel_visible = app_state.git_panel_visible;
@@ -1886,6 +1949,23 @@ impl PersistedState {
         self.version = STATE_VERSION;
         normalize_computer_app_grants(&mut self.computer_use_allowed_apps);
         self.backfill_remembered_selection();
+        self.backfill_worktree_bases();
+    }
+
+    /// `project_worktree_bases` predates its own slot: until it split out,
+    /// the base rode inside the `project_workspaces` `NewWorktree` value.
+    /// Entries already present win — they are the fresher record.
+    fn backfill_worktree_bases(&mut self) {
+        for (project_id, workspace) in &self.project_workspaces {
+            if let SessionWorkspace::NewWorktree {
+                base_branch: Some(base),
+            } = workspace
+            {
+                self.project_worktree_bases
+                    .entry(*project_id)
+                    .or_insert_with(|| base.clone());
+            }
+        }
     }
 
     fn backfill_remembered_selection(&mut self) {
@@ -2828,6 +2908,26 @@ mod tests {
     }
 
     #[test]
+    fn default_workspace_defaults_to_last_used_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.default_workspace, DefaultWorkspace::LastUsed);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.default_workspace, DefaultWorkspace::LastUsed);
+        state.default_workspace = DefaultWorkspace::NewWorktree;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["default_workspace"], "new_worktree");
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("default_workspace")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.default_workspace, DefaultWorkspace::NewWorktree);
+    }
+
+    #[test]
     fn terminal_font_size_follows_code_size_until_it_differs() {
         // Settings files written before the terminal size existed carry no
         // value, and the resolved size is the code size.
@@ -3007,19 +3107,83 @@ mod tests {
     }
 
     #[test]
-    fn switching_back_to_local_overwrites_the_remembered_worktree() {
+    fn switching_back_to_local_overwrites_the_mode_but_keeps_the_base() {
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
         let project_id = state.projects[0].id;
 
         state.remember_workspace(
             project_id,
-            &SessionWorkspace::NewWorktree { base_branch: None },
+            &SessionWorkspace::NewWorktree {
+                base_branch: Some("develop".to_owned()),
+            },
         );
         state.remember_workspace(project_id, &SessionWorkspace::Local);
 
         let session = state.new_session(project_id, ProviderKind::Codex);
         assert_eq!(session.workspace, SessionWorkspace::Local);
-        assert_eq!(state.remembered_base_branch(project_id), None);
+        // The base is its own memory: a Local pick does not erase it, so
+        // reopening a worktree still forks from the last picked branch.
+        assert_eq!(
+            state.remembered_base_branch(project_id),
+            Some("develop".to_owned())
+        );
+    }
+
+    #[test]
+    fn local_default_starts_every_task_on_the_checkout() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        state.remember_workspace(
+            project_id,
+            &SessionWorkspace::NewWorktree {
+                base_branch: Some("develop".to_owned()),
+            },
+        );
+
+        state.default_workspace = DefaultWorkspace::Local;
+
+        // A remembered worktree loses to the setting; the base memory is
+        // untouched for when the setting changes back.
+        let session = state.new_session(project_id, ProviderKind::Codex);
+        assert_eq!(session.workspace, SessionWorkspace::Local);
+        assert_eq!(
+            state.remembered_base_branch(project_id),
+            Some("develop".to_owned())
+        );
+    }
+
+    #[test]
+    fn worktree_default_starts_every_task_in_a_worktree() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        let other = Project::from_path(PathBuf::from("/tmp/other"));
+        let other_id = other.id;
+        state.projects.push(other);
+        state.remember_workspace(
+            project_id,
+            &SessionWorkspace::NewWorktree {
+                base_branch: Some("develop".to_owned()),
+            },
+        );
+        state.remember_workspace(other_id, &SessionWorkspace::Local);
+
+        state.default_workspace = DefaultWorkspace::NewWorktree;
+
+        // The remembered base branch still applies per project; a project
+        // that only ever chose Local — or never chose — forks from the
+        // repository's default branch.
+        let session = state.new_session(project_id, ProviderKind::Codex);
+        assert_eq!(
+            session.workspace,
+            SessionWorkspace::NewWorktree {
+                base_branch: Some("develop".to_owned())
+            }
+        );
+        let session = state.new_session(other_id, ProviderKind::Codex);
+        assert_eq!(
+            session.workspace,
+            SessionWorkspace::NewWorktree { base_branch: None }
+        );
     }
 
     #[test]
@@ -3096,6 +3260,35 @@ mod tests {
             SessionWorkspace::NewWorktree {
                 base_branch: Some("main".to_owned())
             }
+        );
+    }
+
+    #[test]
+    fn worktree_bases_backfill_from_a_pre_split_app_state() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        state.remember_workspace(
+            project_id,
+            &SessionWorkspace::NewWorktree {
+                base_branch: Some("main".to_owned()),
+            },
+        );
+
+        // A state file written before `project_worktree_bases` existed
+        // carries the base only inside the workspace-mode memory.
+        let mut app_state = serde_json::to_value(state.app_state()).unwrap();
+        app_state
+            .as_object_mut()
+            .unwrap()
+            .remove("project_worktree_bases");
+        let mut restored = PersistedState::empty();
+        restored.projects.clone_from(&state.projects);
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        restored.migrate_loaded();
+
+        assert_eq!(
+            restored.remembered_base_branch(project_id),
+            Some("main".to_owned())
         );
     }
 

@@ -1074,6 +1074,12 @@ settings.auto_resolve_land_conflicts:
   en: Resolve land conflicts in chat
 settings.auto_resolve_land_conflicts_description:
   en: When a land stops on rebase or merge conflicts, send the resolution prompt to the task's chat instead of showing the conflict dialog
+settings.default_workspace:
+  en: Default workspace
+settings.default_workspace_description:
+  en: The workspace new tasks start in. "Last used workspace" reopens the workspace picked for each project; a different pick in the composer still applies to that task
+settings.default_workspace_last_used:
+  en: Last used workspace
 settings.new_worktree_default_branch:
   en: New worktrees use the default branch
 settings.new_worktree_default_branch_description:

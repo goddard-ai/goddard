@@ -1,0 +1,1 @@
+- New "Default workspace" setting chooses where new tasks start: "Last used workspace" keeps the current per-project behavior, "Local" always starts on the project's checkout, and "New worktree" always forks a worktree from the base branch last picked for that project

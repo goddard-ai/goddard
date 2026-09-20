@@ -1620,6 +1620,43 @@ impl Waku {
                 theme,
                 search,
             ))
+            .children({
+                let default_workspace = self.state.default_workspace;
+                let weak = cx.entity().downgrade();
+                let workspace_handle = self.menu_handle("default-workspace-selector", cx);
+                let workspace_selector = dropdown_menu(
+                    MenuChip::new("default-workspace-selector")
+                        .label(tr!(default_workspace.label_key()))
+                        .outlined()
+                        .selected(workspace_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "default-workspace-selector-menu",
+                    &workspace_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        DefaultWorkspace::ALL
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(tr!(option.label_key()), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_default_workspace(option, cx);
+                                    });
+                                })
+                                .selected(option == default_workspace)
+                            })
+                            .collect()
+                    },
+                );
+                setting_card(
+                    tr!("settings.default_workspace"),
+                    tr!("settings.default_workspace_description"),
+                    workspace_selector,
+                    theme,
+                    search,
+                )
+            })
             .children(setting_card(
                 tr!("settings.new_worktree_default_branch"),
                 tr!("settings.new_worktree_default_branch_description"),
@@ -7540,6 +7577,15 @@ impl Waku {
             return;
         }
         self.state.sidebar_composer_drafts = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_default_workspace(&mut self, workspace: DefaultWorkspace, cx: &mut Context<Self>) {
+        if self.state.default_workspace == workspace {
+            return;
+        }
+        self.state.default_workspace = workspace;
         self.save();
         cx.notify();
     }
