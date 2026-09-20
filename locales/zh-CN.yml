@@ -789,6 +789,14 @@ full_access.confirm_title: 启用完全访问？
 full_access.confirm_description: 代理将可以在不征求许可的情况下读取、编辑文件并运行命令。
 full_access.confirm_effect: 此更改会立即应用于当前任务，并成为新任务的默认模式。
 full_access.confirm_enable: 启用完全访问
+provider_switch.title: "切换到 %{provider}？"
+provider_switch.description_new: Jev 将压缩此任务的对话记录，并用提取出的上下文启动新的 %{provider} 会话 — 按 %{provider} 的输入费率一次性摄入，长任务可能开销较大。%{from} 会话保持可恢复状态，切回时会恢复。
+provider_switch.description_return: Jev 将压缩 %{provider} 错过的工作，并用其恢复你之前的 %{provider} 会话 — 按 %{provider} 的输入费率一次性摄入，长任务可能开销较大。
+provider_switch.estimate: "约 %{items} 条记录项，约 %{tokens} 个 token。"
+provider_switch.confirm: "切换到 %{provider}"
+provider_switch.working: "正在为 %{provider} 压缩历史记录…"
+provider_switch.failed: "切换 provider 失败 — %{error}"
+provider_switch.no_eval_backend: 切换 provider 需要在设置中配置评估（Jev）后端。
 sandbox.environment: 环境
 sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
@@ -1381,6 +1389,8 @@ transcript.edit_message: 编辑消息
 transcript.sent_by_agent: 由智能体发送
 transcript.landed: 已合入 %{base}
 transcript.landed_more: "…以及另外 %{count} 个提交"
+transcript.provider_switched: "已切换 provider — %{from} → %{to}"
+transcript.provider_switched_restarted: "已切换 provider — %{from} → %{to}；无法恢复之前的 %{to} 会话，已用完整历史启动新会话"
 transcript.show_more_commits: 再显示 %{count} 个提交
 transcript.show_fewer_commits: 收起提交列表
 transcript.showing_first_commits: 仅显示前 %{count}/%{total} 个

@@ -500,6 +500,7 @@ impl Render for Waku {
             let archive_dialog = self.render_archive_dialog(cx);
             let full_access_dialog = self.render_full_access_dialog(cx);
             let terminal_close_dialog = self.render_terminal_close_dialog(cx);
+            let provider_switch_dialog = self.render_provider_switch_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
             let send_file_dialog = self.render_send_file_dialog(cx);
@@ -549,6 +550,7 @@ impl Render for Waku {
                 .children(archive_dialog)
                 .children(full_access_dialog)
                 .children(terminal_close_dialog)
+                .children(provider_switch_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
                 .children(send_file_dialog)
@@ -583,6 +585,7 @@ impl Render for Waku {
         let archive_dialog = self.render_archive_dialog(cx);
         let full_access_dialog = self.render_full_access_dialog(cx);
         let terminal_close_dialog = self.render_terminal_close_dialog(cx);
+        let provider_switch_dialog = self.render_provider_switch_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let send_file_dialog = self.render_send_file_dialog(cx);
@@ -970,6 +973,7 @@ impl Render for Waku {
             .children(archive_dialog)
             .children(full_access_dialog)
             .children(terminal_close_dialog)
+            .children(provider_switch_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(send_file_dialog)

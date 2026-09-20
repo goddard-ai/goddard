@@ -1855,14 +1855,16 @@ impl Waku {
         )
     }
 
-    /// The provider the picker cannot switch away from — a session that has
-    /// already sent messages locks its provider. The automation editor never
-    /// locks one.
+    /// The provider the picker cannot switch away from. A started session
+    /// keeps listing every provider — a different-provider pick routes
+    /// through the switch dialog — so only a skeleton, whose unloaded
+    /// transcript cannot be compacted, still locks the picker. The
+    /// automation editor never locks one.
     fn model_picker_locked_provider(&self) -> Option<ProviderKind> {
         match self.model_picker_target {
             ModelPickerTarget::Composer => self
                 .composer_session()
-                .filter(|session| session.provider_locked())
+                .filter(|session| session.provider_locked() && !session.detail_loaded)
                 .map(|session| session.provider),
             ModelPickerTarget::AutomationEditor => None,
         }

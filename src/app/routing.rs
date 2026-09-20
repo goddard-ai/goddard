@@ -233,6 +233,7 @@ impl TurnRoutePlan {
                     state,
                     questions,
                     feature: Some("route-effort".to_owned()),
+                    timeout_secs: None,
                 },
             )
             .ok()?;

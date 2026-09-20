@@ -5643,6 +5643,7 @@ impl Waku {
                         state,
                         questions,
                         feature: Some("route-class-suggest".to_owned()),
+                        timeout_secs: None,
                     },
                 )
                 .map_err(|error| format!("{error:#}"))

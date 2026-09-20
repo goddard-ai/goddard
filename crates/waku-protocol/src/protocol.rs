@@ -306,6 +306,11 @@ pub enum Command {
         /// logs as a bare `"evaluate"`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         feature: Option<String>,
+        /// Override for the call's latency budget in seconds. Latency-bound
+        /// callers (routing) leave it `None` for the default; long-context
+        /// callers such as provider-switch compaction pass a larger budget.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_secs: Option<u64>,
     },
     /// Smoke-test an evaluation backend configuration for the settings
     /// pane. Carries the full settings so unsaved field edits can be tested;

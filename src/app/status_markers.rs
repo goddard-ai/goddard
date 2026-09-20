@@ -349,6 +349,7 @@ impl Waku {
                             state,
                             questions,
                             feature: Some(EVAL_FEATURE.to_owned()),
+                            timeout_secs: None,
                         },
                     )
                     .map_err(|error| format!("{error:#}"))

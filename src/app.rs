@@ -2101,6 +2101,12 @@ pub struct Waku {
     /// The kill confirmation ⌘W raises on a main-area terminal whose shell
     /// still has a command running.
     terminal_close_dialog: Option<terminal_close_dialog::TerminalCloseDialogState>,
+    /// The cost warning a provider pick on a locked session raises; the pick
+    /// rides along so confirming applies the whole row.
+    provider_switch_dialog: Option<provider_switch_dialog::ProviderSwitchDialogState>,
+    /// Sessions mid-switch: the compaction eval is in flight. Submissions
+    /// queue behind it like they would behind a busy turn.
+    provider_switch_in_flight: HashSet<Uuid>,
     /// The keyboard-shortcut cheatsheet opened from the sidebar footer.
     shortcuts_dialog: Option<shortcuts_dialog::ShortcutsDialogState>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
@@ -3126,6 +3132,8 @@ mod issue_dialog;
 mod notifications;
 mod project_switcher;
 mod projects;
+mod provider_switch;
+mod provider_switch_dialog;
 mod relocate;
 mod render;
 mod right_panel;
@@ -3171,6 +3179,7 @@ pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
+pub use provider_switch_dialog::init as init_provider_switch_dialog_keys;
 pub use saved_drafts::init as init_drafts_keys;
 pub use send_file_dialog::init as init_send_file_dialog_keys;
 pub use settings::init as init_settings_keys;
@@ -3195,6 +3204,7 @@ pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog, GenerateCommit
 pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
+pub use provider_switch_dialog::{ConfirmProviderSwitchDialog, DismissProviderSwitchDialog};
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
@@ -5355,6 +5365,8 @@ impl Waku {
                 last_created_issue: None,
                 archive_dialog: None,
                 terminal_close_dialog: None,
+                provider_switch_dialog: None,
+                provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
                 full_access_dialog: None,
                 shortcuts_dialog: None,

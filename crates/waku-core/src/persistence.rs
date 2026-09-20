@@ -1786,6 +1786,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         quarantined: false,
         landed_at: landed_at.map(|at| at as u64),
         provider_cursor: None,
+        suspended_provider_sessions: Vec::new(),
+        pending_provider_context: None,
         available_commands: Vec::new(),
         thread_goal: None,
         context_usage: None,

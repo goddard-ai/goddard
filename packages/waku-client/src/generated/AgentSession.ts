@@ -11,6 +11,7 @@ import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionStatus } from "./SessionStatus";
 import type { SessionWorkspace } from "./SessionWorkspace";
+import type { SuspendedProviderSession } from "./SuspendedProviderSession";
 import type { ThreadGoal } from "./ThreadGoal";
 import type { TranscriptBlock } from "./TranscriptBlock";
 
@@ -117,6 +118,20 @@ quarantined?: boolean,
  * `None` while the session's work has not been landed through the app.
  */
 landed_at?: number | null, provider_cursor: ProviderResumeCursor | null,
+/**
+ * Provider conversations this session ran on before switching away.
+ * Each holds a resumable cursor and the transcript boundary the return
+ * compacts from — the current provider's entry lives in
+ * `provider`/`provider_cursor`, not here.
+ */
+suspended_provider_sessions?: Array<SuspendedProviderSession>,
+/**
+ * Compacted context staged by a provider switch, prepended to the next
+ * outbound prompt and then cleared — the same one-shot delivery
+ * `workspace_moved_from` uses. Persisted so a quit between the switch
+ * and the next prompt does not lose it.
+ */
+pending_provider_context?: string | null,
 /**
  * Slash commands the provider reported for this session's live process,
  * kept so a resumed session still completes them before its next

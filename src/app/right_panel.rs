@@ -3203,6 +3203,7 @@ impl Waku {
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
+            || self.provider_switch_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.image_preview.is_some()
             || self.composer.read(cx).context_menu_open(cx)

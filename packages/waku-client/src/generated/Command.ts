@@ -59,7 +59,13 @@ scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider
  * log record. `None` — every caller before this field existed —
  * logs as a bare `"evaluate"`.
  */
-feature?: string | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "routeTask", prompt: string,
+feature?: string | null,
+/**
+ * Override for the call's latency budget in seconds. Latency-bound
+ * callers (routing) leave it `None` for the default; long-context
+ * callers such as provider-switch compaction pass a larger budget.
+ */
+timeoutSecs?: number | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "routeTask", prompt: string,
 /**
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.

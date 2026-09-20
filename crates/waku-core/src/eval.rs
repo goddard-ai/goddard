@@ -33,7 +33,7 @@ const JEV_MODEL_ALIAS: &str = "jev-latest";
 
 /// The eval call's share of a user action's latency budget; callers degrade to
 /// their default route when it elapses.
-const EVAL_TIMEOUT_SECS: u64 = 5;
+pub const EVAL_TIMEOUT_SECS: u64 = 5;
 /// Answer envelopes are a few hundred bytes; far past that the response is
 /// not an answer worth parsing.
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -153,15 +153,28 @@ pub fn append_decision_log(path: &Path, record: &EvalDecisionRecord) {
     })();
 }
 
-/// Run one evaluation against the configured backend. Blocking.
+/// Run one evaluation against the configured backend, on the default
+/// latency budget shared by latency-bound callers. Blocking.
 pub fn evaluate(
     settings: &EvalSettings,
     state: &Value,
     questions: &BTreeMap<String, EvalQuestion>,
 ) -> anyhow::Result<Evaluation> {
+    evaluate_with_timeout(settings, state, questions, EVAL_TIMEOUT_SECS)
+}
+
+/// Run one evaluation with an explicit latency budget. Long-context callers
+/// — provider-switch compaction asks one question per transcript item —
+/// need more than the routing share. Blocking.
+pub fn evaluate_with_timeout(
+    settings: &EvalSettings,
+    state: &Value,
+    questions: &BTreeMap<String, EvalQuestion>,
+    timeout_secs: u64,
+) -> anyhow::Result<Evaluation> {
     let (url, headers, body) = backend_request(settings, state, questions)?;
     let started = Instant::now();
-    let (status, raw) = curl_post_json(&url, &headers, &body, EVAL_TIMEOUT_SECS)?;
+    let (status, raw) = curl_post_json(&url, &headers, &body, timeout_secs)?;
     let latency_ms = started.elapsed().as_millis() as u64;
     if !(200..300).contains(&status) {
         // Provider error bodies can echo the request — including the prompt —

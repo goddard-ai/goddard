@@ -1172,6 +1172,7 @@ impl Backend for WakuBackend {
                 state,
                 questions,
                 feature,
+                timeout_secs,
             } => {
                 let settings = self
                     .settings
@@ -1179,7 +1180,12 @@ impl Backend for WakuBackend {
                     .eval
                     .ok_or_else(|| anyhow!("no evaluation backend is configured"))?;
                 let started = std::time::Instant::now();
-                let result = crate::eval::evaluate(&settings, &state, &questions);
+                let result = crate::eval::evaluate_with_timeout(
+                    &settings,
+                    &state,
+                    &questions,
+                    timeout_secs.unwrap_or(crate::eval::EVAL_TIMEOUT_SECS),
+                );
                 let mut record = crate::eval::EvalDecisionRecord::empty("evaluate");
                 if let Some(feature) = feature {
                     record.feature = feature;

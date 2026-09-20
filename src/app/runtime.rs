@@ -5292,9 +5292,10 @@ impl Waku {
             self.steer_composer_submission(submission, cx);
             return;
         }
-        if session.is_busy() {
-            // While the agent is working, Enter queues a follow-up instead of
-            // refusing the message. The queue drains once the turn settles.
+        if session.is_busy() || self.provider_switch_in_flight.contains(&session.id) {
+            // While the agent is working — or a provider switch is still
+            // compacting — Enter queues a follow-up instead of refusing the
+            // message. The queue drains once the turn settles.
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
         }
@@ -5328,7 +5329,7 @@ impl Waku {
             self.steer_session_submission(session.id, submission, cx);
             return;
         }
-        if session.is_busy() {
+        if session.is_busy() || self.provider_switch_in_flight.contains(&session.id) {
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
         }
@@ -6172,6 +6173,19 @@ impl Waku {
                         }
                     }
                 }
+                // A provider switch stages the compacted context the new
+                // provider needs; it precedes every other one-shot note so
+                // the resumed-or-seeded session reads its history first.
+                // Provider-facing only — the transcript keeps the user's
+                // text and the marker message records the switch.
+                let driver_prompt = match self
+                    .state
+                    .session_mut(session_id)
+                    .and_then(AgentSession::take_provider_context)
+                {
+                    Some(context) => format!("{context}\n\n{driver_prompt}"),
+                    None => driver_prompt,
+                };
                 // The first prompt after a move into a worktree warns the
                 // resumed thread that its recorded paths now name a stale
                 // checkout. Provider-facing only — the transcript keeps the

@@ -800,6 +800,14 @@ full_access.confirm_title: フルアクセスを有効にしますか？
 full_access.confirm_description: エージェントは承認を求めずにファイルの読み取り・編集とコマンドの実行を行えます。
 full_access.confirm_effect: この変更は現在のタスクにすぐ適用され、新しいタスクのデフォルトになります。
 full_access.confirm_enable: フルアクセスを有効にする
+provider_switch.title: "%{provider} に切り替えますか？"
+provider_switch.description_new: Jev がこのタスクのトランスクリプトを圧縮し、抽出したコンテキストで新しい %{provider} セッションをシードします。%{provider} の入力レートで一度だけ取り込みます — 長いタスクでは費用がかかることがあります。%{from} のセッションは再開可能なまま残り、戻ると復元されます。
+provider_switch.description_return: Jev が %{provider} が見逃した作業を圧縮し、以前の %{provider} セッションをその内容で再開します。%{provider} の入力レートで一度だけ取り込みます — 長いタスクでは費用がかかることがあります。
+provider_switch.estimate: "約 %{items} 件のトランスクリプト項目、およそ %{tokens} トークン。"
+provider_switch.confirm: "%{provider} に切り替える"
+provider_switch.working: "%{provider} 用に履歴を圧縮しています…"
+provider_switch.failed: "プロバイダーの切り替えに失敗しました — %{error}"
+provider_switch.no_eval_backend: プロバイダーの切り替えには設定で評価（Jev）バックエンドの構成が必要です。
 sandbox.environment: 環境
 sandbox.this_mac: この Mac
 sandbox.this_mac_description: この Mac でコマンドと編集を実行
@@ -1421,6 +1429,8 @@ transcript.edit_message: メッセージを編集
 transcript.sent_by_agent: エージェントから送信
 transcript.landed: "%{base} に取り込みました"
 transcript.landed_more: "…その他 %{count} 件のコミット"
+transcript.provider_switched: "プロバイダーを切り替えました — %{from} → %{to}"
+transcript.provider_switched_restarted: "プロバイダーを切り替えました — %{from} → %{to}。以前の %{to} セッションを再開できなかったため、完全な履歴で新しいセッションをシードしました"
 transcript.show_more_commits: "さらに %{count} 件のコミットを表示"
 transcript.show_fewer_commits: 表示するコミットを減らす
 transcript.showing_first_commits: "%{total} 件中、先頭 %{count} 件を表示"

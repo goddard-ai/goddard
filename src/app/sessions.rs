@@ -2933,6 +2933,7 @@ impl Waku {
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
+            || self.provider_switch_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()
             || self.image_preview.is_some()
@@ -2992,6 +2993,7 @@ impl Waku {
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
+            || self.provider_switch_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()
             || self.image_preview.is_some()
@@ -3416,6 +3418,36 @@ impl Waku {
             return;
         }
         let service_tier = fast.then(|| "fast".to_owned());
+        // A switch in flight owns the session's provider row until the
+        // compaction lands; a second pick must not race its mutation.
+        if self
+            .composer_session()
+            .is_some_and(|session| self.provider_switch_in_flight.contains(&session.id))
+        {
+            return;
+        }
+        // A different provider on a started session is a provider switch, not
+        // a model change: the pick waits on the compaction warning dialog,
+        // which applies the whole row if confirmed.
+        if self.model_picker_target == composer::ModelPickerTarget::Composer
+            && let Some(session) = self.composer_session()
+            && session.provider != provider
+            && session.provider_locked()
+            && session.detail_loaded
+            && !self.provider_switch_in_flight.contains(&session.id)
+        {
+            let session_id = session.id;
+            let pick = provider_switch::ProviderSwitchPick {
+                provider,
+                model: Some(model),
+                effort,
+                fast,
+            };
+            let focus = self.open_provider_switch_dialog(session_id, pick, cx);
+            let window_handle = self.window_handle;
+            let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
+            return;
+        }
         // Picking a concrete model exits an Auto draft even when provider and
         // model happen to match the draft's last-used carryover.
         let Some((session_id, provider_changed, was_routed)) = self

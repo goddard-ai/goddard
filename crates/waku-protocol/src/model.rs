@@ -1465,6 +1465,18 @@ pub struct AgentSession {
     pub landed_at: Option<u64>,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
+    /// Provider conversations this session ran on before switching away.
+    /// Each holds a resumable cursor and the transcript boundary the return
+    /// compacts from — the current provider's entry lives in
+    /// `provider`/`provider_cursor`, not here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suspended_provider_sessions: Vec<SuspendedProviderSession>,
+    /// Compacted context staged by a provider switch, prepended to the next
+    /// outbound prompt and then cleared — the same one-shot delivery
+    /// `workspace_moved_from` uses. Persisted so a quit between the switch
+    /// and the next prompt does not lose it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_provider_context: Option<String>,
     /// Slash commands the provider reported for this session's live process,
     /// kept so a resumed session still completes them before its next
     /// handshake.
@@ -1558,6 +1570,8 @@ impl AgentSession {
             landed_at: None,
             detail_loaded: true,
             provider_cursor: None,
+            suspended_provider_sessions: Vec::new(),
+            pending_provider_context: None,
             available_commands: Vec::new(),
             thread_goal: None,
             context_usage: None,
@@ -1609,6 +1623,8 @@ impl AgentSession {
             quarantined: self.quarantined,
             landed_at: self.landed_at,
             provider_cursor: None,
+            suspended_provider_sessions: Vec::new(),
+            pending_provider_context: None,
             available_commands: Vec::new(),
             thread_goal: None,
             context_usage: None,
@@ -1714,6 +1730,22 @@ impl AgentSession {
         ))
     }
 
+    /// Where the transcript stands now, recorded as a suspended provider's
+    /// `boundary` when the session switches away from it.
+    pub fn transcript_boundary(&self) -> TranscriptBoundary {
+        TranscriptBoundary {
+            messages: self.messages.len(),
+            blocks: self.transcript_blocks.len(),
+        }
+    }
+
+    /// The staged provider-switch context for the next outbound prompt, or
+    /// `None` once consumed. Like [`Self::take_workspace_move_notice`] it is
+    /// provider-facing only — the transcript keeps the user's text.
+    pub fn take_provider_context(&mut self) -> Option<String> {
+        self.pending_provider_context.take()
+    }
+
     /// Drops the loaded transcript so the session returns to its skeleton
     /// state, releasing the heap its messages, blocks and turns occupied.
     ///
@@ -1813,7 +1845,11 @@ impl AgentSession {
     }
 
     pub fn can_choose_model(&self, provider: ProviderKind) -> bool {
-        !self.status.is_busy() && (!self.provider_locked() || self.provider == provider)
+        // A different provider on a locked session routes through the
+        // provider-switch flow rather than applying directly, so it needs a
+        // loaded transcript to compact — skeletons stay same-provider only.
+        !self.status.is_busy()
+            && (self.provider == provider || !self.provider_locked() || self.detail_loaded)
     }
 
     pub fn migrate_legacy_state(&mut self) {
@@ -2361,6 +2397,15 @@ pub enum TranscriptNotice {
     /// ("Goal set"). `kind` picks the leading icon; `content` still carries
     /// the rendered text for clients that predate the variant.
     Status { kind: TranscriptNoticeStatus },
+    /// The session moved to a different provider. `restarted` means the
+    /// target's earlier provider session could not be resumed, so a fresh
+    /// one was seeded with the full compacted history instead of the delta.
+    ProviderSwitched {
+        from: ProviderKind,
+        to: ProviderKind,
+        #[serde(default, skip_serializing_if = "is_false")]
+        restarted: bool,
+    },
 }
 
 /// Which icon a [`TranscriptNotice::Status`] row leads with.
@@ -2387,6 +2432,26 @@ pub enum TranscriptNoticeStatus {
     Error,
     /// A goal was set on the session.
     Goal,
+}
+
+/// A position in the persisted transcript: how many `messages` and
+/// `transcript_blocks` existed when it was taken. The delta a suspended
+/// provider missed is everything appended past its boundary.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct TranscriptBoundary {
+    pub messages: usize,
+    pub blocks: usize,
+}
+
+/// A provider-side conversation this session previously ran on, suspended
+/// when it switched providers. `cursor` resumes it; `boundary` marks where
+/// the transcript stood at suspension so a return can compact only the work
+/// the provider never saw.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+pub struct SuspendedProviderSession {
+    pub provider: ProviderKind,
+    pub cursor: ProviderResumeCursor,
+    pub boundary: TranscriptBoundary,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -5119,15 +5184,23 @@ mod tests {
     }
 
     #[test]
-    fn model_selection_keeps_started_sessions_on_their_provider() {
+    fn model_selection_routes_locked_sessions_through_provider_switch() {
         let project = Project::from_path(PathBuf::from("/tmp/waku"));
         let mut session = AgentSession::new(project.id, ProviderKind::Codex);
 
         assert!(session.can_choose_model(ProviderKind::Claude));
 
         session.push_message(MessageRole::User, "first turn");
+        assert!(session.provider_locked());
+        // The pick stays allowed — the app routes it through the switch
+        // flow — as long as the transcript is loaded to compact.
         assert!(session.can_choose_model(ProviderKind::Codex));
+        assert!(session.can_choose_model(ProviderKind::Claude));
+
+        // A skeleton cannot compact its unloaded transcript.
+        session.detail_loaded = false;
         assert!(!session.can_choose_model(ProviderKind::Claude));
+        assert!(session.can_choose_model(ProviderKind::Codex));
     }
 
     #[test]
@@ -5147,7 +5220,9 @@ mod tests {
         session.finish_active_turn(TurnStatus::Completed);
 
         assert!(session.provider_locked());
-        assert!(!session.can_choose_model(ProviderKind::Claude));
+        // Locked no longer blocks the pick — it routes through the
+        // provider-switch flow, which compacts the loaded transcript.
+        assert!(session.can_choose_model(ProviderKind::Claude));
     }
 
     #[test]

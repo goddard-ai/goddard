@@ -2998,7 +2998,7 @@ fn format_count(value: u64) -> String {
 
 /// Compacts a token count to three significant figures with a unit suffix, so
 /// columns of numbers line up at a glance (`19.9B`, `76.7M`, `804K`).
-fn format_tokens_compact(value: f64) -> String {
+pub(super) fn format_tokens_compact(value: f64) -> String {
     let abs = value.abs();
     let (scaled, suffix) = if abs >= 1e12 {
         (value / 1e12, "T")

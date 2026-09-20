@@ -2116,6 +2116,22 @@ full_access.confirm_effect:
   en: The change applies to this task right away and becomes the default for new tasks.
 full_access.confirm_enable:
   en: Enable Full access
+provider_switch.title:
+  en: Switch to %{provider}?
+provider_switch.description_new:
+  en: Jev will compact this task's transcript and seed a new %{provider} session with the extracted context — one ingestion at %{provider}'s input rates, which can be expensive on a long task. The %{from} session stays resumable; switching back restores it.
+provider_switch.description_return:
+  en: Jev will compact the work %{provider} missed and resume your earlier %{provider} session with it — one ingestion at %{provider}'s input rates, which can be expensive on a long task.
+provider_switch.estimate:
+  en: About %{items} transcript items, roughly %{tokens} tokens.
+provider_switch.confirm:
+  en: Switch to %{provider}
+provider_switch.working:
+  en: Compacting history for %{provider}…
+provider_switch.failed:
+  en: "Provider switch failed — %{error}"
+provider_switch.no_eval_backend:
+  en: Provider switching needs an evaluation (Jev) backend configured in Settings.
 sandbox.environment:
   en: Environment
 sandbox.this_mac:
@@ -3517,6 +3533,10 @@ transcript.landed:
   en: Landed on %{base}
 transcript.landed_more:
   en: "…and %{count} more"
+transcript.provider_switched:
+  en: "Switched provider — %{from} → %{to}"
+transcript.provider_switched_restarted:
+  en: "Switched provider — %{from} → %{to}; the earlier %{to} session could not be resumed, so a new one was seeded with the full history"
 transcript.show_more_commits:
   en: Show %{count} more commits
 transcript.show_fewer_commits:
