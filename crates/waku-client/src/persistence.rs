@@ -752,6 +752,9 @@ pub struct AppSettings {
     /// run as tasks whether or not the app is open. Defaults on in debug
     /// builds.
     pub automations_enabled: bool,
+    /// Experimental: the quick-action dock that rises above the sidebar
+    /// footer on hover. Defaults on in debug builds.
+    pub sidebar_dock_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -801,6 +804,7 @@ impl Default for AppSettings {
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
+            sidebar_dock_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1155,6 +1159,8 @@ pub struct PersistedState {
     pub status_markers_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub automations_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub sidebar_dock_enabled: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1346,6 +1352,7 @@ impl PersistedState {
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
+            sidebar_dock_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1651,6 +1658,7 @@ impl PersistedState {
             model_router_enabled: self.model_router_enabled,
             status_markers_enabled: self.status_markers_enabled,
             automations_enabled: self.automations_enabled,
+            sidebar_dock_enabled: self.sidebar_dock_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1744,6 +1752,7 @@ impl PersistedState {
         self.model_router_enabled = settings.model_router_enabled;
         self.status_markers_enabled = settings.status_markers_enabled;
         self.automations_enabled = settings.automations_enabled;
+        self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 

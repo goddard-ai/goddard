@@ -1691,6 +1691,10 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        // Experimental — the dock never mounts while its opt-in is off.
+        if !self.state.sidebar_dock_enabled {
+            return None;
+        }
         // The hover flags gate *wanted* visibility; the slide gate is the
         // motion state, so the dock stays mounted while it drops back off
         // the window's bottom edge. Requesting the next frame here notifies

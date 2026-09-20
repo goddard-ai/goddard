@@ -666,6 +666,10 @@ experiments.status_markers_title:
   en: Turn status markers
 experiments.status_markers_description:
   en: When an assistant turn ends, the evaluation model scores it against a fixed marker set — complete, awaiting input, unverified, partial, blocked, failed, drifted — and markers that clear their threshold appear as chips under the response.
+experiments.sidebar_dock_title:
+  en: Sidebar dock
+experiments.sidebar_dock_description:
+  en: A quick-action dock that rises above the sidebar footer on hover — inbox, archive, keyboard shortcuts, and settings one click away.
 experiments.memory_title:
   en: Project memory
 experiments.memory_description:

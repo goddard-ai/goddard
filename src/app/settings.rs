@@ -4138,6 +4138,16 @@ impl Waku {
                         |this, enabled, cx| this.set_status_markers_enabled(enabled, cx),
                     ))
                     .children(self.experiment_card(
+                        "sidebar-dock-experiment-toggle",
+                        "experiments.sidebar_dock_title",
+                        "experiments.sidebar_dock_description",
+                        self.state.sidebar_dock_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_sidebar_dock_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
                         "memory-experiment-toggle",
                         "experiments.memory_title",
                         "experiments.memory_description",
@@ -4293,6 +4303,12 @@ impl Waku {
             self.clear_status_markers();
         }
         self.state.status_markers_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_sidebar_dock_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.sidebar_dock_enabled = enabled;
         self.save();
         cx.notify();
     }
