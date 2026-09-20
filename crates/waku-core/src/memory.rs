@@ -554,18 +554,21 @@ fn scrub_note(line: &str) -> Option<String> {
     Some(collapsed.chars().take(MAX_NOTE_CHARS).collect())
 }
 
-/// Create the store directory and exclude `.goddard/` from the project's own
-/// git, so memory never appears in diffs or commits. Non-git projects simply
-/// get the directory.
+/// Create the store directory and exclude `.goddard/memory/` from the
+/// project's own git, so memory never appears in diffs or commits. Only the
+/// store is excluded — `.goddard/commands` and friends stay committable.
+/// Non-git projects simply get the directory.
 fn ensure_store(project_path: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(memory_dir(project_path))?;
     exclude_from_git(project_path);
     Ok(())
 }
 
-/// Append `.goddard/` to the repository's `info/exclude` — the local exclude
-/// file that never touches the tracked `.gitignore`. Resolves `gitdir:`
-/// pointers so linked worktrees write to the real git directory.
+/// Append `.goddard/memory/` to the repository's `info/exclude` — the local
+/// exclude file that never touches the tracked `.gitignore`. Resolves
+/// `gitdir:` pointers and then `commondir` so a linked worktree lands the
+/// entry in the shared git directory; git never reads a worktree's own
+/// `info/exclude`.
 fn exclude_from_git(project_path: &Path) {
     let _ = (|| -> anyhow::Result<()> {
         let dotgit = project_path.join(".git");
@@ -587,14 +590,25 @@ fn exclude_from_git(project_path: &Path) {
         } else {
             return Ok(());
         };
+        let git_dir = match std::fs::read_to_string(git_dir.join("commondir")) {
+            Ok(common) => {
+                let common = PathBuf::from(common.trim());
+                if common.is_absolute() {
+                    common
+                } else {
+                    git_dir.join(common)
+                }
+            }
+            Err(_) => git_dir,
+        };
         let info = git_dir.join("info");
         std::fs::create_dir_all(&info)?;
         let exclude = info.join("exclude");
         let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
-        if existing
-            .lines()
-            .any(|line| line.trim() == ".goddard/" || line.trim() == ".goddard")
-        {
+        if existing.lines().any(|line| {
+            let line = line.trim().trim_end_matches('/');
+            line == ".goddard" || line == ".goddard/memory"
+        }) {
             return Ok(());
         }
         let mut file = std::fs::OpenOptions::new()
@@ -604,7 +618,7 @@ fn exclude_from_git(project_path: &Path) {
         if !existing.is_empty() && !existing.ends_with('\n') {
             writeln!(file)?;
         }
-        writeln!(file, ".goddard/")?;
+        writeln!(file, ".goddard/memory/")?;
         Ok(())
     })();
 }
@@ -949,11 +963,11 @@ mod tests {
         std::fs::create_dir_all(root.join(".git")).unwrap();
         exclude_from_git(&root);
         let exclude = std::fs::read_to_string(root.join(".git/info/exclude")).unwrap();
-        assert!(exclude.lines().any(|line| line == ".goddard/"));
+        assert!(exclude.lines().any(|line| line == ".goddard/memory/"));
         // Idempotent: a second pass does not duplicate the line.
         exclude_from_git(&root);
         let exclude = std::fs::read_to_string(root.join(".git/info/exclude")).unwrap();
-        assert_eq!(exclude.matches(".goddard/").count(), 1);
+        assert_eq!(exclude.matches(".goddard/memory/").count(), 1);
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -965,6 +979,25 @@ mod tests {
         std::fs::write(root.join(".git"), format!("gitdir: {}", gitdir.display())).unwrap();
         exclude_from_git(&root);
         assert!(gitdir.join("info/exclude").exists());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn exclude_resolves_worktree_commondir() {
+        let root = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
+        let common = root.join("main/.git");
+        let worktree_git = common.join("worktrees/linked");
+        std::fs::create_dir_all(&worktree_git).unwrap();
+        std::fs::write(worktree_git.join("commondir"), "../..\n").unwrap();
+        std::fs::write(
+            root.join(".git"),
+            format!("gitdir: {}", worktree_git.display()),
+        )
+        .unwrap();
+        exclude_from_git(&root);
+        let exclude = std::fs::read_to_string(common.join("info/exclude")).unwrap();
+        assert!(exclude.lines().any(|line| line == ".goddard/memory/"));
+        assert!(!worktree_git.join("info/exclude").exists());
         std::fs::remove_dir_all(&root).ok();
     }
 
