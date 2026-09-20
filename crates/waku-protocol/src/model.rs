@@ -2612,6 +2612,25 @@ pub enum ProjectMapStatus {
     },
 }
 
+/// Where a sandboxed session's launch is, streamed while the daemon builds
+/// the guest's checkpoints and boots the VM. The session's working indicator
+/// renders the phase; `Ready` clears it. Ephemeral — setup noise never lands
+/// in the persisted transcript.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SandboxSetupStatus {
+    /// The VM OS image is absent and downloading — only on a machine's first
+    /// sandboxed session.
+    DownloadingImage,
+    /// A checkpoint layer is being built; `toolchain` names what is
+    /// installing (the provider CLI, or the detected runtimes).
+    BuildingToolchain { toolchain: String },
+    /// The VM is booting from a saved checkpoint.
+    BootingVm,
+    /// The provider process is up — clients clear the transient status.
+    Ready,
+}
+
 #[derive(Clone, Debug)]
 pub enum DriverEvent {
     /// Client-only acknowledgement that every daemon event through this
@@ -2723,6 +2742,10 @@ pub enum DriverEvent {
     /// index lifecycle updates plus the `Sent` record of the map that rode
     /// the first prompt.
     ProjectMap(ProjectMapStatus),
+    /// Sandbox launch progress for this session, emitted before the
+    /// provider process exists. Ephemeral — replayed to nobody, cleared by
+    /// `SandboxSetupStatus::Ready` or any setup failure.
+    SandboxSetup(SandboxSetupStatus),
     TurnFinished {
         success: bool,
         summary: Option<String>,

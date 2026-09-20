@@ -138,6 +138,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
         DriverEvent::ProjectMap(status) => ("projectMap", serde_json::to_value(status)?),
+        DriverEvent::SandboxSetup(status) => ("sandboxSetup", serde_json::to_value(status)?),
         DriverEvent::TurnFinished {
             success,
             summary,
@@ -243,6 +244,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
         "projectMap" => DriverEvent::ProjectMap(serde_json::from_value(payload)?),
+        "sandboxSetup" => DriverEvent::SandboxSetup(serde_json::from_value(payload)?),
         "turnFinished" => {
             let finished: TurnFinishedWire = serde_json::from_value(payload)?;
             DriverEvent::TurnFinished {
@@ -357,7 +359,9 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion};
+    use crate::model::{
+        SandboxSetupStatus, ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion,
+    };
 
     #[test]
     fn goal_updates_round_trip_through_the_daemon_wire() {
@@ -384,6 +388,31 @@ mod tests {
         assert!(matches!(
             event_from_wire(cleared).unwrap(),
             DriverEvent::GoalUpdated(None)
+        ));
+    }
+
+    #[test]
+    fn sandbox_setup_round_trips_through_the_daemon_wire() {
+        let wire = event_to_wire(DriverEvent::SandboxSetup(
+            SandboxSetupStatus::BuildingToolchain {
+                toolchain: "node@lts".into(),
+            },
+        ))
+        .unwrap();
+        assert_eq!(wire.kind, "sandboxSetup");
+        assert_eq!(wire.payload["state"], "buildingToolchain");
+
+        let DriverEvent::SandboxSetup(SandboxSetupStatus::BuildingToolchain { toolchain }) =
+            event_from_wire(wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(toolchain, "node@lts");
+
+        let ready = event_to_wire(DriverEvent::SandboxSetup(SandboxSetupStatus::Ready)).unwrap();
+        assert!(matches!(
+            event_from_wire(ready).unwrap(),
+            DriverEvent::SandboxSetup(SandboxSetupStatus::Ready)
         ));
     }
 

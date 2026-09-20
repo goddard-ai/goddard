@@ -3038,8 +3038,18 @@ impl WakuBackend {
                     "this task was created with the Sandbox VM environment, but the sandbox experiment is off"
                 );
             }
-            let launch = crate::sandbox::launch_for_provider(provider, &options.cwd)
-                .context("could not prepare the sandbox VM")?;
+            let launch = crate::sandbox::launch_for_provider(
+                provider,
+                &options.cwd,
+                |status| {
+                    // Launch progress is ephemeral — it exists to name the
+                    // Connecting phase, never to enter the transcript.
+                    if let Ok(wire) = event_to_wire(DriverEvent::SandboxSetup(status)) {
+                        let _ = events.send_ephemeral(wire);
+                    }
+                },
+            )
+            .context("could not prepare the sandbox VM")?;
             options.binary = launch.binary;
             options.cwd = launch.cwd;
             options.sandbox = Some(launch.vm);
@@ -3048,6 +3058,7 @@ impl WakuBackend {
             options.agent = None;
         }
         // A launch that never came up keeps no credential.
+        let sandboxed_launch = options.sandbox.is_some();
         let handle = match driver::start_local(provider, options, event_sender) {
             Ok(handle) => handle,
             Err(error) => {
@@ -3055,6 +3066,15 @@ impl WakuBackend {
                 return Err(error);
             }
         };
+        if sandboxed_launch {
+            // The provider process is up — clear the launch phase so the
+            // transcript's indicator falls back to its ordinary working state.
+            if let Ok(wire) = event_to_wire(DriverEvent::SandboxSetup(
+                waku_protocol::model::SandboxSetupStatus::Ready,
+            )) {
+                let _ = events.send_ephemeral(wire);
+            }
+        }
         let forwarder_handle = handle.clone();
         let agent = self.agent.clone();
         let task_state = self.task_state.clone();

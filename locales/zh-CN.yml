@@ -793,6 +793,9 @@ sandbox.sandbox_vm: 沙箱 VM
 sandbox.sandbox_vm_description: 在隔离的 Linux 虚拟机中运行
 sandbox.sandbox_vm_unsupported: 沙箱任务需要 Codex 或 Claude — {provider} 暂时无法在 VM 中启动。
 sandbox.badge: 沙箱中
+sandbox.setup_downloading: 正在设置沙箱 — 正在下载 VM 镜像
+sandbox.setup_building: 正在设置沙箱 — 正在安装 {toolchain}
+sandbox.setup_booting: 正在设置沙箱 — 正在启动 VM
 agent_preset.standard: 标准模式
 agent_preset.code: 代码模式
 agent_preset.minimal: 极简模式

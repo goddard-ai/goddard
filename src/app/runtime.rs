@@ -1968,6 +1968,7 @@ impl Waku {
                     .checked_sub(BACKGROUND_WORK_REFRESH_INTERVAL)
                     .unwrap_or_else(Instant::now),
                 project_map: None,
+                sandbox_setup: None,
             },
         );
         signal_event_pump(&self.event_wake_tx);
@@ -5083,6 +5084,7 @@ impl Waku {
                     .checked_sub(BACKGROUND_WORK_REFRESH_INTERVAL)
                     .unwrap_or_else(Instant::now),
                 project_map: None,
+                sandbox_setup: None,
             },
         );
         // Startup can emit before the background task hands this receiver to

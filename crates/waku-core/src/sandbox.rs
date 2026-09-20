@@ -25,7 +25,7 @@ use anyhow::{Context, anyhow, bail};
 use base64::Engine;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use waku_protocol::model::ProviderKind;
+use waku_protocol::model::{ProviderKind, SandboxSetupStatus};
 
 /// The guest path the session's worktree is mounted at — also the provider's
 /// working directory inside the VM.
@@ -176,7 +176,18 @@ fn shuru_binary() -> anyhow::Result<PathBuf> {
 
 /// Download the OS image on first use — `shuru init` is a no-op once assets
 /// exist, so calling it unconditionally costs nothing after the first time.
-fn ensure_os_image(shuru: &Path) -> anyhow::Result<()> {
+/// The download phase is reported only when the rootfs is actually absent so
+/// every later launch skips straight to booting.
+fn ensure_os_image(
+    shuru: &Path,
+    progress: &mut impl FnMut(SandboxSetupStatus),
+) -> anyhow::Result<()> {
+    let missing = !dirs::home_dir()
+        .map(|home| home.join(".local/share/shuru/rootfs.ext4"))
+        .is_some_and(|rootfs| rootfs.is_file());
+    if missing {
+        progress(SandboxSetupStatus::DownloadingImage);
+    }
     static ONCE: Mutex<()> = Mutex::new(());
     let _guard = ONCE.lock();
     let status = crate::command_env::plain_command(shuru)
@@ -219,16 +230,20 @@ fn checkpoint_install_argv(spec: &GuestSpec) -> Vec<String> {
 /// Build a checkpoint layer once — the download happens in a throwaway VM
 /// with open network, and every later session boots straight from the saved
 /// disk state. `from` chains onto an earlier checkpoint (base image when
-/// `None`).
+/// `None`). `phase` produces the progress event only when a build actually
+/// runs — a cached layer reports nothing and skips straight through.
 fn ensure_layer(
     shuru: &Path,
     name: &str,
     from: Option<&str>,
     install: &[String],
+    phase: impl FnOnce() -> SandboxSetupStatus,
+    progress: &mut impl FnMut(SandboxSetupStatus),
 ) -> anyhow::Result<()> {
     if checkpoint_names(shuru)?.iter().any(|n| n == name) {
         return Ok(());
     }
+    progress(phase());
     eprintln!(
         "goddard-daemon: building sandbox checkpoint {name} (first sandboxed task downloads its toolchain)"
     );
@@ -571,8 +586,14 @@ pub fn spawn(command: &Command, sandbox: Option<&Arc<ShuruVm>>) -> anyhow::Resul
 /// Prepare a sandboxed launch: resolve the toolchain checkpoint, boot the VM
 /// with the worktree mounted, and hand back everything the driver needs to
 /// spawn inside it. Honest failure — a sandboxed session that cannot prepare
-/// reports why instead of running on the host.
-pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::Result<GuestLaunch> {
+/// reports why instead of running on the host. `progress` reports the phase
+/// as the launch reaches it so a client can name what the session is doing
+/// while it sits at Connecting.
+pub fn launch_for_provider(
+    provider: ProviderKind,
+    worktree: &Path,
+    mut progress: impl FnMut(SandboxSetupStatus),
+) -> anyhow::Result<GuestLaunch> {
     let spec = guest_spec(provider).ok_or_else(|| {
         anyhow!(
             "{} cannot run in the sandbox VM yet — pick This Mac or another provider",
@@ -580,7 +601,7 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
         )
     })?;
     let shuru = shuru_binary()?;
-    ensure_os_image(&shuru)?;
+    ensure_os_image(&shuru, &mut progress)?;
     // The provider layer, then the toolchain layer the worktree's manifests
     // ask for — both cached checkpoints, so a later session boots straight
     // from saved disk state.
@@ -589,15 +610,28 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
         spec.checkpoint,
         None,
         &checkpoint_install_argv(&spec),
+        || {
+            SandboxSetupStatus::BuildingToolchain {
+                toolchain: provider.display_name().to_owned(),
+            }
+        },
+        &mut progress,
     )?;
     let runtimes = detect_runtimes(worktree);
     let checkpoint = session_checkpoint(&spec, &runtimes);
     if !runtimes.is_empty() {
+        let toolchain = runtimes
+            .iter()
+            .map(|runtime| format!("{}@{}", runtime.tool, runtime.version))
+            .collect::<Vec<_>>()
+            .join(", ");
         ensure_layer(
             &shuru,
             &checkpoint,
             Some(spec.checkpoint),
             &runtime_install_argv(&runtimes),
+            || SandboxSetupStatus::BuildingToolchain { toolchain },
+            &mut progress,
         )?;
     }
 
@@ -636,6 +670,7 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
     })?;
     exclude_from_git(worktree, ".goddard/");
 
+    progress(SandboxSetupStatus::BootingVm);
     let vm = ShuruVm::launch(GuestConfig {
         shuru,
         // shuru only mounts host paths beneath its own working directory —

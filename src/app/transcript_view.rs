@@ -2794,10 +2794,26 @@ impl Waku {
                 .saturating_sub(turn.started_at)
             })
             .unwrap_or(0);
+        // A sandboxed launch spends its Connecting window building the guest;
+        // name that work instead of the ordinary working/routing labels.
+        let setup = session
+            .and_then(|session| self.runtimes.get(&session.id))
+            .and_then(|runtime| runtime.sandbox_setup.as_ref());
         // A parked turn is waiting on detached work, not working; a
         // first-turn route call that has not answered yet reads as routing,
         // not connecting.
-        let label = if session.is_some_and(|session| session.status == SessionStatus::Background) {
+        let label = if let Some(status) = setup {
+            match status {
+                crate::model::SandboxSetupStatus::DownloadingImage => {
+                    tr!("sandbox.setup_downloading")
+                }
+                crate::model::SandboxSetupStatus::BuildingToolchain { toolchain } => {
+                    tr!("sandbox.setup_building", toolchain = toolchain.clone())
+                }
+                crate::model::SandboxSetupStatus::BootingVm => tr!("sandbox.setup_booting"),
+                crate::model::SandboxSetupStatus::Ready => unreachable!("cleared on store"),
+            }
+        } else if session.is_some_and(|session| session.status == SessionStatus::Background) {
             tr!("transcript.waiting_background")
         } else if session.is_some_and(|session| {
             session.status == SessionStatus::Connecting

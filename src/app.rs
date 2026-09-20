@@ -1262,6 +1262,10 @@ struct SessionRuntime {
     /// The daemon's project-map state for this session, if the experiment
     /// emitted any. `None` keeps the composer's map chip hidden.
     project_map: Option<crate::model::ProjectMapStatus>,
+    /// Where a sandboxed launch is, while the daemon builds the guest —
+    /// the transcript's working indicator names the phase. `None` once the
+    /// provider process is up (or never ran sandboxed).
+    sandbox_setup: Option<crate::model::SandboxSetupStatus>,
 }
 
 #[derive(Clone)]

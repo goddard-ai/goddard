@@ -482,6 +482,14 @@ impl Waku {
                 }
                 runtime.project_map = Some(status);
             }
+            DriverEvent::SandboxSetup(status) => {
+                // Launch progress is transient: `Ready` (or a fresh runtime)
+                // clears it so the working indicator resumes its own label.
+                runtime.sandbox_setup = match status {
+                    crate::model::SandboxSetupStatus::Ready => None,
+                    status => Some(status),
+                };
+            }
             DriverEvent::Permission {
                 request_id,
                 title,
