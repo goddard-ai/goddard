@@ -1,1 +1,0 @@
-- Creating a worktree no longer fails when Git's LFS filters can't run — the worktree materializes with LFS pointer stubs and a notice to run `git lfs pull` inside it instead

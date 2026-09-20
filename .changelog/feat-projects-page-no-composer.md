@@ -1,1 +1,0 @@
-- The Projects page no longer docks a composer — ⌘N goes to the New task page instead, and opening the page or cycling its projects no longer creates a task draft (or connects to a remote host) just for viewing

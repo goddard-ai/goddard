@@ -1,1 +1,0 @@
-- The pin (⌘⌥P) and mark-unread (⌘⌥U, ⌘⇧D) shortcuts now confirm what they did with a toast — including batch selections and pinned terminals

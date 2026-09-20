@@ -1,1 +1,0 @@
-- The Experiments settings page now opens behind a one-time warning that experiments can be buggy or corrupt your data; accepting it once reveals the toggles

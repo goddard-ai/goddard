@@ -1,1 +1,0 @@
-- The Resume view now says when a provider's CLI isn't installed on this machine instead of showing an empty session list

@@ -1,1 +1,0 @@
-- Revoking an always-allowed app on the Computer Use settings page now confirms first, naming the app whose grant is being dropped

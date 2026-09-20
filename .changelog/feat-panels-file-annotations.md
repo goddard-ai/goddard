@@ -1,1 +1,0 @@
-- Select text in a right-panel file editor — or in its rendered markdown preview — and "Add to chat" pins a commented highlight there that quotes into the next message as @path with a [Selected lines N-M] marker and a fenced block

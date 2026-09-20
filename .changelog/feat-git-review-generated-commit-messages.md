@@ -1,1 +1,0 @@
-- Generated commit messages are now reviewable before they land: a Generate action (⌘G) fills the dialog's message field instead of committing immediately, dismissing mid-generation actually cancels (the commit used to land anyway), and a caption names the provider and model doing the generating

@@ -1,1 +1,0 @@
-- Git and `gh` invocations now run with the login shell's search path, so helpers spawned by name — `git-lfs` during checkout, credential helpers, `core.sshCommand`, signing programs — resolve when the app is launched from Finder instead of dying with "command not found"

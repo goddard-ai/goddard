@@ -1,1 +1,0 @@
-- Landing a checkout's commits now clears its sidebar unpushed-count badge right away instead of waiting out the rescan cadence; pushes and new commits refresh the badge on the same moment too

@@ -1,1 +1,0 @@
-- A failed provider setup now leaves its embedded terminal open with the error visible instead of vanishing, sign-in flows that print a localhost URL no longer kill the terminal mid-login, and clicking Run in terminal while an install is running refocuses it instead of killing it

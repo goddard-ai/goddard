@@ -1,1 +1,0 @@
-- The Git panel's "Land onto `<base>`" button now asks first — a confirmation names the base branch and the commit count before the rebase-and-fast-forward rewrites the shared branch

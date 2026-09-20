@@ -1,1 +1,0 @@
-- The file viewer's "Open on GitHub" button now only appears when the remote actually has the file — untracked, uncommitted, and unpushed work no longer opens a 404 — and links to the remote branch (or pushed commit) GitHub can serve rather than the local branch name

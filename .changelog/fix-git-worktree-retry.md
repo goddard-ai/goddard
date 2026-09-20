@@ -1,1 +1,0 @@
-- A worktree creation that fails partway no longer poisons the name — the leftover claim directory and any half-registered worktree are cleaned up, so retrying with the same name succeeds instead of failing with "already exists"

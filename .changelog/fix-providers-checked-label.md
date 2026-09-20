@@ -1,1 +1,0 @@
-- The Providers page's Checked caption reserves its line so rows no longer shift when it appears or disappears, and it now repaints itself at the minute and hour boundaries instead of going stale on an idle page

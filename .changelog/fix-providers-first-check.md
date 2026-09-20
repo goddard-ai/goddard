@@ -1,1 +1,0 @@
-- Provider rows show Checking… until the first detection completes instead of flashing Not detected, expanding a provider's settings no longer steals keyboard focus into the binary path field, and the setup buttons respond to Enter and Space without swallowing modified chords

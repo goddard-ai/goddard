@@ -1,1 +1,0 @@
-- Copying a selection that covers exactly one inline code span puts just the code on the clipboard, without the surrounding backticks

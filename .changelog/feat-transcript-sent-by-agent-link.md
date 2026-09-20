@@ -1,1 +1,0 @@
-- The "Sent by agent" chip on agent-authored prompts now opens the task that sent it; archived and deleted source tasks leave the chip inert

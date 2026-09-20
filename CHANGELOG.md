@@ -31,6 +31,85 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.5.0]
+
+### Features
+
+- **Sessions**
+  - New "Default workspace" setting chooses where new tasks start: "Last used workspace" keeps the current per-project behavior, "Local" always starts on the project's checkout, and "New worktree" always forks a worktree from the base branch last picked for that project
+  - ⌘⇧D is now a "come back to this later" chain: consecutive presses jump to the most important task the chain hasn't shown — unread completions first, then the idle rotation — and a task is re-marked unread only if it was unread on arrival or settled a turn while selected, so parking an already-read task no longer manufactures a dot
+  - The Resume… provider picker only offers providers that can enumerate their terminal sessions, and the Resume view explains when a provider can't expose them instead of showing an empty list
+  - Resume… now lists terminal sessions whose project folder was moved or deleted — marked "folder missing" — and resumes them in the nearest folder that still exists
+  - The Resume view now says when a provider's CLI isn't installed on this machine instead of showing an empty session list
+  - The pin (⌘⌥P) and mark-unread (⌘⌥U, ⌘⇧D) shortcuts now confirm what they did with a toast — including batch selections and pinned terminals
+- **Providers**
+  - ⌥Tab cycles the composer session through its favorited model+effort combos plus the most recently used selection
+  - Switch a started task to a different provider from the model picker: the pick now warns about compaction cost, Jev extracts the relevant transcript verbatim, and the session resumes on the new provider with that context injected into the next prompt. Switching back resumes the earlier provider-side session and injects only the work it missed; a provider session that can no longer be resumed is restarted with the full compacted history and marked in the transcript. Requires a configured evaluation backend, shared with Auto model routing.
+- **Git**
+  - New "Change base branch…" command (⌘K) for a task's worktree: it shows the current base, offers the repo's other local branches, and replays the task's own commits onto the pick with `git rebase --onto` — the worktree must be committed first, conflicts open the usual resolve-in-chat dialog, and the pick becomes the branch Land targets
+  - Generated commit messages are now reviewable before they land: a Generate action (⌘G) fills the dialog's message field instead of committing immediately, dismissing mid-generation actually cancels (the commit used to land anyway), and a caption names the provider and model doing the generating
+- **Transcript**
+  - System notices in the transcript — "Stopped", "Turn completed", provider failures, goal changes — now lead with a status icon so they read as chrome, not agent replies
+  - The "Sent by agent" chip on agent-authored prompts now opens the task that sent it; archived and deleted source tasks leave the chip inert
+- **Terminals**
+  - Selecting text in the integrated terminal now copies it to the clipboard when the mouse is released — like iTerm2's copy-on-select — with a new "Copy on select" setting to turn it off; the selection itself stays visible
+  - Terminal panes drop their header strip — the status dot, title, and working directory are gone and the grid runs to the top edge, with command status still reported on the terminal's sidebar row
+  - New "Terminal link modifier" setting chooses which key opens links and file paths when clicked in the integrated terminal — Option instead of Command on macOS, Alt instead of Ctrl on Linux and Windows; the unselected key stays a plain click
+  - Mouse-aware terminal programs — vim, htop, lazygit — now receive clicks, drags, releases, and scrolls (SGR, UTF-8, and X10 encodings); Shift-click still selects text, Shift-scroll still reaches the scrollback, and links keep opening via the modifier click unless the new "Open links in mouse-aware terminal programs" setting is turned off
+- **Settings**
+  - The Experiments settings page now opens behind a one-time warning that experiments can be buggy or corrupt your data; accepting it once reveals the toggles
+  - Settings gains a dedicated Terminal page — font size, link-click modifier, mouse-aware links, and copy-on-select — while the math/Markdown/token-speed display options moved to Appearance and General now groups its rows under Sessions, Git, and Notifications headers
+- **SSH**
+  - Changing daemon exposure no longer restarts the daemon or interrupts running tasks: the exposed listener opens, rebinds, and closes in place over a new `setDaemonExposure` command, while the loopback listener and every active session keep running — so toggling "Expose managed daemon" in Settings is safe at any time
+  - Daemon access tokens now read as 12-word mnemonic phrases — easy to read, say aloud, and type when connecting Goddard Web or a phone — while previously generated hex tokens keep working unchanged
+- Click a filename wherever one renders — activity rows, diff file headers, attachment tiles, checkpoint previews, and dialog file lists — to open it in its default app
+- The command palette now includes Remove project…, which removes a project and its tasks from Goddard without deleting the project folder from disk
+- Select text in a right-panel file editor — or in its rendered markdown preview — and "Add to chat" pins a commented highlight there that quotes into the next message as @path with a [Selected lines N-M] marker and a fenced block
+- The Projects page no longer docks a composer — ⌘N goes to the New task page instead, and opening the page or cycling its projects no longer creates a task draft (or connects to a remote host) just for viewing
+
+### Experiments
+
+- **[Experimental]** QA review moves behind its own Settings → Experiments opt-in — the Projects page's Review tab only appears while it's enabled.
+- **[Experimental]** Auto model routing now maps each task class — Routine, General, Demanding — to a provider, model, and effort configured under Settings → Jev, with a "suggest from recent usage" button that fills them from your most-used combos: Jev classifies the task at session start, the routed model locks for the session's life, and a per-turn evaluation can shift reasoning effort at high confidence while the model stays put
+- **[Experimental]** Sandbox VM environment: opt in under Settings → Experiments to run a task's agent inside an isolated Linux ARM64 VM instead of on this Mac. The access menu gains an Environment section (This Mac / Sandbox VM), each sandboxed task boots its own VM with the worktree mounted read-write and dev-server ports forwarded, and Codex and Claude run inside the guest with API credentials proxied — never copied in. General → Daemon can also make sandboxing the default for new tasks. The window title's Sandboxed badge only shows while a sandboxed session is on screen.
+
+### Fixed
+
+- **Sessions**
+  - Mobile's /resume command no longer offers resume for a provider that's disabled in Settings
+  - The Resume… provider list no longer offers disabled providers, and Resume opens on an enabled provider when the current session's provider is turned off
+  - The Resume… command is hidden when no provider could offer sessions — every provider is disabled or no provider CLI is installed
+- **Providers**
+  - The Providers page's Checked caption reserves its line so rows no longer shift when it appears or disappears, and it now repaints itself at the minute and hour boundaries instead of going stale on an idle page
+  - Provider rows show Checking… until the first detection completes instead of flashing Not detected, expanding a provider's settings no longer steals keyboard focus into the binary path field, and the setup buttons respond to Enter and Space without swallowing modified chords
+  - The Set up button on an undetected provider now expands its documented install and sign-in steps instead of immediately running them — the expanded row's Run in terminal, which previews the exact script, stays the explicit way to execute it
+  - A failed provider setup now leaves its embedded terminal open with the error visible instead of vanishing, sign-in flows that print a localhost URL no longer kill the terminal mid-login, and clicking Run in terminal while an install is running refocuses it instead of killing it
+- **Git**
+  - Git and `gh` invocations now run with the login shell's search path, so helpers spawned by name — `git-lfs` during checkout, credential helpers, `core.sshCommand`, signing programs — resolve when the app is launched from Finder instead of dying with "command not found"
+  - The Git panel's "Land onto `<base>`" button now asks first — a confirmation names the base branch and the commit count before the rebase-and-fast-forward rewrites the shared branch
+  - Creating a worktree no longer fails when Git's LFS filters can't run — the worktree materializes with LFS pointer stubs and a notice to run `git lfs pull` inside it instead
+  - A worktree creation that fails partway no longer poisons the name — the leftover claim directory and any half-registered worktree are cleaned up, so retrying with the same name succeeds instead of failing with "already exists"
+- **Transcript**
+  - Copying a selection that covers exactly one inline code span puts just the code on the clipboard, without the surrounding backticks
+  - The "Landed on `<base>`" transcript card now spans the message column and starts collapsed: its header opens the commit list, subjects take the width the hashes don't need, and a "Show N more commits" row reveals commits beyond the first five
+  - Commit-looking hex in agent replies — UUID segments, content hashes — no longer gets a commit affordance: each candidate is verified against the repository before the underline, hover card, and diff link appear
+- **Terminals**
+  - ⌘⇧T with a terminal on screen no longer spawns a duplicate — it cycles to the next terminal in sidebar order, wrapping past the end (a lone terminal folds back to where it took over); with no terminal selected it still opens the group on the last-shown one, or a fresh global terminal in ~ when the group is empty
+  - ⌘T with a session selected opens a global terminal in the session's workspace instead of a session-owned one — it no longer appears in that session's right panel; session terminals still come from ⌘J or the panel's terminal button
+- **Settings**
+  - Revoking an always-allowed app on the Computer Use settings page now confirms first, naming the app whose grant is being dropped
+  - Tab and Shift-Tab now move through every settings form, not just the custom command editor — fields and controls across all settings pages register as tab stops, and buttons that could be focused but not activated (integration cards, skill actions, computer-use permissions, usage selectors) now respond to Enter and Space
+- Removing a friend and revoking a paired device now ask first — a confirmation names the friend or device instead of dropping them on one click
+- The GitHub inbox's Done action now confirms first — it's irreversible on GitHub's side — and a failed Done write puts the thread back immediately instead of waiting for the next poll to restore it
+- ⌘N always lands on the New task page now — on Projects, Drafts, Automations, Inbox, and Settings it opened the recent-project switcher over the page (or did nothing in Settings) instead of navigating; the switcher still answers ⌘N while New task is the page on screen
+- OAuth sign-in for MCP integrations works across providers that were failing: registered redirect URIs carry the real `/oauth/callback` path, the loopback redirect uses `localhost` (Supabase rejects `127.0.0.1`), and discovery follows RFC 9728 protected-resource metadata to reach the true authorization server — fixing connects for Supabase, Atlassian, Monday, GitHub, and Linear
+- The Archived Chats search now resets when you leave the page instead of reviving the last visit's query on return
+- The file viewer's "Open on GitHub" button now only appears when the remote actually has the file — untracked, uncommitted, and unpushed work no longer opens a 404 — and links to the remote branch (or pushed commit) GitHub can serve rather than the local branch name
+- Project memory's git exclude now lands in the shared git dir where it takes effect — linked worktrees wrote it to a per-worktree `info/exclude` git never reads — and the pattern narrows to `.goddard/memory/` so `.goddard/commands` stays committable
+- Landing a checkout's commits now clears its sidebar unpushed-count badge right away instead of waiting out the rescan cadence; pushes and new commits refresh the badge on the same moment too
+- Remote hosts no longer interrupt with SSH password prompts or connection errors until you actually use them: background connects run non-interactively and retry with backoff, the auth prompt only appears when you open, submit to, or fork a session on that host, and offline or password-required hosts are badged in the sidebar with a reconnect action. Adding or editing a host in Settings connects right away and accepts its host key on first contact, offline rows get a Connect button, a failed attempt toasts the cause, and prompts queued to an unreachable remote are restored to the composer or saved as drafts instead of being lost. Prompts written in a remote project's draft also start their session on that remote instead of failing against the local daemon
+- Stopping a turn no longer leaves the chat looking frozen: foreground commands show Stopping until the agent confirms they exited, follow-ups typed while the provider finishes winding down sit visibly in the queued-message card instead of vanishing into the driver, and closing terminals or restarting runtimes no longer stalls the session behind the old process's teardown
+
 ## [0.4.0]
 
 ### Features

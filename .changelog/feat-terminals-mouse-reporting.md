@@ -1,1 +1,0 @@
-- Mouse-aware terminal programs — vim, htop, lazygit — now receive clicks, drags, releases, and scrolls (SGR, UTF-8, and X10 encodings); Shift-click still selects text, Shift-scroll still reaches the scrollback, and links keep opening via the modifier click unless the new "Open links in mouse-aware terminal programs" setting is turned off

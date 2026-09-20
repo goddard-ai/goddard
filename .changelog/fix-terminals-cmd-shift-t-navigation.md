@@ -1,1 +1,0 @@
-- ⌘⇧T with a terminal on screen no longer spawns a duplicate — it cycles to the next terminal in sidebar order, wrapping past the end (a lone terminal folds back to where it took over); with no terminal selected it still opens the group on the last-shown one, or a fresh global terminal in ~ when the group is empty

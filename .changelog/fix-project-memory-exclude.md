@@ -1,1 +1,0 @@
-- Project memory's git exclude now lands in the shared git dir where it takes effect — linked worktrees wrote it to a per-worktree `info/exclude` git never reads — and the pattern narrows to `.goddard/memory/` so `.goddard/commands` stays committable

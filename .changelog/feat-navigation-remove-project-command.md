@@ -1,1 +1,0 @@
-- The command palette now includes Remove project…, which removes a project and its tasks from Goddard without deleting the project folder from disk

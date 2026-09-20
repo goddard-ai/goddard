@@ -1,1 +1,0 @@
-- Daemon access tokens now read as 12-word mnemonic phrases — easy to read, say aloud, and type when connecting Goddard Web or a phone — while previously generated hex tokens keep working unchanged

@@ -1,1 +1,0 @@
-- ⌘⇧D is now a "come back to this later" chain: consecutive presses jump to the most important task the chain hasn't shown — unread completions first, then the idle rotation — and a task is re-marked unread only if it was unread on arrival or settled a turn while selected, so parking an already-read task no longer manufactures a dot

@@ -1,1 +1,0 @@
-- OAuth sign-in for MCP integrations works across providers that were failing: registered redirect URIs carry the real `/oauth/callback` path, the loopback redirect uses `localhost` (Supabase rejects `127.0.0.1`), and discovery follows RFC 9728 protected-resource metadata to reach the true authorization server — fixing connects for Supabase, Atlassian, Monday, GitHub, and Linear

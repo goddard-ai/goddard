@@ -1,1 +1,0 @@
-- New "Terminal link modifier" setting chooses which key opens links and file paths when clicked in the integrated terminal — Option instead of Command on macOS, Alt instead of Ctrl on Linux and Windows; the unselected key stays a plain click

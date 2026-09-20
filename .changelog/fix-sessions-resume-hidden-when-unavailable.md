@@ -1,1 +1,0 @@
-- The Resume… command is hidden when no provider could offer sessions — every provider is disabled or no provider CLI is installed

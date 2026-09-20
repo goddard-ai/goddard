@@ -1,1 +1,0 @@
-- Tab and Shift-Tab now move through every settings form, not just the custom command editor — fields and controls across all settings pages register as tab stops, and buttons that could be focused but not activated (integration cards, skill actions, computer-use permissions, usage selectors) now respond to Enter and Space

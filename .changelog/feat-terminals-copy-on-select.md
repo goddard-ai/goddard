@@ -1,1 +1,0 @@
-- Selecting text in the integrated terminal now copies it to the clipboard when the mouse is released — like iTerm2's copy-on-select — with a new "Copy on select" setting to turn it off; the selection itself stays visible
