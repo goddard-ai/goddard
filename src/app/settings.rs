@@ -4417,6 +4417,16 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
+        // The page stays behind a warning until the user accepts it once.
+        // Under a query the section renders nothing at all, so a settings
+        // search can't reach a toggle that skips the gate.
+        if !self.state.experiments_warning_acknowledged {
+            return if search.active() {
+                div().into_any_element()
+            } else {
+                self.render_experiments_gate(theme, cx)
+            };
+        }
         let experiments = [
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4583,6 +4593,78 @@ impl Waku {
                     .children(groups),
             )
             .into_any_element()
+    }
+
+    /// The one-time interstitial standing between the Experiments page and
+    /// its toggles: experiments can be buggy or corrupt data outright, so
+    /// the page shows this warning until the user accepts it once.
+    fn render_experiments_gate(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .mt(px(15.0))
+            .w_full()
+            .px(px(20.0))
+            .py(px(16.0))
+            .rounded(px(16.0))
+            .border(hairline())
+            .border_color(theme.warning.opacity(0.5))
+            .bg(theme.raised)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(9.0))
+                    .child(icon("icons/alert.svg", 16.0, theme.warning))
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text)
+                            .child(tr!("experiments.gate_title")),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(18.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("experiments.gate_body")),
+            )
+            .child(
+                div().mt(px(12.0)).flex().child(
+                    div()
+                        .id("experiments-gate-confirm")
+                        .tab_index(0)
+                        .h(px(29.0))
+                        .px(px(13.0))
+                        .rounded(px(9.0))
+                        .border(hairline())
+                        .border_color(theme.inverse)
+                        .flex()
+                        .items_center()
+                        .cursor_default()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .bg(theme.inverse)
+                        .text_color(theme.on_inverse)
+                        .hover(|element| element.opacity(0.9))
+                        .active(|element| element.opacity(0.8))
+                        .focus_visible(|element| element.bg(theme.focus_highlight()))
+                        .child(tr!("experiments.gate_confirm"))
+                        .on_activation(cx, |this, _, cx| {
+                            this.acknowledge_experiments_gate(cx)
+                        }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn acknowledge_experiments_gate(&mut self, cx: &mut Context<Self>) {
+        self.state.experiments_warning_acknowledged = true;
+        self.save();
+        cx.notify();
     }
 
     /// The Jev page — the Auto model routing experiment's home: eval backend

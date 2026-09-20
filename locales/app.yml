@@ -746,6 +746,12 @@ experiments.group_git:
   en: Git & review
 experiments.group_surfaces:
   en: App surfaces
+experiments.gate_title:
+  en: Experiments can break things
+experiments.gate_body:
+  en: These are unfinished features. They may be buggy, change or disappear without notice, and in the worst case corrupt your data. Unless you know what you're doing, it's best to leave them off.
+experiments.gate_confirm:
+  en: I understand the risks — show experiments
 status_markers.complete:
   en: Complete
 status_markers.awaiting_input:

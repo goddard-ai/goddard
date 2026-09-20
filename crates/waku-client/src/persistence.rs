@@ -1269,6 +1269,11 @@ pub struct PersistedState {
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub sidebar_dock_enabled: bool,
+    /// Whether the user has confirmed the Experiments page's warning
+    /// interstitial. Gates the page's toggles, not the flags themselves —
+    /// an experiment already on stays on.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub experiments_warning_acknowledged: bool,
     /// Saved remote daemons connected alongside the local one; app-owned,
     /// persisted through `app_settings`/`apply_app_settings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1479,6 +1484,7 @@ impl PersistedState {
             status_markers_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
+            experiments_warning_acknowledged: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
