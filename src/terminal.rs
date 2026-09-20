@@ -83,9 +83,32 @@ pub fn install_open_links_in_mouse_mode(enabled: bool, cx: &mut App) {
     cx.set_global(ActiveOpenLinksInMouseMode(enabled));
 }
 
+/// The key that opens links and paths in the integrated terminal; published
+/// by the app when settings load or change.
+struct ActiveTerminalLinkModifier(crate::persistence::TerminalLinkModifier);
+impl Global for ActiveTerminalLinkModifier {}
+
+/// The resolved link modifier — the platform key until the app publishes
+/// the stored pick.
+fn link_modifier(cx: &App) -> crate::persistence::TerminalLinkModifier {
+    cx.try_global::<ActiveTerminalLinkModifier>()
+        .map_or(Default::default(), |modifier| modifier.0)
+}
+
+/// Publish the resolved pick so every terminal view tracks it.
+pub fn install_link_modifier(modifier: crate::persistence::TerminalLinkModifier, cx: &mut App) {
+    cx.set_global(ActiveTerminalLinkModifier(modifier));
+}
+
+/// Whether `modifiers` holds the key that owns the link gesture — the
+/// platform's primary key (⌘/Ctrl) for `CmdOrCtrl`, ⌥/Alt for `Alt`. The
+/// other key keeps its plain-click meaning, so the two never compete.
 #[inline]
-fn primary_modifier_pressed(modifiers: &Modifiers) -> bool {
-    modifiers.secondary()
+fn link_modifier_pressed(modifiers: &Modifiers, cx: &App) -> bool {
+    match link_modifier(cx) {
+        crate::persistence::TerminalLinkModifier::CmdOrCtrl => modifiers.secondary(),
+        crate::persistence::TerminalLinkModifier::Alt => modifiers.alt,
+    }
 }
 
 #[inline]
@@ -1369,7 +1392,7 @@ impl TerminalView {
         // acting: the press is swallowed and the release opens the link when
         // it lands on the same one.
         if event.button == MouseButton::Left
-            && primary_modifier_pressed(&event.modifiers)
+            && link_modifier_pressed(&event.modifiers, cx)
             && (open_links_in_mouse_mode(cx) || !mouse_mode)
         {
             self.link_gesture = self
@@ -1496,10 +1519,7 @@ impl TerminalView {
             return;
         }
 
-        if self.refresh_hovered_link(
-            primary_modifier_pressed(&event.modifiers),
-            event.position,
-        ) {
+        if self.refresh_hovered_link(link_modifier_pressed(&event.modifiers, cx), event.position) {
             cx.notify();
         }
     }
@@ -1554,7 +1574,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         if self.refresh_hovered_link(
-            primary_modifier_pressed(&event.modifiers)
+            link_modifier_pressed(&event.modifiers, cx)
                 && !self
                     .session
                     .as_ref()
@@ -2083,7 +2103,7 @@ impl Render for TerminalView {
             self.set_hovered_link(None);
         } else {
             self.refresh_hovered_link(
-                primary_modifier_pressed(&window.modifiers())
+                link_modifier_pressed(&window.modifiers(), cx)
                     && !self
                         .session
                         .as_ref()
@@ -3300,7 +3320,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(primary_modifier_pressed(&control));
+        assert!(control.secondary());
         assert!(!terminal_clipboard_modifier_pressed(&control));
         assert!(terminal_clipboard_modifier_pressed(&control_shift));
     }

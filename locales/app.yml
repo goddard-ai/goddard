@@ -1108,6 +1108,10 @@ settings.terminal_open_links_in_mouse_mode:
   en: Open links in mouse-aware terminal programs
 settings.terminal_open_links_in_mouse_mode_description:
   en: "%{modifier}-click keeps opening links and file paths while a program like vim or htop handles the mouse. Off sends those clicks to the program instead — Shift-%{modifier}-click still opens links."
+settings.terminal_link_modifier:
+  en: Terminal link modifier
+settings.terminal_link_modifier_description:
+  en: The key that opens links and file paths when clicked in the integrated terminal; the other key does a plain click
 settings.completion_sound:
   en: Play sound on completed turn
 settings.completion_sound_description:

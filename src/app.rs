@@ -64,13 +64,11 @@ use crate::ui::tooltip::Tooltip;
 use crate::browser::BrowserView;
 use crate::persistence::{
     ArchiveNavigation, CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand,
-    CustomCommandIcon,
-    DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH,
-    DefaultWorkspace,
-    PersistedDiffSource,
-    PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
-    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
-    PersistedWindowState, RecentModelUse, SidebarGrouping, SidebarOrdering, StateStore,
+    CustomCommandIcon, DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_RIGHT_PANEL_WIDTH,
+    DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource, PersistedFullscreenSurface,
+    PersistedListOffset, PersistedNavigationLocation, PersistedRightPanelState,
+    PersistedRightPanelSurface, PersistedSettingsPage, PersistedState, PersistedWindowState,
+    RecentModelUse, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -3946,6 +3944,7 @@ impl Waku {
             state.terminal_open_links_in_mouse_mode,
             cx,
         );
+        crate::terminal::install_link_modifier(state.terminal_link_modifier, cx);
         let analytics = crate::analytics::Analytics::new(
             state.language.locale(),
             state.analytics_id,

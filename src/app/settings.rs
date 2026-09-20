@@ -562,6 +562,14 @@ fn dormant_after_label(days: Option<u32>) -> String {
     }
 }
 
+/// The key's product name — Command/Option on macOS, Ctrl/Alt elsewhere.
+fn link_modifier_label(modifier: TerminalLinkModifier) -> &'static str {
+    match modifier {
+        TerminalLinkModifier::CmdOrCtrl => crate::platform::primary_shortcut("Command", "Ctrl"),
+        TerminalLinkModifier::Alt => crate::platform::primary_shortcut("Option", "Alt"),
+    }
+}
+
 /// A standalone-card settings row — the General page's shape — kept or
 /// dropped by the search. Pass an empty `div()` as the control for text-only
 /// cards.
@@ -1895,6 +1903,43 @@ impl Waku {
                 theme,
                 search,
             ))
+            .children({
+                let selected_modifier = self.state.terminal_link_modifier;
+                let weak = cx.entity().downgrade();
+                let modifier_handle = self.menu_handle("terminal-link-modifier-selector", cx);
+                let modifier_selector = dropdown_menu(
+                    MenuChip::new("terminal-link-modifier-selector")
+                        .label(link_modifier_label(selected_modifier))
+                        .outlined()
+                        .selected(modifier_handle.is_open())
+                        .w(px(220.0))
+                        .justify_between(),
+                    "terminal-link-modifier-selector-menu",
+                    &modifier_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        TerminalLinkModifier::ALL
+                            .into_iter()
+                            .map(|option| {
+                                let weak = weak.clone();
+                                MenuItem::new(link_modifier_label(option), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_terminal_link_modifier(option, cx);
+                                    });
+                                })
+                                .selected(option == selected_modifier)
+                            })
+                            .collect()
+                    },
+                );
+                setting_card(
+                    tr!("settings.terminal_link_modifier"),
+                    tr!("settings.terminal_link_modifier_description"),
+                    modifier_selector,
+                    theme,
+                    search,
+                )
+            })
             .when(updater_available, |column| {
                 let enabled = self.automatic_updates_enabled;
                 column.children(setting_card(
@@ -1940,6 +1985,20 @@ impl Waku {
         }
         self.state.terminal_open_links_in_mouse_mode = enabled;
         crate::terminal::install_open_links_in_mouse_mode(enabled, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_terminal_link_modifier(
+        &mut self,
+        modifier: TerminalLinkModifier,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.terminal_link_modifier == modifier {
+            return;
+        }
+        self.state.terminal_link_modifier = modifier;
+        crate::terminal::install_link_modifier(modifier, cx);
         self.save();
         cx.notify();
     }

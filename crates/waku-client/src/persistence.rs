@@ -93,6 +93,26 @@ impl ArchiveNavigation {
     }
 }
 
+/// The key that opens links and file paths in the integrated terminal.
+/// Only one key owns the gesture at a time — the other keeps its
+/// plain-click meaning, so the pick is a partition rather than an extra
+/// binding.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalLinkModifier {
+    /// ⌘ on macOS, Ctrl on Linux and Windows.
+    #[default]
+    #[serde(alias = "cmd", alias = "ctrl")]
+    CmdOrCtrl,
+    /// ⌥ on macOS, Alt on Linux and Windows.
+    Alt,
+}
+
+impl TerminalLinkModifier {
+    /// Every pick in dropdown order.
+    pub const ALL: [Self; 2] = [Self::CmdOrCtrl, Self::Alt];
+}
+
 /// Which workspace a fresh task draft opens with.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -750,6 +770,9 @@ pub struct AppSettings {
     /// reports mouse input. Off forwards those clicks to the program
     /// instead, and Shift-⌘-click still opens links.
     pub terminal_open_links_in_mouse_mode: bool,
+    /// The key that opens links and file paths in the integrated terminal
+    /// when clicked — ⌘ or ⌥ on macOS, Ctrl or Alt elsewhere.
+    pub terminal_link_modifier: TerminalLinkModifier,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -839,6 +862,7 @@ impl Default for AppSettings {
             sidebar_composer_drafts: false,
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
+            terminal_link_modifier: TerminalLinkModifier::default(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1199,6 +1223,10 @@ pub struct PersistedState {
     /// reports mouse input.
     #[serde(default = "default_terminal_open_links_in_mouse_mode")]
     pub terminal_open_links_in_mouse_mode: bool,
+    /// The key that opens links and file paths in the integrated terminal
+    /// when clicked.
+    #[serde(default)]
+    pub terminal_link_modifier: TerminalLinkModifier,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1425,6 +1453,7 @@ impl PersistedState {
             sidebar_composer_drafts: false,
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
+            terminal_link_modifier: TerminalLinkModifier::default(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1752,6 +1781,7 @@ impl PersistedState {
             sidebar_composer_drafts: self.sidebar_composer_drafts,
             dormant_after_days: self.dormant_after_days,
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
+            terminal_link_modifier: self.terminal_link_modifier,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1849,6 +1879,7 @@ impl PersistedState {
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
         self.dormant_after_days = settings.dormant_after_days;
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
+        self.terminal_link_modifier = settings.terminal_link_modifier;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -2837,6 +2868,29 @@ mod tests {
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.terminal_open_links_in_mouse_mode);
     }
+
+    #[test]
+    fn terminal_link_modifier_defaults_to_primary_and_persists() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            defaults.terminal_link_modifier,
+            TerminalLinkModifier::CmdOrCtrl
+        );
+        for alias in ["\"cmd_or_ctrl\"", "\"cmd\"", "\"ctrl\""] {
+            assert_eq!(
+                serde_json::from_str::<TerminalLinkModifier>(alias).unwrap(),
+                TerminalLinkModifier::CmdOrCtrl
+            );
+        }
+        let mut state = PersistedState::empty();
+        state.terminal_link_modifier = TerminalLinkModifier::Alt;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["terminal_link_modifier"], "alt");
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.terminal_link_modifier, TerminalLinkModifier::Alt);
+    }
+
     #[test]
     fn new_worktree_default_branch_defaults_off_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
