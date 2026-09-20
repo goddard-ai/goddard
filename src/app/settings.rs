@@ -8167,7 +8167,7 @@ impl Waku {
                         .relative()
                         .child(view)
                         .child(
-                            div().absolute().top(px(4.0)).right(px(6.0)).child(
+                            div().absolute().top(px(6.0)).right(px(6.0)).child(
                                 icon_button(
                                     SharedString::from(format!(
                                         "provider-setup-close-{}",

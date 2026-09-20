@@ -1868,7 +1868,7 @@ impl Render for TerminalView {
         let selection_color = theme.selection;
         let viewport = window.viewport_size();
         let panel_width = self.panel_width;
-        let body_height = (f32::from(viewport.height) - 48.0 - TERMINAL_TOOLBAR_HEIGHT).max(120.0);
+        let body_height = (f32::from(viewport.height) - 48.0).max(120.0);
         // The rows are laid out by `StyledText` at the font's own advance, so
         // the grid must be sized from that same measured advance or the text
         // wraps short of (or past) the panel edge.
@@ -1934,18 +1934,6 @@ impl Render for TerminalView {
             .session
             .as_ref()
             .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
-        let title = if self.title().trim().is_empty() {
-            tr!("right_panel.terminal")
-        } else {
-            self.title().to_owned()
-        };
-        let directory = self
-            .working_directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| tr!("workspace.workspace"));
-
         let mut screen = div()
             .flex_1()
             .min_h_0()
@@ -2120,6 +2108,61 @@ impl Render for TerminalView {
 
         let command_bar = self.command_bar_element(window, cx);
 
+        // Only an embedded terminal keeps the header strip. Its trailing
+        // inset clears the kill button the parent overlays at the toolbar's
+        // right edge.
+        let toolbar = self.embedded.then(|| {
+            let title = if self.title().trim().is_empty() {
+                tr!("right_panel.terminal")
+            } else {
+                self.title().to_owned()
+            };
+            let directory = self
+                .working_directory
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| tr!("workspace.workspace"));
+            div()
+                .h(px(TERMINAL_TOOLBAR_HEIGHT))
+                .flex_none()
+                .pl(px(10.0))
+                .pr(px(34.0))
+                .flex()
+                .items_center()
+                .gap(px(7.0))
+                .border_b(hairline())
+                .border_color(theme.separator)
+                .bg(theme.surface)
+                .child(
+                    div()
+                        .w(px(6.0))
+                        .h(px(6.0))
+                        .rounded_full()
+                        .bg(if self.exited {
+                            theme.danger
+                        } else {
+                            theme.accent
+                        }),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(SharedString::from(title)),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(directory),
+                )
+        });
+
         let grid = div()
             .flex_1()
             .min_h_0()
@@ -2145,45 +2188,7 @@ impl Render for TerminalView {
             .flex()
             .flex_col()
             .bg(theme.terminal)
-            .child(
-                div()
-                    .h(px(TERMINAL_TOOLBAR_HEIGHT))
-                    .flex_none()
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(7.0))
-                    .border_b(hairline())
-                    .border_color(theme.separator)
-                    .bg(theme.surface)
-                    .child(
-                        div()
-                            .w(px(6.0))
-                            .h(px(6.0))
-                            .rounded_full()
-                            .bg(if self.exited {
-                                theme.danger
-                            } else {
-                                theme.accent
-                            }),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(SharedString::from(title.to_owned())),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_tertiary)
-                            .child(directory),
-                    ),
-            )
+            .children(toolbar)
             .child(grid)
             .on_key_down(cx.listener(Self::on_key_down))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))

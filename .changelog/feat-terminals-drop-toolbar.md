@@ -1,0 +1,1 @@
+- Terminal panes drop their header strip — the status dot, title, and working directory are gone and the grid runs to the top edge, with command status still reported on the terminal's sidebar row
