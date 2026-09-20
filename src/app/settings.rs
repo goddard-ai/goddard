@@ -7538,6 +7538,7 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let checking = self.provider_detection_remaining > 0;
+        let detection_pending = self.provider_detection_checked_at.is_none();
         let checked_label = self
             .provider_detection_checked_at
             .filter(|_| !checking)
@@ -7580,10 +7581,13 @@ impl Waku {
                 .and_then(|probe| probe.path.as_deref())
                 .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()));
             let model_count = probe.map(|probe| probe.models.len()).unwrap_or(0);
-            let version = self
-                .provider_versions
-                .get(&kind)
-                .and_then(|version| version.clone());
+            let version = (!detection_pending)
+                .then(|| {
+                    self.provider_versions
+                        .get(&kind)
+                        .and_then(|version| version.clone())
+                })
+                .flatten();
             let disabled = self.state.disabled_providers.contains(&kind);
 
             let dot_color = if !installed {
@@ -7594,7 +7598,12 @@ impl Waku {
                 theme.success
             };
 
-            let detail_text: String = if installed {
+            // Until the first detection completes the probe state is
+            // unknowable — a "Checking…" placeholder keeps a real install
+            // from flashing "Not detected" plus a Set up button.
+            let detail_text: String = if detection_pending {
+                tr!("common.checking")
+            } else if installed {
                 let mut parts = Vec::new();
                 if let Some(path) = binary_path {
                     parts.push(path);
@@ -7662,11 +7671,11 @@ impl Waku {
             )
             .tab_index(0)
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.toggle_provider_expanded(kind, window, cx);
-            }));
+            .on_activation(cx, move |this, _, cx| {
+                this.toggle_provider_expanded(kind, cx);
+            });
 
-            let setup_button = (!installed).then(|| {
+            let setup_button = (!installed && !detection_pending).then(|| {
                 div()
                     .id(SharedString::from(format!("provider-setup-{}", kind.id())))
                     .tab_index(0)
@@ -7686,15 +7695,9 @@ impl Waku {
                     .hover(|element| element.bg(theme.overlay))
                     .child(icon("icons/download.svg", 11.0, theme.text_tertiary))
                     .child(tr!("providers.set_up"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.provider_setup_clicked(kind, window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.provider_setup_clicked(kind, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.provider_setup_clicked(kind, cx);
+                    })
             });
 
             let header = div()
@@ -7777,7 +7780,9 @@ impl Waku {
                 )
                 .when_some(setup_button, |element, button| element.child(button))
                 .child(expand_button)
-                .when(installed, |element| element.child(toggle));
+                .when(installed && !detection_pending, |element| {
+                    element.child(toggle)
+                });
 
             provider_rows.push(
                 div()
@@ -7844,14 +7849,18 @@ impl Waku {
                                 .items_end()
                                 .gap(px(6.0))
                                 .child(refresh)
-                                .when_some(checked_label, |element, label| {
-                                    element.child(
-                                        div()
-                                            .text_size(sp(12.5))
-                                            .text_color(theme.text_ghost)
-                                            .child(SharedString::from(label)),
-                                    )
-                                }),
+                                // The label line is always present — an nbsp
+                                // reserves its height so a label arriving or
+                                // leaving can't shift the rows below.
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_ghost)
+                                        .child(SharedString::from(
+                                            checked_label
+                                                .unwrap_or_else(|| "\u{00a0}".to_owned()),
+                                        )),
+                                ),
                         )
                     }),
             )
@@ -8021,15 +8030,9 @@ impl Waku {
                 .child(icon("icons/terminal.svg", 11.0, theme.text_tertiary))
                 .child(tr!("providers.run_in_terminal"))
                 .tooltip(Tooltip::text(script))
-                .on_click(cx.listener(move |this, _, window, cx| {
+                .on_activation(cx, move |this, window, cx| {
                     this.run_provider_setup(kind, window, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.run_provider_setup(kind, window, cx);
-                        cx.stop_propagation();
-                    }
-                }));
+                });
             actions = actions.child(run);
         }
         let docs_url = setup.docs_url;
@@ -8052,13 +8055,7 @@ impl Waku {
             .hover(|element| element.bg(theme.overlay))
             .child(icon("icons/external-link.svg", 11.0, theme.text_tertiary))
             .child(tr!("providers.docs"))
-            .on_click(move |_, _, cx| cx.open_url(docs_url))
-            .on_key_down(move |event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    cx.open_url(docs_url);
-                    cx.stop_propagation();
-                }
-            });
+            .on_activation(cx, move |_, _, cx| cx.open_url(docs_url));
         actions = actions.child(docs);
         if let Some(env) = setup.api_key_env {
             actions = actions.child(
@@ -8103,18 +8100,9 @@ impl Waku {
                                 )
                                 .tab_index(0)
                                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                                .on_activation(cx, move |this, _, cx| {
                                     this.dismiss_provider_setup_terminal(kind, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, _, cx| {
-                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                        {
-                                            this.dismiss_provider_setup_terminal(kind, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
+                                }),
                             ),
                         ),
                 )
@@ -8134,10 +8122,8 @@ impl Waku {
     ) -> Div {
         let copy_id = format!("provider-setup-copy-{}-{}", kind.id(), step);
         let copied = self.control_was_copied(&copy_id);
-        let click_id = copy_id.clone();
-        let key_id = copy_id.clone();
         let copy = div()
-            .id(SharedString::from(copy_id))
+            .id(SharedString::from(copy_id.clone()))
             .tab_index(0)
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .size(px(22.0))
@@ -8157,17 +8143,10 @@ impl Waku {
                 11.0,
                 theme.text_tertiary,
             ))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_activation(cx, move |this, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(command.to_owned()));
-                this.show_control_copied(click_id.clone(), cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    cx.write_to_clipboard(ClipboardItem::new_string(command.to_owned()));
-                    this.show_control_copied(key_id.clone(), cx);
-                    cx.stop_propagation();
-                }
-            }));
+                this.show_control_copied(copy_id.clone(), cx);
+            });
         div()
             .flex()
             .items_center()
@@ -8215,22 +8194,16 @@ impl Waku {
         }
     }
 
-    /// The row's Set up button: expand the provider's settings and start the
-    /// setup script. A remote daemon gets the expanded copy/docs row only —
-    /// a desktop PTY would install the binary on the wrong host.
-    fn provider_setup_clicked(
-        &mut self,
-        provider: ProviderKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// The row's Set up button: expand the provider's settings so its
+    /// documented commands, copy buttons, and Run button are visible — the
+    /// expanded row's Run stays the explicit execution step, since these are
+    /// `curl | bash` installers the user should see before they run. A click
+    /// on an already-expanded row is a no-op: collapsing it could hide a
+    /// running setup terminal.
+    fn provider_setup_clicked(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
         if self.expanded_provider_settings != Some(provider) {
-            self.toggle_provider_expanded(provider, window, cx);
+            self.toggle_provider_expanded(provider, cx);
         }
-        if self.daemon.is_remote() || self.provider_setup_terminals.contains_key(&provider) {
-            return;
-        }
-        self.run_provider_setup(provider, window, cx);
     }
 
     /// Run the setup script in a terminal embedded in the expanded row. The
@@ -8243,6 +8216,13 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if self.daemon.is_remote() {
+            return;
+        }
+        // A live embed owns the slot — refocus it rather than killing the
+        // in-flight install by replacing the map entry.
+        if let Some(view) = self.provider_setup_terminals.get(&provider) {
+            let focus = view.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
             return;
         }
         let Some(script) = self.provider_setup_script(provider) else {
@@ -8261,8 +8241,27 @@ impl Waku {
             .unwrap_or_else(|| PathBuf::from("/"));
         let view =
             cx.new(|cx| TerminalView::embedded(cwd, TerminalLaunch::CustomCommand(command), cx));
-        cx.subscribe(&view, move |this, _, _: &TerminalViewEvent, cx| {
-            this.provider_setup_terminal_exited(provider, cx);
+        cx.subscribe(&view, move |this, _, event: &TerminalViewEvent, cx| {
+            match event {
+                // The shell is gone — drop the embed and re-detect so the row
+                // reflects whatever the script changed.
+                TerminalViewEvent::Exited => {
+                    this.provider_setup_terminal_exited(provider, cx);
+                }
+                // A failed script leaves its shell open with the error
+                // visible — never tear the embed down on the finish report.
+                // An install may still have succeeded mid-script (a sign-in
+                // that bailed after the CLI landed), so re-detect on a
+                // non-clean finish too.
+                TerminalViewEvent::CommandFinished(code) => {
+                    if *code != Some(0) {
+                        this.refresh_provider_detection(Some(provider));
+                    }
+                }
+                TerminalViewEvent::ActivityChanged
+                | TerminalViewEvent::LocalhostUrl(_)
+                | TerminalViewEvent::GenerateCommand { .. } => {}
+            }
         })
         .detach();
         self.provider_setup_terminals.insert(provider, view.clone());
@@ -8284,12 +8283,7 @@ impl Waku {
         cx.notify();
     }
 
-    fn toggle_provider_expanded(
-        &mut self,
-        provider: ProviderKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn toggle_provider_expanded(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
         // Commit any pending edit for the previously expanded provider before
         // the input is handed to another row.
         self.apply_provider_path_override(cx);
@@ -8305,8 +8299,6 @@ impl Waku {
                 .unwrap_or_default();
             self.provider_path_input
                 .update(cx, |input, cx| input.set_content(override_value, cx));
-            let focus = self.provider_path_input.read(cx).focus();
-            window.focus(&focus, cx);
         }
         cx.notify();
     }
@@ -10082,6 +10074,21 @@ pub(super) fn route_class_rows(
         );
     }
     rows
+}
+
+/// The display bucket the "Checked …" caption renders for an elapsed time:
+/// 0 is "just now", then the minute count, then the hour count offset so the
+/// two ranges never collide. A bucket change is the only repaint the caption
+/// needs — the maintenance tick watches it.
+pub(super) fn detection_checked_bucket(elapsed: Duration) -> u64 {
+    let seconds = elapsed.as_secs();
+    if seconds < 90 {
+        0
+    } else if seconds < 3600 {
+        seconds / 60
+    } else {
+        seconds / 3600 + 1000
+    }
 }
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page

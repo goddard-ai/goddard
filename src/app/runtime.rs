@@ -3447,12 +3447,36 @@ impl Waku {
     /// installed.
     pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
         if self.provider_detection_remaining > 0 {
+            // A pass is already probing. Queue the scope instead of dropping
+            // it: the in-flight probes may run before the change the request
+            // was meant to see — a just-finished setup install — so the
+            // queued pass re-asks once this one drains.
+            match scope {
+                None => self.provider_detection_pending = PendingProviderDetection::All,
+                Some(provider) => match &mut self.provider_detection_pending {
+                    PendingProviderDetection::All => {}
+                    PendingProviderDetection::Providers(set) => {
+                        set.insert(provider);
+                    }
+                    PendingProviderDetection::None => {
+                        self.provider_detection_pending =
+                            PendingProviderDetection::Providers(HashSet::from([provider]));
+                    }
+                },
+            }
             return;
         }
         let providers = match scope {
             Some(provider) => vec![provider],
             None => ProviderKind::ALL.to_vec(),
         };
+        self.start_provider_detection(providers);
+    }
+
+    /// Spawn the detection thread for a concrete provider list and arm the
+    /// bookkeeping a drain expects: the unanswered-probe count and a cleared
+    /// model-discovery guard so each provider's catalog revalidates.
+    fn start_provider_detection(&mut self, providers: Vec<ProviderKind>) {
         self.provider_detection_remaining = providers.len();
         let overrides = self.state.provider_binary_overrides.clone();
         let provider_detection_tx = self.provider_detection_tx.clone();
@@ -3541,7 +3565,31 @@ impl Waku {
         if changed {
             self.request_provider_version_probes();
         }
+        if self.provider_detection_remaining == 0 {
+            let providers = match std::mem::take(&mut self.provider_detection_pending) {
+                PendingProviderDetection::None => Vec::new(),
+                PendingProviderDetection::All => ProviderKind::ALL.to_vec(),
+                PendingProviderDetection::Providers(set) => set.into_iter().collect(),
+            };
+            if !providers.is_empty() {
+                self.start_provider_detection(providers);
+            }
+        }
         changed
+    }
+
+    /// The "Checked …" caption derives from `checked_at.elapsed()`, which no
+    /// event recomputes — the 1 Hz maintenance tick bumps the rendered bucket
+    /// so the label flips at its own boundaries instead of going stale.
+    pub(super) fn maybe_refresh_provider_checked_label(&mut self, cx: &mut Context<Self>) {
+        let bucket = self
+            .provider_detection_checked_at
+            .map(|checked_at| settings::detection_checked_bucket(checked_at.elapsed()));
+        if bucket == self.provider_checked_label_bucket {
+            return;
+        }
+        self.provider_checked_label_bucket = bucket;
+        cx.notify();
     }
 
     /// Whether the provider can back a new session: installed and not switched

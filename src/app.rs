@@ -988,6 +988,17 @@ enum EventPumpSchedule {
     BackgroundOutput(Duration),
 }
 
+/// A provider re-detection scope queued while a pass was already in flight —
+/// flushed when the in-flight pass drains so its answer reflects the latest
+/// state rather than a probe that ran before the change.
+#[derive(Default)]
+enum PendingProviderDetection {
+    #[default]
+    None,
+    All,
+    Providers(HashSet<ProviderKind>),
+}
+
 /// One cached island of the root view: a region rendered by delegating back
 /// into [`Waku`] under its own view identity.
 ///
@@ -1899,6 +1910,12 @@ pub struct Waku {
     provider_detection_remaining: usize,
     /// When provider detection last completed, for the page's "Checked" label.
     provider_detection_checked_at: Option<Instant>,
+    /// A re-detection requested while a pass was in flight; the drain starts
+    /// it once the current pass finishes.
+    provider_detection_pending: PendingProviderDetection,
+    /// The display bucket ("just now"/minutes/hours) the "Checked" label last
+    /// rendered — the maintenance tick repaints when it changes.
+    provider_checked_label_bucket: Option<u64>,
     /// The provider row expanded on the Providers page, if any. The binary
     /// override input below edits this provider's entry.
     expanded_provider_settings: Option<ProviderKind>,
@@ -5062,6 +5079,7 @@ impl Waku {
                         .update(cx, |this, cx| {
                             this.maybe_refresh_background_work(cx);
                             this.maybe_poll_notifications(cx);
+                            this.maybe_refresh_provider_checked_label(cx);
                         })
                         .is_err()
                     {
@@ -5235,6 +5253,8 @@ impl Waku {
                 provider_detection_events,
                 provider_detection_remaining: 0,
                 provider_detection_checked_at: None,
+                provider_detection_pending: PendingProviderDetection::None,
+                provider_checked_label_bucket: None,
                 expanded_provider_settings: None,
                 provider_path_input,
                 computer_permissions: ComputerPermissions::default(),

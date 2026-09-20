@@ -1,0 +1,1 @@
+- The Set up button on an undetected provider now expands its documented install and sign-in steps instead of immediately running them — the expanded row's Run in terminal, which previews the exact script, stays the explicit way to execute it
