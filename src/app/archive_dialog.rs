@@ -149,6 +149,14 @@ impl Waku {
         let weak = cx.entity().downgrade();
         let files = dialog.preview.files.clone();
         let commits = dialog.preview.unpushed_commits.clone();
+        // The listed paths are relative to the session's checkout.
+        let session_workspace = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == dialog.session_id)
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(std::path::Path::to_path_buf);
         let has_checkout_work = !files.is_empty() || !commits.is_empty();
         let description = match (dialog.active_turn, has_checkout_work) {
             (true, true) => match dialog.kind {
@@ -196,6 +204,12 @@ impl Waku {
                             .child(tr!("archive.uncommitted", count = files.len())),
                     )
                     .children(files.into_iter().map(|file| {
+                        let absolute = session_workspace
+                            .as_ref()
+                            .map(|workspace| workspace.join(&file.path))
+                            .unwrap_or_else(|| std::path::PathBuf::from(&file.path));
+                        let focus = self
+                            .transcript_control_focus(format!("archive-file-{}", file.path), cx);
                         div()
                             .h(px(24.0))
                             .px(px(4.0))
@@ -211,16 +225,23 @@ impl Waku {
                                     .text_color(theme.text_ghost)
                                     .child(file.status),
                             )
-                            .child(
+                            .child(file_link(
                                 div()
+                                    .id(SharedString::from(format!(
+                                        "archive-file-{}",
+                                        file.path
+                                    )))
                                     .min_w_0()
                                     .flex_1()
                                     .truncate()
                                     .font_family(crate::fonts::current(cx).code)
                                     .text_size(sp(12.5))
                                     .text_color(theme.text)
-                                    .child(file.path),
-                            )
+                                    .child(file.path.clone()),
+                                &focus,
+                                absolute.to_string_lossy().into_owned(),
+                                &weak,
+                            ))
                             .into_any_element()
                     }))
                     .into_any_element(),

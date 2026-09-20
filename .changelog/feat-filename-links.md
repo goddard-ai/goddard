@@ -1,0 +1,1 @@
+- Click a filename wherever one renders — activity rows, diff file headers, attachment tiles, checkpoint previews, and dialog file lists — to open it in its default app

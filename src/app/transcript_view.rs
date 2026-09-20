@@ -2511,8 +2511,12 @@ impl Waku {
             .border_b(hairline())
             .border_color(theme.separator)
             .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
-            .child(
+            .child(file_link(
                 div()
+                    .id(SharedString::from(format!(
+                        "changed-files-preview-path-{turn_id}-{}",
+                        file.path
+                    )))
                     .min_w_0()
                     .flex_1()
                     .truncate()
@@ -2520,7 +2524,13 @@ impl Waku {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .child(file.path.clone()),
-            )
+                &self.transcript_control_focus(
+                    format!("changed-files-preview-{turn_id}-{}", file.path),
+                    cx,
+                ),
+                file.path.clone(),
+                &cx.entity().downgrade(),
+            ))
             .child(
                 div()
                     .flex_none()
@@ -3093,6 +3103,13 @@ impl Waku {
                 }
                 _ => None,
             };
+            // When the detail text is a filename it doubles as a link to the
+            // file's default app — separate from the in-app viewer the icon
+            // button opens.
+            let open_file_path = activity_file_link_path(activity);
+            let detail_focus =
+                self.transcript_control_focus(format!("activity-detail-{id}"), cx);
+            let weak = cx.entity().downgrade();
             let shows_diff = reasoning.is_none() && activity_shows_diff(activity);
             let has_detail = reasoning
                 .is_some_and(|reasoning| !reasoning.content.trim().is_empty())
@@ -3150,14 +3167,24 @@ impl Waku {
                                 .child(SharedString::from(action_label)),
                         )
                         .when(!row_detail.is_empty(), |element| {
-                            element.child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(theme.text_secondary)
-                                    .child(SharedString::from(row_detail)),
-                            )
+                            let detail = div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme.text_secondary)
+                                .child(SharedString::from(row_detail.clone()));
+                            element.child(match &open_file_path {
+                                Some(path) => file_link(
+                                    detail.id(SharedString::from(format!(
+                                        "activity-detail-{id}"
+                                    ))),
+                                    &detail_focus,
+                                    path.clone(),
+                                    &weak,
+                                )
+                                .into_any_element(),
+                                None => detail.into_any_element(),
+                            })
                         })
                         .when_some(file_change_stats, |row, (additions, deletions)| {
                             row.child(

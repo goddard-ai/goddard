@@ -24,8 +24,12 @@ pub fn init(cx: &mut App) {
 pub(super) struct ImagePreviewState {
     image: Arc<gpui::Image>,
     name: SharedString,
+    /// The attachment's on-disk path — the caption opens it in the default
+    /// app on click.
+    path: PathBuf,
     focus: FocusHandle,
     close_focus: FocusHandle,
+    name_focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     generation: u64,
 }
@@ -121,6 +125,7 @@ impl Waku {
         &mut self,
         image: Arc<gpui::Image>,
         name: SharedString,
+        path: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -130,8 +135,10 @@ impl Waku {
         self.image_preview = Some(ImagePreviewState {
             image,
             name,
+            path,
             focus: focus.clone(),
             close_focus: cx.focus_handle(),
+            name_focus: cx.focus_handle(),
             previous_focus: window.focused(cx),
             generation,
         });
@@ -176,9 +183,12 @@ impl Waku {
         let theme = Theme::current(cx);
         let image_source = preview.image.clone();
         let name = preview.name.clone();
+        let path = preview.path.clone();
         let focus = preview.focus.clone();
         let close_focus = preview.close_focus.clone();
+        let name_focus = preview.name_focus.clone();
         let generation = preview.generation;
+        let weak = cx.entity().downgrade();
 
         let close = div()
             .id("image-preview-close")
@@ -244,8 +254,9 @@ impl Waku {
             .items_center()
             .gap(px(12.0))
             .child(div().w_full().flex_1().min_h_0().child(image))
-            .child(
+            .child(file_link(
                 div()
+                    .id("image-preview-name")
                     .max_w(px(560.0))
                     .px(px(11.0))
                     .py(px(5.0))
@@ -255,7 +266,10 @@ impl Waku {
                     .text_color(gpui::white().opacity(0.9))
                     .truncate()
                     .child(name),
-            )
+                &name_focus,
+                path.to_string_lossy().into_owned(),
+                &weak,
+            ))
             .child(close);
 
         let layer = div()

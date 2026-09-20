@@ -1954,6 +1954,30 @@ impl Waku {
         self.open_transcript_link(&resolved.to_string_lossy(), cx);
     }
 
+    /// Open a named file in its OS default app — the user's editor for
+    /// source, Preview for images, Finder for directories.
+    ///
+    /// Paths resolve the same way [`Self::open_activity_file`] does:
+    /// absolute paths are taken as-is, anything else joins the selected
+    /// workspace. A remote host's path cannot be opened locally, so it
+    /// toasts instead of silently doing nothing.
+    pub(super) fn open_path_in_default_app(&mut self, path: &str, cx: &mut Context<Self>) {
+        let path = Path::new(path.trim());
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(workspace) = self.selected_workspace_path() {
+            workspace.join(path)
+        } else {
+            return;
+        };
+        if self.is_remote_path(&resolved) {
+            self.show_toast(tr!("errors.remote_host_path"));
+            cx.notify();
+            return;
+        }
+        crate::platform::open_with_default_app(&resolved, cx);
+    }
+
     pub(super) fn store_selected_right_panel_state(&mut self) {
         let state = self.take_active_right_panel_state();
         // A session parks under its id; with none selected the active strip
@@ -4365,15 +4389,24 @@ impl Waku {
                     .border_b(hairline())
                     .border_color(theme.separator)
                     .child(file_icon(file_icon_for_path(&relative_path), 13.0))
-                    .child(
+                    .child(file_link(
                         div()
+                            .id(SharedString::from(format!(
+                                "file-viewer-path-{relative_path}"
+                            )))
                             .min_w_0()
                             .flex_1()
                             .truncate()
                             .text_size(sp(12.5))
                             .text_color(theme.text_secondary)
                             .child(relative_path.clone()),
-                    )
+                        &self.transcript_control_focus(
+                            format!("file-viewer-path-{relative_path}"),
+                            cx,
+                        ),
+                        relative_path.clone(),
+                        &cx.entity().downgrade(),
+                    ))
                     .children(github_button)
                     .children(preview_toggle),
             )
@@ -5684,7 +5717,7 @@ impl Waku {
             .bg(theme.surface)
             .when(sticky, |header| header.block_mouse_except_scroll())
             .child(file_icon(file_icon_for_path(&file.path), 14.0))
-            .child(
+            .child(file_link(
                 div()
                     .id(SharedString::from(format!("{id_prefix}-path-{index}")))
                     .min_w_0()
@@ -5695,7 +5728,11 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .tooltip(Tooltip::text(file.path.clone()))
                     .child(file.path.clone()),
-            )
+                &self
+                    .transcript_control_focus(format!("{id_prefix}-path-{index}"), cx),
+                file.path.clone(),
+                &cx.entity().downgrade(),
+            ))
             .child(
                 div()
                     .text_size(px(12.5))

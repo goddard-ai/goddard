@@ -40,6 +40,7 @@ pub(super) struct SendFileDialogState {
     note: Entity<TextInput>,
     send_focus: FocusHandle,
     cancel_focus: FocusHandle,
+    file_focus: FocusHandle,
     _subscription: Subscription,
 }
 
@@ -80,6 +81,7 @@ impl Waku {
             note,
             send_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
+            file_focus: cx.focus_handle(),
             _subscription: subscription,
         });
         // Like Goddard's other deferred surfaces, the modal joins the dispatch
@@ -157,7 +159,7 @@ impl Waku {
             &dialog.cancel_focus,
             "icons/x.svg",
             tr!("common.cancel"),
-            weak,
+            weak.clone(),
             &theme,
             |waku, cx| waku.close_send_file_dialog(cx),
         );
@@ -206,15 +208,19 @@ impl Waku {
                     .items_center()
                     .gap(px(8.0))
                     .child(icon(file_icon, 13.0, theme.text_tertiary))
-                    .child(
+                    .child(file_link(
                         div()
+                            .id("send-file-dialog-name")
                             .min_w_0()
                             .flex_1()
                             .truncate()
                             .text_size(sp(12.5))
                             .text_color(theme.text_secondary)
                             .child(dialog.file_name.clone()),
-                    ),
+                        &dialog.file_focus,
+                        dialog.path.to_string_lossy().into_owned(),
+                        &weak,
+                    )),
             )
             .child(
                 div()

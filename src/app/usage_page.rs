@@ -1443,14 +1443,23 @@ impl Waku {
                             .child(SharedString::from(name)),
                     )
                     .when_some(path_caption, |element, path| {
-                        element.child(
+                        element.child(file_link(
                             div()
+                                .id(SharedString::from(format!(
+                                    "usage-project-path-{index}"
+                                )))
                                 .min_w_0()
                                 .truncate()
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_ghost)
                                 .child(SharedString::from(path)),
-                        )
+                            &self.transcript_control_focus(
+                                format!("usage-project-path-{index}"),
+                                cx,
+                            ),
+                            project.path.clone(),
+                            &cx.entity().downgrade(),
+                        ))
                     })
                     .child(div().flex_1())
                     .child(

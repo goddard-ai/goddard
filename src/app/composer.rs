@@ -3742,6 +3742,7 @@ impl Waku {
                 if let Some(attachment_image) = attachment_image.as_ref() {
                     let preview_image = attachment_image.clone();
                     let preview_name = attachment.name.clone();
+                    let preview_path = attachment.path.clone();
                     tile = tile.child(
                         div()
                             .id(SharedString::from(format!(
@@ -3753,6 +3754,7 @@ impl Waku {
                                 this.open_image_preview(
                                     preview_image.clone(),
                                     preview_name.clone(),
+                                    preview_path.clone(),
                                     window,
                                     cx,
                                 );
@@ -3775,40 +3777,58 @@ impl Waku {
                     );
                 }
             } else {
-                tile = tile.child(
-                    div()
-                        .size_full()
-                        .px(px(5.0))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(5.0))
-                        .child(icon(icon_path, 16.0, theme.text_tertiary))
-                        .child(
-                            div().w_full().flex().justify_center().child(
-                                div()
-                                    .max_w_full()
-                                    .truncate()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child(attachment.name.clone()),
+                let click_path = attachment.path.to_string_lossy().into_owned();
+                tile = tile
+                    .cursor_pointer()
+                    .child(
+                        div()
+                            .size_full()
+                            .px(px(5.0))
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .gap(px(5.0))
+                            .child(icon(icon_path, 16.0, theme.text_tertiary))
+                            .child(
+                                div().w_full().flex().justify_center().child(
+                                    div()
+                                        .max_w_full()
+                                        .truncate()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_tertiary)
+                                        .child(attachment.name.clone()),
+                                ),
                             ),
-                        ),
-                );
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_path_in_default_app(&click_path, cx);
+                        cx.stop_propagation();
+                    }));
             }
             let key_menu = menu.clone();
             let key_image = attachment_image.clone();
             let key_name = attachment.name.clone();
+            let key_path = attachment.path.clone();
             let is_image = attachment.is_image;
             tile = tile.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
-                if is_image
-                    && matches!(key, "enter" | "space")
-                    && let Some(key_image) = key_image.as_ref()
-                {
-                    this.open_image_preview(key_image.clone(), key_name.clone(), window, cx);
-                    cx.stop_propagation();
+                if matches!(key, "enter" | "space") {
+                    if is_image {
+                        if let Some(key_image) = key_image.as_ref() {
+                            this.open_image_preview(
+                                key_image.clone(),
+                                key_name.clone(),
+                                key_path.clone(),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }
+                    } else {
+                        this.open_path_in_default_app(&key_path.to_string_lossy(), cx);
+                        cx.stop_propagation();
+                    }
                 } else if key == "f10" && event.keystroke.modifiers.shift {
                     key_menu.open_context_menu(window, cx);
                     cx.stop_propagation();

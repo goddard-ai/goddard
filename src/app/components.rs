@@ -390,6 +390,67 @@ pub(super) struct LandedNoticeState {
     pub(super) commits_focus: FocusHandle,
 }
 
+/// Filename text that opens the file in its OS default app — the user's
+/// editor for source, Preview for images, Finder for directories.
+///
+/// The caller styles and identifies the element; this adds the link
+/// affordance (pointer cursor, underline on hover or keyboard focus) and
+/// click/Enter/Space activation routed through `open_path_in_default_app`,
+/// which resolves workspace-relative paths and toasts on remote hosts. The
+/// press is stopped so a containing row's own click action stays silent.
+pub(super) fn file_link(
+    element: Stateful<Div>,
+    focus: &FocusHandle,
+    path: String,
+    waku: &gpui::WeakEntity<Waku>,
+) -> Stateful<Div> {
+    let click_waku = waku.clone();
+    let key_waku = waku.clone();
+    let click_path = path.clone();
+    let key_path = path;
+    element
+        .track_focus(focus)
+        .tab_index(0)
+        .cursor_pointer()
+        .hover(|style| style.underline())
+        .focus_visible(|style| style.underline())
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, _, cx| {
+            let _ = click_waku.update(cx, |this, cx| {
+                this.open_path_in_default_app(&click_path, cx);
+            });
+            cx.stop_propagation();
+        })
+        .on_key_down(move |event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                let _ = key_waku.update(cx, |this, cx| {
+                    this.open_path_in_default_app(&key_path, cx);
+                });
+                cx.stop_propagation();
+            }
+        })
+}
+
+/// The on-disk path a file-backed activity row's detail names, when the
+/// detail text is a filename: reads and lists carry `display_target`, a
+/// single-file change carries `change.path`. Anything else — commands,
+/// searches, multi-file counts — renders prose, not a filename.
+pub(super) fn activity_file_link_path(activity: &ActivityItem) -> Option<String> {
+    match activity.kind {
+        ActivityKind::FileRead | ActivityKind::FileList => activity
+            .display_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+            .map(str::to_owned),
+        ActivityKind::FileChange => match activity.file_changes.as_slice() {
+            [change] => Some(change.path.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn render_sent_message_attachments(
     message_id: Uuid,
     attachments: &[MessageAttachment],
@@ -539,6 +600,8 @@ fn render_sent_message_attachments(
                 let key_image = attachment_image.clone();
                 let preview_name = SharedString::from(attachment.name.clone());
                 let key_name = preview_name.clone();
+                let preview_path = attachment.path.clone();
+                let key_path = attachment.path.clone();
                 tile = tile.child(
                     div()
                         .id(SharedString::from(format!(
@@ -551,6 +614,7 @@ fn render_sent_message_attachments(
                                 this.open_image_preview(
                                     preview_image.clone(),
                                     preview_name.clone(),
+                                    preview_path.clone(),
                                     window,
                                     cx,
                                 );
@@ -570,6 +634,7 @@ fn render_sent_message_attachments(
                             this.open_image_preview(
                                 key_image.clone(),
                                 key_name.clone(),
+                                key_path.clone(),
                                 window,
                                 cx,
                             );
@@ -599,32 +664,50 @@ fn render_sent_message_attachments(
             }
         } else {
             let key_menu = menu.clone();
-            tile = tile.child(
-                div()
-                    .size_full()
-                    .px(px(7.0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(7.0))
-                    .child(icon(icon_path, 18.0, theme.text_tertiary))
-                    .child(
-                        div()
-                            .w_full()
-                            .truncate()
-                            .text_center()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(attachment.name.clone()),
-                    ),
-            );
-            tile = tile.on_key_down(move |event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
-                    key_menu.open_context_menu(window, cx);
+            let click_waku = waku.clone();
+            let key_waku = waku.clone();
+            let click_path = attachment.path.to_string_lossy().into_owned();
+            let key_path = click_path.clone();
+            tile = tile
+                .cursor_pointer()
+                .child(
+                    div()
+                        .size_full()
+                        .px(px(7.0))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(7.0))
+                        .child(icon(icon_path, 18.0, theme.text_tertiary))
+                        .child(
+                            div()
+                                .w_full()
+                                .truncate()
+                                .text_center()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(attachment.name.clone()),
+                        ),
+                )
+                .on_click(move |_, _, cx| {
+                    let _ = click_waku.update(cx, |this, cx| {
+                        this.open_path_in_default_app(&click_path, cx);
+                    });
                     cx.stop_propagation();
-                }
-            });
+                })
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    let key = event.keystroke.key.as_str();
+                    if matches!(key, "enter" | "space") {
+                        let _ = key_waku.update(cx, |this, cx| {
+                            this.open_path_in_default_app(&key_path, cx);
+                        });
+                        cx.stop_propagation();
+                    } else if key == "f10" && event.keystroke.modifiers.shift {
+                        key_menu.open_context_menu(window, cx);
+                        cx.stop_propagation();
+                    }
+                });
         }
         let reveal_path = attachment.path.clone();
         row = row.child(context_menu(

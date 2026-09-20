@@ -4351,10 +4351,22 @@ impl Waku {
             );
         if !conflict.files().is_empty() {
             let code = crate::fonts::current(cx).code;
+            let workspace = self
+                .git_panel
+                .as_ref()
+                .map(|panel| panel.workspace.clone());
+            let weak = cx.entity().downgrade();
             let mut files = div().flex().flex_col().py(px(2.0));
             for path in conflict.files() {
-                files = files.child(
+                let absolute = workspace
+                    .as_ref()
+                    .map(|workspace| workspace.join(path).to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                files = files.child(file_link(
                     div()
+                        .id(SharedString::from(format!(
+                            "git-panel-conflict-file-{path}"
+                        )))
                         .px(px(8.0))
                         .py(px(2.0))
                         .w_full()
@@ -4363,7 +4375,11 @@ impl Waku {
                         .font_family(code.clone())
                         .text_color(theme.text_secondary)
                         .child(path.clone()),
-                );
+                    &self
+                        .transcript_control_focus(format!("git-panel-conflict-file-{path}"), cx),
+                    absolute,
+                    &weak,
+                ));
             }
             let scroll = self.git_panel_conflict_files_scroll.clone();
             let wheel = scroll.clone();
