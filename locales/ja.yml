@@ -358,6 +358,8 @@ settings.three_finger_swipe_navigation: 3本指スワイプでタスク間を移
 settings.three_finger_swipe_navigation_description: トラックパッドを3本指で左右にスワイプしてタスク間を移動します。システム設定 → トラックパッドで「フルスクリーンアプリケーション間をスワイプ」を4本指に設定してください。
 settings.sidebar_shortcut_tags: サイドバーのショートカットタグ
 settings.sidebar_shortcut_tags_description: "%{modifier} を押している間、サイドバーの先頭タスクに %{keys} タグを表示します"
+settings.terminal_open_links_in_mouse_mode: マウス対応ターミナルプログラムでリンクを開く
+settings.terminal_open_links_in_mouse_mode_description: "vim や htop などのプログラムがマウスを使用中でも、%{modifier}-クリックでリンクやファイルパスを開きます。オフにするとクリックはプログラムに送られ、Shift-%{modifier}-click でも引き続きリンクを開けます"
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド

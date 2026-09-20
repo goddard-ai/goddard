@@ -1104,6 +1104,10 @@ settings.sidebar_composer_drafts:
   en: Sidebar draft previews
 settings.sidebar_composer_drafts_description:
   en: Show a task's unsent composer draft under its title in the sidebar
+settings.terminal_open_links_in_mouse_mode:
+  en: Open links in mouse-aware terminal programs
+settings.terminal_open_links_in_mouse_mode_description:
+  en: "%{modifier}-click keeps opening links and file paths while a program like vim or htop handles the mouse. Off sends those clicks to the program instead — Shift-%{modifier}-click still opens links."
 settings.completion_sound:
   en: Play sound on completed turn
 settings.completion_sound_description:

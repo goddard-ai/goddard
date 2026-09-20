@@ -208,6 +208,10 @@ fn default_dormant_after_days() -> Option<u32> {
     Some(DEFAULT_DORMANT_AFTER_DAYS)
 }
 
+fn default_terminal_open_links_in_mouse_mode() -> bool {
+    true
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -741,6 +745,11 @@ pub struct AppSettings {
     /// Days without a reply before a session groups as dormant; `None`
     /// disables auto-dormancy.
     pub dormant_after_days: Option<u32>,
+    /// ⌘-click (Ctrl-click on Linux and Windows) keeps opening links and
+    /// file paths in the integrated terminal even while the running program
+    /// reports mouse input. Off forwards those clicks to the program
+    /// instead, and Shift-⌘-click still opens links.
+    pub terminal_open_links_in_mouse_mode: bool,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -829,6 +838,7 @@ impl Default for AppSettings {
             archive_navigation: ArchiveNavigation::default(),
             sidebar_composer_drafts: false,
             dormant_after_days: default_dormant_after_days(),
+            terminal_open_links_in_mouse_mode: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1184,6 +1194,11 @@ pub struct PersistedState {
     /// disables auto-dormancy.
     #[serde(default = "default_dormant_after_days")]
     pub dormant_after_days: Option<u32>,
+    /// ⌘-click (Ctrl-click on Linux and Windows) keeps opening links and
+    /// file paths in the integrated terminal even while the running program
+    /// reports mouse input.
+    #[serde(default = "default_terminal_open_links_in_mouse_mode")]
+    pub terminal_open_links_in_mouse_mode: bool,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1409,6 +1424,7 @@ impl PersistedState {
             archive_navigation: ArchiveNavigation::default(),
             sidebar_composer_drafts: false,
             dormant_after_days: default_dormant_after_days(),
+            terminal_open_links_in_mouse_mode: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1735,6 +1751,7 @@ impl PersistedState {
             archive_navigation: self.archive_navigation,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
             dormant_after_days: self.dormant_after_days,
+            terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1831,6 +1848,7 @@ impl PersistedState {
         self.archive_navigation = settings.archive_navigation;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
         self.dormant_after_days = settings.dormant_after_days;
+        self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -2800,6 +2818,25 @@ mod tests {
         assert!(restored.auto_resolve_land_conflicts);
     }
 
+    #[test]
+    fn open_links_in_mouse_mode_defaults_on_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.terminal_open_links_in_mouse_mode);
+        let mut state = PersistedState::empty();
+        assert!(state.terminal_open_links_in_mouse_mode);
+        state.terminal_open_links_in_mouse_mode = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["terminal_open_links_in_mouse_mode"], false);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("terminal_open_links_in_mouse_mode")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.terminal_open_links_in_mouse_mode);
+    }
     #[test]
     fn new_worktree_default_branch_defaults_off_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();

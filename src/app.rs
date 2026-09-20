@@ -3942,6 +3942,10 @@ impl Waku {
             cx,
         );
         crate::terminal::install_font_size(state.terminal_font_size(), cx);
+        crate::terminal::install_open_links_in_mouse_mode(
+            state.terminal_open_links_in_mouse_mode,
+            cx,
+        );
         let analytics = crate::analytics::Analytics::new(
             state.language.locale(),
             state.analytics_id,

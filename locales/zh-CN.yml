@@ -362,6 +362,8 @@ settings.three_finger_swipe_navigation: 三指轻扫切换任务
 settings.three_finger_swipe_navigation_description: 在触控板上用三指向左或向右轻扫即可在任务之间切换。需在系统设置 → 触控板中将“在全屏 App 之间轻扫”设为四指。
 settings.sidebar_shortcut_tags: 侧边栏快捷键标签
 settings.sidebar_shortcut_tags_description: "按住 %{modifier} 时，在侧边栏的前几个任务上显示 %{keys} 标签"
+settings.terminal_open_links_in_mouse_mode: 在响应鼠标的终端程序中打开链接
+settings.terminal_open_links_in_mouse_mode_description: "当 vim、htop 等程序接管鼠标时，%{modifier}-点击仍会打开链接和文件路径。关闭后这些点击会发送给程序；Shift-%{modifier}-点击仍可打开链接"
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音

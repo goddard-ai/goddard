@@ -1875,6 +1875,26 @@ impl Waku {
                     theme,
                 )
             })
+            .children(setting_card(
+                tr!("settings.terminal_open_links_in_mouse_mode"),
+                tr!(
+                    "settings.terminal_open_links_in_mouse_mode_description",
+                    modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                ),
+                toggle_switch(
+                    "terminal-open-links-in-mouse-mode-toggle",
+                    self.state.terminal_open_links_in_mouse_mode,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.terminal_open_links_in_mouse_mode;
+                        move |this, _, cx| this.set_terminal_open_links_in_mouse_mode(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
             .when(updater_available, |column| {
                 let enabled = self.automatic_updates_enabled;
                 column.children(setting_card(
@@ -1910,6 +1930,16 @@ impl Waku {
             self.completion_volume_slider.cancel();
         }
         self.state.completion_sound_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_terminal_open_links_in_mouse_mode(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.terminal_open_links_in_mouse_mode == enabled {
+            return;
+        }
+        self.state.terminal_open_links_in_mouse_mode = enabled;
+        crate::terminal::install_open_links_in_mouse_mode(enabled, cx);
         self.save();
         cx.notify();
     }

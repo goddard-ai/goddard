@@ -67,6 +67,22 @@ pub fn install_font_size(size: f32, cx: &mut App) {
     cx.set_global(ActiveTerminalFontSize(size));
 }
 
+/// Whether the link modifier still opens links while the running program is
+/// reporting mouse events; published by the app when settings load or change.
+struct ActiveOpenLinksInMouseMode(bool);
+impl Global for ActiveOpenLinksInMouseMode {}
+
+/// The resolved preference — on until the app publishes the stored value.
+fn open_links_in_mouse_mode(cx: &App) -> bool {
+    cx.try_global::<ActiveOpenLinksInMouseMode>()
+        .map_or(true, |enabled| enabled.0)
+}
+
+/// Publish the resolved preference so every terminal view tracks it.
+pub fn install_open_links_in_mouse_mode(enabled: bool, cx: &mut App) {
+    cx.set_global(ActiveOpenLinksInMouseMode(enabled));
+}
+
 #[inline]
 fn primary_modifier_pressed(modifiers: &Modifiers) -> bool {
     modifiers.secondary()
@@ -489,6 +505,13 @@ impl TerminalSession {
         *self.term.lock().mode()
     }
 
+    /// True while the running program asked for mouse input and Shift isn't
+    /// held — Shift is the escape hatch that keeps local clicks and
+    /// selection working over a mouse-aware program.
+    fn mouse_mode(&self, shift: bool) -> bool {
+        self.mode().intersects(TermMode::MOUSE_MODE) && !shift
+    }
+
     fn scroll(&self, lines: i32) {
         if lines == 0 {
             return;
@@ -901,6 +924,13 @@ pub struct TerminalView {
     scrollbar_state: Rc<ScrollbarState>,
     grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     selecting: bool,
+    /// The link a link-modifier press landed on, awaiting release. While it
+    /// lives the press is swallowed — the program never sees it and no
+    /// selection starts.
+    link_gesture: Option<TerminalLink>,
+    /// The grid cell the last forwarded motion report used — reports only
+    /// repeat while the cell actually changes.
+    last_mouse_cell: Option<TerminalPoint>,
     hovered_link: Option<TerminalLink>,
     /// Localhost URLs this view has already surfaced, so the overlap between
     /// one output scan and the next cannot re-report them.
@@ -1009,6 +1039,8 @@ impl TerminalView {
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
             selecting: false,
+            link_gesture: None,
+            last_mouse_cell: None,
             hovered_link: None,
             reported_localhost_urls: HashSet::new(),
             cursor_blink,
@@ -1319,28 +1351,51 @@ impl TerminalView {
         if self.scrollbar_state.engaged() {
             return;
         }
+        let mouse_mode = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.mouse_mode(event.modifiers.shift));
+        if event.button != MouseButton::Left && !mouse_mode {
+            // Outside mouse mode the context menu owns right clicks and
+            // middle clicks do nothing.
+            return;
+        }
         window.focus(&self.focus_handle, cx);
         let Some((point, side)) = self.grid_point_for_position(event.position, false) else {
             return;
         };
 
-        if primary_modifier_pressed(&event.modifiers)
-            && let Some(link) = self
+        // A link-modifier press on a link starts a gesture rather than
+        // acting: the press is swallowed and the release opens the link when
+        // it lands on the same one.
+        if event.button == MouseButton::Left
+            && primary_modifier_pressed(&event.modifiers)
+            && (open_links_in_mouse_mode(cx) || !mouse_mode)
+        {
+            self.link_gesture = self
                 .session
                 .as_mut()
                 .and_then(|session| session.link_at(point))
-            && let Some(target) =
-                terminal_link_target(&link.value, self.working_directory.as_path())
-        {
-            self.selecting = false;
-            self.hovered_link = Some(link);
-            match target {
-                TerminalLinkTarget::Url(url) => cx.open_url(&url),
-                TerminalLinkTarget::File(path) => {
-                    crate::platform::reveal_in_file_manager(&path, cx)
-                }
+                .filter(|link| {
+                    terminal_link_target(&link.value, self.working_directory.as_path()).is_some()
+                });
+            if let Some(link) = self.link_gesture.clone() {
+                self.selecting = false;
+                self.hovered_link = Some(link);
+                window.prevent_default();
+                cx.stop_propagation();
+                cx.notify();
+                return;
             }
-            window.prevent_default();
+        }
+
+        if mouse_mode {
+            if let Some(session) = &self.session
+                && let Some(report) =
+                    mouse_button_report(point, event.button, event.modifiers, true, session.mode())
+            {
+                session.write(report);
+            }
             cx.stop_propagation();
             cx.notify();
             return;
@@ -1372,36 +1427,118 @@ impl TerminalView {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let hover_changed = if self.selecting {
-            self.set_hovered_link(None)
-        } else {
-            self.refresh_hovered_link(primary_modifier_pressed(&event.modifiers), event.position)
-        };
-        if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
+        // A live link gesture keeps swallowing the press until release;
+        // dragging off the link's bounds cancels it first.
+        if let Some(link) = &self.link_gesture {
+            let off_link = self
+                .grid_point_for_position(event.position, true)
+                .is_none_or(|(point, _)| !link.bounds.contains(&point));
+            if off_link {
+                self.link_gesture = None;
+                if self.set_hovered_link(None) {
+                    cx.notify();
+                }
+            } else {
+                return;
+            }
+        }
+
+        if self.selecting {
+            let hover_changed = self.set_hovered_link(None);
+            if event.pressed_button != Some(MouseButton::Left) {
+                if hover_changed {
+                    cx.notify();
+                }
+                return;
+            }
+            let Some((point, side)) = self.grid_point_for_position(event.position, true) else {
+                return;
+            };
+            let Some(session) = &self.session else {
+                return;
+            };
+            if let Some(selection) = session.term.lock().selection.as_mut() {
+                selection.update(point, side);
+                session.dirty.store(true, Ordering::Release);
+                cx.stop_propagation();
+                cx.notify();
+            }
+            return;
+        }
+
+        // While the program reports mouse input, motion belongs to it and
+        // there is no local link hover. Reports only repeat on a cell
+        // change.
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.mouse_mode(event.modifiers.shift))
+        {
+            let hover_changed = self.set_hovered_link(None);
+            if let Some((point, _)) = self.grid_point_for_position(event.position, true)
+                && self.last_mouse_cell != Some(point)
+            {
+                self.last_mouse_cell = Some(point);
+                if let Some(session) = &self.session
+                    && let Some(report) = mouse_moved_report(
+                        point,
+                        event.pressed_button,
+                        event.modifiers,
+                        session.mode(),
+                    )
+                {
+                    session.write(report);
+                }
+            }
             if hover_changed {
                 cx.notify();
             }
             return;
         }
-        let Some((point, side)) = self.grid_point_for_position(event.position, true) else {
-            return;
-        };
-        let Some(session) = &self.session else {
-            return;
-        };
 
-        if let Some(selection) = session.term.lock().selection.as_mut() {
-            selection.update(point, side);
-            session.dirty.store(true, Ordering::Release);
-            cx.stop_propagation();
-            cx.notify();
-        } else if hover_changed {
+        if self.refresh_hovered_link(
+            primary_modifier_pressed(&event.modifiers),
+            event.position,
+        ) {
             cx.notify();
         }
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.selecting = false;
+        self.last_mouse_cell = None;
+
+        // Resolve a link gesture: releasing on the link the press started on
+        // opens it; releasing anywhere else just drops the gesture.
+        if let Some(link) = self.link_gesture.take() {
+            self.hovered_link = None;
+            let same_link = self
+                .grid_point_for_position(event.position, false)
+                .and_then(|(point, _)| self.session.as_mut()?.link_at(point))
+                .is_some_and(|current| current == link);
+            if same_link
+                && let Some(target) =
+                    terminal_link_target(&link.value, self.working_directory.as_path())
+            {
+                match target {
+                    TerminalLinkTarget::Url(url) => cx.open_url(&url),
+                    TerminalLinkTarget::File(path) => {
+                        crate::platform::reveal_in_file_manager(&path, cx)
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        if let Some(session) = &self.session
+            && session.mouse_mode(event.modifiers.shift)
+            && let Some((point, _)) = self.grid_point_for_position(event.position, true)
+            && let Some(report) =
+                mouse_button_report(point, event.button, event.modifiers, false, session.mode())
+        {
+            session.write(report);
+        }
     }
 
     fn on_mouse_exit(&mut self, _: &MouseExitEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1417,7 +1554,11 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         if self.refresh_hovered_link(
-            primary_modifier_pressed(&event.modifiers),
+            primary_modifier_pressed(&event.modifiers)
+                && !self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.mouse_mode(event.modifiers.shift)),
             window.mouse_position(),
         ) {
             cx.notify();
@@ -1808,12 +1949,29 @@ impl TerminalView {
         };
         self.scroll_accumulator += delta;
         let lines = self.scroll_accumulator.trunc() as i32;
-        if lines != 0 {
-            self.scroll_accumulator -= lines as f32;
-            session.scroll(lines);
+        if lines == 0 {
+            return;
+        }
+        self.scroll_accumulator -= lines as f32;
+
+        // While the program reports mouse input the wheel is its input too:
+        // each line is one scroll-button press at the cursor's cell.
+        if session.mouse_mode(event.modifiers.shift) {
+            if let Some((point, _)) = self.grid_point_for_position(event.position, true)
+                && let Some(reports) = scroll_report(point, lines, event, session.mode())
+            {
+                for report in reports {
+                    session.write(report);
+                }
+            }
             cx.stop_propagation();
             cx.notify();
+            return;
         }
+
+        session.scroll(lines);
+        cx.stop_propagation();
+        cx.notify();
     }
 
     fn ensure_cursor_focus_tracking(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1925,7 +2083,11 @@ impl Render for TerminalView {
             self.set_hovered_link(None);
         } else {
             self.refresh_hovered_link(
-                primary_modifier_pressed(&window.modifiers()),
+                primary_modifier_pressed(&window.modifiers())
+                    && !self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.mouse_mode(window.modifiers().shift)),
                 window.mouse_position(),
             );
         }
@@ -1944,8 +2106,14 @@ impl Render for TerminalView {
             .relative()
             .cursor_text()
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))
+            .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_mouse_up))
+            .on_mouse_up_out(MouseButton::Right, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_exit(cx.listener(Self::on_mouse_exit))
             .on_modifiers_changed(cx.listener(Self::on_modifiers_changed));
@@ -2400,6 +2568,219 @@ fn existing_terminal_file_path(value: &str, working_directory: &Path) -> Option<
         }
         path = PathBuf::from(prefix);
     }
+}
+
+/// The encoding a mouse-aware program picked: ?1006h SGR, ?1005h UTF-8, or
+/// the default X10 form.
+enum MouseFormat {
+    Sgr,
+    Normal(bool),
+}
+
+impl MouseFormat {
+    fn from_mode(mode: TermMode) -> Self {
+        if mode.contains(TermMode::SGR_MOUSE) {
+            MouseFormat::Sgr
+        } else if mode.contains(TermMode::UTF8_MOUSE) {
+            MouseFormat::Normal(true)
+        } else {
+            MouseFormat::Normal(false)
+        }
+    }
+}
+
+enum MouseButtonCode {
+    LeftButton = 0,
+    MiddleButton = 1,
+    RightButton = 2,
+    LeftMove = 32,
+    MiddleMove = 33,
+    RightMove = 34,
+    NoneMove = 35,
+    ScrollUp = 64,
+    ScrollDown = 65,
+    Other = 99,
+}
+
+impl MouseButtonCode {
+    fn from_move_button(button: Option<MouseButton>) -> Self {
+        match button {
+            Some(MouseButton::Left) => MouseButtonCode::LeftMove,
+            Some(MouseButton::Middle) => MouseButtonCode::MiddleMove,
+            Some(MouseButton::Right) => MouseButtonCode::RightMove,
+            Some(MouseButton::Navigate(_)) => MouseButtonCode::Other,
+            None => MouseButtonCode::NoneMove,
+        }
+    }
+
+    fn from_button(button: MouseButton) -> Self {
+        match button {
+            MouseButton::Left => MouseButtonCode::LeftButton,
+            MouseButton::Middle => MouseButtonCode::MiddleButton,
+            MouseButton::Right => MouseButtonCode::RightButton,
+            MouseButton::Navigate(_) => MouseButtonCode::Other,
+        }
+    }
+
+    fn from_scroll(event: &ScrollWheelEvent) -> Self {
+        let is_positive = match event.delta {
+            ScrollDelta::Pixels(pixels) => pixels.y > px(0.),
+            ScrollDelta::Lines(lines) => lines.y > 0.,
+        };
+
+        if is_positive {
+            MouseButtonCode::ScrollUp
+        } else {
+            MouseButtonCode::ScrollDown
+        }
+    }
+
+    fn is_other(&self) -> bool {
+        matches!(self, MouseButtonCode::Other)
+    }
+}
+
+/// Each scrolled line is one scroll-button press at the cursor's cell —
+/// `None` when the program isn't reporting or the cell is off screen.
+fn scroll_report(
+    point: TerminalPoint,
+    scroll_lines: i32,
+    event: &ScrollWheelEvent,
+    mode: TermMode,
+) -> Option<impl Iterator<Item = Vec<u8>>> {
+    if mode.intersects(TermMode::MOUSE_MODE) {
+        mouse_report(
+            point,
+            MouseButtonCode::from_scroll(event),
+            true,
+            event.modifiers,
+            MouseFormat::from_mode(mode),
+        )
+        .map(|report| std::iter::repeat(report).take(scroll_lines.unsigned_abs() as usize))
+    } else {
+        None
+    }
+}
+
+fn mouse_button_report(
+    point: TerminalPoint,
+    button: MouseButton,
+    modifiers: Modifiers,
+    pressed: bool,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    let button = MouseButtonCode::from_button(button);
+    if !button.is_other() && mode.intersects(TermMode::MOUSE_MODE) {
+        mouse_report(
+            point,
+            button,
+            pressed,
+            modifiers,
+            MouseFormat::from_mode(mode),
+        )
+    } else {
+        None
+    }
+}
+
+fn mouse_moved_report(
+    point: TerminalPoint,
+    button: Option<MouseButton>,
+    modifiers: Modifiers,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    let button = MouseButtonCode::from_move_button(button);
+
+    if !button.is_other() && mode.intersects(TermMode::MOUSE_MOTION | TermMode::MOUSE_DRAG) {
+        // Only drags are reported in drag mode, so block NoneMove.
+        if mode.contains(TermMode::MOUSE_DRAG) && matches!(button, MouseButtonCode::NoneMove) {
+            None
+        } else {
+            mouse_report(point, button, true, modifiers, MouseFormat::from_mode(mode))
+        }
+    } else {
+        None
+    }
+}
+
+/// The bytes to send to the PTY for one mouse event at a cell — `None` for
+/// points in the scrollback, which a mouse-aware program cannot see.
+fn mouse_report(
+    point: TerminalPoint,
+    button: MouseButtonCode,
+    pressed: bool,
+    modifiers: Modifiers,
+    format: MouseFormat,
+) -> Option<Vec<u8>> {
+    if point.line < 0 {
+        return None;
+    }
+
+    let mut mods = 0;
+    if modifiers.shift {
+        mods += 4;
+    }
+    if modifiers.alt {
+        mods += 8;
+    }
+    if modifiers.control {
+        mods += 16;
+    }
+
+    match format {
+        MouseFormat::Sgr => {
+            Some(sgr_mouse_report(point, button as u8 + mods, pressed).into_bytes())
+        }
+        MouseFormat::Normal(utf8) => {
+            if pressed {
+                normal_mouse_report(point, button as u8 + mods, utf8)
+            } else {
+                normal_mouse_report(point, 3 + mods, utf8)
+            }
+        }
+    }
+}
+
+fn normal_mouse_report(point: TerminalPoint, button: u8, utf8: bool) -> Option<Vec<u8>> {
+    let max_point = if utf8 { 2015 } else { 223 };
+
+    if point.line >= max_point || point.column >= max_point as usize {
+        return None;
+    }
+
+    let mut msg = vec![b'\x1b', b'[', b'M', 32 + button];
+
+    let mouse_pos_encode = |pos: usize| -> Vec<u8> {
+        let pos = 32 + 1 + pos;
+        let first = 0xC0 + pos / 64;
+        let second = 0x80 + (pos & 63);
+        vec![first as u8, second as u8]
+    };
+
+    if utf8 && point.column >= 95 {
+        msg.append(&mut mouse_pos_encode(point.column.0));
+    } else {
+        msg.push(32 + 1 + point.column.0 as u8);
+    }
+
+    if utf8 && point.line >= 95 {
+        msg.append(&mut mouse_pos_encode(point.line.0 as usize));
+    } else {
+        msg.push(32 + 1 + point.line.0 as u8);
+    }
+
+    Some(msg)
+}
+
+fn sgr_mouse_report(point: TerminalPoint, button: u8, pressed: bool) -> String {
+    let c = if pressed { 'M' } else { 'm' };
+    format!(
+        "\x1b[<{};{};{}{}",
+        button,
+        point.column.0 + 1,
+        point.line.0 + 1,
+        c
+    )
 }
 
 /// The bottom `count` non-blank rows of the live screen, oldest first.
@@ -3157,6 +3538,118 @@ mod tests {
         assert_eq!(
             scan_grid_localhost_url(&term, &mut watermark, &reported),
             Some("http://localhost:3000/".to_owned())
+        );
+    }
+
+    fn scroll_event(lines: f32) -> ScrollWheelEvent {
+        ScrollWheelEvent {
+            delta: ScrollDelta::Lines(point(0., lines)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn sgr_mouse_reports_encode_button_cell_and_release() {
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
+        let point = TerminalPoint::new(Line(2), Column(4));
+
+        assert_eq!(
+            mouse_button_report(point, MouseButton::Left, Modifiers::none(), true, mode),
+            Some(b"\x1b[<0;5;3M".to_vec())
+        );
+        assert_eq!(
+            mouse_button_report(point, MouseButton::Left, Modifiers::none(), false, mode),
+            Some(b"\x1b[<0;5;3m".to_vec())
+        );
+        // Shift is +4, Alt is +8, Ctrl is +16; the platform key is not
+        // encodable.
+        assert_eq!(
+            mouse_button_report(point, MouseButton::Right, Modifiers::command(), true, mode),
+            Some(b"\x1b[<2;5;3M".to_vec())
+        );
+        assert_eq!(
+            mouse_button_report(
+                point,
+                MouseButton::Left,
+                Modifiers {
+                    shift: true,
+                    alt: true,
+                    ..Default::default()
+                },
+                true,
+                mode,
+            ),
+            Some(b"\x1b[<12;5;3M".to_vec())
+        );
+        // Scrollback cells report nothing — the program cannot see them.
+        assert_eq!(
+            mouse_button_report(
+                TerminalPoint::new(Line(-1), Column(4)),
+                MouseButton::Left,
+                Modifiers::none(),
+                true,
+                mode,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn scroll_report_repeats_one_press_per_line() {
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
+        let point = TerminalPoint::new(Line(0), Column(0));
+
+        let reports: Vec<Vec<u8>> = scroll_report(point, 3, &scroll_event(1.), mode)
+            .expect("mouse mode should produce scroll reports")
+            .collect();
+        assert_eq!(reports, vec![b"\x1b[<64;1;1M".to_vec(); 3]);
+
+        let reports: Vec<Vec<u8>> = scroll_report(point, -2, &scroll_event(-1.), mode)
+            .expect("mouse mode should produce scroll reports")
+            .collect();
+        assert_eq!(reports, vec![b"\x1b[<65;1;1M".to_vec(); 2]);
+
+        assert!(scroll_report(point, 3, &scroll_event(1.), TermMode::empty()).is_none());
+    }
+
+    #[test]
+    fn mouse_motion_reports_follow_the_reporting_mode() {
+        let point = TerminalPoint::new(Line(0), Column(0));
+        let none = Modifiers::none();
+
+        // Click reporting alone never reports motion.
+        assert_eq!(
+            mouse_moved_report(point, None, none, TermMode::MOUSE_REPORT_CLICK),
+            None
+        );
+        // Any-motion mode reports plain moves and drags.
+        assert_eq!(
+            mouse_moved_report(
+                point,
+                None,
+                none,
+                TermMode::MOUSE_MOTION | TermMode::SGR_MOUSE
+            ),
+            Some(b"\x1b[<35;1;1M".to_vec())
+        );
+        // Drag mode reports drags but swallows plain moves.
+        assert_eq!(
+            mouse_moved_report(
+                point,
+                Some(MouseButton::Left),
+                none,
+                TermMode::MOUSE_DRAG | TermMode::SGR_MOUSE,
+            ),
+            Some(b"\x1b[<32;1;1M".to_vec())
+        );
+        assert_eq!(
+            mouse_moved_report(
+                point,
+                None,
+                none,
+                TermMode::MOUSE_DRAG | TermMode::SGR_MOUSE
+            ),
+            None
         );
     }
 }
