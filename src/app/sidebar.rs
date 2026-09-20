@@ -3334,18 +3334,16 @@ impl Waku {
         };
         let folder_missing =
             matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));
-        // Remote projects carry their host's name — and an offline marker
-        // while that host is disconnected — so the merged catalog never
-        // hides which machine a row belongs to.
+        // Remote projects carry their host's name — and an offline or
+        // needs-auth marker while that host is disconnected — so the merged
+        // catalog never hides which machine a row belongs to. The marker is
+        // the retry affordance: activating it runs a user-initiated connect
+        // that may raise the ssh prompt.
         let host_badge = match group {
             SidebarGroup::Project(project_id) => match self.project_host(project_id) {
-                waku_client::DaemonKey::Remote(host) => self.remote_host_name(host).map(|name| {
-                    if self.remote_host_connected(host) {
-                        format!("· {name}")
-                    } else {
-                        format!("· {name} · {}", tr!("sidebar.offline"))
-                    }
-                }),
+                waku_client::DaemonKey::Remote(host) => {
+                    self.remote_host_name(host).map(|name| (host, name))
+                }
                 waku_client::DaemonKey::Local => None,
             },
             _ => None,
@@ -3505,11 +3503,55 @@ impl Waku {
                             )
                         })
                         .when_some(host_badge, |element, badge| {
+                            let (host, name) = badge;
+                            if self.remote_host_connected(host) {
+                                return element.child(
+                                    div()
+                                        .flex_none()
+                                        .text_color(theme.text_tertiary)
+                                        .child(format!("· {name}")),
+                                );
+                            }
+                            let state_label = if self.needs_auth_hosts.contains(&host) {
+                                tr!("sidebar.needs_auth")
+                            } else {
+                                tr!("sidebar.offline")
+                            };
                             element.child(
                                 div()
+                                    .id(SharedString::from(format!(
+                                        "sidebar-host-connect-{group_key}"
+                                    )))
+                                    .tab_index(0)
                                     .flex_none()
+                                    .rounded(px(4.0))
+                                    .px(px(2.0))
+                                    .cursor_default()
                                     .text_color(theme.text_tertiary)
-                                    .child(badge),
+                                    .hover(|style| {
+                                        style.bg(theme.overlay).text_color(theme.text_secondary)
+                                    })
+                                    .focus_visible(|style| style.text_color(theme.accent))
+                                    .tooltip(Tooltip::text(tr!("daemon.reconnect")))
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.use_remote_host(host, cx);
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, _, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                this.use_remote_host(host, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    ))
+                                    .child(format!("· {name} · {state_label}")),
                             )
                         })
                         .when_some(updated_chevron, |element, chevron| element.child(chevron))
@@ -4272,15 +4314,27 @@ impl Waku {
             ))
         };
         // Date grouping and Big Picture cards have no project header to carry
-        // the host name, so the detail line wears it. Project grouping leaves
-        // it to the group header's badge.
+        // the host name, so the detail line wears it — plus the host's
+        // offline or needs-auth state while it is disconnected. Selecting
+        // the row is itself the retry path.
         let (detail_label, session_remote) = match self.session_host(session_id) {
             waku_client::DaemonKey::Remote(host) if !grouped_by_project => {
                 let host_name = self.remote_host_name(host);
-                let label = match (detail_label, host_name) {
-                    (Some(label), Some(host)) => format!("{label} · {host}"),
-                    (None, Some(host)) => host,
-                    (label, None) => label.map(|label| label.to_string()).unwrap_or_default(),
+                let state = (!self.remote_host_connected(host)).then(|| {
+                    if self.needs_auth_hosts.contains(&host) {
+                        tr!("sidebar.needs_auth")
+                    } else {
+                        tr!("sidebar.offline")
+                    }
+                });
+                let label = match (detail_label, host_name, state) {
+                    (Some(label), Some(host), Some(state)) => {
+                        format!("{label} · {host} · {state}")
+                    }
+                    (Some(label), Some(host), None) => format!("{label} · {host}"),
+                    (None, Some(host), Some(state)) => format!("{host} · {state}"),
+                    (None, Some(host), None) => host,
+                    (label, None, _) => label.map(|label| label.to_string()).unwrap_or_default(),
                 };
                 (Some(SharedString::from(label)), true)
             }

@@ -2491,6 +2491,9 @@ impl Waku {
                                 let current = waku.remote_host_record_matches(&host);
                                 if current {
                                     waku.remote_errors.insert(host_id, error.to_string());
+                                    if interactive {
+                                        waku.fail_pending_remote_submissions(host_id, &error, cx);
+                                    }
                                     cx.notify();
                                 }
                                 current
@@ -2565,6 +2568,12 @@ impl Waku {
         self.remote_connect_triggers.remove(&host);
         #[cfg(unix)]
         self.ssh_repair_requests.remove(&host);
+        // Submissions held on this host's connect run through the normal
+        // path now that the supervisor routes.
+        let pending_submissions = self
+            .pending_remote_submissions
+            .remove(&host)
+            .unwrap_or_default();
         self.start_task_state_sync(waku_client::DaemonKey::Remote(host), supervisor);
         let drafts = self.composer_draft_store.clone();
         let daemons = self.daemons.clone();
@@ -2596,7 +2605,55 @@ impl Waku {
             });
         })
         .detach();
+        for (session_id, submission) in pending_submissions {
+            self.submit_submission_for_session(session_id, submission, cx);
+        }
         cx.notify();
+    }
+
+    /// The connect attempt these submissions waited on failed — return each
+    /// prompt to its composer and surface the cause once.
+    fn fail_pending_remote_submissions(
+        &mut self,
+        host: Uuid,
+        error: &anyhow::Error,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = self
+            .pending_remote_submissions
+            .remove(&host)
+            .unwrap_or_default();
+        if pending.is_empty() {
+            return;
+        }
+        for (session_id, submission) in pending {
+            if self.state.selected_session == Some(session_id) {
+                self.restore_composer_submission(submission, cx);
+            }
+        }
+        let name = self
+            .remote_host_name(host)
+            .unwrap_or_else(|| "remote host".to_string());
+        self.show_toast(tr!(
+            "errors.remote_connect",
+            name = name,
+            error = error.to_string()
+        ));
+        cx.notify();
+    }
+
+    /// Return submissions held on a host's connect to the composer without
+    /// an error toast — the host record itself changed or went away.
+    fn restore_pending_remote_submissions(&mut self, host: Uuid, cx: &mut Context<Self>) {
+        for (session_id, submission) in self
+            .pending_remote_submissions
+            .remove(&host)
+            .unwrap_or_default()
+        {
+            if self.state.selected_session == Some(session_id) {
+                self.restore_composer_submission(submission, cx);
+            }
+        }
     }
 
     /// Save a remote host record and start its connect loop.
@@ -2659,6 +2716,7 @@ impl Waku {
         self.needs_auth_hosts.remove(&host_id);
         self.interactive_connects_pending.remove(&host_id);
         self.remote_connect_triggers.remove(&host_id);
+        self.restore_pending_remote_submissions(host_id, cx);
         self.connect_remote_host(record, cx);
         cx.notify();
     }
@@ -2708,6 +2766,7 @@ impl Waku {
         self.remote_connect_triggers.remove(&host);
         #[cfg(unix)]
         self.ssh_repair_requests.remove(&host);
+        self.restore_pending_remote_submissions(host, cx);
         self.remote_catalogs.remove(&host);
         self.save_remote_catalogs();
         if self.skills_catalogs.remove(&remote).is_some() {
@@ -5304,9 +5363,9 @@ impl Waku {
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
-        // Submitting to an offline remote host is use — start its
-        // interactive connect. The submission still fails on this pass; the
-        // user re-sends once the daemon lands.
+        // Submitting to an offline remote is use: hold the submission, run
+        // the interactive connect, and send when the daemon lands. A failed
+        // or cancelled attempt restores the composer.
         if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
             && self.daemons.daemon_for_session(session_id).is_none()
             && self
@@ -5315,7 +5374,13 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id)
         {
+            self.pending_remote_submissions
+                .entry(host)
+                .or_default()
+                .push((session_id, submission));
             self.use_remote_host(host, cx);
+            cx.notify();
+            return;
         }
         let Some(session) = self
             .state

@@ -1746,6 +1746,10 @@ pub struct Waku {
     /// Hosts with a queued interactive connect request — repeated actions do
     /// not stack prompts.
     interactive_connects_pending: HashSet<Uuid>,
+    /// Submissions waiting on a remote host's connect, host id → (session,
+    /// submission): drained through the normal submit path on install,
+    /// restored to the composer when the attempt fails.
+    pending_remote_submissions: HashMap<Uuid, Vec<(Uuid, ComposerSubmission)>>,
     /// Daemon settings mirrored per remote host. Binary overrides and custom
     /// commands are host-local, so `state`'s copy stays the local daemon's.
     remote_daemon_settings: HashMap<Uuid, waku_client::DaemonSettings>,
@@ -5105,6 +5109,7 @@ impl Waku {
                 needs_auth_hosts: HashSet::new(),
                 remote_connect_triggers: HashMap::new(),
                 interactive_connects_pending: HashSet::new(),
+                pending_remote_submissions: HashMap::new(),
                 remote_daemon_settings: HashMap::new(),
                 #[cfg(unix)]
                 ssh_transports: HashMap::new(),

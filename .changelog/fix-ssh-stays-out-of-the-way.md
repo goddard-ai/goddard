@@ -1,0 +1,1 @@
+- Remote hosts no longer interrupt with SSH password prompts or connection errors until you actually use them: background connects run non-interactively and retry with backoff, the auth prompt only appears when you open, submit to, or fork a session on that host, and offline or password-required hosts are badged in the sidebar with a reconnect action

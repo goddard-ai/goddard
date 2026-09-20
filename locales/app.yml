@@ -864,6 +864,8 @@ daemon.remote_unreachable:
   en: That host is not connected
 sidebar.offline:
   en: Offline
+sidebar.needs_auth:
+  en: Password required
 daemon.restart_failed:
   en: "Could not restart daemon: %{error}"
 daemon.url_copied:
@@ -2624,6 +2626,8 @@ errors.unexpected_daemon_response:
   en: "Expected %{expected}, received %{actual} from the daemon"
 errors.daemon_disconnected:
   en: Goddard daemon is disconnected
+errors.remote_connect:
+  en: "Could not connect to %{name}: %{error}"
 errors.path_outside_workspace:
   en: This path is outside the active workspace on the daemon host
 errors.rename_task:
