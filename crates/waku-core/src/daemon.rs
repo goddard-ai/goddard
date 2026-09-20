@@ -1556,6 +1556,9 @@ impl Backend for WakuBackend {
                     !imported.contains(&(session.provider(), session.cursor.native_id().to_owned()))
                 });
                 catalog.sessions.truncate(limit);
+                for session in &mut catalog.sessions {
+                    session.cwd_missing = !session.cwd.is_dir();
+                }
                 Ok(ResponsePayload::ProviderSessions {
                     sessions: catalog.sessions,
                     status: catalog.status,
@@ -1565,6 +1568,9 @@ impl Backend for WakuBackend {
                 // Preserve every native turn shell for exact provider turn
                 // numbering, but bound imported display text to recent turns.
                 const VISIBLE_TURN_LIMIT: usize = 100;
+                // A `cwd_missing` session's recorded folder is gone; launch
+                // and load in the nearest surviving ancestor instead.
+                let cwd = crate::acp_session::resume_working_directory(&cwd);
                 let history = match &cursor {
                     ProviderResumeCursor::Amp { thread_id, .. } => {
                         let binary = self.provider_binary(ProviderKind::Amp)?;
@@ -1666,7 +1672,10 @@ impl Backend for WakuBackend {
                         bail!("Antigravity conversations live in its own TUI; there is no transcript to import")
                     }
                 };
-                Ok(ResponsePayload::ProviderSessionHistory { history })
+                Ok(ResponsePayload::ProviderSessionHistory {
+                    history,
+                    resolved_cwd: Some(cwd),
+                })
             }
             Command::LoadComposerDrafts => Ok(ResponsePayload::ComposerDrafts {
                 drafts: self.composer_drafts.load()?,

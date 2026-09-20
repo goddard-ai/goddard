@@ -103,6 +103,7 @@ fn catalog_summary(state_path: &Path) -> Option<ProviderSessionSummary> {
         },
         title: catalog_title(&state, &session_id, &cwd),
         cwd,
+        cwd_missing: false,
         created_at,
         updated_at,
     })

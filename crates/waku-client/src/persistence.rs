@@ -2044,6 +2044,14 @@ pub struct ProviderSessionCatalog {
     pub status: ProviderSessionCatalogStatus,
 }
 
+/// A loaded provider-native conversation plus the launch directory the
+/// daemon resolved for it (which may differ from the recorded `cwd` when
+/// that folder no longer exists).
+pub struct LoadedProviderSession {
+    pub history: ProviderSessionHistory,
+    pub resolved_cwd: Option<PathBuf>,
+}
+
 impl StateStore {
     pub fn default_path() -> PathBuf {
         if cfg!(debug_assertions) {
@@ -2215,7 +2223,7 @@ impl StateStore {
         key: DaemonKey,
         cursor: ProviderResumeCursor,
         cwd: PathBuf,
-    ) -> impl FnOnce() -> io::Result<ProviderSessionHistory> + Send + 'static {
+    ) -> impl FnOnce() -> io::Result<LoadedProviderSession> + Send + 'static {
         let daemon = self.daemons.supervisor(key);
         move || match daemon {
             Some(daemon) => match daemon
@@ -2227,7 +2235,13 @@ impl StateStore {
                 )
                 .map_err(to_io_error)?
             {
-                ResponsePayload::ProviderSessionHistory { history } => Ok(history),
+                ResponsePayload::ProviderSessionHistory {
+                    history,
+                    resolved_cwd,
+                } => Ok(LoadedProviderSession {
+                    history,
+                    resolved_cwd,
+                }),
                 _ => Err(io::Error::other(
                     "Goddard daemon returned an invalid provider-session history response",
                 )),

@@ -279,6 +279,7 @@ fn summary_from_session(
         cursor,
         title,
         cwd: session.cwd.clone(),
+        cwd_missing: false,
         created_at: session.created_at,
         updated_at: session.updated_at,
     })

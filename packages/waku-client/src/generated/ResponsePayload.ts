@@ -39,4 +39,10 @@ supportsUserInputActions: boolean, } | { "type": "started", supportsSteer: boole
  * Why the catalog is empty; `Ready` means an empty list is genuine.
  * Pre-status daemons omit it, deserializing to `Ready`.
  */
-status: ProviderSessionCatalogStatus, } | { "type": "providerSessionHistory", history: ProviderSessionHistory, } | { "type": "composerDrafts", drafts: ComposerDrafts, } | { "type": "evaluation", evaluation: Evaluation, } | { "type": "routeDecision", decision: RouteDecision, } | { "type": "blobStored", reference: string, path: string, } | { "type": "attachmentStored", attachment: StoredAttachment, } | { "type": "blobData", bytes: string, } | { "type": "providerSessionForked", result: ProviderSessionFork, } | { "type": "sessionForked", session: AgentSession, checkpointWarning: string | null, } | { "type": "sessionRewound", session: AgentSession, cleanupWarning: string | null, } | { "type": "workspace", result: WorkspaceResult, } | { "type": "agentSessionCreated", sessionId: string, } | { "type": "agentSessionTranscript", transcript: AgentSessionTranscript, };
+status: ProviderSessionCatalogStatus, } | { "type": "providerSessionHistory", history: ProviderSessionHistory,
+/**
+ * The launch directory the daemon resolved for the session; a
+ * `cwd_missing` catalog entry resumes in the nearest surviving
+ * ancestor rather than the recorded path.
+ */
+resolvedCwd: string | null, } | { "type": "composerDrafts", drafts: ComposerDrafts, } | { "type": "evaluation", evaluation: Evaluation, } | { "type": "routeDecision", decision: RouteDecision, } | { "type": "blobStored", reference: string, path: string, } | { "type": "attachmentStored", attachment: StoredAttachment, } | { "type": "blobData", bytes: string, } | { "type": "providerSessionForked", result: ProviderSessionFork, } | { "type": "sessionForked", session: AgentSession, checkpointWarning: string | null, } | { "type": "sessionRewound", session: AgentSession, cleanupWarning: string | null, } | { "type": "workspace", result: WorkspaceResult, } | { "type": "agentSessionCreated", sessionId: string, } | { "type": "agentSessionTranscript", transcript: AgentSessionTranscript, };

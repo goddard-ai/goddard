@@ -1289,6 +1289,10 @@ pub struct ProviderSessionSummary {
     pub cursor: ProviderResumeCursor,
     pub title: String,
     pub cwd: PathBuf,
+    /// The recorded working directory no longer exists on the daemon host;
+    /// resuming falls back to its nearest surviving ancestor.
+    #[serde(default)]
+    pub cwd_missing: bool,
     pub created_at: u64,
     pub updated_at: u64,
 }

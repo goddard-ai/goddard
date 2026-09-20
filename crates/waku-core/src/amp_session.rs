@@ -89,6 +89,7 @@ fn parse_provider_sessions(value: &Value, limit: usize) -> Vec<ProviderSessionSu
                 },
                 title: title.to_owned(),
                 cwd,
+                cwd_missing: false,
                 created_at: updated_at,
                 updated_at,
             })

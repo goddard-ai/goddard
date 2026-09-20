@@ -149,6 +149,7 @@ pub fn list_provider_sessions(limit: usize) -> anyhow::Result<Vec<ProviderSessio
             },
             title: session_title(&events, &session_id),
             cwd,
+            cwd_missing: false,
             created_at,
             updated_at,
         });

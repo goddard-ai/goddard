@@ -1,0 +1,1 @@
+- Resume… now lists terminal sessions whose project folder was moved or deleted — marked "folder missing" — and resumes them in the nearest folder that still exists

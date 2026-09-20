@@ -366,6 +366,8 @@ command_palette.resume_not_installed:
   en: Provider not installed
 command_palette.resume_not_installed_hint:
   en: "Install %{provider} on this machine to resume its terminal sessions."
+command_palette.resume_missing_folder:
+  en: folder missing
 command_palette.loading_selected_session:
   en: Loading conversation…
 command_palette.resume_failed:

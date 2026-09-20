@@ -90,6 +90,7 @@ fn parse_provider_summaries(value: &Value, limit: usize) -> Vec<ProviderSessionS
                 },
                 title,
                 cwd,
+                cwd_missing: false,
                 created_at: updated_at,
                 updated_at,
             })

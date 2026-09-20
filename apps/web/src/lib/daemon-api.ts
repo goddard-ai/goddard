@@ -154,7 +154,7 @@ export async function listProviderSessions(
 export async function loadProviderSessionHistory(
   client: WakuClient,
   summary: ProviderSessionSummary,
-): Promise<ProviderSessionHistory> {
+): Promise<{ history: ProviderSessionHistory; resolvedCwd: string | null | undefined }> {
   const response = expectResponse(
     await client.request({
       type: 'loadProviderSession',
@@ -163,7 +163,7 @@ export async function loadProviderSessionHistory(
     }),
     'providerSessionHistory',
   )
-  return response.history
+  return { history: response.history, resolvedCwd: response.resolvedCwd }
 }
 
 /** Fields the daemon omits on the wire when empty get their concrete

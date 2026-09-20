@@ -122,6 +122,7 @@ fn session_summary(session: &SessionInfo) -> Option<ProviderSessionSummary> {
             session_id,
         ),
         cwd,
+        cwd_missing: false,
         created_at,
         updated_at: unix_seconds(session.time.updated).max(created_at),
     })

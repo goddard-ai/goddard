@@ -945,6 +945,11 @@ pub enum ResponsePayload {
     },
     ProviderSessionHistory {
         history: ProviderSessionHistory,
+        /// The launch directory the daemon resolved for the session; a
+        /// `cwd_missing` catalog entry resumes in the nearest surviving
+        /// ancestor rather than the recorded path.
+        #[serde(default)]
+        resolved_cwd: Option<PathBuf>,
     },
     ComposerDrafts {
         drafts: ComposerDrafts,

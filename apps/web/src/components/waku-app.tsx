@@ -656,13 +656,14 @@ export function WakuApp() {
       return
     }
 
-    const history = await loadProviderSessionHistory(client, summary)
-    const existingProject = taskState.data.projects.find((project) => project.path === summary.cwd)
-    const project = existingProject ?? createProject(summary.cwd)
+    const loaded = await loadProviderSessionHistory(client, summary)
+    const projectPath = loaded.resolvedCwd ?? summary.cwd
+    const existingProject = taskState.data.projects.find((project) => project.path === projectPath)
+    const project = existingProject ?? createProject(projectPath)
     const session = createResumedSession(
       project.id,
       summary,
-      history,
+      loaded.history,
       activeSession?.runtime_mode ?? 'autoAcceptEdits',
     )
     const saved = await saveSession(session, existingProject ? undefined : project)

@@ -327,6 +327,7 @@ describe('provider session resume', () => {
     cursor: { provider: 'claude', sessionId: 'native-session' },
     title: 'Imported terminal task',
     cwd: '/srv/waku',
+    cwd_missing: false,
     created_at: 100,
     updated_at: 200,
   }
@@ -344,7 +345,7 @@ describe('provider session resume', () => {
     } as unknown as WakuClient
 
     await expect(listProviderSessions(client, 'claude')).resolves.toEqual({ sessions: [summary], status: undefined })
-    await expect(loadProviderSessionHistory(client, summary)).resolves.toEqual(history)
+    await expect(loadProviderSessionHistory(client, summary)).resolves.toEqual({ history, resolvedCwd: undefined })
     expect(commands).toEqual([
       { type: 'listProviderSessions', provider: 'claude', limit: 250 },
       { type: 'loadProviderSession', cursor: summary.cursor, cwd: '/srv/waku' },

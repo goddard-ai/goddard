@@ -328,6 +328,7 @@ fn session_summary_from_path(path: &Path) -> anyhow::Result<ProviderSessionSumma
         },
         title,
         cwd,
+        cwd_missing: false,
         created_at,
         updated_at,
     })
@@ -417,11 +418,14 @@ fn list_provider_sessions_from_history(
         else {
             continue;
         };
+        // A deleted or moved project folder still has a resumable transcript;
+        // the daemon flags it `cwd_missing` and resume falls back to the
+        // nearest surviving ancestor.
         let Some(cwd) = value
             .get("project")
             .and_then(Value::as_str)
             .map(PathBuf::from)
-            .filter(|cwd| cwd.is_absolute() && cwd.is_dir())
+            .filter(|cwd| cwd.is_absolute())
         else {
             continue;
         };
@@ -466,6 +470,7 @@ fn list_provider_sessions_from_history(
                 },
                 title: fallback_title,
                 cwd: indexed.cwd.clone(),
+                cwd_missing: false,
                 created_at: indexed.created_at,
                 updated_at: indexed.updated_at,
             });

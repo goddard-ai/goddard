@@ -19,7 +19,7 @@ describe('mobile runtime projection', () => {
     const existing = session();
     const resumed = createResumedSession('project', {
       cursor: { provider: 'codex', threadId: 'native-thread' },
-      title: 'Terminal task', cwd: '/repo', created_at: 10, updated_at: 20,
+      title: 'Terminal task', cwd: '/repo', cwd_missing: false, created_at: 10, updated_at: 20,
     }, { messages: existing.messages, turns: existing.turns }, 'ask', {
       nowSeconds: () => 42, randomUUID: () => 'resumed-task',
     });

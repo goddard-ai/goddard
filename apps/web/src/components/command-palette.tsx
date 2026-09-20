@@ -279,6 +279,7 @@ export function CommandPalette({
         sessions: providerSessions,
         importing: providerSessionImport,
         resume: (summary) => resumeProviderSession(summary),
+        t,
       })
     : view === 'resumeProviders'
       ? buildResumeProviderItems({
@@ -759,12 +760,14 @@ function buildResumeItems({
   sessions,
   importing,
   resume,
+  t,
 }: {
   taskState: TaskState
   query: string
   sessions: ProviderSessionSummary[]
   importing: string | null
   resume: (summary: ProviderSessionSummary) => Promise<void>
+  t: Translator
 }): PaletteItem[] {
   const normalized = query.trim()
   const now = Math.floor(Date.now() / 1_000)
@@ -786,7 +789,7 @@ function buildResumeItems({
           id: `provider-session-${identity}`,
           section: 'sessions' as const,
           label: summary.title,
-          detail: `${provider.shortName} · ${summary.cwd} · ${formatTimeAgo(Math.max(0, now - summary.updated_at))}`,
+          detail: `${provider.shortName} · ${summary.cwd} · ${formatTimeAgo(Math.max(0, now - summary.updated_at))}${summary.cwd_missing ? ` · ${t('command_palette.resume_missing_folder')}` : ''}`,
           provider: summary.cursor.provider,
           pending: importing === identity,
           closeOnRun: false,

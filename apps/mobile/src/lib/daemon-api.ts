@@ -119,10 +119,11 @@ export async function listProviderSessions(
 export async function loadProviderSessionHistory(
   client: WakuClient,
   summary: ProviderSessionSummary,
-): Promise<ProviderSessionHistory> {
-  return expectResponse(await client.request({
+): Promise<{ history: ProviderSessionHistory; resolvedCwd: string | null | undefined }> {
+  const response = expectResponse(await client.request({
     type: 'loadProviderSession', cursor: summary.cursor, cwd: summary.cwd,
-  }), 'providerSessionHistory').history;
+  }), 'providerSessionHistory');
+  return { history: response.history, resolvedCwd: response.resolvedCwd };
 }
 
 export function providerSessionKey(cursor: ProviderSessionSummary['cursor']): string {

@@ -8,4 +8,9 @@ import type { ProviderResumeCursor } from "./ProviderResumeCursor";
  * native sessions without moving their transcripts over the daemon protocol.
  * [`ProviderSessionHistory`] is fetched only after the user chooses one.
  */
-export type ProviderSessionSummary = { cursor: ProviderResumeCursor, title: string, cwd: string, created_at: number, updated_at: number, };
+export type ProviderSessionSummary = { cursor: ProviderResumeCursor, title: string, cwd: string,
+/**
+ * The recorded working directory no longer exists on the daemon host;
+ * resuming falls back to its nearest surviving ancestor.
+ */
+cwd_missing: boolean, created_at: number, updated_at: number, };

@@ -98,6 +98,7 @@ fn session_summary(session: &Value) -> Option<ProviderSessionSummary> {
             &session_id,
         ),
         cwd: workspace.map(std::path::PathBuf::from).unwrap_or_default(),
+        cwd_missing: false,
         created_at: rfc3339_millis(session.get("createdAt")),
         updated_at: rfc3339_millis(session.get("updatedAt")),
     })

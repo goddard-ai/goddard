@@ -231,6 +231,7 @@ fn parse_session_summaries(response: &Value, limit: usize) -> Vec<ProviderSessio
                 },
                 title,
                 cwd,
+                cwd_missing: false,
                 created_at,
                 updated_at,
             })

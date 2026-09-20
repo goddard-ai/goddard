@@ -85,6 +85,7 @@ fn session_summary(session: &Value) -> Option<ProviderSessionSummary> {
             session_id,
         ),
         cwd,
+        cwd_missing: false,
         created_at,
         updated_at,
     })

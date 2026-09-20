@@ -76,6 +76,21 @@ pub(crate) fn catalog_working_directory() -> anyhow::Result<PathBuf> {
     Ok(directory)
 }
 
+/// The cwd a resumed session can actually launch in. When the recorded
+/// directory is gone, fall back to its nearest existing ancestor, then to
+/// the isolated catalog directory.
+pub(crate) fn resume_working_directory(cwd: &Path) -> PathBuf {
+    if cwd.is_dir() {
+        return cwd.to_path_buf();
+    }
+    cwd.ancestors()
+        .skip(1)
+        .find(|candidate| candidate.is_dir())
+        .map(Path::to_path_buf)
+        .or_else(|| catalog_working_directory().ok())
+        .unwrap_or_else(std::env::temp_dir)
+}
+
 fn initialize_request() -> InitializeRequest {
     InitializeRequest::new(ProtocolVersion::V1)
         .client_capabilities(ClientCapabilities::new().terminal(false))
@@ -171,6 +186,7 @@ pub fn list_provider_sessions(
                             ),
                             title: session_title(provider, session.title.as_deref(), &session_id),
                             cwd: session.cwd,
+                            cwd_missing: false,
                             created_at: updated_at,
                             updated_at,
                         });
@@ -422,6 +438,19 @@ mod tests {
                 .iter()
                 .all(|message| !message.content.contains("private"))
         );
+    }
+
+    #[test]
+    fn resume_working_directory_keeps_existing_and_falls_back_to_ancestors() {
+        let existing = std::env::temp_dir();
+        assert_eq!(resume_working_directory(&existing), existing);
+
+        let missing = existing.join("waku-no-such-dir").join("deeper");
+        assert_eq!(resume_working_directory(&missing), existing);
+
+        // No surviving ancestor: falls back to a directory that exists.
+        let unresolvable = PathBuf::from("/waku-no-such-root/branch/leaf");
+        assert!(resume_working_directory(&unresolvable).is_dir());
     }
 
     #[test]

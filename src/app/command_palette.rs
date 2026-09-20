@@ -2413,11 +2413,16 @@ impl Waku {
                         .map(|name| format!("{name} · ")),
                 }
                 .unwrap_or_default();
+                let missing = if native.cwd_missing {
+                    format!(" · {}", tr!("command_palette.resume_missing_folder"))
+                } else {
+                    String::new()
+                };
                 CommandPaletteItem {
                     section: PaletteSection::Sessions,
                     label: native.title.clone(),
                     detail: Some(format!(
-                        "{}{} · {} · {age}",
+                        "{}{} · {} · {age}{missing}",
                         host,
                         provider.short_name(),
                         path
@@ -3593,7 +3598,13 @@ impl Waku {
                     return None;
                 }
                 match result {
-                    Ok(history) => Some((summary, history)),
+                    Ok(loaded) => {
+                        let mut summary = summary;
+                        if let Some(resolved) = loaded.resolved_cwd {
+                            summary.cwd = resolved;
+                        }
+                        Some((summary, loaded.history))
+                    }
                     Err(error) => {
                         let error = error.to_string();
                         waku.command_palette.provider_session_import = None;

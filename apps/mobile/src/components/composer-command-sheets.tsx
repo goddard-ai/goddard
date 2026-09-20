@@ -165,11 +165,12 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
       let session = state.sessions.find((item) => item.provider_cursor
         && providerSessionKey(item.provider_cursor) === providerSessionKey(summary.cursor));
       if (!session) {
-        const history = await loadProviderSessionHistory(client, summary);
-        let project = state.projects.find((item) => item.path === summary.cwd);
-        if (!project) project = (await persistProject(client, createProject(summary.cwd, Crypto.randomUUID()))).project;
+        const loaded = await loadProviderSessionHistory(client, summary);
+        const projectPath = loaded.resolvedCwd ?? summary.cwd;
+        let project = state.projects.find((item) => item.path === projectPath);
+        if (!project) project = (await persistProject(client, createProject(projectPath, Crypto.randomUUID()))).project;
         session = await persistSession(client, createResumedSession(
-          project.id, summary, history, runtimeMode,
+          project.id, summary, loaded.history, runtimeMode,
           { nowSeconds: () => Math.floor(Date.now() / 1_000), randomUUID: Crypto.randomUUID },
         ));
         queryClient.setQueryData(daemonKeys.session(profileId, session.id), session);
@@ -214,7 +215,7 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
           renderItem={({ item }) => (
             <SheetRow
               label={item.title || 'Untitled session'}
-              description={item.cwd}
+              description={item.cwd_missing ? `${item.cwd} · folder missing` : item.cwd}
               disabled={Boolean(resuming)}
               leading={resuming === providerSessionKey(item.cursor) ? <ActivityIndicator size="small" /> : undefined}
               onPress={() => void resume(item)}
