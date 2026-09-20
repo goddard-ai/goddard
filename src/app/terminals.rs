@@ -844,14 +844,20 @@ impl Waku {
     }
 
     /// ⌘⌥P on a terminal row: pinned terminals keep a sidebar row while the
-    /// group is collapsed.
-    pub(super) fn toggle_terminal_pin(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+    /// group is collapsed. Returns the new pinned state for the chord's
+    /// toast — `None` when the terminal no longer exists.
+    pub(super) fn toggle_terminal_pin(
+        &mut self,
+        terminal_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
         let Some(record) = self.terminal_records.get_mut(&terminal_id) else {
-            return;
+            return None;
         };
         record.pinned = !record.pinned;
         self.sidebar_rows_fingerprint.set(None);
         cx.notify();
+        Some(record.pinned)
     }
 
     /// Close a terminal wherever it lives — the active session's tab
@@ -1111,11 +1117,11 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
-                this.toggle_terminal_pin(terminal_id, cx);
+                let _ = this.toggle_terminal_pin(terminal_id, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.toggle_terminal_pin(terminal_id, cx);
+                    let _ = this.toggle_terminal_pin(terminal_id, cx);
                     cx.stop_propagation();
                 }
             }));
@@ -1331,7 +1337,7 @@ impl Waku {
                         },
                         move |_, cx| {
                             let _ = pin_waku.update(cx, |waku, cx| {
-                                waku.toggle_terminal_pin(terminal_id, cx);
+                                let _ = waku.toggle_terminal_pin(terminal_id, cx);
                             });
                         },
                     )

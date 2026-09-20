@@ -3999,7 +3999,7 @@ impl Waku {
                         } else if modifiers.secondary() {
                             this.toggle_sidebar_multi_selection(session_id, cx);
                         } else if modifiers.shift {
-                            this.toggle_session_pin(session_id, cx);
+                            let _ = this.toggle_session_pin(session_id, cx);
                         } else {
                             this.select_session(session_id, cx);
                         }
@@ -4584,12 +4584,12 @@ impl Waku {
                         this.sweep_session(session_id, window, cx);
                     }
                 } else {
-                    this.toggle_session_pin(session_id, cx);
+                    let _ = this.toggle_session_pin(session_id, cx);
                 }
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.toggle_session_pin(session_id, cx);
+                    let _ = this.toggle_session_pin(session_id, cx);
                     cx.stop_propagation();
                 }
             }));

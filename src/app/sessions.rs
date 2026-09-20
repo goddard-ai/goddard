@@ -1928,8 +1928,13 @@ impl Waku {
     ///
     /// Like archiving, the toggle is a mutation: bumping `updated_at` keeps
     /// merge precedence honest so a stale client save cannot resurrect or
-    /// clobber the flag.
-    pub(super) fn toggle_session_pin(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    /// clobber the flag. Returns the new pinned state — `None` when the task
+    /// was not pinnable — so the ⌘⌥P toast can report what actually changed.
+    pub(super) fn toggle_session_pin(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
         self.hold_sidebar_peek();
         let Some(pinned) = self
             .state
@@ -1939,7 +1944,7 @@ impl Waku {
             .filter(|session| session.has_started() && session.archived_at.is_none())
             .map(|session| session.pinned_at.is_some())
         else {
-            return;
+            return None;
         };
         let now = unix_time();
         if let Some(session) = self.state.session_mut(session_id) {
@@ -1948,6 +1953,7 @@ impl Waku {
         }
         self.save();
         cx.notify();
+        Some(!pinned)
     }
 
     /// Lift a received-file session out of quarantine: from here the daemon
@@ -1967,16 +1973,17 @@ impl Waku {
     }
 
     /// Pin or unpin a batch outright — the multi-selection's uniform result,
-    /// where a per-row toggle would leave a mixed set still mixed.
+    /// where a per-row toggle would leave a mixed set still mixed. Returns
+    /// how many tasks actually changed so the ⌘⌥P toast can count them.
     pub(super) fn set_sessions_pinned(
         &mut self,
         session_ids: &[Uuid],
         pinned: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> usize {
         self.hold_sidebar_peek();
         let now = unix_time();
-        let mut changed = false;
+        let mut changed = 0;
         for session_id in session_ids {
             let Some(current) = self
                 .state
@@ -1995,12 +2002,29 @@ impl Waku {
                 session.pinned_at = pinned.then_some(now);
                 session.updated_at = now;
             }
-            changed = true;
+            changed += 1;
         }
-        if changed {
+        if changed > 0 {
             self.save();
             cx.notify();
         }
+        changed
+    }
+
+    /// The pin chord's confirmation toast — its target is a sidebar row the
+    /// composer may not have on screen, so the chord reports what it did.
+    /// Menu and click paths mutate through the helpers directly and stay
+    /// silent.
+    fn show_pin_toast(&mut self, count: usize, pinned: bool, terminal: bool) {
+        let message = match (count, pinned, terminal) {
+            (1, true, false) => tr!("session.pinned"),
+            (1, false, false) => tr!("session.unpinned"),
+            (_, true, false) => tr!("session.pinned_many", count = count),
+            (_, false, false) => tr!("session.unpinned_many", count = count),
+            (_, true, true) => tr!("terminal.pinned"),
+            (_, false, true) => tr!("terminal.unpinned"),
+        };
+        self.show_success_toast(message);
     }
 
     pub(super) fn toggle_session_pin_action(
@@ -2013,13 +2037,17 @@ impl Waku {
         // full-width terminal while one owns the main area, the right-panel
         // terminal while it holds focus, the selected task otherwise.
         if self.big_picture.is_open() {
-            if let Some(session_id) = self.composer_session_id() {
-                self.toggle_session_pin(session_id, cx);
+            if let Some(session_id) = self.composer_session_id()
+                && let Some(pinned) = self.toggle_session_pin(session_id, cx)
+            {
+                self.show_pin_toast(1, pinned, false);
             }
             return;
         }
         if let Some(terminal_id) = self.selected_terminal {
-            self.toggle_terminal_pin(terminal_id, cx);
+            if let Some(pinned) = self.toggle_terminal_pin(terminal_id, cx) {
+                self.show_pin_toast(1, pinned, true);
+            }
             return;
         }
         let focused_terminal = self
@@ -2031,7 +2059,9 @@ impl Waku {
                     .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
             });
         if let Some(terminal_id) = focused_terminal {
-            self.toggle_terminal_pin(terminal_id, cx);
+            if let Some(pinned) = self.toggle_terminal_pin(terminal_id, cx) {
+                self.show_pin_toast(1, pinned, true);
+            }
             return;
         }
         // A sidebar multi-selection pins as a batch: pin every member unless
@@ -2045,11 +2075,16 @@ impl Waku {
                     .find(|session| session.id == *session_id)
                     .is_some_and(|session| session.pinned_at.is_none())
             });
-            self.set_sessions_pinned(&targets, pin, cx);
+            let changed = self.set_sessions_pinned(&targets, pin, cx);
+            if changed > 0 {
+                self.show_pin_toast(changed, pin, false);
+            }
             return;
         }
-        if let Some(session_id) = self.state.selected_session {
-            self.toggle_session_pin(session_id, cx);
+        if let Some(session_id) = self.state.selected_session
+            && let Some(pinned) = self.toggle_session_pin(session_id, cx)
+        {
+            self.show_pin_toast(1, pinned, false);
         }
     }
 
@@ -2679,21 +2714,24 @@ impl Waku {
     /// Context-menu "Mark as unread": the task rejoins the unseen-completion
     /// set — sidebar dot, GoToNextUnreadCompletion candidate — on demand,
     /// where `mark_unseen_turn_settled` only stamps off-screen finishes.
-    /// Stamping now orders it newest.
-    pub(super) fn mark_session_unread(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    /// Stamping now orders it newest. Returns whether the stamp landed —
+    /// `false` for a task that has not started — so the ⌘⌥U/⌘⇧D toast only
+    /// confirms a real change.
+    pub(super) fn mark_session_unread(&mut self, session_id: Uuid, cx: &mut Context<Self>) -> bool {
         if !self
             .state
             .sessions
             .iter()
             .any(|session| session.id == session_id && session.has_started())
         {
-            return;
+            return false;
         }
         self.state
             .unseen_completions
             .insert(session_id, unix_time());
         self.save();
         cx.notify();
+        true
     }
 
     /// Command palette "Mark all tasks as read": drains the unseen-completion
@@ -2724,17 +2762,19 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let targets = self.sidebar_multi_selection_targets();
+        let mut stamped = 0;
         if targets.is_empty() {
             if let Some(session_id) = self.composer_session_id() {
-                self.mark_session_unread(session_id, cx);
+                stamped += self.mark_session_unread(session_id, cx) as usize;
                 self.unread_sweep.insert(session_id);
             }
         } else {
             for session_id in targets {
-                self.mark_session_unread(session_id, cx);
+                stamped += self.mark_session_unread(session_id, cx) as usize;
                 self.unread_sweep.insert(session_id);
             }
         }
+        self.show_unread_toast(stamped);
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
         let pending = self
@@ -2755,6 +2795,17 @@ impl Waku {
         }
     }
 
+    /// The unread-stamp chords' confirmation toast — ⌘⌥U changes only a
+    /// sidebar dot and ⌘⇧D navigates away, so both report what they did.
+    /// Menu paths call `mark_session_unread` directly and stay silent.
+    fn show_unread_toast(&mut self, stamped: usize) {
+        match stamped {
+            0 => {}
+            1 => self.show_success_toast(tr!("session.marked_unread")),
+            count => self.show_success_toast(tr!("session.marked_unread_many", count = count)),
+        }
+    }
+
     /// ⌘⌥U: the sidebar's "Mark as Unread" on the viewed task — the same
     /// rejoin-the-unseen-set stamp as ⌘⇧D, without leaving the session.
     pub(super) fn mark_session_unread_action(
@@ -2765,13 +2816,16 @@ impl Waku {
     ) {
         let targets = self.sidebar_multi_selection_targets();
         if !targets.is_empty() {
+            let mut stamped = 0;
             for session_id in targets {
-                self.mark_session_unread(session_id, cx);
+                stamped += self.mark_session_unread(session_id, cx) as usize;
             }
+            self.show_unread_toast(stamped);
             return;
         }
         if let Some(session_id) = self.composer_session_id() {
-            self.mark_session_unread(session_id, cx);
+            let stamped = self.mark_session_unread(session_id, cx) as usize;
+            self.show_unread_toast(stamped);
         }
     }
 

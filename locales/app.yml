@@ -2829,6 +2829,18 @@ session.unarchived:
   en: Task unarchived.
 session.unarchived_many:
   en: "%{count} tasks unarchived."
+session.pinned:
+  en: Task pinned.
+session.unpinned:
+  en: Task unpinned.
+session.pinned_many:
+  en: "%{count} tasks pinned."
+session.unpinned_many:
+  en: "%{count} tasks unpinned."
+session.marked_unread:
+  en: Task marked as unread.
+session.marked_unread_many:
+  en: "%{count} tasks marked as unread."
 session.view_now:
   en: View now
 session.worktree_recreated:
@@ -2890,6 +2902,10 @@ terminal.localhost_open:
   en: Open
 terminal.localhost_open_in_tab:
   en: "%{keys} opens it in a browser tab"
+terminal.pinned:
+  en: Terminal pinned.
+terminal.unpinned:
+  en: Terminal unpinned.
 right_panel.resize:
   en: Resize right panel
 right_panel.tabs:
