@@ -10,7 +10,7 @@
 // Outputs:
 //   resources/windows/AppIcon.ico  multi-size PNG-compressed icon (exe +
 //                                  SetupIconFile in resources/windows/waku.iss)
-//   website/public/app-icon.png    256px icon installed to hicolor by
+//   resources/linux/app-icon.png   256px icon installed to hicolor by
 //                                  scripts/bundle-linux.sh and embedded by
 //                                  platform::linux_app_icon
 import { $ } from "bun";
@@ -79,11 +79,11 @@ try {
 
   await copyFile(
     join(iconset, iconsetFile[256]),
-    join(projectRoot, "website/public/app-icon.png"),
+    join(projectRoot, "resources/linux/app-icon.png"),
   );
 
   console.log("Wrote resources/windows/AppIcon.ico");
-  console.log("Wrote website/public/app-icon.png");
+  console.log("Wrote resources/linux/app-icon.png");
 } finally {
   await rm(staging, { recursive: true, force: true });
 }

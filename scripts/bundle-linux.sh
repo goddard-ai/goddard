@@ -30,7 +30,7 @@ install -Dm644 resources/linux/org.goddardai.app.desktop \
   "$package_dir/share/applications/org.goddardai.app.desktop"
 install -Dm644 resources/linux/self-update-v1 \
   "$package_dir/share/goddard/self-update-v1"
-install -Dm644 website/public/app-icon.png \
+install -Dm644 resources/linux/app-icon.png \
   "$package_dir/share/icons/hicolor/256x256/apps/org.goddardai.app.png"
 install -Dm644 LICENSE "$package_dir/share/licenses/goddard/LICENSE"
 

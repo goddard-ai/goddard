@@ -428,7 +428,7 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          # What `install.sh` and the website's Windows download resolve
+          # What `install.sh` and the site's Windows download page resolve
           # "latest" to. In-app updates read the appcasts instead.
           echo "$VERSION" > artifacts/latest-linux.txt
           echo "$VERSION" > artifacts/latest-windows.txt
