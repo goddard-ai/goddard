@@ -728,6 +728,12 @@ experiments.sandbox_title:
   en: Sandbox VM
 experiments.sandbox_description:
   en: Reveal the environment choice in the composer's access menu — run a task on this Mac or in an isolated Linux VM — and the Sandboxed badge on the session header. Applies to sessions started after turning it on.
+experiments.group_sessions:
+  en: Sessions & agents
+experiments.group_git:
+  en: Git & review
+experiments.group_surfaces:
+  en: App surfaces
 status_markers.complete:
   en: Complete
 status_markers.awaiting_input:

@@ -254,6 +254,39 @@ const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 9] = [
     SettingsPage::Experiments,
 ];
 
+/// The Experiments page's groups, in display order — the taxonomy the
+/// changelog's topic groups already use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExperimentGroup {
+    Sessions,
+    Git,
+    Surfaces,
+}
+
+impl ExperimentGroup {
+    const ALL: [Self; 3] = [Self::Sessions, Self::Git, Self::Surfaces];
+
+    fn title_key(self) -> &'static str {
+        match self {
+            Self::Sessions => "experiments.group_sessions",
+            Self::Git => "experiments.group_git",
+            Self::Surfaces => "experiments.group_surfaces",
+        }
+    }
+}
+
+/// One Experiments-page opt-in: its group, card text, current flag value,
+/// and the setter the toggle calls. `set` is a method pointer —
+/// `Self::set_*_enabled` coerces — so the page's table stays data.
+struct ExperimentDef {
+    group: ExperimentGroup,
+    id: &'static str,
+    title_key: &'static str,
+    description_key: &'static str,
+    enabled: bool,
+    set: fn(&mut Waku, bool, &mut Context<Waku>),
+}
+
 /// The query state shared by every settings row built in one render pass.
 /// `hits` counts the rows a page keeps under the query so the content column
 /// can tell whether a whole section rendered empty without diffing trees.
@@ -4115,14 +4148,168 @@ impl Waku {
     }
 
     /// The Experiments page: one opt-in card per unfinished feature, each
-    /// defaulting off. Subagents and Computer Use are daemon-owned — their
-    /// flags travel with the daemon settings `save()` already syncs.
+    /// defaulting off, grouped under the surface it changes. Subagents and
+    /// Computer Use are daemon-owned — their flags travel with the daemon
+    /// settings `save()` already syncs.
     fn render_experiments_settings(
         &self,
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
+        let experiments = [
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "subagents-experiment-toggle",
+                title_key: "experiments.subagents_title",
+                description_key: "experiments.subagents_description",
+                enabled: self.state.subagents_enabled,
+                set: Self::set_subagents_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "automations-experiment-toggle",
+                title_key: "experiments.automations_title",
+                description_key: "experiments.automations_description",
+                enabled: self.state.automations_enabled,
+                set: Self::set_automations_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "memory-experiment-toggle",
+                title_key: "experiments.memory_title",
+                description_key: "experiments.memory_description",
+                enabled: self.state.memory_experiment_enabled,
+                set: Self::set_memory_experiment_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "project-map-experiment-toggle",
+                title_key: "experiments.project_map_title",
+                description_key: "experiments.project_map_description",
+                enabled: self.state.project_map_enabled,
+                set: Self::set_project_map_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "model-router-experiment-toggle",
+                title_key: "experiments.model_router_title",
+                description_key: "experiments.model_router_description",
+                enabled: self.state.model_router_enabled,
+                set: Self::set_model_router_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "status-markers-experiment-toggle",
+                title_key: "experiments.status_markers_title",
+                description_key: "experiments.status_markers_description",
+                enabled: self.state.status_markers_enabled,
+                set: Self::set_status_markers_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "computer-use-experiment-toggle",
+                title_key: "experiments.computer_use_title",
+                description_key: "experiments.computer_use_description",
+                enabled: self.state.computer_use_experiment_enabled,
+                set: Self::set_computer_use_experiment_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "integrations-experiment-toggle",
+                title_key: "experiments.integrations_title",
+                description_key: "experiments.integrations_description",
+                enabled: self.state.integrations_enabled,
+                set: Self::set_integrations_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "sandbox-experiment-toggle",
+                title_key: "experiments.sandbox_title",
+                description_key: "experiments.sandbox_description",
+                enabled: self.state.sandbox_experiment_enabled,
+                set: Self::set_sandbox_experiment_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "git-panel-experiment-toggle",
+                title_key: "experiments.git_panel_title",
+                description_key: "experiments.git_panel_description",
+                enabled: self.state.git_panel_enabled,
+                set: Self::set_git_panel_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "github-experiment-toggle",
+                title_key: "experiments.github_title",
+                description_key: "experiments.github_description",
+                enabled: self.state.github_enabled,
+                set: Self::set_github_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "projects-page-experiment-toggle",
+                title_key: "experiments.projects_page_title",
+                description_key: "experiments.projects_page_description",
+                enabled: self.state.projects_page_enabled,
+                set: Self::set_projects_page_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "review-queue-experiment-toggle",
+                title_key: "experiments.review_queue_title",
+                description_key: "experiments.review_queue_description",
+                enabled: self.state.review_queue_enabled,
+                set: Self::set_review_queue_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Surfaces,
+                id: "big-picture-experiment-toggle",
+                title_key: "experiments.big_picture_title",
+                description_key: "experiments.big_picture_description",
+                enabled: self.state.big_picture_enabled,
+                set: Self::set_big_picture_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Surfaces,
+                id: "friends-experiment-toggle",
+                title_key: "experiments.friends_title",
+                description_key: "experiments.friends_description",
+                enabled: self.state.friends_enabled,
+                set: Self::set_friends_enabled,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Surfaces,
+                id: "sidebar-dock-experiment-toggle",
+                title_key: "experiments.sidebar_dock_title",
+                description_key: "experiments.sidebar_dock_description",
+                enabled: self.state.sidebar_dock_enabled,
+                set: Self::set_sidebar_dock_enabled,
+            },
+        ];
+        let groups = ExperimentGroup::ALL.into_iter().filter_map(|group| {
+            let cards: Vec<AnyElement> = experiments
+                .iter()
+                .filter(|experiment| experiment.group == group)
+                .filter_map(|experiment| self.experiment_card(experiment, theme, search, cx))
+                .collect();
+            // A group the search emptied out loses its header too.
+            (!cards.is_empty()).then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .px(px(4.0))
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!(group.title_key())),
+                    )
+                    .child(div().flex().flex_col().gap(px(10.0)).children(cards))
+                    .into_any_element()
+            })
+        });
         div()
             .when(!search.active(), |element| {
                 element.child(
@@ -4147,167 +4334,8 @@ impl Waku {
                     .mt(px(15.0))
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
-                    .children(self.experiment_card(
-                        "big-picture-experiment-toggle",
-                        "experiments.big_picture_title",
-                        "experiments.big_picture_description",
-                        self.state.big_picture_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_big_picture_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "git-panel-experiment-toggle",
-                        "experiments.git_panel_title",
-                        "experiments.git_panel_description",
-                        self.state.git_panel_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_git_panel_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "github-experiment-toggle",
-                        "experiments.github_title",
-                        "experiments.github_description",
-                        self.state.github_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_github_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "projects-page-experiment-toggle",
-                        "experiments.projects_page_title",
-                        "experiments.projects_page_description",
-                        self.state.projects_page_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_projects_page_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "review-queue-experiment-toggle",
-                        "experiments.review_queue_title",
-                        "experiments.review_queue_description",
-                        self.state.review_queue_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_review_queue_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "subagents-experiment-toggle",
-                        "experiments.subagents_title",
-                        "experiments.subagents_description",
-                        self.state.subagents_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_subagents_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "computer-use-experiment-toggle",
-                        "experiments.computer_use_title",
-                        "experiments.computer_use_description",
-                        self.state.computer_use_experiment_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_computer_use_experiment_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "project-map-experiment-toggle",
-                        "experiments.project_map_title",
-                        "experiments.project_map_description",
-                        self.state.project_map_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_project_map_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "integrations-experiment-toggle",
-                        "experiments.integrations_title",
-                        "experiments.integrations_description",
-                        self.state.integrations_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_integrations_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "friends-experiment-toggle",
-                        "experiments.friends_title",
-                        "experiments.friends_description",
-                        self.state.friends_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_friends_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "automations-experiment-toggle",
-                        "experiments.automations_title",
-                        "experiments.automations_description",
-                        self.state.automations_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_automations_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "model-router-experiment-toggle",
-                        "experiments.model_router_title",
-                        "experiments.model_router_description",
-                        self.state.model_router_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_model_router_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "status-markers-experiment-toggle",
-                        "experiments.status_markers_title",
-                        "experiments.status_markers_description",
-                        self.state.status_markers_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_status_markers_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "sidebar-dock-experiment-toggle",
-                        "experiments.sidebar_dock_title",
-                        "experiments.sidebar_dock_description",
-                        self.state.sidebar_dock_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_sidebar_dock_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "memory-experiment-toggle",
-                        "experiments.memory_title",
-                        "experiments.memory_description",
-                        self.state.memory_experiment_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_memory_experiment_enabled(enabled, cx),
-                    ))
-                    .children(self.experiment_card(
-                        "sandbox-experiment-toggle",
-                        "experiments.sandbox_title",
-                        "experiments.sandbox_description",
-                        self.state.sandbox_experiment_enabled,
-                        theme,
-                        search,
-                        cx,
-                        |this, enabled, cx| this.set_sandbox_experiment_enabled(enabled, cx),
-                    )),
+                    .gap(px(20.0))
+                    .children(groups),
             )
             .into_any_element()
     }
@@ -4321,19 +4349,17 @@ impl Waku {
 
     fn experiment_card(
         &self,
-        id: &'static str,
-        title_key: &'static str,
-        description_key: &'static str,
-        enabled: bool,
+        experiment: &ExperimentDef,
         theme: Theme,
         search: &SettingSearch,
         cx: &mut Context<Self>,
-        set: impl Fn(&mut Self, bool, &mut Context<Self>) + 'static,
     ) -> Option<AnyElement> {
-        let title = tr!(title_key);
-        let description = tr!(description_key);
+        let title = tr!(experiment.title_key);
+        let description = tr!(experiment.description_key);
         let matched = search.matched(&title, &description)?;
-        let toggle = toggle_switch(id, enabled, false, theme, cx, move |this, _, cx| {
+        let enabled = experiment.enabled;
+        let set = experiment.set;
+        let toggle = toggle_switch(experiment.id, enabled, false, theme, cx, move |this, _, cx| {
             set(this, !enabled, cx)
         });
         Some(
