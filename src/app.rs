@@ -14,10 +14,9 @@ use gpui::{
     HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
     ObjectFit, PathPromptOptions, Pixels, Render, ScrollAnchor, ScrollHandle, SharedString,
-    Stateful, StyleRefinement,
-    TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div, ease_out_quint, fill, font,
-    img, linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
-    size,
+    Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div,
+    ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list, point, prelude::*,
+    pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
 
@@ -40,10 +39,9 @@ use crate::model::{
     ContextUsage, DriverEvent, FavoriteModel, Message, MessageAttachment, MessageRole,
     PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe, ProviderResumeCursor,
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
-    ReasoningBlock, RuntimeMode,
-    SessionStatus, SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus,
-    TurnStatus, UserInputAnswer,
-    UserInputQuestion, compact_path, unix_time, unix_time_millis,
+    ReasoningBlock, RuntimeMode, SessionStatus, SessionWorkspace, TranscriptBlock,
+    TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputAnswer, UserInputQuestion,
+    compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -77,27 +75,26 @@ use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
-    file_icon, goddard_logo, icon, icon_button, icon_button_tinted, motion, progress_ring, provider_color,
-    provider_mark, rem_scale, status_color, thinking, toggle_switch,
+    file_icon, goddard_logo, icon, icon_button, icon_button_tinted, motion, progress_ring,
+    provider_color, provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    CycleFavoriteModel, CycleReasoningEffort, DismissDraftsLayer, DismissInbox, DismissProjectsLayer,
-    EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
-    FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
-    MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward, NewProject,
-    NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker,
-    OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows,
-    SelectAutomationsTab, SelectFavoriteModel, SelectFirstProject, SelectFirstTask,
-    SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
+    CycleFavoriteModel, CycleReasoningEffort, DismissDraftsLayer, DismissInbox,
+    DismissProjectsLayer, EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious,
+    FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion,
+    GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle, NavigateBack, NavigateForward,
+    NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine,
+    OpenResumePicker, OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile,
+    SelectAllProjectsRows, SelectAutomationsTab, SelectFavoriteModel, SelectFirstProject,
+    SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
     SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, SyncBranch,
-    ToggleAutomationsPage, ToggleBigPicture,
-    ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
-    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
-    ToggleWorkspace,
+    ToggleAutomationsPage, ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette,
+    ToggleEnvironment, ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex,
+    ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker,
+    ToggleProjectsPage, ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar,
+    ToggleTerminals, ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -2087,8 +2084,7 @@ pub struct Waku {
     /// button, keyed by (workspace path, workspace-relative file path).
     /// Answers come from the daemon's remote-tracking refs; misses are
     /// fetched on the background executor like `branch_snapshots`.
-    remote_files:
-        QueryCache<(PathBuf, String), Result<Option<RemoteFileRef>, String>>,
+    remote_files: QueryCache<(PathBuf, String), Result<Option<RemoteFileRef>, String>>,
     /// Stale-while-revalidate value for the selected path, avoiding label
     /// flicker when app activation invalidates the query.
     visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
@@ -2748,8 +2744,7 @@ pub struct Waku {
     archived_session_rows: RefCell<Vec<Uuid>>,
     /// Transcript-search results keyed by the archived field's query, fetched
     /// on the background executor — the SQLite scan never runs on a frame.
-    archived_message_searches:
-        QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
+    archived_message_searches: QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
     /// The query `archived_message_matches` belongs to; a map built for an
     /// older query must not decorate rows under a newer one.
     archived_message_matches_query: Option<String>,
@@ -3138,9 +3133,9 @@ mod github;
 mod github_media;
 mod go_to_line;
 mod goal_dialog;
-mod keybindings_page;
 mod image_preview;
 mod issue_dialog;
+mod keybindings_page;
 mod notifications;
 mod project_switcher;
 mod projects;
@@ -3183,10 +3178,10 @@ use background_work::{
 pub use big_picture::init as init_big_picture_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
-pub use full_access_dialog::init as init_full_access_dialog_keys;
 use components::*;
 pub use element_inspector::init as init_element_inspector;
 pub use file_finder::init as init_file_finder;
+pub use full_access_dialog::init as init_full_access_dialog_keys;
 pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
@@ -3221,8 +3216,8 @@ pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
 pub use sidebar::CancelSessionRename;
-pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
 use streaming::*;
+pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
 use terminals::TerminalRecord;
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
@@ -3397,11 +3392,7 @@ impl Waku {
     /// the toast already showing instead of replacing it, so one Undo
     /// restores the whole group.
     pub(super) fn show_archived_toast(&mut self, session_id: Uuid) {
-        let joined = match self
-            .toast
-            .as_mut()
-            .and_then(|toast| toast.action.as_mut())
-        {
+        let joined = match self.toast.as_mut().and_then(|toast| toast.action.as_mut()) {
             Some(ToastAction {
                 kind: ToastActionKind::Unarchive(session_ids),
                 ..
@@ -3436,11 +3427,7 @@ impl Waku {
 
     /// The archive toast's Undo. A lone task gets the unarchived toast's
     /// "View now" follow-up; a group reports how many came back.
-    pub(super) fn undo_archived_sessions(
-        &mut self,
-        session_ids: &[Uuid],
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn undo_archived_sessions(&mut self, session_ids: &[Uuid], cx: &mut Context<Self>) {
         let restorable: Vec<Uuid> = session_ids
             .iter()
             .copied()
@@ -4666,9 +4653,7 @@ impl Waku {
                             && this.composer_pasted_blocks.is_empty()
                             && !this.has_annotations();
                         if this.big_picture.is_open() && !empty_draft {
-                            if let Some(submission) =
-                                this.submission_with_attachments(prompt, cx)
-                            {
+                            if let Some(submission) = this.submission_with_attachments(prompt, cx) {
                                 this.steer_big_picture_submission(submission, cx);
                             }
                         } else if empty_draft {
@@ -5175,9 +5160,7 @@ impl Waku {
             // while no Antigravity session needs it.
             cx.spawn(async move |this, cx| {
                 loop {
-                    cx.background_executor()
-                        .timer(agy::AGY_POLL_INTERVAL)
-                        .await;
+                    cx.background_executor().timer(agy::AGY_POLL_INTERVAL).await;
                     if this
                         .update(cx, |this, cx| this.maybe_poll_agy_sessions(cx))
                         .is_err()
@@ -5829,14 +5812,9 @@ impl Waku {
                 // Antigravity's runtime is the app-local TUI terminal, not a
                 // daemon attachment. It respawns lazily — only the selected
                 // session's surface exists at launch.
-                let is_agy = this
-                    .state
-                    .sessions
-                    .iter()
-                    .any(|session| {
-                        session.id == session_id
-                            && session.provider == ProviderKind::Antigravity
-                    });
+                let is_agy = this.state.sessions.iter().any(|session| {
+                    session.id == session_id && session.provider == ProviderKind::Antigravity
+                });
                 if is_agy {
                     if this.state.selected_session == Some(session_id) {
                         this.ensure_agy_terminal(session_id, cx);

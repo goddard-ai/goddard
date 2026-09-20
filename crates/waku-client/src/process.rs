@@ -768,7 +768,11 @@ fn set_daemon_exposure(
     client: &DaemonClient,
     exposure: Option<waku_protocol::DaemonExposure>,
 ) -> anyhow::Result<()> {
-    match client.request(Uuid::nil(), Uuid::nil(), Command::SetDaemonExposure { exposure })? {
+    match client.request(
+        Uuid::nil(),
+        Uuid::nil(),
+        Command::SetDaemonExposure { exposure },
+    )? {
         ResponsePayload::Exposure { .. } => Ok(()),
         _ => bail!("Goddard daemon returned an invalid exposure response"),
     }

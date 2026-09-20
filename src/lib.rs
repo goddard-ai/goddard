@@ -727,7 +727,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-d", GoToNextUnreadCompletion, Some("Workspace")),
         // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
         // moves down the sidebar to the next non-busy task.
-        KeyBinding::new("secondary-shift-d", MarkUnreadAndGoToNextIdle, Some("Workspace")),
+        KeyBinding::new(
+            "secondary-shift-d",
+            MarkUnreadAndGoToNextIdle,
+            Some("Workspace"),
+        ),
         // ⌘⌥U is the sidebar's "Mark as Unread" on the viewed task,
         // without ⌘⇧D's jump to the next one waiting.
         KeyBinding::new("secondary-alt-u", MarkSessionUnread, Some("Workspace")),
@@ -757,7 +761,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // the keystroke when no draft can take the switcher.
         KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
         KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Workspace")),
-        KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Workspace")),
+        KeyBinding::new(
+            "secondary-shift-escape",
+            CancelProjectSwitch,
+            Some("Workspace"),
+        ),
         // Re-bound on the overlay context so the chord cancels when
         // the switcher's focus path does not pass "Workspace" (the
         // settings branch renders the layer as its sibling).
@@ -902,7 +910,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
             CancelTurn { immediate: false },
             Some("Workspace && !Terminal"),
         ),
-        KeyBinding::new("alt-escape", CancelTurn { immediate: true }, Some("Workspace")),
+        KeyBinding::new(
+            "alt-escape",
+            CancelTurn { immediate: true },
+            Some("Workspace"),
+        ),
         KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Workspace")),
         KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Workspace")),
         KeyBinding::new("secondary-c", CopySelection, Some("Workspace")),

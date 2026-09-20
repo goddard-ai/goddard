@@ -463,9 +463,7 @@ fn permission_disposition(
         RuntimeMode::FullAccess => PermissionDisposition::AutoApprove,
         // Providers running their own review escalate held actions to the
         // user; the rest keep the legacy blanket answer.
-        RuntimeMode::AutoAcceptEdits
-            if crate::permission_review::reviews_natively(provider) =>
-        {
+        RuntimeMode::AutoAcceptEdits if crate::permission_review::reviews_natively(provider) => {
             PermissionDisposition::Prompt
         }
         RuntimeMode::AutoAcceptEdits => PermissionDisposition::AutoApprove,
@@ -910,7 +908,11 @@ async fn establish_session(
                 .block_task()
                 .await;
             for _ in 0..ACP_SESSION_LOAD_RETRIES {
-                if response.as_ref().err().is_none_or(|e| !session_error_retryable(e)) {
+                if response
+                    .as_ref()
+                    .err()
+                    .is_none_or(|e| !session_error_retryable(e))
+                {
                     break;
                 }
                 smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
@@ -1065,7 +1067,11 @@ fn cursor_model_selection(
     option: &SessionConfigOption,
     requested: &str,
 ) -> Option<PackedModelSelection> {
-    resolve_packed_model(session_config_select_values(option), requested, ProviderKind::Cursor)
+    resolve_packed_model(
+        session_config_select_values(option),
+        requested,
+        ProviderKind::Cursor,
+    )
 }
 
 fn cursor_option_id(option: &SessionConfigOption) -> String {
@@ -1635,8 +1641,7 @@ async fn apply_model(
     if provider == ProviderKind::Devin {
         let options = config_options.unwrap_or_default();
         let option = advertised_model_option(options);
-        if let Some(resolved) = resolve_devin_model(option, model, reasoning_effort, service_tier)
-        {
+        if let Some(resolved) = resolve_devin_model(option, model, reasoning_effort, service_tier) {
             if option.and_then(session_config_current_value) == Some(resolved.as_str()) {
                 return;
             }
@@ -2296,16 +2301,18 @@ fn handle_permission_request(
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| params.to_string()),
             call_id: request_id.clone(),
-            detail: permission_reason(&params)
-                .or_else(|| params.pointer("/toolCall/title").and_then(Value::as_str).map(str::to_owned)),
+            detail: permission_reason(&params).or_else(|| {
+                params
+                    .pointer("/toolCall/title")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            }),
         };
         pending.lock().insert(request_id.clone(), responder);
         let pending = pending.clone();
         let events = events.clone();
-        crate::permission_review::review_on_thread(
-            eval.clone(),
-            action,
-            move |verdict| match verdict {
+        crate::permission_review::review_on_thread(eval.clone(), action, move |verdict| {
+            match verdict {
                 crate::permission_review::ReviewVerdict::Allow => {
                     let Some(responder) = pending.lock().remove(&request_id) else {
                         return;
@@ -2327,8 +2334,8 @@ fn handle_permission_request(
                         ));
                     }
                 }
-            },
-        );
+            }
+        });
         return Ok(());
     }
 
@@ -2957,12 +2964,7 @@ mod tests {
             "model",
             SessionConfigOptionCategory::Model,
             "swe-2-medium",
-            &[
-                "swe-2-medium",
-                "swe-2-high",
-                "swe-2-high-fast",
-                "swe-2-max",
-            ],
+            &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
         );
         assert_eq!(
             resolve_devin_model(Some(&option), "swe-2", Some("high"), None).as_deref(),

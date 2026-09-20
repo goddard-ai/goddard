@@ -403,8 +403,13 @@ impl DaemonClient {
 pub enum PairReply {
     /// Approved; `token` authenticates a normal `DaemonClient::connect`,
     /// `daemon_name` labels the remote host.
-    Granted { token: String, daemon_name: String },
-    Declined { message: String },
+    Granted {
+        token: String,
+        daemon_name: String,
+    },
+    Declined {
+        message: String,
+    },
 }
 
 /// Ask the daemon at `address` for a client token on this device's
@@ -531,10 +536,8 @@ fn run_client(
                             }
                         };
                         if should_deliver {
-                            if let Some(watchers) = inner
-                                .session_watchers
-                                .lock()
-                                .get_mut(&event.session_id)
+                            if let Some(watchers) =
+                                inner.session_watchers.lock().get_mut(&event.session_id)
                             {
                                 watchers.retain(|watcher| watcher.send(event.clone()).is_ok());
                             }

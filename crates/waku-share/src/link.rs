@@ -40,7 +40,9 @@ pub struct DaemonInfo {
 pub enum PairDecision {
     /// Grant a full client token. The daemon mints and records it; the
     /// caller uses it as the `hello` bearer on the WebSocket protocol.
-    Grant { token: String },
+    Grant {
+        token: String,
+    },
     Decline,
 }
 
@@ -149,7 +151,9 @@ pub async fn fetch_info(
 pub enum PairOutcome {
     /// The remote user approved; `token` is a bearer for the daemon's
     /// WebSocket `hello`.
-    Granted { token: String },
+    Granted {
+        token: String,
+    },
     Declined,
 }
 

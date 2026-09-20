@@ -4,9 +4,7 @@
 //! through dynamic client registration or a pasted API key belong here until
 //! a pre-registered Goddard OAuth client exists for them.
 
-use waku_protocol::integrations::{
-    IntegrationAuthKind, IntegrationInfo, IntegrationVariantInfo,
-};
+use waku_protocol::integrations::{IntegrationAuthKind, IntegrationInfo, IntegrationVariantInfo};
 
 pub struct CatalogVariant {
     pub id: &'static str,
@@ -68,7 +66,11 @@ static CATALOG: &[CatalogEntry] = &[
             },
             CatalogVariant {
                 scopes: Some("read"),
-                ..variant("read-only", "Read-only", "https://mcp.linear.app/mcp/readonly")
+                ..variant(
+                    "read-only",
+                    "Read-only",
+                    "https://mcp.linear.app/mcp/readonly",
+                )
             },
         ],
     ),
@@ -162,7 +164,9 @@ pub fn find(id: &str) -> Option<&'static CatalogEntry> {
 
 impl CatalogEntry {
     pub fn variant(&self, variant_id: &str) -> Option<&'static CatalogVariant> {
-        self.variants.iter().find(|variant| variant.id == variant_id)
+        self.variants
+            .iter()
+            .find(|variant| variant.id == variant_id)
     }
 
     pub fn default_variant(&self) -> &'static CatalogVariant {

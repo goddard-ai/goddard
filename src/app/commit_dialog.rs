@@ -9,7 +9,11 @@ use super::*;
 
 actions!(
     waku_commit_dialog,
-    [ConfirmCommitDialog, DismissCommitDialog, GenerateCommitDialog]
+    [
+        ConfirmCommitDialog,
+        DismissCommitDialog,
+        GenerateCommitDialog
+    ]
 );
 
 const DIALOG_CONTEXT: &str = "CommitDialog";
@@ -23,7 +27,11 @@ pub fn init(cx: &mut App) {
             Some(DIALOG_INPUT_CONTEXT),
         ),
         KeyBinding::new("secondary-enter", ConfirmCommitDialog, Some(DIALOG_CONTEXT)),
-        KeyBinding::new("secondary-g", GenerateCommitDialog, Some(DIALOG_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "secondary-g",
+            GenerateCommitDialog,
+            Some(DIALOG_INPUT_CONTEXT),
+        ),
         KeyBinding::new("secondary-g", GenerateCommitDialog, Some(DIALOG_CONTEXT)),
         KeyBinding::new("escape", DismissCommitDialog, Some(DIALOG_CONTEXT)),
     ]);
@@ -589,10 +597,8 @@ impl Waku {
         let error = dialog.error.clone();
         let generation_label = dialog.invocation.as_ref().map(|invocation| {
             let provider = invocation.provider;
-            match crate::git_commit::commit_generation_model(
-                provider,
-                invocation.model.as_deref(),
-            ) {
+            match crate::git_commit::commit_generation_model(provider, invocation.model.as_deref())
+            {
                 Some(model) => format!(
                     "{} · {}",
                     provider.display_name(),

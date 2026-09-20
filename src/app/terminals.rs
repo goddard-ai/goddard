@@ -224,7 +224,10 @@ impl Waku {
         // order entry disappears. No neighbor means the new task page.
         let successor = (self.selected_terminal == Some(terminal_id))
             .then(|| {
-                let index = self.terminal_order.iter().position(|id| *id == terminal_id)?;
+                let index = self
+                    .terminal_order
+                    .iter()
+                    .position(|id| *id == terminal_id)?;
                 self.terminal_order[..index]
                     .iter()
                     .rev()
@@ -804,8 +807,7 @@ impl Waku {
             (dirs::home_dir(), None)
         };
         if let Some(working_directory) = working_directory
-            && let Some(terminal_id) =
-                self.create_terminal(working_directory, session, None, cx)
+            && let Some(terminal_id) = self.create_terminal(working_directory, session, None, cx)
         {
             self.select_terminal(terminal_id, window, cx);
         }
@@ -1201,11 +1203,9 @@ impl Waku {
                                 "terminal-rename-field-{terminal_id}"
                             )))
                             .key_context(sidebar::SESSION_RENAME_PARENT_CONTEXT)
-                            .on_action(cx.listener(
-                                |this, _: &CancelSessionRename, window, cx| {
-                                    this.cancel_terminal_rename(window, cx);
-                                },
-                            ))
+                            .on_action(cx.listener(|this, _: &CancelSessionRename, window, cx| {
+                                this.cancel_terminal_rename(window, cx);
+                            }))
                             .h(px(18.0))
                             .flex_1()
                             .min_w_0()
@@ -1221,9 +1221,7 @@ impl Waku {
                             .child(self.session_rename_input.clone())
                     } else {
                         div()
-                            .id(SharedString::from(format!(
-                                "terminal-title-{terminal_id}"
-                            )))
+                            .id(SharedString::from(format!("terminal-title-{terminal_id}")))
                             .min_w_0()
                             .flex_1()
                             .truncate()
@@ -1317,54 +1315,54 @@ impl Waku {
                 .into_any_element()
         } else {
             context_menu(
-            div().w_full().child(row),
-            SharedString::from(format!("terminal-menu-{terminal_id}")),
-            &menu,
-            move |cx| {
-                let pinned = waku
-                    .update(cx, |waku, _| {
-                        waku.terminal_records
-                            .get(&terminal_id)
-                            .is_some_and(|record| record.pinned)
-                    })
-                    .unwrap_or(false);
-                let rename_waku = waku.clone();
-                let pin_waku = waku.clone();
-                let close_waku = waku.clone();
-                vec![
-                    MenuItem::new(tr!("common.rename"), move |window, cx| {
-                        let _ = rename_waku.update(cx, |waku, cx| {
-                            waku.begin_terminal_rename(terminal_id, window, cx);
-                        });
-                    })
-                    .icon("icons/pencil.svg"),
-                    MenuItem::new(
-                        if pinned {
-                            tr!("session.unpin")
-                        } else {
-                            tr!("session.pin")
-                        },
-                        move |_, cx| {
-                            let _ = pin_waku.update(cx, |waku, cx| {
-                                let _ = waku.toggle_terminal_pin(terminal_id, cx);
+                div().w_full().child(row),
+                SharedString::from(format!("terminal-menu-{terminal_id}")),
+                &menu,
+                move |cx| {
+                    let pinned = waku
+                        .update(cx, |waku, _| {
+                            waku.terminal_records
+                                .get(&terminal_id)
+                                .is_some_and(|record| record.pinned)
+                        })
+                        .unwrap_or(false);
+                    let rename_waku = waku.clone();
+                    let pin_waku = waku.clone();
+                    let close_waku = waku.clone();
+                    vec![
+                        MenuItem::new(tr!("common.rename"), move |window, cx| {
+                            let _ = rename_waku.update(cx, |waku, cx| {
+                                waku.begin_terminal_rename(terminal_id, window, cx);
                             });
-                        },
-                    )
-                    .shortcut_action(&ToggleSessionPin)
-                    .icon(if pinned {
-                        "icons/pin-off.svg"
-                    } else {
-                        "icons/pin.svg"
-                    }),
-                    MenuItem::Separator,
-                    MenuItem::new(tr!("common.close"), move |_, cx| {
-                        let _ = close_waku.update(cx, |waku, cx| {
-                            waku.close_terminal(terminal_id, cx);
-                        });
-                    })
-                    .icon("icons/x.svg"),
-                ]
-            },
+                        })
+                        .icon("icons/pencil.svg"),
+                        MenuItem::new(
+                            if pinned {
+                                tr!("session.unpin")
+                            } else {
+                                tr!("session.pin")
+                            },
+                            move |_, cx| {
+                                let _ = pin_waku.update(cx, |waku, cx| {
+                                    let _ = waku.toggle_terminal_pin(terminal_id, cx);
+                                });
+                            },
+                        )
+                        .shortcut_action(&ToggleSessionPin)
+                        .icon(if pinned {
+                            "icons/pin-off.svg"
+                        } else {
+                            "icons/pin.svg"
+                        }),
+                        MenuItem::Separator,
+                        MenuItem::new(tr!("common.close"), move |_, cx| {
+                            let _ = close_waku.update(cx, |waku, cx| {
+                                waku.close_terminal(terminal_id, cx);
+                            });
+                        })
+                        .icon("icons/x.svg"),
+                    ]
+                },
             )
         };
 

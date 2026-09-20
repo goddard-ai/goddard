@@ -90,15 +90,13 @@ fn markdown_template(filename: &str, contents: &str) -> IssueTemplate {
     let mut title_prefix = None;
     let mut labels = Vec::new();
     let mut assignees = Vec::new();
-    let body = crate::frontmatter::parse_frontmatter_fields(contents, |key, value| {
-        match key {
-            "name" => name = Some(value),
-            "about" | "description" => about = Some(value),
-            "title" => title_prefix = Some(value),
-            "labels" => labels = split_name_list(&value),
-            "assignees" => assignees = split_name_list(&value),
-            _ => {}
-        }
+    let body = crate::frontmatter::parse_frontmatter_fields(contents, |key, value| match key {
+        "name" => name = Some(value),
+        "about" | "description" => about = Some(value),
+        "title" => title_prefix = Some(value),
+        "labels" => labels = split_name_list(&value),
+        "assignees" => assignees = split_name_list(&value),
+        _ => {}
     });
     IssueTemplate {
         name: name.unwrap_or_else(|| filename_stem(filename)),
@@ -254,14 +252,20 @@ mod tests {
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].kind, IssueTemplateKind::ContactLink);
         assert_eq!(links[0].name, "Security");
-        assert_eq!(links[0].url.as_deref(), Some("https://example.com/security"));
+        assert_eq!(
+            links[0].url.as_deref(),
+            Some("https://example.com/security")
+        );
         assert_eq!(links[0].about.as_deref(), Some("Report privately"));
     }
 
     #[test]
     fn name_lists_split_comma_and_bracket_forms() {
         assert_eq!(split_name_list("bug, help wanted"), ["bug", "help wanted"]);
-        assert_eq!(split_name_list("[bug, needs triage]"), ["bug", "needs triage"]);
+        assert_eq!(
+            split_name_list("[bug, needs triage]"),
+            ["bug", "needs triage"]
+        );
         assert_eq!(split_name_list("bug"), ["bug"]);
         assert!(split_name_list("").is_empty());
     }

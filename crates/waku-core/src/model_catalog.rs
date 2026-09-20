@@ -34,8 +34,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         .into_iter()
         .map(|model| {
             model.service_tiers(
-                [ProviderModelOption::keyed("fast", localized!("model_option.fast"))
-                    .keyed_description(localized!("model_option.amp_fast_description"))],
+                [
+                    ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                        .keyed_description(localized!("model_option.amp_fast_description")),
+                ],
                 "default",
             )
         })
@@ -55,8 +57,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
                     "medium",
                 )
                 .service_tiers(
-                    [ProviderModelOption::keyed("fast", localized!("model_option.fast"))
-                        .keyed_description(localized!("model_option.fast_description"))],
+                    [
+                        ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                            .keyed_description(localized!("model_option.fast_description")),
+                    ],
                     "default",
                 )
         })
@@ -288,7 +292,10 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
                     .filter_map(Value::as_str)
                     .map(str::trim)
                     .filter(|effort| !effort.is_empty())
-                    .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
+                    .map(|effort| {
+                        let (label, i18n) = reasoning_effort_pair(effort);
+                        ProviderModelOption::new(effort, label).with_label_i18n(i18n)
+                    })
                     .collect();
                 // `ultracode` is Goddard's orchestration effort. Claude accepts
                 // it wherever the provider metadata says xhigh is supported.
@@ -298,9 +305,9 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
                     .any(|option| option.id == "xhigh")
                 {
                     let (label, i18n) = reasoning_effort_pair("ultracode");
-                    model.reasoning_efforts.push(
-                        ProviderModelOption::new("ultracode", label).with_label_i18n(i18n),
-                    );
+                    model
+                        .reasoning_efforts
+                        .push(ProviderModelOption::new("ultracode", label).with_label_i18n(i18n));
                 }
                 model.default_reasoning_effort = ["high", "medium"]
                     .into_iter()
@@ -351,7 +358,8 @@ fn discover_copilot_models(binary: &Path) -> Vec<ProviderModel> {
                 .into_iter()
                 .map(|model| {
                     let mut entry = ProviderModel::new(model.id, model.name);
-                    if let Some(efforts) = model.supported_reasoning_efforts.filter(|e| !e.is_empty())
+                    if let Some(efforts) =
+                        model.supported_reasoning_efforts.filter(|e| !e.is_empty())
                     {
                         let default = model
                             .default_reasoning_effort
@@ -359,16 +367,17 @@ fn discover_copilot_models(binary: &Path) -> Vec<ProviderModel> {
                             .unwrap_or_else(|| efforts[0].clone());
                         entry = entry.reasoning(
                             efforts.iter().map(|effort| {
-                                { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) }
+                                let (label, i18n) = reasoning_effort_pair(effort);
+                                ProviderModelOption::new(effort, label).with_label_i18n(i18n)
                             }),
                             default,
                         );
                     }
                     if let Some(tiers) = model.supported_context_tiers.filter(|t| !t.is_empty()) {
                         entry = entry.context_windows(
-                            tiers.iter().map(|tier| {
-                                ProviderModelOption::new(tier, tier.replace('_', " "))
-                            }),
+                            tiers
+                                .iter()
+                                .map(|tier| ProviderModelOption::new(tier, tier.replace('_', " "))),
                             "default",
                         );
                     }
@@ -522,8 +531,10 @@ fn with_cursor_config_options(mut model: ProviderModel, options: &[Value]) -> Pr
             "default"
         };
         model = model.service_tiers(
-            [ProviderModelOption::keyed("fast", localized!("model_option.fast"))
-                .keyed_description(localized!("model_option.fast_description"))],
+            [
+                ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                    .keyed_description(localized!("model_option.fast_description")),
+            ],
             default,
         );
     }
@@ -876,10 +887,7 @@ fn merge_model_options(target: &mut Vec<ProviderModelOption>, source: &[Provider
 /// sibling, or whose slug still looks like a model (a digit or a second word);
 /// anything else — a name part mistaken for a trait — stays its own row.
 fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
-    let ids: Vec<String> = listings
-        .iter()
-        .map(|listing| listing.id.clone())
-        .collect();
+    let ids: Vec<String> = listings.iter().map(|listing| listing.id.clone()).collect();
     // (base id, effort, fast) — `synthetic` when the base is inferred rather
     // than listed.
     let mut keyed: Vec<(String, ProviderModel, Option<String>, bool, bool)> =
@@ -930,9 +938,8 @@ fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
             *synthetic_members.entry(base.clone()).or_default() += 1;
         }
     }
-    let plausible_base = |base: &str| {
-        base.chars().any(|char| char.is_ascii_digit()) || base.split('-').count() > 1
-    };
+    let plausible_base =
+        |base: &str| base.chars().any(|char| char.is_ascii_digit()) || base.split('-').count() > 1;
     let mut models: Vec<ProviderModel> = Vec::new();
     let mut group_index: std::collections::HashMap<String, usize> = Default::default();
     let mut seen: HashSet<String> = HashSet::new();
@@ -959,8 +966,7 @@ fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
                     // is the only description the listing gave of the model.
                     let mut group = listing.clone();
                     group.id = base.clone();
-                    group.name =
-                        packed_stripped_name(&listing.name, &listing.id[base.len() + 1..]);
+                    group.name = packed_stripped_name(&listing.name, &listing.id[base.len() + 1..]);
                     group.name_i18n = None;
                     group
                 };
@@ -1016,7 +1022,15 @@ fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
     // Order each ladder by strength and default it the way the ACP path does:
     // high, else medium, else the first offered.
     const STRENGTH: [&str; 9] = [
-        "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode",
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+        "ultracode",
     ];
     for model in &mut models {
         model.reasoning_efforts.sort_by_key(|option| {
@@ -1684,7 +1698,10 @@ fn parse_devin_model(value: &Value) -> Option<ProviderModel> {
             .filter_map(Value::as_str)
             .map(str::trim)
             .filter(|effort| !effort.is_empty())
-            .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
+            .map(|effort| {
+                let (label, i18n) = reasoning_effort_pair(effort);
+                ProviderModelOption::new(effort, label).with_label_i18n(i18n)
+            })
             .collect();
         if !model.reasoning_efforts.is_empty() {
             model.default_reasoning_effort =
@@ -1749,7 +1766,10 @@ fn parse_antigravity_models(output: &str) -> Vec<ProviderModel> {
             if id.is_empty() {
                 return None;
             }
-            Some(ProviderModel::new(id, if name.is_empty() { id } else { name }))
+            Some(ProviderModel::new(
+                id,
+                if name.is_empty() { id } else { name },
+            ))
         })
         .collect()
 }
@@ -1885,7 +1905,10 @@ fn parse_kimi_models(catalog: &Value, default_model: Option<&str>) -> Vec<Provid
                 .filter_map(Value::as_str)
                 .map(str::trim)
                 .filter(|effort| !effort.is_empty())
-                .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
+                .map(|effort| {
+                    let (label, i18n) = reasoning_effort_pair(effort);
+                    ProviderModelOption::new(effort, label).with_label_i18n(i18n)
+                })
                 .collect();
             if !model.reasoning_efforts.is_empty() {
                 model.default_reasoning_effort = value
@@ -2080,7 +2103,10 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
                         .filter_map(Value::as_str)
                         .any(|effort| effort == *level)
             })
-            .map(|level| { let (label, i18n) = reasoning_effort_pair(level); ProviderModelOption::new(level, label).with_label_i18n(i18n) })
+            .map(|level| {
+                let (label, i18n) = reasoning_effort_pair(level);
+                ProviderModelOption::new(level, label).with_label_i18n(i18n)
+            })
             .collect();
     }
     let level_map = model.get("thinkingLevelMap").and_then(Value::as_object);
@@ -2094,7 +2120,10 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
                 mapped.is_none_or(|value| !value.is_null())
             }
         })
-        .map(|level| { let (label, i18n) = reasoning_effort_pair(level); ProviderModelOption::new(level, label).with_label_i18n(i18n) })
+        .map(|level| {
+            let (label, i18n) = reasoning_effort_pair(level);
+            ProviderModelOption::new(level, label).with_label_i18n(i18n)
+        })
         .collect()
 }
 
@@ -2209,8 +2238,11 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     Some(
-                        { let (label, i18n) = reasoning_effort_pair(id); ProviderModelOption::new(id, label).with_label_i18n(i18n) }
-                            .description(description),
+                        {
+                            let (label, i18n) = reasoning_effort_pair(id);
+                            ProviderModelOption::new(id, label).with_label_i18n(i18n)
+                        }
+                        .description(description),
                     )
                 })
                 .collect();
@@ -2319,12 +2351,10 @@ pub(crate) fn with_variant_efforts<'a>(
         .max_by_key(|id| rank(id))
         .or_else(|| ids.last())
         .cloned();
-    let options = ids
-        .iter()
-        .map(|id| {
-            let (label, i18n) = reasoning_effort_pair(id);
-            ProviderModelOption::new(id.clone(), label).with_label_i18n(i18n)
-        });
+    let options = ids.iter().map(|id| {
+        let (label, i18n) = reasoning_effort_pair(id);
+        ProviderModelOption::new(id.clone(), label).with_label_i18n(i18n)
+    });
     match default {
         Some(default) => model.reasoning(options, default),
         None => model,
@@ -2334,7 +2364,10 @@ pub(crate) fn with_variant_efforts<'a>(
 fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOption> {
     efforts
         .into_iter()
-        .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) })
+        .map(|effort| {
+            let (label, i18n) = reasoning_effort_pair(effort);
+            ProviderModelOption::new(effort, label).with_label_i18n(i18n)
+        })
         .collect()
 }
 
@@ -2344,10 +2377,10 @@ fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOpt
 fn grok_reasoning_model(model: ProviderModel) -> ProviderModel {
     match waku_protocol::model_catalog::grok_model_reasoning_efforts(&model.id) {
         Some(efforts) => model.reasoning(
-            efforts
-                .iter()
-                .copied()
-                .map(|effort| { let (label, i18n) = reasoning_effort_pair(effort); ProviderModelOption::new(effort, label).with_label_i18n(i18n) }),
+            efforts.iter().copied().map(|effort| {
+                let (label, i18n) = reasoning_effort_pair(effort);
+                ProviderModelOption::new(effort, label).with_label_i18n(i18n)
+            }),
             "high",
         ),
         None => model,
@@ -3034,10 +3067,8 @@ opencode/big-pickle
         // already carries its own ladder all take the same shape.
         let mut codex = ProviderModel::new("openai/gpt-5.3-codex", "GPT-5.3 Codex");
         codex = codex.sub_provider("OpenAI");
-        let mut base_with_ladder =
-            ProviderModel::new("kimi-k3", "Kimi K3").sub_provider("Managed");
-        base_with_ladder.reasoning_efforts =
-            vec![ProviderModelOption::new("high", "High")];
+        let mut base_with_ladder = ProviderModel::new("kimi-k3", "Kimi K3").sub_provider("Managed");
+        base_with_ladder.reasoning_efforts = vec![ProviderModelOption::new("high", "High")];
         let models = fold_packed_aliases(vec![
             codex,
             ProviderModel::new("openai/gpt-5.3-codex-low", "GPT-5.3 Codex Low"),
@@ -3049,7 +3080,10 @@ opencode/big-pickle
             ProviderModel::new("kimi-k3-max", "Kimi K3 Max"),
         ]);
         assert_eq!(
-            models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
             ["openai/gpt-5.3-codex", "swe-2", "qwen-max", "kimi-k3"]
         );
         let codex = &models[0];

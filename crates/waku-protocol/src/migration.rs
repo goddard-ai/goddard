@@ -379,7 +379,10 @@ fn is_migration_artifact(name: &str, allowed_items: Option<&[&str]>) -> bool {
     // dot while the identity constants may or may not carry one.
     if let Some(items) = allowed_items {
         let bare = item.trim_start_matches('.');
-        if !items.iter().any(|known| known.trim_start_matches('.') == bare) {
+        if !items
+            .iter()
+            .any(|known| known.trim_start_matches('.') == bare)
+        {
             return false;
         }
     }

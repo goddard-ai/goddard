@@ -410,7 +410,9 @@ fn visible_project_sessions(
     revealed_dormant_sessions: usize,
 ) -> (Vec<Uuid>, Option<SidebarFold>) {
     let live_limit = SIDEBAR_PROJECT_DEFAULT_VISIBLE.saturating_add(revealed_extra_sessions);
-    let mut visible = Vec::with_capacity(live_limit.min(live.len()) + dormant.len().min(revealed_dormant_sessions));
+    let mut visible = Vec::with_capacity(
+        live_limit.min(live.len()) + dormant.len().min(revealed_dormant_sessions),
+    );
     visible.extend(live.iter().take(live_limit).copied());
     visible.extend(dormant.iter().take(revealed_dormant_sessions).copied());
     let fold = if live.len() > live_limit {
@@ -1220,11 +1222,7 @@ impl Waku {
             },
         );
 
-        div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .child(options)
+        div().flex().items_center().gap(px(2.0)).child(options)
     }
 
     fn render_sidebar_action_row(
@@ -1785,8 +1783,7 @@ impl Waku {
             let Some(mouse_x) = mouse_x else {
                 return DOCK_ITEM_REST;
             };
-            let center =
-                DOCK_LEFT_INSET + index as f32 * rest_pitch + DOCK_ITEM_REST * 0.5;
+            let center = DOCK_LEFT_INSET + index as f32 * rest_pitch + DOCK_ITEM_REST * 0.5;
             let distance = (mouse_x - center).abs();
             if distance >= DOCK_MAGNIFY_RADIUS {
                 return DOCK_ITEM_REST;
@@ -1830,20 +1827,11 @@ impl Waku {
                         cx.notify();
                     }
                 }))
-                .child(
-                    div()
-                        .flex()
-                        .items_end()
-                        .gap(px(DOCK_ITEM_GAP))
-                        .children(items.iter().enumerate().map(|(index, item)| {
-                            self.render_sidebar_dock_item(
-                                *item,
-                                diameter_at(index),
-                                &theme,
-                                cx,
-                            )
-                        })),
-                )
+                .child(div().flex().items_end().gap(px(DOCK_ITEM_GAP)).children(
+                    items.iter().enumerate().map(|(index, item)| {
+                        self.render_sidebar_dock_item(*item, diameter_at(index), &theme, cx)
+                    }),
+                ))
                 .into_any_element(),
         )
     }
@@ -1924,29 +1912,24 @@ impl Waku {
                 }
                 cx.notify();
             }))
-            .child(
-                div()
-                    .h(px(20.5))
-                    .flex()
-                    .when(hovered, |slot| {
-                        slot.child(
-                            div()
-                                .h(px(17.5))
-                                .px(px(10.0))
-                                .rounded_full()
-                                .bg(pill_surface)
-                                .border(hairline())
-                                .border_color(surface_border)
-                                .shadow(surface_shadow.clone())
-                                .flex()
-                                .items_center()
-                                .text_size(sp(11.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(glyph)
-                                .child(label),
-                        )
-                    }),
-            )
+            .child(div().h(px(20.5)).flex().when(hovered, |slot| {
+                slot.child(
+                    div()
+                        .h(px(17.5))
+                        .px(px(10.0))
+                        .rounded_full()
+                        .bg(pill_surface)
+                        .border(hairline())
+                        .border_color(surface_border)
+                        .shadow(surface_shadow.clone())
+                        .flex()
+                        .items_center()
+                        .text_size(sp(11.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(glyph)
+                        .child(label),
+                )
+            }))
             .child(
                 div()
                     .size(px(diameter))
@@ -1992,9 +1975,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         match item {
-            SidebarDockItem::Friends => {
-                self.open_settings_page(SettingsPage::Friends, window, cx)
-            }
+            SidebarDockItem::Friends => self.open_settings_page(SettingsPage::Friends, window, cx),
             SidebarDockItem::Inbox => {
                 if self.notifications.open {
                     self.close_inbox(cx);
@@ -2002,9 +1983,7 @@ impl Waku {
                     self.open_inbox(window, cx);
                 }
             }
-            SidebarDockItem::Archive => {
-                self.open_settings_page(SettingsPage::Archived, window, cx)
-            }
+            SidebarDockItem::Archive => self.open_settings_page(SettingsPage::Archived, window, cx),
             SidebarDockItem::Shortcuts => self.open_shortcuts(window, cx),
             SidebarDockItem::Settings => self.open_settings_action(&OpenSettings, window, cx),
         }
@@ -2052,8 +2031,7 @@ impl Waku {
         let percent = (total > 0).then_some(done as f64 * 100.0 / total as f64);
         let glyph: AnyElement = match percent {
             Some(percent) => {
-                progress_ring(Some(percent), theme.border_strong, theme.accent)
-                    .into_any_element()
+                progress_ring(Some(percent), theme.border_strong, theme.accent).into_any_element()
             }
             None => motion::spin_slow(icon("icons/loader-circle.svg", 13.0, theme.accent)),
         };
@@ -2073,7 +2051,10 @@ impl Waku {
                 .cursor_default()
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.bg(theme.overlay_strong))
-                .tooltip(Tooltip::text(tr!("friends.transfers_active", count = count)))
+                .tooltip(Tooltip::text(tr!(
+                    "friends.transfers_active",
+                    count = count
+                )))
                 .child(glyph)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_settings_page(SettingsPage::Friends, window, cx);
@@ -2782,12 +2763,12 @@ impl Waku {
                     .fold(0u64, |combined, (group, count)| {
                         combined.wrapping_add(group.mix_fingerprint(*count as u64))
                     });
-            let dormant_revealed = self
-                .sidebar_project_dormant_reveals
-                .iter()
-                .fold(0u64, |combined, (group, count)| {
+            let dormant_revealed = self.sidebar_project_dormant_reveals.iter().fold(
+                0u64,
+                |combined, (group, count)| {
                     combined.wrapping_add(group.mix_fingerprint(*count as u64))
-                });
+                },
+            );
             fingerprint = mix(
                 mix(
                     fingerprint,
@@ -3160,8 +3141,7 @@ impl Waku {
             })
             .collect();
         for session in &self.state.sessions {
-            if self.sidebar_multi_selection.contains(&session.id)
-                && !targets.contains(&session.id)
+            if self.sidebar_multi_selection.contains(&session.id) && !targets.contains(&session.id)
             {
                 targets.push(session.id);
             }
@@ -3235,12 +3215,12 @@ impl Waku {
             SidebarRow::Terminal(terminal_id) => self
                 .render_sidebar_terminal_item(terminal_id, cx)
                 .into_any_element(),
-            SidebarRow::ShowMore(group) => {
-                self.render_sidebar_show_more(group, false, cx).into_any_element()
-            }
-            SidebarRow::ShowDormant(group) => {
-                self.render_sidebar_show_more(group, true, cx).into_any_element()
-            }
+            SidebarRow::ShowMore(group) => self
+                .render_sidebar_show_more(group, false, cx)
+                .into_any_element(),
+            SidebarRow::ShowDormant(group) => self
+                .render_sidebar_show_more(group, true, cx)
+                .into_any_element(),
             SidebarRow::GroupSpacer => div()
                 .w_full()
                 .h(px(SIDEBAR_GROUP_SPACER_HEIGHT))
@@ -3269,13 +3249,14 @@ impl Waku {
                             .get(terminal_id)
                             .is_some_and(|record| !record.pinned)
                             && !self.terminal_is_active_surface(*terminal_id)
-                            && self.right_panel_terminals.get(terminal_id).is_some_and(
-                                |terminal| {
+                            && self
+                                .right_panel_terminals
+                                .get(terminal_id)
+                                .is_some_and(|terminal| {
                                     let terminal = terminal.read(cx);
                                     !terminal.command_running()
                                         && terminal.last_command_exit() == Some(0)
-                                },
-                            )
+                                })
                     })
                 }
                 _ => self
@@ -3399,7 +3380,9 @@ impl Waku {
                         .cursor_default()
                         .opacity(0.0)
                         .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-                        .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
+                        .focus_visible(|style| {
+                            style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
+                        })
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
                         .tooltip(if group == SidebarGroup::Terminals {
@@ -3618,9 +3601,7 @@ impl Waku {
 
         div()
             .w_full()
-            .when(action_row, |element| {
-                element.pt(px(SIDEBAR_ACTION_ROW_GAP))
-            })
+            .when(action_row, |element| element.pt(px(SIDEBAR_ACTION_ROW_GAP)))
             .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
             .child(header)
     }
@@ -3771,7 +3752,10 @@ impl Waku {
         for group in groups {
             changed |= self.sidebar_collapsed_groups.insert(group);
             changed |= self.sidebar_project_reveal_counts.remove(&group).is_some();
-            changed |= self.sidebar_project_dormant_reveals.remove(&group).is_some();
+            changed |= self
+                .sidebar_project_dormant_reveals
+                .remove(&group)
+                .is_some();
         }
         if changed {
             self.sidebar_rows_fingerprint.set(None);
@@ -3792,7 +3776,10 @@ impl Waku {
         };
         let reveal_reset = collapsed
             && (self.sidebar_project_reveal_counts.remove(&group).is_some()
-                | self.sidebar_project_dormant_reveals.remove(&group).is_some());
+                | self
+                    .sidebar_project_dormant_reveals
+                    .remove(&group)
+                    .is_some());
         if collapse_changed || reveal_reset {
             self.sidebar_rows_fingerprint.set(None);
             cx.notify();
@@ -3921,8 +3908,7 @@ impl Waku {
         // project-name detail even while Project grouping is active. A
         // dormant row sits inside its project there and indents like any
         // sibling; only Date grouping gives it the flat standalone group.
-        let grouped_by_project =
-            self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
+        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -4052,9 +4038,9 @@ impl Waku {
                                     .iter()
                                     .find(|session| session.id == *target)
                             };
-                            let local_workspace = targets
-                                .iter()
-                                .any(|target| session(target).is_some_and(|session| session.workspace.is_local()));
+                            let local_workspace = targets.iter().any(|target| {
+                                session(target).is_some_and(|session| session.workspace.is_local())
+                            });
                             let any_movable = targets
                                 .iter()
                                 .any(|target| waku.can_move_session_to_worktree(*target));
@@ -4069,7 +4055,13 @@ impl Waku {
                                         .is_some_and(|session| waku.session_dormant_now(session))
                                 })
                                 .collect::<Vec<_>>();
-                            (targets, local_workspace, any_movable, all_pinned, dormant_targets)
+                            (
+                                targets,
+                                local_workspace,
+                                any_movable,
+                                all_pinned,
+                                dormant_targets,
+                            )
                         })
                         .unwrap_or((vec![session_id], false, false, pinned, Vec::new()));
                     let all_dormant = dormant_targets.len() == targets.len();
@@ -4705,60 +4697,51 @@ impl Waku {
                     .when(session.workspace.is_worktree(), |element| {
                         element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
                     })
-                    .when_some(
-                        pull_request_badge,
-                        |element, badge| {
-                            let color = sidebar_pull_request_color(&theme, badge.state);
-                            element.child(
-                                div()
-                                    .id(SharedString::from(format!("session-pr-{session_id}")))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(3.0))
-                                    .when(pull_request_unread, |element| {
-                                        element.child(
-                                            div().size(px(5.0)).rounded_full().bg(theme.info),
-                                        )
-                                    })
-                                    .child(icon(
-                                        sidebar_pull_request_icon(badge.state),
-                                        12.0,
-                                        color,
-                                    ))
-                                    .child(div().text_size(sp(12.5)).text_color(color).child(
-                                        if badge.others == 0 {
-                                            format!("#{}", badge.number)
-                                        } else {
-                                            format!("#{} +{}", badge.number, badge.others)
-                                        },
-                                    ))
-                                    .when_some(badge.check_status, |element, status| {
-                                        element.child(icon(
-                                            sidebar_check_status_icon(status),
-                                            11.5,
-                                            sidebar_check_status_color(&theme, status),
-                                        ))
-                                    })
-                                    .when_some(badge.review_decision, |element, decision| {
-                                        element.child(icon(
-                                            sidebar_review_decision_icon(decision),
-                                            11.5,
-                                            sidebar_review_decision_color(&theme, decision),
-                                        ))
-                                    })
-                                    .tooltip(Tooltip::text(if pull_request_unread {
-                                        format!(
-                                            "{} · {}",
-                                            sidebar_pull_request_tooltip(&badge),
-                                            tr!("notifications.new_activity")
-                                        )
+                    .when_some(pull_request_badge, |element, badge| {
+                        let color = sidebar_pull_request_color(&theme, badge.state);
+                        element.child(
+                            div()
+                                .id(SharedString::from(format!("session-pr-{session_id}")))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(3.0))
+                                .when(pull_request_unread, |element| {
+                                    element.child(div().size(px(5.0)).rounded_full().bg(theme.info))
+                                })
+                                .child(icon(sidebar_pull_request_icon(badge.state), 12.0, color))
+                                .child(div().text_size(sp(12.5)).text_color(color).child(
+                                    if badge.others == 0 {
+                                        format!("#{}", badge.number)
                                     } else {
-                                        sidebar_pull_request_tooltip(&badge)
-                                    })),
-                            )
-                        },
-                    )
+                                        format!("#{} +{}", badge.number, badge.others)
+                                    },
+                                ))
+                                .when_some(badge.check_status, |element, status| {
+                                    element.child(icon(
+                                        sidebar_check_status_icon(status),
+                                        11.5,
+                                        sidebar_check_status_color(&theme, status),
+                                    ))
+                                })
+                                .when_some(badge.review_decision, |element, decision| {
+                                    element.child(icon(
+                                        sidebar_review_decision_icon(decision),
+                                        11.5,
+                                        sidebar_review_decision_color(&theme, decision),
+                                    ))
+                                })
+                                .tooltip(Tooltip::text(if pull_request_unread {
+                                    format!(
+                                        "{} · {}",
+                                        sidebar_pull_request_tooltip(&badge),
+                                        tr!("notifications.new_activity")
+                                    )
+                                } else {
+                                    sidebar_pull_request_tooltip(&badge)
+                                })),
+                        )
+                    })
                     .when_some(
                         session_time_label(session, unix_time()),
                         |element, label| {

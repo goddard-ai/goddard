@@ -116,12 +116,13 @@ async fn run(
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
                 tokio::spawn(async move {
-                    let Ok(info) =
-                        tokio::time::timeout(INFO_TIMEOUT, link::fetch_info(&endpoint, addr.clone()))
-                            .await
-                            .map_err(|_| anyhow::anyhow!("info timed out"))
-                            .and_then(|r| r)
-                    else {
+                    let Ok(info) = tokio::time::timeout(
+                        INFO_TIMEOUT,
+                        link::fetch_info(&endpoint, addr.clone()),
+                    )
+                    .await
+                    .map_err(|_| anyhow::anyhow!("info timed out"))
+                    .and_then(|r| r) else {
                         return;
                     };
                     let _ = tx.send(DiscoveryUpdate::Found(DiscoveredDaemon {

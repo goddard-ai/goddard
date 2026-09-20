@@ -58,7 +58,8 @@ fn migrate_data_pair(legacy: &Path, destination: &Path, report: &mut MigrationRe
     if !legacy.is_dir() {
         return;
     }
-    let destination = dunce::canonicalize(destination).unwrap_or_else(|_| destination.to_path_buf());
+    let destination =
+        dunce::canonicalize(destination).unwrap_or_else(|_| destination.to_path_buf());
     if let Err(error) = fs::create_dir_all(&destination) {
         report.record_failure(legacy, destination, error);
         return;

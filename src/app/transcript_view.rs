@@ -2652,10 +2652,7 @@ impl Waku {
                                         scrollbar::FadeEdge::Bottom,
                                         theme.raised,
                                     ))
-                                    .child(scrollbar::vertical(
-                                        &scroll_handle,
-                                        &scrollbar_state,
-                                    )),
+                                    .child(scrollbar::vertical(&scroll_handle, &scrollbar_state)),
                             )
                             .into_any_element()
                     }
@@ -3130,8 +3127,7 @@ impl Waku {
             // file's default app — separate from the in-app viewer the icon
             // button opens.
             let open_file_path = activity_file_link_path(activity);
-            let detail_focus =
-                self.transcript_control_focus(format!("activity-detail-{id}"), cx);
+            let detail_focus = self.transcript_control_focus(format!("activity-detail-{id}"), cx);
             let weak = cx.entity().downgrade();
             let shows_diff = reasoning.is_none() && activity_shows_diff(activity);
             let has_detail = reasoning
@@ -3198,9 +3194,7 @@ impl Waku {
                                 .child(SharedString::from(row_detail.clone()));
                             element.child(match &open_file_path {
                                 Some(path) => file_link(
-                                    detail.id(SharedString::from(format!(
-                                        "activity-detail-{id}"
-                                    ))),
+                                    detail.id(SharedString::from(format!("activity-detail-{id}"))),
                                     &detail_focus,
                                     path.clone(),
                                     &weak,

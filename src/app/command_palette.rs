@@ -941,7 +941,10 @@ impl Waku {
         });
         self.command_palette.view = CommandPaletteView::RebaseBase;
         let placeholder = match &current_base {
-            Some(base) => tr!("command_palette.rebase_base_placeholder", base = base.clone()),
+            Some(base) => tr!(
+                "command_palette.rebase_base_placeholder",
+                base = base.clone()
+            ),
             None => tr!("command_palette.rebase_base_placeholder_unknown"),
         };
         self.command_palette.search.update(cx, |input, cx| {
@@ -1056,14 +1059,15 @@ impl Waku {
                 .map(|path| {
                     tr!(
                         "command_palette.save_prompt_path_hint",
-                        path = settings::abbreviate_home_path(
-                            &path,
-                            self.home_directory.as_deref()
-                        )
+                        path =
+                            settings::abbreviate_home_path(&path, self.home_directory.as_deref())
                     )
                 })
                 .unwrap_or_else(|| tr!("command_palette.save_prompt_name_hint"));
-            (tr!("command_palette.save_prompt_named", name = slug.clone()), detail)
+            (
+                tr!("command_palette.save_prompt_named", name = slug.clone()),
+                detail,
+            )
         };
         self.command_palette.results = vec![CommandPaletteItem {
             section: PaletteSection::Prompts,
@@ -1122,10 +1126,7 @@ impl Waku {
                 match result {
                     Ok(()) => {
                         waku.invalidate_composer_sources(cx);
-                        waku.show_success_toast(tr!(
-                            "prompt_templates.saved",
-                            name = slug.clone()
-                        ));
+                        waku.show_success_toast(tr!("prompt_templates.saved", name = slug.clone()));
                     }
                     Err(error) => {
                         waku.show_toast(tr!(
@@ -1262,7 +1263,10 @@ impl Waku {
     /// A session's workspace — its worktree checkout when it has one —
     /// rooted at the enclosing repository. The project id comes along so
     /// the created issue can deep-link into the GitHub browser.
-    fn issue_target_for_session(&self, session: &AgentSession) -> Option<issue_dialog::IssueTarget> {
+    fn issue_target_for_session(
+        &self,
+        session: &AgentSession,
+    ) -> Option<issue_dialog::IssueTarget> {
         let project = self
             .state
             .projects
@@ -1312,10 +1316,7 @@ impl Waku {
                 .max_by_key(|project| project.path.components().count())
                 .map(|project| project.id)
         });
-        Some(issue_dialog::IssueTarget {
-            cwd: root,
-            project,
-        })
+        Some(issue_dialog::IssueTarget { cwd: root, project })
     }
 
     /// The template step doubles as the availability gate: the repo
@@ -1359,9 +1360,7 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     let templates = match workspace.request(
-                        waku_client::WorkspaceOperation::ListIssueTemplates {
-                            cwd: cwd.clone(),
-                        },
+                        waku_client::WorkspaceOperation::ListIssueTemplates { cwd: cwd.clone() },
                     ) {
                         Ok(waku_client::WorkspaceResult::IssueTemplates {
                             entries,
@@ -1369,9 +1368,9 @@ impl Waku {
                         }) => Some((entries, blank_issues_enabled)),
                         _ => None,
                     };
-                    let (repo, availability) = match workspace.request(
-                        waku_client::WorkspaceOperation::ResolveGitHubRepo { cwd },
-                    ) {
+                    let (repo, availability) = match workspace
+                        .request(waku_client::WorkspaceOperation::ResolveGitHubRepo { cwd })
+                    {
                         Ok(waku_client::WorkspaceResult::GitHubRepo { repo, availability }) => {
                             (repo, availability)
                         }
@@ -1485,7 +1484,10 @@ impl Waku {
 
     /// A YAML form template's only path — `gh` cannot render GitHub's form
     /// schema — is `issues/new?template=` on the repo's host.
-    fn issue_template_web_url(&self, template: &waku_protocol::workspace::IssueTemplate) -> Option<String> {
+    fn issue_template_web_url(
+        &self,
+        template: &waku_protocol::workspace::IssueTemplate,
+    ) -> Option<String> {
         let repo = self.command_palette.issue_repo.as_ref()?.0.as_ref()?;
         Some(format!(
             "{}/issues/new?template={}",
@@ -1511,9 +1513,7 @@ impl Waku {
             CommandPaletteView::IssueProjects => self.leave_command_palette_drill_in_view(cx),
             // Esc on the templates step backs up to the project step —
             // also the way to override an inferred repository.
-            CommandPaletteView::IssueTemplates => {
-                self.open_command_palette_issue_projects_view(cx)
-            }
+            CommandPaletteView::IssueTemplates => self.open_command_palette_issue_projects_view(cx),
             CommandPaletteView::RebaseBase => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::SavePrompt => self.leave_command_palette_drill_in_view(cx),
         }
@@ -1546,7 +1546,10 @@ impl Waku {
                     .and_then(|picker| picker.current_base.as_deref())
                 {
                     Some(base) => {
-                        tr!("command_palette.rebase_base_placeholder", base = base.to_owned())
+                        tr!(
+                            "command_palette.rebase_base_placeholder",
+                            base = base.to_owned()
+                        )
                     }
                     None => tr!("command_palette.rebase_base_placeholder_unknown"),
                 }
@@ -1619,13 +1622,11 @@ impl Waku {
         let Some(token) = fetch else {
             return;
         };
-        let search = self
-            .store
-            .session_message_search(
-                query.clone(),
-                MESSAGE_SEARCH_LIMIT,
-                crate::persistence::SessionMessageSearchScope::Active,
-            );
+        let search = self.store.session_message_search(
+            query.clone(),
+            MESSAGE_SEARCH_LIMIT,
+            crate::persistence::SessionMessageSearchScope::Active,
+        );
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(MESSAGE_SEARCH_DEBOUNCE)
@@ -1698,9 +1699,7 @@ impl Waku {
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_task"),
                 "icons/pencil.svg",
-                Some(
-                    ShortcutHint::action(&NewSession).shadowed_by(&SwitchProjectForward),
-                ),
+                Some(ShortcutHint::action(&NewSession).shadowed_by(&SwitchProjectForward)),
                 PaletteAction::NewTask,
                 "new task session chat conversation start",
                 next(),
@@ -1919,13 +1918,10 @@ impl Waku {
 
         // Same gate as the composer's `/compact`: the session has a compact
         // path — the reserved Waku entry or a provider-reported builtin.
-        if self
-            .composer_session()
-            .is_some_and(|session| {
-                session.provider.supports_compact()
-                    || crate::composer_complete::has_compact_path(&self.slash_command_index)
-            })
-        {
+        if self.composer_session().is_some_and(|session| {
+            session.provider.supports_compact()
+                || crate::composer_complete::has_compact_path(&self.slash_command_index)
+        }) {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("commands.compact_context"),
@@ -2026,7 +2022,9 @@ impl Waku {
             pending,
             None,
         )
-        .or_else(|| sessions::next_idle_session(&self.state.sessions, &rows, selected, pending, None))
+        .or_else(|| {
+            sessions::next_idle_session(&self.state.sessions, &rows, selected, pending, None)
+        })
         .is_some()
         {
             commands.push(CommandPaletteItem::command(
@@ -2203,7 +2201,9 @@ impl Waku {
                 content_match: None,
                 search_text: format!(
                     "/{} {} {} prompt template slash saved reusable",
-                    command.name, command.description, command.scope.label()
+                    command.name,
+                    command.description,
+                    command.scope.label()
                 ),
                 order: next(),
                 recency: 0,
@@ -2769,12 +2769,8 @@ impl Waku {
             return Vec::new();
         };
         let selected = picker.current_base.clone().unwrap_or_default();
-        let branches = composer::visible_branch_entries(
-            &picker.branches,
-            &selected,
-            "",
-            unix_time(),
-        );
+        let branches =
+            composer::visible_branch_entries(&picker.branches, &selected, "", unix_time());
         let mut order = 0usize;
         let mut items = Vec::new();
         if let Some(base) = &picker.current_base {
@@ -2923,46 +2919,42 @@ impl Waku {
         }
         let web_hint = tr!("command_palette.opens_on_web");
         let base = items.len();
-        items.extend(
-            self.command_palette
-                .issue_templates
-                .iter()
-                .enumerate()
-                .map(|(index, template)| {
-                    let web = !matches!(
-                        template.kind,
-                        waku_protocol::workspace::IssueTemplateKind::Markdown
-                    );
-                    let icon = if web {
-                        "icons/external-link.svg"
-                    } else {
-                        "icons/file.svg"
-                    };
-                    let detail = match (&template.about, web) {
-                        (Some(about), true) => Some(format!("{about} · {web_hint}")),
-                        (Some(about), false) => Some(about.clone()),
-                        (None, true) => Some(web_hint.clone()),
-                        (None, false) => None,
-                    };
-                    CommandPaletteItem {
-                        section: PaletteSection::Templates,
-                        label: template.name.clone(),
-                        detail,
-                        icon: PaletteIcon::Asset(icon),
-                        shortcut: None,
-                        action: PaletteAction::ChooseIssueTemplate(template.clone()),
-                        content_match: None,
-                        search_text: format!(
-                            "{} {} {} issue template",
-                            template.name,
-                            template.about.as_deref().unwrap_or(""),
-                            template.filename
-                        ),
-                        order: base + index,
-                        recency: 0,
-                    }
-                }),
-        );
+        items.extend(self.command_palette.issue_templates.iter().enumerate().map(
+            |(index, template)| {
+                let web = !matches!(
+                    template.kind,
+                    waku_protocol::workspace::IssueTemplateKind::Markdown
+                );
+                let icon = if web {
+                    "icons/external-link.svg"
+                } else {
+                    "icons/file.svg"
+                };
+                let detail = match (&template.about, web) {
+                    (Some(about), true) => Some(format!("{about} · {web_hint}")),
+                    (Some(about), false) => Some(about.clone()),
+                    (None, true) => Some(web_hint.clone()),
+                    (None, false) => None,
+                };
+                CommandPaletteItem {
+                    section: PaletteSection::Templates,
+                    label: template.name.clone(),
+                    detail,
+                    icon: PaletteIcon::Asset(icon),
+                    shortcut: None,
+                    action: PaletteAction::ChooseIssueTemplate(template.clone()),
+                    content_match: None,
+                    search_text: format!(
+                        "{} {} {} issue template",
+                        template.name,
+                        template.about.as_deref().unwrap_or(""),
+                        template.filename
+                    ),
+                    order: base + index,
+                    recency: 0,
+                }
+            },
+        ));
         items
     }
 
@@ -3207,12 +3199,7 @@ impl Waku {
         if !self.command_palette.open {
             return;
         }
-        let query = self
-            .command_palette
-            .search
-            .read(cx)
-            .content()
-            .to_owned();
+        let query = self.command_palette.search.read(cx).content().to_owned();
         self.refresh_command_palette_results(&query, true, cx);
     }
 
@@ -3869,7 +3856,8 @@ impl Waku {
                         "",
                     )
                 };
-                self.composer.update(cx, |input, cx| input.insert_text(&text, cx));
+                self.composer
+                    .update(cx, |input, cx| input.insert_text(&text, cx));
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);
             }
@@ -3918,23 +3906,21 @@ impl Waku {
                 self.settings_page = None;
                 self.run_project_script(project, script, window, cx);
             }
-            PaletteAction::ChooseIssueTemplate(template) => {
-                match template.kind {
-                    waku_protocol::workspace::IssueTemplateKind::Markdown => {
-                        self.open_issue_dialog_from_palette(Some(template), window, cx)
-                    }
-                    waku_protocol::workspace::IssueTemplateKind::YamlForm => {
-                        if let Some(url) = self.issue_template_web_url(&template) {
-                            cx.open_url(&url);
-                        }
-                    }
-                    waku_protocol::workspace::IssueTemplateKind::ContactLink => {
-                        if let Some(url) = &template.url {
-                            cx.open_url(url);
-                        }
+            PaletteAction::ChooseIssueTemplate(template) => match template.kind {
+                waku_protocol::workspace::IssueTemplateKind::Markdown => {
+                    self.open_issue_dialog_from_palette(Some(template), window, cx)
+                }
+                waku_protocol::workspace::IssueTemplateKind::YamlForm => {
+                    if let Some(url) = self.issue_template_web_url(&template) {
+                        cx.open_url(&url);
                     }
                 }
-            }
+                waku_protocol::workspace::IssueTemplateKind::ContactLink => {
+                    if let Some(url) = &template.url {
+                        cx.open_url(url);
+                    }
+                }
+            },
             PaletteAction::NewBlankIssue => {
                 self.open_issue_dialog_from_palette(None, window, cx);
             }
@@ -4014,9 +4000,7 @@ impl Waku {
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
             CommandPaletteView::NewTaskIn => self.command_palette.new_task_directories_pending,
-            CommandPaletteView::IssueTemplates => {
-                self.command_palette.issue_templates_pending
-            }
+            CommandPaletteView::IssueTemplates => self.command_palette.issue_templates_pending,
             CommandPaletteView::RebaseBase => self
                 .command_palette
                 .rebase_base
@@ -4220,12 +4204,7 @@ impl Waku {
                                 .flex()
                                 .items_center()
                                 .gap(px(7.0))
-                                .child(provider_mark(
-                                    &theme,
-                                    provider,
-                                    13.0,
-                                    theme.text_secondary,
-                                ))
+                                .child(provider_mark(&theme, provider, 13.0, theme.text_secondary))
                                 .child(
                                     div()
                                         .text_size(sp(12.5))
@@ -4251,19 +4230,18 @@ impl Waku {
                                 .cursor_default()
                                 .hover(|button| button.bg(theme.overlay))
                                 .active(|button| button.opacity(0.82))
-                                .child(provider_mark(
-                                    &theme,
-                                    provider,
-                                    13.0,
-                                    theme.text_secondary,
-                                ))
+                                .child(provider_mark(&theme, provider, 13.0, theme.text_secondary))
                                 .child(
                                     div()
                                         .text_size(sp(12.5))
                                         .text_color(theme.text_secondary)
                                         .child(provider.display_name().to_owned()),
                                 )
-                                .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon()))
+                                .child(icon(
+                                    "icons/chevron-down.svg",
+                                    11.0,
+                                    theme.affordance_icon(),
+                                ))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.open_command_palette_resume_provider_view(cx);
                                     cx.stop_propagation();

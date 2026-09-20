@@ -286,8 +286,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                if waku.sync_branch.fetch_generation != fetch_generation || !waku.sync_branch.open
-                {
+                if waku.sync_branch.fetch_generation != fetch_generation || !waku.sync_branch.open {
                     return;
                 }
                 match result {

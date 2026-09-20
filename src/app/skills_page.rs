@@ -234,14 +234,11 @@ impl Waku {
             .skills_catalogs
             .get(&owner)
             .and_then(|catalog| {
-                catalog
-                    .skills
-                    .iter()
-                    .find(|skill| {
-                        skill
-                            .primary()
-                            .is_some_and(|primary| primary.dir == primary_dir)
-                    })
+                catalog.skills.iter().find(|skill| {
+                    skill
+                        .primary()
+                        .is_some_and(|primary| primary.dir == primary_dir)
+                })
             })
             .map(|skill| {
                 skill
@@ -355,14 +352,12 @@ impl Waku {
         };
         if let Some(catalog) = self.skills_catalogs.get(&owner) {
             let mut updated = catalog.as_ref().clone();
-            updated
-                .skills
-                .retain(|skill| {
-                    skill
-                        .primary()
-                        .map(|primary| primary.dir != primary_dir)
-                        .unwrap_or(true)
-                });
+            updated.skills.retain(|skill| {
+                skill
+                    .primary()
+                    .map(|primary| primary.dir != primary_dir)
+                    .unwrap_or(true)
+            });
             self.skills_catalogs.insert(owner, Rc::new(updated));
             self.rebuild_skills_catalog();
         }
@@ -425,14 +420,11 @@ impl Waku {
         };
         let current = self.skills_selected.as_ref().and_then(|selected| {
             entries.iter().position(|(_, index)| {
-                catalog
-                    .skills
-                    .get(*index)
-                    .is_some_and(|skill| {
-                        skill
-                            .primary()
-                            .is_some_and(|primary| &primary.dir == selected)
-                    })
+                catalog.skills.get(*index).is_some_and(|skill| {
+                    skill
+                        .primary()
+                        .is_some_and(|primary| &primary.dir == selected)
+                })
             })
         });
         let Some(next) = next_picker_highlight(current, entries.len(), key) else {
@@ -476,14 +468,11 @@ impl Waku {
             .as_ref()
             .filter(|selected| {
                 indices.iter().any(|index| {
-                    catalog
-                        .skills
-                        .get(*index)
-                        .is_some_and(|skill| {
-                            skill
-                                .primary()
-                                .is_some_and(|primary| &&primary.dir == selected)
-                        })
+                    catalog.skills.get(*index).is_some_and(|skill| {
+                        skill
+                            .primary()
+                            .is_some_and(|primary| &&primary.dir == selected)
+                    })
                 })
             })
             .cloned()
@@ -491,9 +480,7 @@ impl Waku {
                 indices
                     .first()
                     .and_then(|index| catalog.skills.get(*index))
-                    .and_then(|skill| {
-                        skill.primary().map(|primary| primary.dir.clone())
-                    })
+                    .and_then(|skill| skill.primary().map(|primary| primary.dir.clone()))
             });
         let rows = self.skills_rows_from(&catalog, &indices, effective.as_deref());
         self.sync_skills_rows(&rows);
@@ -502,11 +489,7 @@ impl Waku {
             catalog
                 .skills
                 .iter()
-                .find(|skill| {
-                    skill
-                        .primary()
-                        .is_some_and(|primary| &primary.dir == dir)
-                })
+                .find(|skill| skill.primary().is_some_and(|primary| &primary.dir == dir))
         }) {
             self.render_skill_detail_pane(skill, &theme, cx)
                 .into_any_element()

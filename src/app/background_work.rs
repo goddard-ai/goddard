@@ -1164,7 +1164,11 @@ impl Waku {
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("open_in.choose")))
-            .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon()));
+            .child(icon(
+                "icons/chevron-down.svg",
+                11.0,
+                theme.affordance_icon(),
+            ));
 
         let weak = cx.entity().downgrade();
         let menu = dropdown_menu(
@@ -1332,7 +1336,11 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .child(format!("+{count}")),
             )
-            .child(icon("icons/chevron-down.svg", 10.0, theme.affordance_icon()));
+            .child(icon(
+                "icons/chevron-down.svg",
+                10.0,
+                theme.affordance_icon(),
+            ));
         let menu = dropdown_menu(
             caret,
             "header-pull-request-menu-list",
@@ -2445,17 +2453,9 @@ mod tests {
             false,
         ));
         // Detached work survives Stop by design; it keeps its own control.
-        registry.upsert(stoppable(
-            "detached",
-            BackgroundWorkStatus::Running,
-            true,
-        ));
+        registry.upsert(stoppable("detached", BackgroundWorkStatus::Running, true));
         // Already-halting work needs no second request.
-        registry.upsert(stoppable(
-            "halting",
-            BackgroundWorkStatus::Stopping,
-            false,
-        ));
+        registry.upsert(stoppable("halting", BackgroundWorkStatus::Stopping, false));
         // No control channel means there is nothing to send.
         let mut uncontrolled = item("uncontrolled", BackgroundWorkStatus::Running, false);
         uncontrolled.can_stop = true;

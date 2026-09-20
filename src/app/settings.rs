@@ -540,7 +540,11 @@ pub(super) fn settings_row_text(
         .text_size(sp(13.5))
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme.text)
-        .child(settings_search_text(title, matched.title_ranges.clone(), theme));
+        .child(settings_search_text(
+            title,
+            matched.title_ranges.clone(),
+            theme,
+        ));
     div()
         .flex_1()
         .min_w_0()
@@ -1753,9 +1757,7 @@ impl Waku {
                     cx,
                     {
                         let enabled = self.state.auto_resolve_land_conflicts;
-                        move |this, _, cx| {
-                            this.set_auto_resolve_land_conflicts(!enabled, cx)
-                        }
+                        move |this, _, cx| this.set_auto_resolve_land_conflicts(!enabled, cx)
                     },
                 ),
                 theme,
@@ -2061,9 +2063,7 @@ impl Waku {
                             cx,
                             {
                                 let enabled = self.state.terminal_copy_on_select;
-                                move |this, _, cx| {
-                                    this.set_terminal_copy_on_select(!enabled, cx)
-                                }
+                                move |this, _, cx| this.set_terminal_copy_on_select(!enabled, cx)
                             },
                         ),
                         theme,
@@ -3167,137 +3167,28 @@ impl Waku {
         let expose_card = {
             let title = tr!("daemon.expose_title");
             let description = tr!("daemon.expose_description");
-            search
-                .matched(&title, &description)
-                .map(|matched| {
-                    div()
-                        .min_h(px(66.0))
-                        .px(px(20.0))
-                        .py(px(13.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .flex()
-                        .items_center()
-                        .gap(px(24.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(7.0))
-                                        .child(settings_title_jump(
-                                            div()
-                                                .text_size(sp(13.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.text)
-                                                .child(settings_search_text(
-                                                    title,
-                                                    matched.title_ranges.clone(),
-                                                    theme,
-                                                )),
-                                            &matched,
-                                            theme,
-                                        ))
-                                        .child(
-                                            div()
-                                                .px(px(6.0))
-                                                .py(px(2.0))
-                                                .rounded_full()
-                                                .text_size(sp(12.5))
-                                                .text_color(if enabled {
-                                                    theme.success
-                                                } else {
-                                                    theme.text_tertiary
-                                                })
-                                                .bg(theme.overlay)
-                                                .child(if pending {
-                                                    tr!("daemon.status_restarting")
-                                                } else if enabled {
-                                                    tr!("daemon.status_exposed")
-                                                } else {
-                                                    tr!("daemon.status_local")
-                                                }),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .mt(px(5.0))
-                                        .min_w_0()
-                                        .whitespace_normal()
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(18.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(settings_search_text(
-                                            description,
-                                            matched.description_ranges.clone(),
-                                            theme,
-                                        )),
-                                ),
-                        )
-                        .child(exposure_toggle)
-                        .into_any_element()
-                })
-        };
-
-        let connection_card = if !enabled {
-            None
-        } else {
-            let before = search.hits();
-            let header = {
-                let title = tr!("daemon.connection_title");
-                let description = tr!("daemon.connection_description");
-                search
-                    .matched(&title, &description)
-                    .map(|matched| {
+            search.matched(&title, &description).map(|matched| {
+                div()
+                    .min_h(px(66.0))
+                    .px(px(20.0))
+                    .py(px(13.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
                         div()
-                            .child(settings_title_jump(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(settings_search_text(
-                                        title,
-                                        matched.title_ranges.clone(),
-                                        theme,
-                                    )),
-                                &matched,
-                                theme,
-                            ))
+                            .flex_1()
+                            .min_w_0()
                             .child(
                                 div()
-                                    .mt(px(4.0))
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(16.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(settings_search_text(
-                                        description,
-                                        matched.description_ranges.clone(),
-                                        theme,
-                                    )),
-                            )
-                    })
-            };
-            let field_row = |title: String, description: String, field: TextField| -> Option<Div> {
-                search
-                    .matched(&title, &description)
-                    .map(|matched| {
-                        div()
-                            .mt(px(14.0))
-                            .flex()
-                            .items_start()
-                            .gap(px(24.0))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(7.0))
                                     .child(settings_title_jump(
                                         div()
-                                            .text_size(sp(12.5))
+                                            .text_size(sp(13.5))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme.text)
                                             .child(settings_search_text(
@@ -3310,20 +3201,123 @@ impl Waku {
                                     ))
                                     .child(
                                         div()
-                                            .mt(px(3.0))
-                                            .whitespace_normal()
+                                            .px(px(6.0))
+                                            .py(px(2.0))
+                                            .rounded_full()
                                             .text_size(sp(12.5))
-                                            .line_height(sp(14.0))
-                                            .text_color(theme.text_tertiary)
-                                            .child(settings_search_text(
-                                                description,
-                                                matched.description_ranges.clone(),
-                                                theme,
-                                            )),
+                                            .text_color(if enabled {
+                                                theme.success
+                                            } else {
+                                                theme.text_tertiary
+                                            })
+                                            .bg(theme.overlay)
+                                            .child(if pending {
+                                                tr!("daemon.status_restarting")
+                                            } else if enabled {
+                                                tr!("daemon.status_exposed")
+                                            } else {
+                                                tr!("daemon.status_local")
+                                            }),
                                     ),
                             )
-                            .child(div().flex_1().min_w_0().flex().justify_end().child(field))
-                    })
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        matched.description_ranges.clone(),
+                                        theme,
+                                    )),
+                            ),
+                    )
+                    .child(exposure_toggle)
+                    .into_any_element()
+            })
+        };
+
+        let connection_card = if !enabled {
+            None
+        } else {
+            let before = search.hits();
+            let header = {
+                let title = tr!("daemon.connection_title");
+                let description = tr!("daemon.connection_description");
+                search.matched(&title, &description).map(|matched| {
+                    div()
+                        .child(settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(sp(12.5))
+                                .line_height(sp(16.0))
+                                .text_color(theme.text_secondary)
+                                .child(settings_search_text(
+                                    description,
+                                    matched.description_ranges.clone(),
+                                    theme,
+                                )),
+                        )
+                })
+            };
+            let field_row = |title: String, description: String, field: TextField| -> Option<Div> {
+                search.matched(&title, &description).map(|matched| {
+                    div()
+                        .mt(px(14.0))
+                        .flex()
+                        .items_start()
+                        .gap(px(24.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(settings_title_jump(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(settings_search_text(
+                                            title,
+                                            matched.title_ranges.clone(),
+                                            theme,
+                                        )),
+                                    &matched,
+                                    theme,
+                                ))
+                                .child(
+                                    div()
+                                        .mt(px(3.0))
+                                        .whitespace_normal()
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(14.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(settings_search_text(
+                                            description,
+                                            matched.description_ranges.clone(),
+                                            theme,
+                                        )),
+                                ),
+                        )
+                        .child(div().flex_1().min_w_0().flex().justify_end().child(field))
+                })
             };
             let port_row = field_row(
                 tr!("daemon.port"),
@@ -3364,38 +3358,36 @@ impl Waku {
             let header = {
                 let title = tr!("daemon.credentials_title");
                 let description = tr!("daemon.credentials_description");
-                search
-                    .matched(&title, &description)
-                    .map(|matched| {
-                        div()
-                            .child(settings_title_jump(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(settings_search_text(
-                                        title,
-                                        matched.title_ranges.clone(),
-                                        theme,
-                                    )),
-                                &matched,
-                                theme,
-                            ))
-                            .child(
-                                div()
-                                    .mt(px(4.0))
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(16.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(settings_search_text(
-                                        description,
-                                        matched.description_ranges.clone(),
-                                        theme,
-                                    )),
-                            )
-                    })
+                search.matched(&title, &description).map(|matched| {
+                    div()
+                        .child(settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(sp(12.5))
+                                .line_height(sp(16.0))
+                                .text_color(theme.text_secondary)
+                                .child(settings_search_text(
+                                    description,
+                                    matched.description_ranges.clone(),
+                                    theme,
+                                )),
+                        )
+                })
             };
             let url_row = {
                 let title = tr!("daemon.websocket_url");
@@ -3814,14 +3806,16 @@ impl Waku {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.use_remote_host(host_id, cx);
                 }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                    if !event.keystroke.modifiers.modified()
-                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                    {
-                        this.use_remote_host(host_id, cx);
-                        cx.stop_propagation();
-                    }
-                }))
+                .on_key_down(cx.listener(
+                    move |this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.use_remote_host(host_id, cx);
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
             });
             rows = rows.child(
                 div()
@@ -4610,9 +4604,14 @@ impl Waku {
         let matched = search.matched(&title, &description)?;
         let enabled = experiment.enabled;
         let set = experiment.set;
-        let toggle = toggle_switch(experiment.id, enabled, false, theme, cx, move |this, _, cx| {
-            set(this, !enabled, cx)
-        });
+        let toggle = toggle_switch(
+            experiment.id,
+            enabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| set(this, !enabled, cx),
+        );
         Some(
             div()
                 .min_h(px(66.0))
@@ -5106,9 +5105,7 @@ impl Waku {
                                     .child(message),
                             )
                         })
-                        .when(no_probe_status, |row| {
-                            row.child(div().flex_1())
-                        })
+                        .when(no_probe_status, |row| row.child(div().flex_1()))
                         .child(test_button)
                         .child(apply_button),
                 )
@@ -5404,8 +5401,7 @@ impl Waku {
                 // rail has.
                 let rail_sections = vec![ModelPickerRailItem {
                     id: "route-class-rail-unmapped".into(),
-                    mark: icon("icons/sparkle.svg", 17.0, theme.text_tertiary)
-                        .into_any_element(),
+                    mark: icon("icons/sparkle.svg", 17.0, theme.text_tertiary).into_any_element(),
                     active: false,
                     on_activate: Rc::new(|this, cx| {
                         this.scroll_route_class_to_section(RouteClassSection::Unmapped, cx);
@@ -5421,10 +5417,7 @@ impl Waku {
                                 .is_some_and(|value| value == provider.id())
                         });
                         ModelPickerRailItem {
-                            id: SharedString::from(format!(
-                                "route-class-rail-{}",
-                                provider.id()
-                            )),
+                            id: SharedString::from(format!("route-class-rail-{}", provider.id())),
                             mark: provider_mark(&theme, provider, 18.0, theme.text_tertiary)
                                 .into_any_element(),
                             active,
@@ -5438,73 +5431,68 @@ impl Waku {
                 let render_row = Rc::new({
                     let weak = weak.clone();
                     let current = current.clone();
-                    let render =
-                        move |row_index: usize,
-                              row: &RouteClassRow,
-                              is_highlighted: bool,
-                              popover: &ContextMenuHandle,
-                              _window: &mut Window,
-                              cx: &mut App|
-                              -> AnyElement {
-                            let theme = Theme::current(cx);
-                            let is_selected = row.matches(current.as_ref());
-                            let (mark, title, subtitle) = row.render_parts(&theme);
-                            let row = row.clone();
-                            let select_weak = weak.clone();
-                            let select_popover = popover.clone();
-                            model_picker_row_shell(
-                                SharedString::from(format!("route-class-row-{row_index}")),
-                                is_selected,
-                                is_highlighted,
-                                &theme,
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .child(
+                    let render = move |row_index: usize,
+                                       row: &RouteClassRow,
+                                       is_highlighted: bool,
+                                       popover: &ContextMenuHandle,
+                                       _window: &mut Window,
+                                       cx: &mut App|
+                          -> AnyElement {
+                        let theme = Theme::current(cx);
+                        let is_selected = row.matches(current.as_ref());
+                        let (mark, title, subtitle) = row.render_parts(&theme);
+                        let row = row.clone();
+                        let select_weak = weak.clone();
+                        let select_popover = popover.clone();
+                        model_picker_row_shell(
+                            SharedString::from(format!("route-class-row-{row_index}")),
+                            is_selected,
+                            is_highlighted,
+                            &theme,
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .child(
+                                    div().flex().items_center().gap(px(8.0)).child(
                                         div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(
-                                                div()
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_size(sp(13.0))
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.text)
-                                                    .child(SharedString::from(title)),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt(px(4.0))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(mark)
-                                            .child(
-                                                div()
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(SharedString::from(subtitle)),
-                                            ),
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(13.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(theme.text)
+                                            .child(SharedString::from(title)),
                                     ),
-                            )
-                            .when(is_selected, |element| {
-                                element.child(icon("icons/check.svg", 13.0, theme.accent))
-                            })
-                            .on_click(move |_, window, cx| {
-                                let _ = select_weak.update(cx, |this, cx| {
-                                    this.set_route_class_row(class, &row, cx);
-                                });
-                                select_popover.close(window, cx);
-                            })
-                            .into_any_element()
-                        };
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(4.0))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(mark)
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_size(sp(12.5))
+                                                .text_color(theme.text_tertiary)
+                                                .child(SharedString::from(subtitle)),
+                                        ),
+                                ),
+                        )
+                        .when(is_selected, |element| {
+                            element.child(icon("icons/check.svg", 13.0, theme.accent))
+                        })
+                        .on_click(move |_, window, cx| {
+                            let _ = select_weak.update(cx, |this, cx| {
+                                this.set_route_class_row(class, &row, cx);
+                            });
+                            select_popover.close(window, cx);
+                        })
+                        .into_any_element()
+                    };
                     render
                 });
 
@@ -5696,7 +5684,8 @@ impl Waku {
         section: RouteClassSection,
         cx: &mut Context<Self>,
     ) {
-        self.route_class_search.update(cx, |search, cx| search.clear(cx));
+        self.route_class_search
+            .update(cx, |search, cx| search.clear(cx));
         let probes = self.route_class_probes();
         let rows = route_class_rows(&probes, &self.state.disabled_providers, "");
         let first = rows
@@ -6297,9 +6286,7 @@ impl Waku {
                 })
                 .unwrap_or(false);
             if !current {
-                let _ = this.update(cx, |this, _| {
-                    this.archived_message_searches.abandon(token)
-                });
+                let _ = this.update(cx, |this, _| this.archived_message_searches.abandon(token));
                 return;
             }
             let matches = cx
@@ -6320,8 +6307,7 @@ impl Waku {
                 {
                     return;
                 }
-                let Query::Ready(matches) = this.archived_message_searches.read(&query)
-                else {
+                let Query::Ready(matches) = this.archived_message_searches.read(&query) else {
                     return;
                 };
                 this.archived_message_matches_query = Some(query.clone());
@@ -6526,11 +6512,9 @@ impl Waku {
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_size(sp(11.5))
-                                .child(
-                                    super::command_palette::palette_content_match_text(
-                                        &matched, &query, window, theme,
-                                    ),
-                                ),
+                                .child(super::command_palette::palette_content_match_text(
+                                    &matched, &query, window, theme,
+                                )),
                         )
                     }),
             )
@@ -8183,7 +8167,9 @@ impl Waku {
                             &theme,
                             kind,
                             16.0,
-                            theme.text_secondary.opacity(if installed { 1.0 } else { 0.5 }),
+                            theme
+                                .text_secondary
+                                .opacity(if installed { 1.0 } else { 0.5 }),
                         ))
                         .child(
                             div()
@@ -8321,8 +8307,7 @@ impl Waku {
                                         .text_size(sp(12.5))
                                         .text_color(theme.text_ghost)
                                         .child(SharedString::from(
-                                            checked_label
-                                                .unwrap_or_else(|| "\u{00a0}".to_owned()),
+                                            checked_label.unwrap_or_else(|| "\u{00a0}".to_owned()),
                                         )),
                                 ),
                         )
@@ -8564,9 +8549,12 @@ impl Waku {
                                 )
                                 .tab_index(0)
                                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .on_activation(cx, move |this, _, cx| {
-                                    this.dismiss_provider_setup_terminal(kind, cx);
-                                }),
+                                .on_activation(
+                                    cx,
+                                    move |this, _, cx| {
+                                        this.dismiss_provider_setup_terminal(kind, cx);
+                                    },
+                                ),
                             ),
                         ),
                 )
@@ -8937,7 +8925,10 @@ impl Waku {
                                 .on_activation(cx, move |_this, window, cx| {
                                     let answer = window.prompt(
                                         gpui::PromptLevel::Warning,
-                                        &tr!("computer_use.confirm_revoke", name = revoke_name.clone()),
+                                        &tr!(
+                                            "computer_use.confirm_revoke",
+                                            name = revoke_name.clone()
+                                        ),
                                         Some(&tr!("computer_use.confirm_revoke_detail")),
                                         &[
                                             gpui::PromptButton::cancel(tr!("common.cancel")),
@@ -8993,35 +8984,33 @@ impl Waku {
             let header = {
                 let title = tr!("computer_use.macos_access");
                 let description = tr!("computer_use.helper_access", helper = helper_name);
-                search
-                    .matched(&title, &description)
-                    .map(|matched| {
-                        div()
-                            .child(settings_title_jump(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(settings_search_text(
-                                        title,
-                                        matched.title_ranges.clone(),
-                                        theme,
-                                    )),
-                                &matched,
-                                theme,
-                            ))
-                            .child(
-                                div()
-                                    .mt(px(4.0))
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(settings_search_text(
-                                        description,
-                                        matched.description_ranges.clone(),
-                                        theme,
-                                    )),
-                            )
-                    })
+                search.matched(&title, &description).map(|matched| {
+                    div()
+                        .child(settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(settings_search_text(
+                                    description,
+                                    matched.description_ranges.clone(),
+                                    theme,
+                                )),
+                        )
+                })
             };
             let screen_row = permission_status_row(
                 tr!("computer_use.screen_recording"),
@@ -9070,9 +9059,7 @@ impl Waku {
                                         .cursor_default()
                                         .text_size(sp(12.5))
                                         .opacity(if pending { 0.6 } else { 1.0 })
-                                        .focus_visible(|element| {
-                                            element.border_color(theme.accent)
-                                        })
+                                        .focus_visible(|element| element.border_color(theme.accent))
                                         .child(if pending {
                                             tr!("common.checking")
                                         } else {
@@ -9112,41 +9099,39 @@ impl Waku {
         let apps_card = {
             let title = tr!("computer_use.always_allowed_apps");
             let description = tr!("computer_use.always_allowed_apps_description");
-            search
-                .matched(&title, &description)
-                .map(|matched| {
-                    div()
-                        .px(px(20.0))
-                        .py(px(14.0))
-                        .rounded(px(16.0))
-                        .bg(theme.raised)
-                        .child(settings_title_jump(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ))
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(settings_search_text(
-                                    description,
-                                    matched.description_ranges.clone(),
-                                    theme,
-                                )),
-                        )
-                        .when(!search.active(), |card| card.child(allowed_apps))
-                        .into_any_element()
-                })
+            search.matched(&title, &description).map(|matched| {
+                div()
+                    .px(px(20.0))
+                    .py(px(14.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .child(settings_title_jump(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(settings_search_text(
+                                title,
+                                matched.title_ranges.clone(),
+                                theme,
+                            )),
+                        &matched,
+                        theme,
+                    ))
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(settings_search_text(
+                                description,
+                                matched.description_ranges.clone(),
+                                theme,
+                            )),
+                    )
+                    .when(!search.active(), |card| card.child(allowed_apps))
+                    .into_any_element()
+            })
         };
 
         div()
@@ -9700,7 +9685,9 @@ impl Waku {
             .filter(|kind| {
                 *kind != ProviderKind::Pi
                     && !self.state.disabled_providers.contains(kind)
-                    && self.provider_probe(*kind).is_some_and(|probe| probe.installed)
+                    && self
+                        .provider_probe(*kind)
+                        .is_some_and(|probe| probe.installed)
             })
             .collect()
     }
@@ -9867,12 +9854,8 @@ impl Waku {
             }
             Some(snapshots) => {
                 for snapshot in snapshots {
-                    cards = cards.child(self.render_integration_card(
-                        snapshot,
-                        &providers,
-                        theme,
-                        cx,
-                    ));
+                    cards =
+                        cards.child(self.render_integration_card(snapshot, &providers, theme, cx));
                 }
             }
         }
@@ -9922,9 +9905,7 @@ impl Waku {
         // Disconnect; one waiting on OAuth offers Sign in; anything else
         // opens the connect form.
         let (status_label, status_color) = match configured.map(|setting| setting.auth) {
-            Some(IntegrationAuthState::Connected) => {
-                (tr!("integrations.connected"), theme.success)
-            }
+            Some(IntegrationAuthState::Connected) => (tr!("integrations.connected"), theme.success),
             Some(IntegrationAuthState::NeedsAuth) => {
                 (tr!("integrations.sign_in_required"), theme.warning)
             }
@@ -9966,7 +9947,10 @@ impl Waku {
                 move |_this, window, cx| {
                     let answer = window.prompt(
                         gpui::PromptLevel::Warning,
-                        &tr!("integrations.confirm_disconnect", name = disconnect_name.clone()),
+                        &tr!(
+                            "integrations.confirm_disconnect",
+                            name = disconnect_name.clone()
+                        ),
                         Some(&tr!("integrations.confirm_disconnect_detail")),
                         &[
                             gpui::PromptButton::cancel(tr!("common.cancel")),
@@ -10022,8 +10006,7 @@ impl Waku {
                 ));
             }
         } else if editing {
-            body =
-                body.child(self.render_integration_editor(snapshot, None, providers, theme, cx));
+            body = body.child(self.render_integration_editor(snapshot, None, providers, theme, cx));
         }
 
         div()
@@ -10198,9 +10181,7 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(tr!("integrations.api_key_hint")),
             );
-            form = form.child(
-                TextField::new("integration-api-key", api_key.clone()).w_full(),
-            );
+            form = form.child(TextField::new("integration-api-key", api_key.clone()).w_full());
         }
 
         form = form.child(
@@ -10448,8 +10429,7 @@ impl RouteClassRow {
                 tr!("routing.provider_default"),
             ),
             RouteClassRow::Model(provider, model) => (
-                provider_mark(theme, *provider, 14.0, theme.text_secondary)
-                .into_any_element(),
+                provider_mark(theme, *provider, 14.0, theme.text_secondary).into_any_element(),
                 model
                     .name_i18n
                     .as_ref()
@@ -10498,8 +10478,9 @@ pub(super) fn route_class_rows(
                     // way the picker's model rows do — the policy
                     // vocabulary has none, so it drops out of a filtered
                     // list.
-                    Some(("provider", value)) => provider
-                        .is_some_and(|kind| kind.id().eq_ignore_ascii_case(value)),
+                    Some(("provider", value)) => {
+                        provider.is_some_and(|kind| kind.id().eq_ignore_ascii_case(value))
+                    }
                     _ => searchable.to_ascii_lowercase().contains(token),
                 }
             })
@@ -10596,11 +10577,7 @@ pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
 
 /// Small bordered action button for the Integrations cards.
 #[track_caller]
-fn integration_button(
-    id: impl Into<ElementId>,
-    label: String,
-    theme: Theme,
-) -> Stateful<Div> {
+fn integration_button(id: impl Into<ElementId>, label: String, theme: Theme) -> Stateful<Div> {
     div()
         .id(id)
         .tab_index(0)
@@ -10636,12 +10613,20 @@ fn integration_chip(
         .px(px(8.0))
         .rounded_full()
         .border(hairline())
-        .border_color(if on { theme.accent } else { theme.border_strong })
+        .border_color(if on {
+            theme.accent
+        } else {
+            theme.border_strong
+        })
         .flex()
         .items_center()
         .cursor_default()
         .text_size(sp(11.5))
-        .text_color(if on { theme.accent } else { theme.text_secondary })
+        .text_color(if on {
+            theme.accent
+        } else {
+            theme.text_secondary
+        })
         .when(on, |element| element.bg(theme.accent.opacity(0.12)))
         .hover(|element| element.bg(theme.overlay))
         .child(label)

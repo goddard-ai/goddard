@@ -798,16 +798,8 @@ impl ExitPlanModeHandler for CopilotHandler {
             title_i18n: Some(title_i18n),
             detail: data.summary,
             options: vec![
-                PermissionOption::keyed(
-                    "allow",
-                    localized!("permission.allow_once"),
-                    true,
-                ),
-                PermissionOption::keyed(
-                    "deny",
-                    localized!("common.deny"),
-                    false,
-                ),
+                PermissionOption::keyed("allow", localized!("permission.allow_once"), true),
+                PermissionOption::keyed("deny", localized!("common.deny"), false),
             ],
             detail_i18n: None,
         });

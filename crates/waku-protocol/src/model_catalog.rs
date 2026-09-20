@@ -394,7 +394,11 @@ mod tests {
         // A non-Cursor provider resolves only its own spelling — no
         // `cursor-` prefix, family re-spelling, or auto/default swap.
         assert_eq!(
-            resolve_packed_model(["grok-4.6", "composer-2.5"], "grok-4.6-xhigh", ProviderKind::Grok),
+            resolve_packed_model(
+                ["grok-4.6", "composer-2.5"],
+                "grok-4.6-xhigh",
+                ProviderKind::Grok
+            ),
             Some(PackedModelSelection {
                 value: "grok-4.6".into(),
                 suffix: "xhigh".into(),

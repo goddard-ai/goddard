@@ -143,9 +143,7 @@ pub fn review_action(eval: &EvalSettings, action: &PendingAction) -> ReviewVerdi
 
     match result {
         Ok(evaluation) => match evaluation.answers.get("decision") {
-            Some(EvalAnswer::Choice { choice, .. }) if choice == "clear" => {
-                ReviewVerdict::Allow
-            }
+            Some(EvalAnswer::Choice { choice, .. }) if choice == "clear" => ReviewVerdict::Allow,
             _ => ReviewVerdict::Escalate,
         },
         Err(_) => ReviewVerdict::Escalate,
@@ -216,9 +214,7 @@ mod tests {
             provider_metadata: None,
         };
         let verdict = match evaluation.answers.get("decision") {
-            Some(EvalAnswer::Choice { choice, .. }) if choice == "clear" => {
-                ReviewVerdict::Allow
-            }
+            Some(EvalAnswer::Choice { choice, .. }) if choice == "clear" => ReviewVerdict::Allow,
             _ => ReviewVerdict::Escalate,
         };
         assert_eq!(verdict, ReviewVerdict::Escalate);

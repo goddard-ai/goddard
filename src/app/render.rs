@@ -50,32 +50,36 @@ impl Waku {
                 .w(px(8.0))
                 .h_full()
                 .cursor_col_resize()
-                .child(bar(
-                    div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full(),
-                )),
+                .child(bar(div()
+                    .absolute()
+                    .top_0()
+                    .left(px(5.0))
+                    .w(px(2.0))
+                    .h_full())),
             PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => strip
                 .top_0()
                 .left(px(-5.0))
                 .w(px(10.0))
                 .h_full()
                 .cursor_col_resize()
-                .child(bar(
-                    div().absolute().top_0().left(px(5.0)).w(px(2.0)).h_full(),
-                )),
+                .child(bar(div()
+                    .absolute()
+                    .top_0()
+                    .left(px(5.0))
+                    .w(px(2.0))
+                    .h_full())),
             PanelResizeTarget::GitPanelTop => strip
                 .left_0()
                 .right_0()
                 .bottom_0()
                 .h(px(8.0))
                 .cursor_row_resize()
-                .child(bar(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom(px(3.0))
-                        .h(px(2.0)),
-                )),
+                .child(bar(div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom(px(3.0))
+                    .h(px(2.0)))),
         };
         strip.on_mouse_down(
             MouseButton::Left,
@@ -1202,13 +1206,9 @@ impl Waku {
                                 project,
                                 number,
                                 url,
-                            } => this.open_created_issue(
-                                *project,
-                                *number,
-                                url.as_ref(),
-                                window,
-                                cx,
-                            ),
+                            } => {
+                                this.open_created_issue(*project, *number, url.as_ref(), window, cx)
+                            }
                         }
                         cx.stop_propagation();
                     }
@@ -1235,13 +1235,9 @@ impl Waku {
                                 project,
                                 number,
                                 url,
-                            } => this.open_created_issue(
-                                *project,
-                                *number,
-                                url.as_ref(),
-                                window,
-                                cx,
-                            ),
+                            } => {
+                                this.open_created_issue(*project, *number, url.as_ref(), window, cx)
+                            }
                         }
                         cx.stop_propagation();
                     }

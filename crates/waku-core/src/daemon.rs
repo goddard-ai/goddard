@@ -17,9 +17,9 @@ use crate::attachments::AttachmentStore;
 use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, DriverEvent,
-    Project, ProjectMapStatus, ProviderKind, ProviderResumeCursor, ProviderSessionCatalogStatus,
-    SessionStatus, SessionWorkspace, TurnStatus,
+    AgentSession, Checkpoint, CheckpointStatus, DriverEvent, Project, ProjectMapStatus,
+    ProviderKind, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
+    SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -157,11 +157,9 @@ impl WakuBackend {
             .to_owned();
         let share_dir = data_dir.clone().join("share");
         let settings = Arc::new(settings);
-        let integrations = crate::integrations::IntegrationService::new(
-            settings.clone(),
-            data_dir.clone(),
-        )
-        .context("could not start the integrations service")?;
+        let integrations =
+            crate::integrations::IntegrationService::new(settings.clone(), data_dir.clone())
+                .context("could not start the integrations service")?;
         let our_name = std::env::var("USER")
             .ok()
             .filter(|name| !name.is_empty())
@@ -252,12 +250,9 @@ impl WakuBackend {
                         .map(|project| crate::share::RepoInfo {
                             path: project.path.clone(),
                             name: project.name.clone(),
-                            origin_url: crate::git_branch::remote_url(
-                                &project.path,
-                                "origin",
-                            )
-                            .ok()
-                            .flatten(),
+                            origin_url: crate::git_branch::remote_url(&project.path, "origin")
+                                .ok()
+                                .flatten(),
                         })
                         .collect();
                     *cache = Some((std::time::Instant::now(), repos));
@@ -296,15 +291,13 @@ impl WakuBackend {
                                         && session.archived_at.is_none()
                                         && session.side_chat_of.is_none()
                                 })
-                                .map(|session| {
-                                    waku_protocol::friends::SharedSessionSummary {
-                                        session_id: session.id,
-                                        title: session.title.clone(),
-                                        auto_title: session.auto_title.clone(),
-                                        status: session.status,
-                                        created_at: session.created_at,
-                                        last_reply_at: session.last_reply_at,
-                                    }
+                                .map(|session| waku_protocol::friends::SharedSessionSummary {
+                                    session_id: session.id,
+                                    title: session.title.clone(),
+                                    auto_title: session.auto_title.clone(),
+                                    status: session.status,
+                                    created_at: session.created_at,
+                                    last_reply_at: session.last_reply_at,
                                 })
                                 .collect()
                         }
@@ -1023,9 +1016,9 @@ impl Backend for WakuBackend {
                 origin_url,
                 session_id,
             } => {
-                let session =
-                    self.share
-                        .watch_friend_session(node_id, origin_url, session_id)?;
+                let session = self
+                    .share
+                    .watch_friend_session(node_id, origin_url, session_id)?;
                 Ok(ResponsePayload::FriendSession {
                     session: Box::new(session),
                 })
@@ -1208,11 +1201,9 @@ impl Backend for WakuBackend {
                     evaluation: result?,
                 })
             }
-            Command::TestEvalConnection { settings } => {
-                Ok(ResponsePayload::Evaluation {
-                    evaluation: crate::eval::probe(&settings)?,
-                })
-            }
+            Command::TestEvalConnection { settings } => Ok(ResponsePayload::Evaluation {
+                evaluation: crate::eval::probe(&settings)?,
+            }),
             Command::RouteTask {
                 prompt,
                 project,
@@ -1675,7 +1666,9 @@ impl Backend for WakuBackend {
                         )?
                     }
                     ProviderResumeCursor::Antigravity { .. } => {
-                        bail!("Antigravity conversations live in its own TUI; there is no transcript to import")
+                        bail!(
+                            "Antigravity conversations live in its own TUI; there is no transcript to import"
+                        )
                     }
                 };
                 Ok(ResponsePayload::ProviderSessionHistory {
@@ -1988,14 +1981,11 @@ impl Backend for WakuBackend {
                 // text, so the injected blocks reach the provider without
                 // entering the transcript as a user message.
                 let mut command = command;
-                if let Command::Prompt {
-                    prompt, hidden, ..
-                } = &mut command
+                if let Command::Prompt { prompt, hidden, .. } = &mut command
                     && !*hidden
                 {
                     *prompt = self.memory.prompt_with_memory(session_id, prompt);
-                    let (mapped, status) =
-                        self.inject_repo_map(session_id, std::mem::take(prompt));
+                    let (mapped, status) = self.inject_repo_map(session_id, std::mem::take(prompt));
                     *prompt = mapped;
                     if let Some(status) = status
                         && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status))
@@ -2156,12 +2146,16 @@ impl WakuBackend {
         };
         match review_move {
             ReviewMove::Approved => {
-                self.share
-                    .notify_refs(origin_url.clone(), vec![crate::review::NOTES_REF.to_owned()]);
+                self.share.notify_refs(
+                    origin_url.clone(),
+                    vec![crate::review::NOTES_REF.to_owned()],
+                );
             }
             ReviewMove::Rejected => {
-                self.share
-                    .notify_refs(origin_url.clone(), vec![crate::review::NOTES_REF.to_owned()]);
+                self.share.notify_refs(
+                    origin_url.clone(),
+                    vec![crate::review::NOTES_REF.to_owned()],
+                );
                 self.share
                     .notify_push(origin_url.clone(), vec!["qa".to_owned()]);
             }
@@ -3091,17 +3085,13 @@ impl WakuBackend {
                     "this task was created with the Sandbox VM environment, but the sandbox experiment is off"
                 );
             }
-            let launch = crate::sandbox::launch_for_provider(
-                provider,
-                &options.cwd,
-                |status| {
-                    // Launch progress is ephemeral — it exists to name the
-                    // Connecting phase, never to enter the transcript.
-                    if let Ok(wire) = event_to_wire(DriverEvent::SandboxSetup(status)) {
-                        let _ = events.send_ephemeral(wire);
-                    }
-                },
-            )
+            let launch = crate::sandbox::launch_for_provider(provider, &options.cwd, |status| {
+                // Launch progress is ephemeral — it exists to name the
+                // Connecting phase, never to enter the transcript.
+                if let Ok(wire) = event_to_wire(DriverEvent::SandboxSetup(status)) {
+                    let _ = events.send_ephemeral(wire);
+                }
+            })
             .context("could not prepare the sandbox VM")?;
             options.binary = launch.binary;
             options.cwd = launch.cwd;
@@ -3409,8 +3399,10 @@ impl WakuBackend {
             sent_by_task: sender,
             hidden: false,
         })?)?;
-        let (prompt, status) = self
-            .inject_repo_map(session_id, self.memory.prompt_with_memory(session_id, &prompt));
+        let (prompt, status) = self.inject_repo_map(
+            session_id,
+            self.memory.prompt_with_memory(session_id, &prompt),
+        );
         if let Some(status) = status
             && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status))
         {
@@ -3431,24 +3423,18 @@ impl WakuBackend {
         session_id: Uuid,
         prompt: String,
     ) -> (String, Option<ProjectMapStatus>) {
-        const WAIT_FOR_COLD_INDEX: std::time::Duration =
-            std::time::Duration::from_millis(1_500);
+        const WAIT_FOR_COLD_INDEX: std::time::Duration = std::time::Duration::from_millis(1_500);
         let (lock, cvar) = &*self.repo_maps;
         let mut maps = lock.lock();
         if !maps.pending.remove(&session_id) {
             return (prompt, None);
         }
-        let Some(cwd) = maps
-            .sessions
-            .get(&session_id)
-            .map(|(cwd, _)| cwd.clone())
-        else {
+        let Some(cwd) = maps.sessions.get(&session_id).map(|(cwd, _)| cwd.clone()) else {
             return (prompt, None);
         };
         let deadline = std::time::Instant::now() + WAIT_FOR_COLD_INDEX;
         while !maps.indexes.contains_key(&cwd) && maps.building.contains(&cwd) {
-            let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now())
-            else {
+            let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
                 break;
             };
             if cvar.wait_for(&mut maps, remaining).timed_out() {
@@ -3858,7 +3844,11 @@ fn fork_provider_session(
             title,
         } => (
             crate::copilot_session::fork_session_at_turn(
-                &binary, &cwd, &session_id, turn_count, &title,
+                &binary,
+                &cwd,
+                &session_id,
+                turn_count,
+                &title,
             )?,
             HashMap::new(),
             None,
@@ -3886,7 +3876,9 @@ fn handle_driver_command(
 ) -> anyhow::Result<ResponsePayload> {
     match command {
         Command::Prompt {
-            prompt, attachments, ..
+            prompt,
+            attachments,
+            ..
         } => driver.prompt_with_attachments(prompt, attachments),
         Command::Steer { prompt } => driver.steer(prompt),
         Command::ClarifyUserInput {
@@ -4072,8 +4064,7 @@ fn spawn_repo_map_refresh(
             let mut index = repo_maps.0.lock().indexes.remove(&root);
             let result = match index.as_mut() {
                 Some(existing) => existing.refresh().map(|_| ()),
-                None => crate::repo_map::RepoMapIndex::scan(&root)
-                    .map(|built| index = Some(built)),
+                None => crate::repo_map::RepoMapIndex::scan(&root).map(|built| index = Some(built)),
             };
             let mut maps = repo_maps.0.lock();
             match result {
@@ -4082,17 +4073,16 @@ fn spawn_repo_map_refresh(
                         let indexed_files = index.indexed_files();
                         maps.indexes.insert(root.clone(), index);
                         if let Some(sink) = &sink
-                            && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(
-                                ProjectMapStatus::Ready { indexed_files },
-                            ))
+                            && let Ok(wire) =
+                                event_to_wire(DriverEvent::ProjectMap(ProjectMapStatus::Ready {
+                                    indexed_files,
+                                }))
                         {
                             // Every session in this root moves to ready —
                             // including one that joined the build late and
                             // never got its own thread.
-                            for (session_id, (_, runtime_id)) in maps
-                                .sessions
-                                .iter()
-                                .filter(|(_, (cwd, _))| *cwd == root)
+                            for (session_id, (_, runtime_id)) in
+                                maps.sessions.iter().filter(|(_, (cwd, _))| *cwd == root)
                             {
                                 let _ = sink
                                     .for_session(*session_id, *runtime_id)
@@ -4383,7 +4373,6 @@ fn record_provider_cursor(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4608,9 +4597,7 @@ mod tests {
             .unwrap();
         assert!(!reloaded.sessions[index].quarantined);
         assert!(!reloaded.sessions[index].sandboxed);
-        reload_store
-            .hydrate(&mut reloaded.sessions[index])
-            .unwrap();
+        reload_store.hydrate(&mut reloaded.sessions[index]).unwrap();
         assert!(reloaded.sessions[index].quarantined);
         assert!(reloaded.sessions[index].sandboxed);
 

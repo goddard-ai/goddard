@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, ListAlignment, ListState, MouseButton,
-    SharedString, Task, Window, div, list, px, prelude::*,
+    SharedString, Task, Window, div, list, prelude::*, px,
 };
 
 use crate::input::{InputEvent, TextInput};
 use crate::keybindings::{
     BindingFact, BindingOperation, BindingSource, CommandId, CommandRow, Conflict, ConflictKind,
-    Editability, KeyboardLayout, KeybindingService, KeymapSnapshot, LayoutId, LayoutSource,
+    Editability, KeybindingService, KeyboardLayout, KeymapSnapshot, LayoutId, LayoutSource,
     PlatformSet, UserOverride, analyze_conflicts, default_path, detect_layout, layout_by_id,
     snapshot_key_bindings,
 };
@@ -443,7 +443,11 @@ impl super::Waku {
         cx.notify();
     }
 
-    pub(super) fn keybindings_cancel_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn keybindings_cancel_capture(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(ui) = self.keybindings.as_mut() else {
             return;
         };
@@ -462,7 +466,11 @@ impl super::Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.keybindings.as_ref().is_none_or(|ui| ui.capture.is_none()) {
+        if self
+            .keybindings
+            .as_ref()
+            .is_none_or(|ui| ui.capture.is_none())
+        {
             return;
         }
         cx.stop_propagation();
@@ -472,10 +480,7 @@ impl super::Waku {
                 return;
             }
             "backspace" => {
-                if let Some(capture) = self
-                    .keybindings
-                    .as_mut()
-                    .and_then(|ui| ui.capture.as_mut())
+                if let Some(capture) = self.keybindings.as_mut().and_then(|ui| ui.capture.as_mut())
                 {
                     capture.strokes.pop();
                 }
@@ -485,10 +490,7 @@ impl super::Waku {
             "enter" => {
                 // Enter while a conflict warning is showing confirms the
                 // write; otherwise it finishes early.
-                if let Some(capture) = self
-                    .keybindings
-                    .as_mut()
-                    .and_then(|ui| ui.capture.as_mut())
+                if let Some(capture) = self.keybindings.as_mut().and_then(|ui| ui.capture.as_mut())
                 {
                     if capture.warning.is_some() {
                         capture.confirmed = true;
@@ -501,11 +503,8 @@ impl super::Waku {
         }
 
         let mapper = cx.keyboard_mapper().clone();
-        let normalized = gpui::KeybindingKeystroke::new_with_mapper(
-            keystroke.clone(),
-            false,
-            mapper.as_ref(),
-        );
+        let normalized =
+            gpui::KeybindingKeystroke::new_with_mapper(keystroke.clone(), false, mapper.as_ref());
         let stroke = stroke_parts(normalized.inner());
 
         let Some(ui) = self.keybindings.as_mut() else {
@@ -874,64 +873,65 @@ impl super::Waku {
             }));
 
         page = page.child(
-                // Header: title, search, layout readout.
-                div()
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .border_b(hairline())
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .text_size(sp(15.0))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(theme.text)
-                            .child(tr!("keybind.title")),
-                    )
-                    .child(div().w(px(320.0)).child(ui.search.clone()))
-                    .child(
-                        // Click cycles the bundled layouts and pins the pick
-                        // in keybindings.json (manual mode).
-                        div()
-                            .id("keybindings-layout")
-                            .ml_auto()
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .rounded(px(4.0))
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_secondary)
-                            .cursor_pointer()
-                            .hover(|element| element.bg(theme.overlay))
-                            .child(format!("{source_label} · {}", layout.name))
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                if let Some(ui) = this.keybindings.as_mut() {
-                                    let layouts = crate::keybindings::bundled_layouts();
-                                    let next = layouts
-                                        .iter()
-                                        .position(|layout| layout.id == ui.layout)
-                                        .map(|index| (index + 1) % layouts.len())
-                                        .unwrap_or(0);
-                                    if let Some(layout) = layouts.get(next) {
-                                        ui.layout = layout.id;
-                                        ui.layout_source = LayoutSource::Manual;
-                                        if ui
-                                            .service
-                                            .set_layout(layout.id.as_str(), true)
-                                            .is_err()
-                                        {
-                                            ui.commit_error =
-                                                Some("could not save layout".into());
-                                        }
+            // Header: title, search, layout readout.
+            div()
+                .px(px(20.0))
+                .py(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .border_b(hairline())
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .text_size(sp(15.0))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(theme.text)
+                        .child(tr!("keybind.title")),
+                )
+                .child(div().w(px(320.0)).child(ui.search.clone()))
+                .child(
+                    // Click cycles the bundled layouts and pins the pick
+                    // in keybindings.json (manual mode).
+                    div()
+                        .id("keybindings-layout")
+                        .ml_auto()
+                        .px(px(6.0))
+                        .py(px(2.0))
+                        .rounded(px(4.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .cursor_pointer()
+                        .hover(|element| element.bg(theme.overlay))
+                        .child(format!("{source_label} · {}", layout.name))
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            if let Some(ui) = this.keybindings.as_mut() {
+                                let layouts = crate::keybindings::bundled_layouts();
+                                let next = layouts
+                                    .iter()
+                                    .position(|layout| layout.id == ui.layout)
+                                    .map(|index| (index + 1) % layouts.len())
+                                    .unwrap_or(0);
+                                if let Some(layout) = layouts.get(next) {
+                                    ui.layout = layout.id;
+                                    ui.layout_source = LayoutSource::Manual;
+                                    if ui.service.set_layout(layout.id.as_str(), true).is_err() {
+                                        ui.commit_error = Some("could not save layout".into());
                                     }
                                 }
-                                cx.notify();
-                            })),
-                    ),
-            );
+                            }
+                            cx.notify();
+                        })),
+                ),
+        );
 
-        page = page.child(render_keyboard_stage(ui, layout, &codes, preview_row, theme));
+        page = page.child(render_keyboard_stage(
+            ui,
+            layout,
+            &codes,
+            preview_row,
+            theme,
+        ));
 
         if let Some(error) = &ui.commit_error {
             page = page.child(
@@ -976,12 +976,14 @@ impl super::Waku {
                     .on_click(cx.listener(|this, _, _window, cx| {
                         this.keybindings_cycle_conflicts(cx);
                     }))
-                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.keybindings_cycle_conflicts(cx);
-                            cx.stop_propagation();
-                        }
-                    })),
+                    .on_key_down(
+                        cx.listener(|this, event: &gpui::KeyDownEvent, _window, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.keybindings_cycle_conflicts(cx);
+                                cx.stop_propagation();
+                            }
+                        }),
+                    ),
             );
         }
 
@@ -1410,7 +1412,9 @@ fn render_row(
         .gap(px(COL_GAP))
         .px(px(ROW_PAD))
         .rounded(px(6.0))
-        .when(selected, |element| element.bg(theme.sidebar_item_background))
+        .when(selected, |element| {
+            element.bg(theme.sidebar_item_background)
+        })
         .when(hovered, |element| element.bg(theme.overlay))
         .hover(|element| element.bg(theme.overlay))
         .on_hover(move |hovered, _window, app| {
@@ -1507,10 +1511,7 @@ mod tests {
     #[test]
     fn sequence_matches_keys_and_term_combinations() {
         for query in ["p", "escape", "f5", "tab"] {
-            assert!(
-                sequence_matches(&format!("cmd-{query}"), query),
-                "{query}"
-            );
+            assert!(sequence_matches(&format!("cmd-{query}"), query), "{query}");
         }
         // Terms can combine and come in any order, but all must land on
         // the same stroke.

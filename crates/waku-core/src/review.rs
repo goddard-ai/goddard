@@ -81,7 +81,10 @@ pub fn promote(cwd: &Path) -> anyhow::Result<Option<ReviewQueue>> {
     let Some(frontier) = &queue.frontier else {
         bail!("nothing on qa is approved for promotion");
     };
-    let base = queue.base_branch.clone().unwrap_or_else(|| "main".to_owned());
+    let base = queue
+        .base_branch
+        .clone()
+        .unwrap_or_else(|| "main".to_owned());
     git_success(
         cwd,
         &["push", "origin", &format!("{frontier}:refs/heads/{base}")],
@@ -165,10 +168,7 @@ fn queue_inner(cwd: &Path) -> anyhow::Result<ReviewQueue> {
 
 /// `sha` → stored review records, read in one `git log --notes` pass.
 fn notes_by_commit(cwd: &Path, range: &str) -> anyhow::Result<HashMap<String, Vec<NoteLine>>> {
-    let output = git_stdout(
-        cwd,
-        &["log", "--notes=qa", "--format=%H%x1f%N%x1e", range],
-    )?;
+    let output = git_stdout(cwd, &["log", "--notes=qa", "--format=%H%x1f%N%x1e", range])?;
     let mut map = HashMap::new();
     for record in output.split('\x1e') {
         let mut fields = record.splitn(2, '\x1f');
@@ -219,8 +219,7 @@ fn revert_marks(body: &str) -> Vec<String> {
                 .trim()
                 .strip_prefix("This reverts commit ")?
                 .trim_end_matches('.');
-            (sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()))
-                .then(|| sha.to_owned())
+            (sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit())).then(|| sha.to_owned())
         })
         .collect()
 }
@@ -315,16 +314,15 @@ fn record(cwd: &Path, sha: &str, decision: ReviewDecision) -> anyhow::Result<()>
         decision,
         at: now_secs(),
     })?;
-    let existing = git_optional_stdout(cwd, &["notes", "--ref", "qa", "show", sha])?
-        .unwrap_or_default();
+    let existing =
+        git_optional_stdout(cwd, &["notes", "--ref", "qa", "show", sha])?.unwrap_or_default();
     let content = match existing.trim_end() {
         "" => line,
         existing => format!("{existing}\n{line}"),
     };
     // Unique per call — a concurrent record (or test) must not read a
     // stranger's decision.
-    let tmp =
-        std::env::temp_dir().join(format!("goddard-qa-note-{}", uuid::Uuid::new_v4()));
+    let tmp = std::env::temp_dir().join(format!("goddard-qa-note-{}", uuid::Uuid::new_v4()));
     std::fs::write(&tmp, format!("{content}\n"))?;
     let write = git_success(
         cwd,
@@ -400,13 +398,20 @@ fn revert_and_push(worktree: &Path, sha: &str) -> anyhow::Result<()> {
 /// one record per line makes `cat_sort_uniq` the correct merge.
 fn push_notes(cwd: &Path) -> anyhow::Result<()> {
     for _ in 0..PUSH_ATTEMPTS {
-        let output = git_capture(cwd, &["push", "origin", &format!("{NOTES_REF}:{NOTES_REF}")])?;
+        let output = git_capture(
+            cwd,
+            &["push", "origin", &format!("{NOTES_REF}:{NOTES_REF}")],
+        )?;
         if output.status.success() {
             return Ok(());
         }
         git_success(
             cwd,
-            &["fetch", "origin", &format!("{NOTES_REF}:{NOTES_REMOTE_TMP}")],
+            &[
+                "fetch",
+                "origin",
+                &format!("{NOTES_REF}:{NOTES_REMOTE_TMP}"),
+            ],
         )?;
         git_success(
             cwd,
@@ -426,7 +431,10 @@ fn push_notes(cwd: &Path) -> anyhow::Result<()> {
 }
 
 fn fetch_notes(cwd: &Path) {
-    let _ = git_capture(cwd, &["fetch", "origin", &format!("+{NOTES_REF}:{NOTES_REF}")]);
+    let _ = git_capture(
+        cwd,
+        &["fetch", "origin", &format!("+{NOTES_REF}:{NOTES_REF}")],
+    );
 }
 
 fn rev_parse(cwd: &Path, reference: &str) -> anyhow::Result<Option<String>> {

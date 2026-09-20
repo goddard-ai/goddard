@@ -288,7 +288,11 @@ impl Waku {
     pub(super) fn jev_credential_missing(&self) -> bool {
         let eval = self.state.eval.clone().unwrap_or_default();
         let missing = |value: &Option<String>| {
-            value.as_deref().map(str::trim).unwrap_or_default().is_empty()
+            value
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
         };
         match eval.backend {
             waku_protocol::eval::EvalBackend::TypeSafe => missing(&eval.typesafe_api_key),

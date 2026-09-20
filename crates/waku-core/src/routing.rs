@@ -266,7 +266,11 @@ mod tests {
         }
     }
 
-    fn entry(provider: ProviderKind, model: Option<&str>, effort: Option<&str>) -> RouteClassTarget {
+    fn entry(
+        provider: ProviderKind,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> RouteClassTarget {
         RouteClassTarget {
             provider,
             model: model.map(str::to_owned),
@@ -326,14 +330,7 @@ mod tests {
             model: Some("claude-opus-5".into()),
             effort: Some("max".into()),
         };
-        let run = route_task(
-            None,
-            &classes,
-            "hello",
-            None,
-            &candidates,
-            Some(&last_used),
-        );
+        let run = route_task(None, &classes, "hello", None, &candidates, Some(&last_used));
         assert_eq!(run.decision.target.provider, ProviderKind::Claude);
         assert_eq!(run.decision.target.model, None);
         assert_eq!(
@@ -362,11 +359,8 @@ mod tests {
             ),
             candidate(ProviderKind::Codex, &["gpt-5.5"]),
         ];
-        let (target, note) = resolve_entry(
-            classes.get(&TaskClass::Routine).unwrap(),
-            &candidates,
-            None,
-        );
+        let (target, note) =
+            resolve_entry(classes.get(&TaskClass::Routine).unwrap(), &candidates, None);
         assert_eq!(note, None);
         assert_eq!(target.provider, ProviderKind::Claude);
         assert_eq!(target.model.as_deref(), Some("claude-haiku-4-5"));
@@ -420,11 +414,8 @@ mod tests {
             entry(ProviderKind::Claude, None, Some("high")),
         )]);
         let candidates = [candidate(ProviderKind::Claude, &["claude-sonnet-5"])];
-        let (target, note) = resolve_entry(
-            classes.get(&TaskClass::General).unwrap(),
-            &candidates,
-            None,
-        );
+        let (target, note) =
+            resolve_entry(classes.get(&TaskClass::General).unwrap(), &candidates, None);
         assert_eq!(note, None);
         assert_eq!(target.model, None);
         assert_eq!(target.effort.as_deref(), Some("high"));

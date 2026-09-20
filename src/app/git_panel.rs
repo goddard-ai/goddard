@@ -1555,7 +1555,10 @@ impl Waku {
             } => (
                 base,
                 workspace,
-                tr!("git_panel.auto_resolving_rebase_in_chat", base = base.clone()),
+                tr!(
+                    "git_panel.auto_resolving_rebase_in_chat",
+                    base = base.clone()
+                ),
             ),
             SyncConflict::Pull { .. } => return false,
         };
@@ -1583,12 +1586,7 @@ impl Waku {
         };
         self.state
             .selected_session
-            .and_then(|id| {
-                self.state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == id)
-            })
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
             .filter(|session| owns(session))
             .or_else(|| self.state.sessions.iter().find(|session| owns(session)))
             .map(|session| session.id)
@@ -2308,11 +2306,7 @@ impl Waku {
     /// candidate unrecorded so a later pass retries; only a definitive answer
     /// lands in `transcript_commit_details`, where `Failed` means "not a
     /// commit" rather than "couldn't ask".
-    pub(super) fn ensure_transcript_commit_detail(
-        &mut self,
-        sha: &str,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn ensure_transcript_commit_detail(&mut self, sha: &str, cx: &mut Context<Self>) {
         if self.transcript_commit_details.contains_key(sha) {
             return;
         }
@@ -4359,7 +4353,10 @@ impl Waku {
         let target = self.git_panel_land_prompt.as_ref()?;
         let theme = Theme::current(cx);
         let description = if target.ahead == 1 {
-            tr!("git_panel.land_confirm_description_one", base = target.branch.clone())
+            tr!(
+                "git_panel.land_confirm_description_one",
+                base = target.branch.clone()
+            )
         } else {
             tr!(
                 "git_panel.land_confirm_description",
@@ -4449,7 +4446,10 @@ impl Waku {
                 tr!("git_panel.land_conflict_description", base = base.clone())
             }
             SyncConflict::Rebase { base, .. } => {
-                tr!("git_panel.rebase_onto_conflict_description", base = base.clone())
+                tr!(
+                    "git_panel.rebase_onto_conflict_description",
+                    base = base.clone()
+                )
             }
         };
         let resolve = modal_button(
@@ -4507,10 +4507,7 @@ impl Waku {
             );
         if !conflict.files().is_empty() {
             let code = crate::fonts::current(cx).code;
-            let workspace = self
-                .git_panel
-                .as_ref()
-                .map(|panel| panel.workspace.clone());
+            let workspace = self.git_panel.as_ref().map(|panel| panel.workspace.clone());
             let weak = cx.entity().downgrade();
             let mut files = div().flex().flex_col().py(px(2.0));
             for path in conflict.files() {
@@ -4531,8 +4528,7 @@ impl Waku {
                         .font_family(code.clone())
                         .text_color(theme.text_secondary)
                         .child(path.clone()),
-                    &self
-                        .transcript_control_focus(format!("git-panel-conflict-file-{path}"), cx),
+                    &self.transcript_control_focus(format!("git-panel-conflict-file-{path}"), cx),
                     absolute,
                     &weak,
                 ));

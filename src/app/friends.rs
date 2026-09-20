@@ -141,7 +141,8 @@ impl Waku {
         let name_card = self.friends_card(
             &theme,
             [
-                self.friends_section_title(&theme, tr!("friends.display_name")).into_any_element(),
+                self.friends_section_title(&theme, tr!("friends.display_name"))
+                    .into_any_element(),
                 div()
                     .mt(px(5.0))
                     .text_size(sp(12.5))
@@ -176,141 +177,135 @@ impl Waku {
         let code_card = {
             let title = tr!("friends.your_code");
             let hint = tr!("friends.code_hint");
-            search
-                .matched(&title, &hint)
-                .map(|matched| {
-                    let mut children: Vec<AnyElement> = vec![
-                        settings_title_jump(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ),
+            search.matched(&title, &hint).map(|matched| {
+                let mut children: Vec<AnyElement> = vec![
+                    settings_title_jump(
                         div()
-                            .mt(px(5.0))
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
                             .child(settings_search_text(
-                                hint,
-                                matched.description_ranges.clone(),
+                                title,
+                                matched.title_ranges.clone(),
                                 theme,
+                            )),
+                        &matched,
+                        theme,
+                    ),
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(settings_search_text(
+                            hint,
+                            matched.description_ranges.clone(),
+                            theme,
+                        ))
+                        .into_any_element(),
+                ];
+                if !search.active() {
+                    children.push(
+                        div()
+                            .mt(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_size(sp(12.0))
+                                    .font_family(crate::fonts::current(cx).code)
+                                    .text_color(theme.text)
+                                    .child(code.clone()),
+                            )
+                            .child(self.friends_button(
+                                "copy-friend-code",
+                                if code_copied {
+                                    tr!("common.copied")
+                                } else {
+                                    tr!("common.copy")
+                                },
+                                &theme,
+                                move |this, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+                                    this.show_control_copied(copy_feedback, cx);
+                                },
+                                cx,
                             ))
                             .into_any_element(),
-                    ];
-                    if !search.active() {
-                        children.push(
-                            div()
-                                .mt(px(10.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .text_size(sp(12.0))
-                                        .font_family(crate::fonts::current(cx).code)
-                                        .text_color(theme.text)
-                                        .child(code.clone()),
-                                )
-                                .child(self.friends_button(
-                                    "copy-friend-code",
-                                    if code_copied {
-                                        tr!("common.copied")
-                                    } else {
-                                        tr!("common.copy")
-                                    },
-                                    &theme,
-                                    move |this, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            code.clone(),
-                                        ));
-                                        this.show_control_copied(copy_feedback, cx);
-                                    },
-                                    cx,
-                                ))
-                                .into_any_element(),
-                        );
-                    }
-                    self.friends_card(&theme, children)
-                })
+                    );
+                }
+                self.friends_card(&theme, children)
+            })
         };
 
         // -- Add friend ------------------------------------------------------
         let code_input = self.friend_code_input.read(cx).content().trim().to_string();
         let can_send = code_input.starts_with("gfr-");
-        let add_card =
-            {
-                let title = tr!("friends.add_friend");
-                let hint = tr!("friends.add_hint");
-                search
-                    .matched(&title, &hint)
-                    .map(|matched| {
-                        let mut children: Vec<AnyElement> = vec![
-                            settings_title_jump(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(settings_search_text(
-                                        title,
-                                        matched.title_ranges.clone(),
-                                        theme,
-                                    )),
-                                &matched,
+        let add_card = {
+            let title = tr!("friends.add_friend");
+            let hint = tr!("friends.add_hint");
+            search.matched(&title, &hint).map(|matched| {
+                let mut children: Vec<AnyElement> = vec![
+                    settings_title_jump(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(settings_search_text(
+                                title,
+                                matched.title_ranges.clone(),
                                 theme,
-                            ),
-                            div()
-                                .mt(px(5.0))
-                                .text_size(sp(12.5))
-                                .line_height(sp(18.0))
-                                .text_color(theme.text_secondary)
-                                .child(settings_search_text(
-                                    hint,
-                                    matched.description_ranges.clone(),
-                                    theme,
-                                ))
-                                .into_any_element(),
-                        ];
-                        if !search.active() {
-                            children.push(
-                                div()
-                                    .mt(px(10.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(
-                                        TextField::new(
-                                            "friend-code-field",
-                                            self.friend_code_input.clone(),
-                                        )
-                                        .w_full(),
-                                    )
-                                    .child(
-                                        self.friends_button(
-                                            "send-friend-request",
-                                            tr!("friends.send_request"),
-                                            &theme,
-                                            move |this, cx| this.send_friend_request(cx),
-                                            cx,
-                                        )
-                                        .opacity(if can_send { 1.0 } else { 0.55 }),
-                                    )
-                                    .into_any_element(),
-                            );
-                        }
-                        self.friends_card(&theme, children)
-                    })
-            };
+                            )),
+                        &matched,
+                        theme,
+                    ),
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(settings_search_text(
+                            hint,
+                            matched.description_ranges.clone(),
+                            theme,
+                        ))
+                        .into_any_element(),
+                ];
+                if !search.active() {
+                    children.push(
+                        div()
+                            .mt(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                TextField::new("friend-code-field", self.friend_code_input.clone())
+                                    .w_full(),
+                            )
+                            .child(
+                                self.friends_button(
+                                    "send-friend-request",
+                                    tr!("friends.send_request"),
+                                    &theme,
+                                    move |this, cx| this.send_friend_request(cx),
+                                    cx,
+                                )
+                                .opacity(if can_send {
+                                    1.0
+                                } else {
+                                    0.55
+                                }),
+                            )
+                            .into_any_element(),
+                    );
+                }
+                self.friends_card(&theme, children)
+            })
+        };
 
         // -- Pending requests -------------------------------------------------
         let mut request_cards = Vec::new();
@@ -467,13 +462,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(
-                    div()
-                        .size(px(8.0))
-                        .rounded_full()
-                        .flex_none()
-                        .bg(dot_color),
-                );
+                .child(div().size(px(8.0)).rounded_full().flex_none().bg(dot_color));
             if editing {
                 row = row
                     .child(
@@ -715,7 +704,8 @@ impl Waku {
             let client_id = client.client_id;
             let name = client.name.clone();
             let revoke_name = name.clone();
-            let ago = format_time_ago(unix_time_millis().saturating_sub(client.added_at_ms) / 1_000);
+            let ago =
+                format_time_ago(unix_time_millis().saturating_sub(client.added_at_ms) / 1_000);
             if search.matched(&name, "").is_none() {
                 continue;
             }
@@ -729,12 +719,7 @@ impl Waku {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.0))
-                                    .text_color(theme.text)
-                                    .child(name),
-                            )
+                            .child(div().text_size(sp(13.0)).text_color(theme.text).child(name))
                             .child(
                                 div()
                                     .text_size(sp(11.5))
@@ -788,9 +773,7 @@ impl Waku {
         // Sync alerts lead the page — a stopped rebase blocks sync until
         // someone picks a decision.
         let sync_alerts_card = (!friends.sync_alerts.is_empty()
-            || search
-                .matched(&tr!("friends.sync_alerts"), "")
-                .is_some())
+            || search.matched(&tr!("friends.sync_alerts"), "").is_some())
         .then(|| {
             self.friends_card(
                 &theme,
@@ -960,11 +943,7 @@ impl Waku {
         if !code.starts_with("gfr-") {
             return;
         }
-        let our_name = self
-            .friends_state
-            .display_name
-            .trim()
-            .to_string();
+        let our_name = self.friends_state.display_name.trim().to_string();
         let our_name = if our_name.is_empty() {
             "Goddard".to_owned()
         } else {
@@ -984,12 +963,7 @@ impl Waku {
 
     /// Persist the display-name field (Save button or Enter).
     pub(super) fn save_friend_display_name(&mut self, cx: &mut Context<Self>) {
-        let name = self
-            .friend_name_input
-            .read(cx)
-            .content()
-            .trim()
-            .to_string();
+        let name = self.friend_name_input.read(cx).content().trim().to_string();
         self.friends_command(waku_client::Command::SetFriendDisplayName { name }, cx);
     }
 
@@ -1287,33 +1261,29 @@ impl Waku {
                     .into_any_element(),
             );
             for share in incoming {
-                let mut row = div()
-                    .mt(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text)
-                                    .child(share.project_name.clone()),
-                            )
-                            .child(
-                                div().text_size(sp(11.0)).text_color(theme.text_tertiary).child(
-                                    match &share.matched_project_name {
-                                        Some(name) => {
-                                            tr!("friends.matches_project", name = name.clone())
-                                                .to_string()
-                                        }
-                                        None => tr!("friends.no_local_match").to_string(),
-                                    },
-                                ),
-                            ),
-                    );
+                let mut row = div().mt(px(6.0)).flex().items_center().gap(px(8.0)).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .child(share.project_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(match &share.matched_project_name {
+                                    Some(name) => {
+                                        tr!("friends.matches_project", name = name.clone())
+                                            .to_string()
+                                    }
+                                    None => tr!("friends.no_local_match").to_string(),
+                                }),
+                        ),
+                );
                 if share.matched_path.is_some() && !share.sync_enabled {
                     let peer = node_id.to_owned();
                     let origin = share.origin_url.clone();
@@ -1545,10 +1515,7 @@ impl Waku {
                                 let origin = share.origin_url.clone();
                                 move |this, event: &KeyDownEvent, _, cx| {
                                     if !event.keystroke.modifiers.modified()
-                                        && matches!(
-                                            event.keystroke.key.as_str(),
-                                            "enter" | "space"
-                                        )
+                                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
                                     {
                                         this.open_friend_session(
                                             peer.clone(),
@@ -1587,8 +1554,7 @@ impl Waku {
         let enabled: Vec<String> = link.enabled_branches.clone();
         let paused = link.paused_branches.clone();
         let peer_enabled = link.peer_sync_enabled;
-        let enabled_set: std::collections::BTreeSet<String> =
-            enabled.iter().cloned().collect();
+        let enabled_set: std::collections::BTreeSet<String> = enabled.iter().cloned().collect();
         let (branches, default_branch) = self
             .sync_link_branches
             .get(&link.id)
@@ -1700,19 +1666,14 @@ impl Waku {
             } else {
                 branch.clone()
             };
-            let mut row = div()
-                .mt(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(sp(12.0))
-                        .text_color(theme.text)
-                        .child(label),
-                );
+            let mut row = div().mt(px(6.0)).flex().items_center().gap(px(8.0)).child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text)
+                    .child(label),
+            );
             if is_enabled && is_paused {
                 let resume_link = link_id.clone();
                 let resume_branch = branch_name.clone();
@@ -1836,28 +1797,23 @@ impl Waku {
             ),
         };
 
-        let mut row = div()
-            .mt(px(10.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_size(sp(13.0))
-                            .text_color(theme.text)
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_tertiary)
-                            .child(hint),
-                    ),
-            );
+        let mut row = div().mt(px(10.0)).flex().items_center().gap(px(8.0)).child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(sp(13.0))
+                        .text_color(theme.text)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(hint),
+                ),
+        );
 
         match alert.kind {
             SyncAlertKind::Conflict => {
@@ -2019,11 +1975,7 @@ impl Waku {
             path = alert.worktree_path.display(),
             files = files,
         );
-        self.submit_composer_submission_to(
-            session_id,
-            ComposerSubmission::plain(prompt),
-            cx,
-        );
+        self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
     }
 }
 

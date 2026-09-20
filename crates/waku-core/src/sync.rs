@@ -59,16 +59,20 @@ fn current_branch(repo: &Path) -> anyhow::Result<Option<String>> {
 }
 
 fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<bool> {
-    Ok(git_capture(repo, &["merge-base", "--is-ancestor", ancestor, descendant])?
-        .status
-        .success())
+    Ok(
+        git_capture(repo, &["merge-base", "--is-ancestor", ancestor, descendant])?
+            .status
+            .success(),
+    )
 }
 
 /// Commits on `head` that `base` lacks.
 fn ahead_count(repo: &Path, base: &str, head: &str) -> anyhow::Result<u64> {
-    Ok(git_stdout(repo, &["rev-list", "--count", &format!("{base}..{head}")])?
-        .parse()
-        .unwrap_or(0))
+    Ok(
+        git_stdout(repo, &["rev-list", "--count", &format!("{base}..{head}")])?
+            .parse()
+            .unwrap_or(0),
+    )
 }
 
 /// Whether the checkout at `worktree` has staged, unstaged, or untracked
@@ -97,8 +101,15 @@ fn branch_worktree(repo: &Path, branch: &str) -> anyhow::Result<Option<PathBuf>>
 
 /// All local branch names, for the link config UI.
 pub(crate) fn local_branches(repo: &Path) -> anyhow::Result<Vec<String>> {
-    let out = git_stdout(repo, &["for-each-ref", "--format=%(refname:short)", "refs/heads"])?;
-    Ok(out.lines().filter(|b| !b.is_empty()).map(str::to_owned).collect())
+    let out = git_stdout(
+        repo,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    )?;
+    Ok(out
+        .lines()
+        .filter(|b| !b.is_empty())
+        .map(str::to_owned)
+        .collect())
 }
 
 /// The repo's default branch: `origin/HEAD`'s target, else the checked-
@@ -153,12 +164,7 @@ fn sanitize_component(raw: &str) -> String {
 pub(crate) fn remove_worktree(repo: &Path, path: &Path) -> anyhow::Result<()> {
     let output = git_capture(
         repo,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            &path.to_string_lossy(),
-        ],
+        &["worktree", "remove", "--force", &path.to_string_lossy()],
     )?;
     if !output.status.success() {
         // Already gone or pruned is fine — anything else is noise-level.
@@ -250,10 +256,7 @@ pub(crate) fn integrate(
             if let Some(parent) = dir.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            git_success(
-                repo,
-                &["worktree", "add", &dir.to_string_lossy(), branch],
-            )?;
+            git_success(repo, &["worktree", "add", &dir.to_string_lossy(), branch])?;
             (dir, true)
         }
     };
@@ -284,11 +287,7 @@ pub(crate) fn integrate(
 
 /// Abort a stopped integration in `worktree`, then drop the temp
 /// worktree registration when `temp_worktree`.
-pub(crate) fn abort(
-    repo: &Path,
-    worktree: &Path,
-    temp_worktree: bool,
-) -> anyhow::Result<()> {
+pub(crate) fn abort(repo: &Path, worktree: &Path, temp_worktree: bool) -> anyhow::Result<()> {
     if worktree.exists() {
         match sync_in_progress(worktree)? {
             Some(SyncInProgress::Rebase) => {
@@ -389,9 +388,7 @@ pub(crate) fn poll(
 
         if local != tips.local {
             let unpushed = match (&local, &remote) {
-                (Some(local), Some(remote)) if local != remote => {
-                    ahead_count(repo, remote, local)?
-                }
+                (Some(local), Some(remote)) if local != remote => ahead_count(repo, remote, local)?,
                 (Some(local), None) => git_stdout(
                     repo,
                     &["rev-list", "--count", local, "--not", "--remotes=origin"],
@@ -469,9 +466,7 @@ pub(crate) fn reconcile_alert(repo: &Path, alert: &SyncAlert) -> anyhow::Result<
     let remote = rev_parse(repo, &remote_ref)?;
     let local = rev_parse(repo, &format!("refs/heads/{}", alert.branch))?;
     let resolved = match (&local, &remote) {
-        (Some(local), Some(remote)) => {
-            local == remote || is_ancestor(repo, remote, local)?
-        }
+        (Some(local), Some(remote)) => local == remote || is_ancestor(repo, remote, local)?,
         _ => false,
     };
     Ok(Some(!resolved))
@@ -569,8 +564,14 @@ mod tests {
         run_git(&seed, &["init", "-b", "main"]);
         commit(&seed, "README.md", "initial\n");
         run_git(&seed, &["clone", "--bare", ".", remote.to_str().unwrap()]);
-        run_git(&seed, &["clone", remote.to_str().unwrap(), friend.to_str().unwrap()]);
-        run_git(&seed, &["clone", remote.to_str().unwrap(), ours.to_str().unwrap()]);
+        run_git(
+            &seed,
+            &["clone", remote.to_str().unwrap(), friend.to_str().unwrap()],
+        );
+        run_git(
+            &seed,
+            &["clone", remote.to_str().unwrap(), ours.to_str().unwrap()],
+        );
         // integrate()'s rebase and merge paths commit without -c flags, so
         // the repos that sync need a configured identity on hosts (CI) that
         // have no global one.
@@ -595,7 +596,10 @@ mod tests {
             origin_url: "origin".into(),
             repo_path: repo_path.to_path_buf(),
             auto_push,
-            enabled_branches: branches.iter().map(|b| b.to_string()).collect::<BTreeSet<_>>(),
+            enabled_branches: branches
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<BTreeSet<_>>(),
             paused_branches: BTreeSet::new(),
             peer_sync_enabled: true,
             created_at_ms: 0,
@@ -616,7 +620,10 @@ mod tests {
         let scratch = ours.join("scratch");
         let outcome = integrate(&ours, &scratch, "link", "main").unwrap();
         assert!(matches!(outcome, IntegrateOutcome::FastForwarded));
-        assert_eq!(tip(&ours, "refs/heads/main"), tip(&ours, "refs/remotes/origin/main"));
+        assert_eq!(
+            tip(&ours, "refs/heads/main"),
+            tip(&ours, "refs/remotes/origin/main")
+        );
     }
 
     #[test]
@@ -720,7 +727,10 @@ mod tests {
         commit(&ours, "OURS.md", "new commit\n");
         let report = poll(&ours, &link, &mut states).unwrap();
         assert_eq!(report.pushed, vec!["main".to_string()]);
-        assert_eq!(tip(&ours, "refs/remotes/origin/main"), tip(&ours, "refs/heads/main"));
+        assert_eq!(
+            tip(&ours, "refs/remotes/origin/main"),
+            tip(&ours, "refs/heads/main")
+        );
 
         // A steady remote reports nothing further.
         let report = poll(&ours, &link, &mut states).unwrap();
@@ -738,7 +748,10 @@ mod tests {
         commit(&ours, "OURS.md", "held back\n");
         let report = poll(&ours, &link, &mut states).unwrap();
         assert!(report.pushed.is_empty());
-        assert_ne!(tip(&ours, "refs/remotes/origin/main"), tip(&ours, "refs/heads/main"));
+        assert_ne!(
+            tip(&ours, "refs/remotes/origin/main"),
+            tip(&ours, "refs/heads/main")
+        );
     }
 
     #[test]

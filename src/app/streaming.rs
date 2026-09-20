@@ -954,9 +954,7 @@ impl Waku {
                         session.push_notice_message(
                             MessageRole::Assistant,
                             failure_message,
-                            TranscriptNotice::Status {
-                                kind: failure_kind,
-                            },
+                            TranscriptNotice::Status { kind: failure_kind },
                         );
                     }
                     true

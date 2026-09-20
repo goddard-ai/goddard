@@ -89,12 +89,16 @@ impl Waku {
         let card = div()
             .id("full-access-dialog-card")
             .key_context(DIALOG_CONTEXT)
-            .on_action(cx.listener(|waku, _: &ConfirmFullAccessDialog, window, cx| {
-                waku.confirm_full_access_dialog(window, cx)
-            }))
-            .on_action(cx.listener(|waku, _: &DismissFullAccessDialog, window, cx| {
-                waku.close_full_access_dialog(window, cx)
-            }))
+            .on_action(
+                cx.listener(|waku, _: &ConfirmFullAccessDialog, window, cx| {
+                    waku.confirm_full_access_dialog(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|waku, _: &DismissFullAccessDialog, window, cx| {
+                    waku.close_full_access_dialog(window, cx)
+                }),
+            )
             .tab_group()
             .tab_stop(false)
             .w_full()

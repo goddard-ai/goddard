@@ -130,8 +130,7 @@ async fn main() -> anyhow::Result<()> {
     let parsed = identity::parse_friend_code(&identity::friend_code(bob_addr.id))?;
     assert_eq!(parsed, bob_addr.id);
 
-    let their_name =
-        send_friend_request(alice.endpoint(), bob_addr, "alice", &alice_store).await?;
+    let their_name = send_friend_request(alice.endpoint(), bob_addr, "alice", &alice_store).await?;
     println!("alice friended: {their_name}");
     assert!(alice_store.lock().is_friend(&bob.addr().id));
     assert!(bob_store.lock().is_friend(&alice.addr().id));

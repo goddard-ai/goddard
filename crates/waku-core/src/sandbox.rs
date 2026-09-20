@@ -155,9 +155,7 @@ fn shuru_binary() -> anyhow::Result<PathBuf> {
     // daemon lives in Contents/MacOS, so its sibling is a deterministic
     // lookup that needs no PATH.
     if let Ok(exe) = std::env::current_exe()
-        && let Some(bundled) = exe
-            .parent()
-            .map(|dir| dir.join("../Resources/shuru"))
+        && let Some(bundled) = exe.parent().map(|dir| dir.join("../Resources/shuru"))
         && bundled.is_file()
     {
         return Ok(bundled);
@@ -263,9 +261,7 @@ fn ensure_layer(
         .status()
         .with_context(|| format!("could not build sandbox checkpoint {name}"))?;
     if !status.success() {
-        bail!(
-            "sandbox checkpoint {name} failed to build — the toolchain could not be installed"
-        );
+        bail!("sandbox checkpoint {name} failed to build — the toolchain could not be installed");
     }
     Ok(())
 }
@@ -336,13 +332,11 @@ fn detect_runtimes(worktree: &Path) -> Vec<RuntimeSpec> {
                         .and_then(|range| {
                             // "20.x", "^20", ">=20" — take the pinned major;
                             // anything vaguer gets the LTS fallback.
-                            range
-                                .split(['.', 'x', ' '])
-                                .find_map(|part| {
-                                    let digits: String =
-                                        part.chars().filter(|c| c.is_ascii_digit()).collect();
-                                    (!digits.is_empty()).then_some(digits)
-                                })
+                            range.split(['.', 'x', ' ']).find_map(|part| {
+                                let digits: String =
+                                    part.chars().filter(|c| c.is_ascii_digit()).collect();
+                                (!digits.is_empty()).then_some(digits)
+                            })
                         })
                 })
             })
@@ -352,10 +346,7 @@ fn detect_runtimes(worktree: &Path) -> Vec<RuntimeSpec> {
             version,
         });
     }
-    if has("pyproject.toml")
-        || has("requirements.txt")
-        || has("uv.lock")
-        || has(".python-version")
+    if has("pyproject.toml") || has("requirements.txt") || has("uv.lock") || has(".python-version")
     {
         let version = pinned("python")
             .or_else(|| read(".python-version").map(|v| v.trim().to_owned()))
@@ -369,14 +360,12 @@ fn detect_runtimes(worktree: &Path) -> Vec<RuntimeSpec> {
         let version = pinned("rust")
             .or_else(|| {
                 read("rust-toolchain.toml").and_then(|content| {
-                    content
-                        .lines()
-                        .find_map(|line| {
-                            let line = line.trim();
-                            line.strip_prefix("channel")
-                                .and_then(|rest| rest.split('"').nth(1))
-                                .map(str::to_owned)
-                        })
+                    content.lines().find_map(|line| {
+                        let line = line.trim();
+                        line.strip_prefix("channel")
+                            .and_then(|rest| rest.split('"').nth(1))
+                            .map(str::to_owned)
+                    })
                 })
             })
             .or_else(|| read("rust-toolchain").map(|v| v.trim().to_owned()))
@@ -391,9 +380,7 @@ fn detect_runtimes(worktree: &Path) -> Vec<RuntimeSpec> {
             .or_else(|| {
                 read("go.mod").and_then(|content| {
                     content.lines().find_map(|line| {
-                        line.trim()
-                            .strip_prefix("go ")
-                            .map(|v| v.trim().to_owned())
+                        line.trim().strip_prefix("go ").map(|v| v.trim().to_owned())
                     })
                 })
             })
@@ -418,7 +405,10 @@ fn parse_tool_versions(content: &str) -> HashMap<&'static str, String> {
         if let (Some(tool), Some(version)) = (parts.next(), parts.next())
             && TOOLS.contains(&tool)
         {
-            map.insert(*TOOLS.iter().find(|t| **t == tool).unwrap(), version.to_owned());
+            map.insert(
+                *TOOLS.iter().find(|t| **t == tool).unwrap(),
+                version.to_owned(),
+            );
         }
     }
     map
@@ -462,7 +452,13 @@ fn session_checkpoint(spec: &GuestSpec, runtimes: &[RuntimeSpec]) -> String {
         let version: String = runtime
             .version
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect();
         name.push_str(&format!("-{}-{}", runtime.tool, version));
     }
@@ -610,10 +606,8 @@ pub fn launch_for_provider(
         spec.checkpoint,
         None,
         &checkpoint_install_argv(&spec),
-        || {
-            SandboxSetupStatus::BuildingToolchain {
-                toolchain: provider.display_name().to_owned(),
-            }
+        || SandboxSetupStatus::BuildingToolchain {
+            toolchain: provider.display_name().to_owned(),
         },
         &mut progress,
     )?;
@@ -1032,10 +1026,7 @@ impl ShuruVm {
             // prefixes — always set so a session without layers is harmless.
             ("MISE_DATA_DIR", MISE_DATA_DIR),
             ("MISE_CONFIG_DIR", MISE_CONFIG_DIR),
-            (
-                "MISE_GLOBAL_CONFIG_FILE",
-                "/opt/mise-config/config.toml",
-            ),
+            ("MISE_GLOBAL_CONFIG_FILE", "/opt/mise-config/config.toml"),
         ] {
             env.insert(name.to_owned(), Value::String(value.to_owned()));
         }
@@ -1305,10 +1296,7 @@ mod tests {
         std::fs::write(dir.join("go.mod"), "module x\n\ngo 1.23\n").unwrap();
         std::fs::write(dir.join(".python-version"), "3.12\n").unwrap();
         let specs = detect_runtimes(&dir);
-        let tools: Vec<(&str, &str)> = specs
-            .iter()
-            .map(|s| (s.tool, s.version.as_str()))
-            .collect();
+        let tools: Vec<(&str, &str)> = specs.iter().map(|s| (s.tool, s.version.as_str())).collect();
         assert_eq!(
             tools,
             [
@@ -1320,11 +1308,7 @@ mod tests {
         );
 
         // .tool-versions and mise.toml pin over file-specific defaults.
-        std::fs::write(
-            dir.join(".tool-versions"),
-            "node 20.11.0\npython 3.13\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join(".tool-versions"), "node 20.11.0\npython 3.13\n").unwrap();
         let specs = detect_runtimes(&dir);
         let node = specs.iter().find(|s| s.tool == "node").unwrap();
         assert_eq!(node.version, "20.11.0");
@@ -1334,7 +1318,8 @@ mod tests {
 
     #[test]
     fn mise_toml_pins_tool_versions() {
-        let tools = parse_mise_tools("[tools]\nnode = \"lts\"\npython = \"3.13\"\n[settings]\nx = 1\n");
+        let tools =
+            parse_mise_tools("[tools]\nnode = \"lts\"\npython = \"3.13\"\n[settings]\nx = 1\n");
         assert_eq!(tools.get("node").map(String::as_str), Some("lts"));
         assert_eq!(tools.get("python").map(String::as_str), Some("3.13"));
         assert!(tools.get("x").is_none());

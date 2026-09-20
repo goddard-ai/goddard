@@ -718,8 +718,7 @@ fn sync_base_branch(
     sync_branches: &[String],
 ) {
     let whitelisted = sync_branches.iter().any(|branch| branch == base_ref);
-    let is_default = sync_default
-        && local_default_branch(repository).as_deref() == Some(base_ref);
+    let is_default = sync_default && local_default_branch(repository).as_deref() == Some(base_ref);
     if !whitelisted && !is_default {
         return;
     }
@@ -734,8 +733,7 @@ fn sync_base_branch(
         ],
     )
     .ok()
-    .flatten()
-    else {
+    .flatten() else {
         return;
     };
     let Some((remote, branch)) = upstream.trim().split_once('/') else {

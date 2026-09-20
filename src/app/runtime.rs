@@ -883,7 +883,10 @@ fn perform_provider_rewind(
                 ));
             };
             let binary = request.binary.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(tr!("errors.provider_not_found", provider = "GitHub Copilot"))
+                anyhow::anyhow!(tr!(
+                    "errors.provider_not_found",
+                    provider = "GitHub Copilot"
+                ))
             })?;
             let cursor = request
                 .workspace_client
@@ -905,16 +908,14 @@ fn perform_provider_rewind(
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
         ProviderKind::Antigravity
-            | ProviderKind::Devin
-            | ProviderKind::Droid
-            | ProviderKind::Fx
-            | ProviderKind::Goose
-            | ProviderKind::Kimi => {
-            Err(anyhow::anyhow!(tr!(
-                "errors.provider_turn_branching_unsupported",
-                provider = provider.display_name()
-            )))
-        }
+        | ProviderKind::Devin
+        | ProviderKind::Droid
+        | ProviderKind::Fx
+        | ProviderKind::Goose
+        | ProviderKind::Kimi => Err(anyhow::anyhow!(tr!(
+            "errors.provider_turn_branching_unsupported",
+            provider = provider.display_name()
+        ))),
     }
 }
 
@@ -1272,7 +1273,10 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     ));
                 };
                 let binary = request.binary.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!(tr!("errors.provider_not_installed", provider = "GitHub Copilot"))
+                    anyhow::anyhow!(tr!(
+                        "errors.provider_not_installed",
+                        provider = "GitHub Copilot"
+                    ))
                 })?;
                 Ok((
                     request
@@ -1294,11 +1298,11 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
             ProviderKind::Antigravity
-                | ProviderKind::Devin
-                | ProviderKind::Droid
-                | ProviderKind::Fx
-                | ProviderKind::Goose
-                | ProviderKind::Kimi => {
+            | ProviderKind::Devin
+            | ProviderKind::Droid
+            | ProviderKind::Fx
+            | ProviderKind::Goose
+            | ProviderKind::Kimi => {
                 anyhow::bail!(tr!(
                     "errors.provider_turn_branching_unsupported",
                     provider = provider.display_name()
@@ -1657,7 +1661,9 @@ impl Waku {
                     session_id,
                 )
             {
-                self.state.unseen_completions.insert(session_id, unix_time());
+                self.state
+                    .unseen_completions
+                    .insert(session_id, unix_time());
             }
         }
         // Fresh sync alerts surface as a toast even when Friends isn't
@@ -1868,11 +1874,7 @@ impl Waku {
 
     /// Send one friends command off the UI thread; results arrive through
     /// the `friendsChanged` broadcast, failures through a toast.
-    pub(super) fn friends_command(
-        &self,
-        command: waku_client::Command,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn friends_command(&self, command: waku_client::Command, cx: &mut Context<Self>) {
         let client = self.daemon.client();
         cx.spawn(async move |this, cx| {
             let error = cx
@@ -1959,7 +1961,12 @@ impl Waku {
             .friends
             .iter()
             .find(|friend| friend.node_id == node_id)
-            .map(|friend| friend.nickname.clone().unwrap_or_else(|| friend.name.clone()))
+            .map(|friend| {
+                friend
+                    .nickname
+                    .clone()
+                    .unwrap_or_else(|| friend.name.clone())
+            })
             .unwrap_or_else(|| tr!("friends.a_friend").to_string());
         let client = self.daemon.client();
         let request_peer = node_id.clone();
@@ -1985,11 +1992,13 @@ impl Waku {
                         waku.install_friend_watch(*session, peer_name, cx);
                         waku.select_session(session_id, cx);
                     }
-                    Ok(_) => waku.show_toast(tr!("friends.command_failed", error = "the daemon returned an invalid response")),
-                    Err(error) => waku.show_toast(tr!(
+                    Ok(_) => waku.show_toast(tr!(
                         "friends.command_failed",
-                        error = error.to_string()
+                        error = "the daemon returned an invalid response"
                     )),
+                    Err(error) => {
+                        waku.show_toast(tr!("friends.command_failed", error = error.to_string()))
+                    }
                 }
                 cx.notify();
             });
@@ -2079,7 +2088,9 @@ impl Waku {
         if let Some(runtime) = self.runtimes.remove(&session_id) {
             runtime.driver.close();
         }
-        self.state.sessions.retain(|session| session.id != session_id);
+        self.state
+            .sessions
+            .retain(|session| session.id != session_id);
         self.transcript_scroll_positions.remove(&session_id);
         self.background_work.remove(&session_id);
         if self.state.selected_session == Some(session_id) {
@@ -2800,8 +2811,10 @@ impl Waku {
                     .collect(),
             };
             if !draft.is_empty() {
-                self.composer_drafts
-                    .set(crate::persistence::ComposerDraftKey::Session(session_id), draft);
+                self.composer_drafts.set(
+                    crate::persistence::ComposerDraftKey::Session(session_id),
+                    draft,
+                );
                 drafts_changed = true;
             }
         }
@@ -5407,7 +5420,11 @@ impl Waku {
 
     /// Resolve presentation-preserving composer syntax immediately before a
     /// prompt crosses into a provider transport.
-    pub(super) fn resolve_provider_submission(&self, provider: ProviderKind, prompt: &str) -> String {
+    pub(super) fn resolve_provider_submission(
+        &self,
+        provider: ProviderKind,
+        prompt: &str,
+    ) -> String {
         crate::composer_complete::resolved_submission(provider, prompt, &self.slash_command_index)
             .unwrap_or_else(|| prompt.to_owned())
     }
@@ -6056,9 +6073,7 @@ impl Waku {
                 .find(|session| session.id == session_id)
                 .and_then(|session| {
                     self.session_model_combo(session)
-                        .map(|(model_id, effort, fast)| {
-                            (session.provider, model_id, effort, fast)
-                        })
+                        .map(|(model_id, effort, fast)| (session.provider, model_id, effort, fast))
                 });
             if let Some((provider, model_id, effort, fast)) = routed_use {
                 self.state
@@ -6594,9 +6609,8 @@ mod remote_retry_delay_tests {
 
     #[test]
     fn delay_jitters_instead_of_lockstepping() {
-        let delays: std::collections::HashSet<_> = (0..16)
-            .map(|_| remote_retry_delay(3).as_secs())
-            .collect();
+        let delays: std::collections::HashSet<_> =
+            (0..16).map(|_| remote_retry_delay(3).as_secs()).collect();
         assert!(delays.len() > 1, "jitter produced a single delay");
     }
 }

@@ -987,7 +987,10 @@ mod tests {
         // rebase finishes — but REBASE_HEAD still resolves.
         std::fs::write(worktree.join("file.txt"), "resolved\n").unwrap();
         run_git(&worktree, &["add", "file.txt"]);
-        run_git(&worktree, &["-c", "core.editor=true", "rebase", "--continue"]);
+        run_git(
+            &worktree,
+            &["-c", "core.editor=true", "rebase", "--continue"],
+        );
         assert!(ref_exists(&worktree, "REBASE_HEAD").unwrap());
 
         let outcome = land(&worktree, Some("main"), PullStrategy::Rebase).unwrap();
@@ -1109,7 +1112,8 @@ mod tests {
         let main_tip = git_stdout(&repository, &["rev-parse", "main"]).unwrap();
         commit_in(&worktree, "work.txt", "session\n");
 
-        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        let outcome =
+            rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
         assert_eq!(
             outcome,
             RebaseOutcome::Rebased {
@@ -1119,7 +1123,10 @@ mod tests {
         // HEAD sits on the new base with the session commit replayed on
         // top; the old base never moved.
         assert!(worktree.join("feature.txt").exists());
-        run_git(&worktree, &["merge-base", "--is-ancestor", "feature", "HEAD"]);
+        run_git(
+            &worktree,
+            &["merge-base", "--is-ancestor", "feature", "HEAD"],
+        );
         assert_eq!(
             git_stdout(&worktree, &["log", "-1", "--format=%s"]).unwrap(),
             "session work"
@@ -1144,7 +1151,10 @@ mod tests {
                 base: "feature".to_owned()
             }
         );
-        run_git(&worktree, &["merge-base", "--is-ancestor", "feature", "HEAD"]);
+        run_git(
+            &worktree,
+            &["merge-base", "--is-ancestor", "feature", "HEAD"],
+        );
         assert_eq!(
             git_stdout(&worktree, &["log", "-1", "--format=%s"]).unwrap(),
             "session work"
@@ -1162,7 +1172,8 @@ mod tests {
         std::fs::write(worktree.join("file.txt"), "session changed\n").unwrap();
         run_git(&worktree, &["commit", "-qam", "session changes"]);
 
-        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        let outcome =
+            rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
         assert_eq!(
             outcome,
             RebaseOutcome::Conflict {
@@ -1172,7 +1183,8 @@ mod tests {
             }
         );
         // Re-running while stopped reports the conflict again.
-        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        let outcome =
+            rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
         assert!(matches!(outcome, RebaseOutcome::Conflict { .. }));
 
         abort_sync(&worktree).unwrap();
@@ -1229,7 +1241,8 @@ mod tests {
         feature_branch(&repository);
         run_git(&worktree, &["merge", "-q", "--no-edit", "feature"]);
 
-        let outcome = rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
+        let outcome =
+            rebase_onto(&worktree, "feature", Some("main"), PullStrategy::Rebase).unwrap();
         assert_eq!(
             outcome,
             RebaseOutcome::Rebased {

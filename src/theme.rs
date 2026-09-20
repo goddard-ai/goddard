@@ -49,7 +49,10 @@ static HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
 /// Store the "High contrast" preference. The OS's own Increase Contrast
 /// setting forces it on regardless of the app toggle.
 pub fn set_high_contrast(enabled: bool) {
-    HIGH_CONTRAST.store(enabled || crate::platform::increase_contrast(), Ordering::Relaxed);
+    HIGH_CONTRAST.store(
+        enabled || crate::platform::increase_contrast(),
+        Ordering::Relaxed,
+    );
 }
 
 fn high_contrast() -> bool {

@@ -447,11 +447,9 @@ impl Waku {
             self.turn_settled_while_visible = None;
         }
         let attention = had_unseen
-            || self
-                .state
-                .sessions
-                .iter()
-                .any(|session| session.id == session_id && session.status == SessionStatus::Waiting);
+            || self.state.sessions.iter().any(|session| {
+                session.id == session_id && session.status == SessionStatus::Waiting
+            });
         if had_unseen {
             self.transcript_new_content_dot = self
                 .selected_session()
@@ -1426,8 +1424,7 @@ impl Waku {
                 pending,
                 Some(&self.sweep_visited),
             )
-        })
-        {
+        }) {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
             self.compose_new_task(project_id, projectless, window, cx);
@@ -1565,13 +1562,8 @@ impl Waku {
                         .is_some_and(|session| session.is_busy());
                     let preview = preview.unwrap_or_default();
                     if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
-                        let focus = waku.open_archive_dialog(
-                            session_id,
-                            preview,
-                            busy,
-                            landing_row,
-                            cx,
-                        );
+                        let focus =
+                            waku.open_archive_dialog(session_id, preview, busy, landing_row, cx);
                         Some(focus)
                     } else {
                         None
@@ -1831,8 +1823,7 @@ impl Waku {
                         .is_some_and(|session| session.is_busy());
                     let preview = preview.unwrap_or_default();
                     if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
-                        let focus =
-                            waku.open_dormant_dialog(session_id, preview, busy, cx);
+                        let focus = waku.open_dormant_dialog(session_id, preview, busy, cx);
                         Some(focus)
                     } else {
                         None
@@ -1849,9 +1840,8 @@ impl Waku {
                         });
                     }
                     None => {
-                        let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_sweep_session(session_id, cx)
-                        });
+                        let _ =
+                            waku.update(cx, |waku, cx| waku.finish_sweep_session(session_id, cx));
                     }
                 }
             });
@@ -1886,7 +1876,9 @@ impl Waku {
         }
         // The sweep's own teardown goes through the archive drain, so an
         // earlier background sweep's bookkeeping starts over.
-        self.dormant_worktrees_swept.borrow_mut().remove(&session_id);
+        self.dormant_worktrees_swept
+            .borrow_mut()
+            .remove(&session_id);
         self.queue_archived_workspace_cleanup(session_id, cx);
         self.save();
         cx.notify();
@@ -1896,7 +1888,11 @@ impl Waku {
     /// snoozes auto-dormancy for one threshold period so a still-stale task
     /// does not fold straight back, and restores a worktree the sweep
     /// already removed. Same mutation-then-save shape as pin/archive.
-    pub(super) fn restore_dormant_sessions(&mut self, session_ids: &[Uuid], cx: &mut Context<Self>) {
+    pub(super) fn restore_dormant_sessions(
+        &mut self,
+        session_ids: &[Uuid],
+        cx: &mut Context<Self>,
+    ) {
         self.hold_sidebar_peek();
         let now = unix_time();
         let exempt_until =
@@ -2136,12 +2132,7 @@ impl Waku {
         let current_project = self
             .projects_page
             .or(self.state.selected_project)
-            .and_then(|id| {
-                self.state
-                    .projects
-                    .iter()
-                    .find(|project| project.id == id)
-            })
+            .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
             .map(|project| (project.id, project.is_projectless()));
         match current_project {
             Some((_, true)) => self.create_projectless_session(cx),
@@ -3095,11 +3086,7 @@ impl Waku {
 
     /// Every batch member's agent directory, one path per line — the same
     /// payload [`Self::copy_session_working_directory`] writes for one task.
-    pub(super) fn copy_sessions_working_directory(
-        &self,
-        session_ids: &[Uuid],
-        cx: &mut App,
-    ) {
+    pub(super) fn copy_sessions_working_directory(&self, session_ids: &[Uuid], cx: &mut App) {
         let paths = session_ids
             .iter()
             .filter_map(|session_id| {
@@ -3227,7 +3214,10 @@ impl Waku {
         self.transcript_selection.selection.borrow_mut().clear();
         self.transcript_selection.registry.borrow_mut().clear();
         *self.transcript_selection.hovered_commit.borrow_mut() = None;
-        self.transcript_selection.resolved_commits.borrow_mut().clear();
+        self.transcript_selection
+            .resolved_commits
+            .borrow_mut()
+            .clear();
         self.transcript_commit_hover = None;
         self.transcript_commit_details.clear();
         self.transcript_commit_press = None;
@@ -3843,7 +3833,9 @@ impl Waku {
         let position =
             current.and_then(|current| combos.iter().position(|combo| *combo == current));
         // Off-rotation selections start the cycle from the top.
-        let next = position.map(|index| (index + 1) % combos.len()).unwrap_or(0);
+        let next = position
+            .map(|index| (index + 1) % combos.len())
+            .unwrap_or(0);
         let (provider, model, effort, fast) = combos[next].clone();
         self.choose_model(provider, model, effort, fast, cx);
     }

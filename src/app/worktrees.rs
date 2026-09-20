@@ -702,9 +702,7 @@ impl Waku {
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
             };
-            self.dormant_worktrees_swept
-                .borrow_mut()
-                .insert(session_id);
+            self.dormant_worktrees_swept.borrow_mut().insert(session_id);
             let local = !self.is_remote_session(session_id);
             cx.spawn(async move |waku, cx| {
                 let worktree_path = path.clone();

@@ -19,7 +19,7 @@ pub mod layout;
 #[allow(dead_code)]
 mod service;
 
-pub use catalog::{COMMANDS, CommandDescriptor, ENTRIES, CatalogEntry, PlatformSet};
+pub use catalog::{COMMANDS, CatalogEntry, CommandDescriptor, ENTRIES, PlatformSet};
 pub use conflict::{BindingFact, Conflict, ConflictKind, analyze_conflicts};
 // Used by the manager UI/service wiring in later phases.
 #[allow(unused_imports)]
@@ -421,10 +421,8 @@ mod tests {
         });
 
         {
-            let gen_set: std::collections::HashSet<&String> =
-                generated_serialized.iter().collect();
-            let live_set: std::collections::HashSet<&String> =
-                live.iter().collect();
+            let gen_set: std::collections::HashSet<&String> = generated_serialized.iter().collect();
+            let live_set: std::collections::HashSet<&String> = live.iter().collect();
             for row in live.iter().filter(|r| !gen_set.contains(*r)) {
                 eprintln!("LIVE-ONLY:  {row}");
             }

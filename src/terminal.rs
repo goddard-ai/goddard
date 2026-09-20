@@ -457,8 +457,8 @@ impl TerminalSession {
                 (program.clone(), None, false, Some(args.clone()))
             }
         };
-        let shell_args = program_args
-            .unwrap_or_else(|| crate::command_env::default_terminal_shell_args(&shell));
+        let shell_args =
+            program_args.unwrap_or_else(|| crate::command_env::default_terminal_shell_args(&shell));
         let mut options = tty::Options {
             shell: Some(Shell::new(shell.to_string_lossy().into_owned(), shell_args)),
             working_directory: Some(working_directory.to_path_buf()),

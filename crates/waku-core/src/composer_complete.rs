@@ -1544,7 +1544,8 @@ mod tests {
 
     #[test]
     fn waku_compact_is_reserved_only_on_dedicated_rpc_transports() {
-        let root = std::env::temp_dir().join(format!("waku-compact-command-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("waku-compact-command-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(".waku/commands")).unwrap();
         std::fs::write(root.join(".waku/commands/compact.md"), "Project override").unwrap();
@@ -1568,7 +1569,9 @@ mod tests {
                 // project command — and get no injected entry when nothing
                 // reports one.
                 assert!(
-                    compact.iter().all(|command| command.scope != CommandScope::Waku),
+                    compact
+                        .iter()
+                        .all(|command| command.scope != CommandScope::Waku),
                     "{provider:?} must not reserve compact"
                 );
             }

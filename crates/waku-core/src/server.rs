@@ -965,9 +965,7 @@ pub fn serve(
     backend.set_event_source(hub.event_sink(Uuid::nil(), Uuid::nil()));
     {
         let hub = hub.clone();
-        backend.set_review_notifier(Arc::new(move |origin_url| {
-            hub.review_changed(origin_url)
-        }));
+        backend.set_review_notifier(Arc::new(move |origin_url| hub.review_changed(origin_url)));
     }
     {
         let hub = hub.clone();
@@ -1305,16 +1303,10 @@ fn handle_connection(
         }
         ClientMessage::Hello {
             token, resume_from, ..
-        } if token_matches(expected_token, &token) =>
-        {
-            (resume_from, None, true)
-        }
+        } if token_matches(expected_token, &token) => (resume_from, None, true),
         ClientMessage::Hello {
             token, resume_from, ..
-        } if dispatcher.authenticate_paired(&token) =>
-        {
-            (resume_from, None, false)
-        }
+        } if dispatcher.authenticate_paired(&token) => (resume_from, None, false),
         ClientMessage::Hello { token, .. } => match dispatcher.authenticate_agent(&token) {
             // A scoped agent credential names the Waku task it belongs to.
             // The connection gets command responses but no event replay or
@@ -2097,9 +2089,7 @@ mod tests {
         )
     }
 
-    fn pairing_server(
-        backend: Arc<dyn Backend>,
-    ) -> (std::net::SocketAddr, Arc<AtomicBool>) {
+    fn pairing_server(backend: Arc<dyn Backend>) -> (std::net::SocketAddr, Arc<AtomicBool>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -2122,9 +2112,7 @@ mod tests {
         address: String,
         device: &'static str,
     ) -> std::thread::JoinHandle<anyhow::Result<waku_client::PairReply>> {
-        std::thread::spawn(move || {
-            waku_client::pair(&address, device, Duration::from_secs(30))
-        })
+        std::thread::spawn(move || waku_client::pair(&address, device, Duration::from_secs(30)))
     }
 
     #[test]
@@ -2138,7 +2126,10 @@ mod tests {
         // The owner's pairing document shows the pending device; approving
         // it by command is what releases the token.
         let pending = loop {
-            match pairing_updates.recv_timeout(Duration::from_secs(5)).unwrap() {
+            match pairing_updates
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+            {
                 state if !state.pending.is_empty() => break state.pending[0].clone(),
                 _ => continue,
             }
@@ -2203,7 +2194,10 @@ mod tests {
 
         let request = pair_device(address.to_string(), "phone");
         let pending = loop {
-            match pairing_updates.recv_timeout(Duration::from_secs(5)).unwrap() {
+            match pairing_updates
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+            {
                 state if !state.pending.is_empty() => break state.pending[0].clone(),
                 _ => continue,
             }
@@ -4130,9 +4124,7 @@ mod tests {
             ResponsePayload::Settings { .. }
         ));
         // …and rejects the loopback token.
-        assert!(
-            DaemonClient::connect(&format!("127.0.0.1:{port}"), "secret".into()).is_err()
-        );
+        assert!(DaemonClient::connect(&format!("127.0.0.1:{port}"), "secret".into()).is_err());
 
         // Reapplying the same config is a no-op — the listener survives.
         assert!(matches!(
@@ -4154,9 +4146,7 @@ mod tests {
             expose(None),
             ResponsePayload::Exposure { port: None }
         ));
-        assert!(
-            DaemonClient::connect(&format!("127.0.0.1:{port}"), "remote".into()).is_err()
-        );
+        assert!(DaemonClient::connect(&format!("127.0.0.1:{port}"), "remote".into()).is_err());
         client
             .request(Uuid::nil(), Uuid::nil(), Command::GetSettings)
             .unwrap();
@@ -4234,9 +4224,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let waku_client::PairReply::Granted { token, .. } =
-            pairing.join().unwrap().unwrap()
-        else {
+        let waku_client::PairReply::Granted { token, .. } = pairing.join().unwrap().unwrap() else {
             panic!("pair request was not granted");
         };
 

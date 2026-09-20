@@ -3765,7 +3765,8 @@ impl ComposerInput {
             (
                 range.clone(),
                 range.start == 0 || input.content()[..range.start].ends_with('\n'),
-                range.end == input.content().len() || input.content()[range.end..].starts_with('\n'),
+                range.end == input.content().len()
+                    || input.content()[range.end..].starts_with('\n'),
             )
         });
         let prefix = (!before_line_start).then_some('\n');

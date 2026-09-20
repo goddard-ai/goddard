@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 
-use super::http::{self, CurlJob};
 use super::Inner;
+use super::http::{self, CurlJob};
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
@@ -67,10 +67,7 @@ struct Request {
 
 /// Read one request; `Ok(None)` is a clean close. `pending` carries bytes
 /// read ahead of the previous request's end.
-fn read_request(
-    stream: &mut TcpStream,
-    pending: &mut Vec<u8>,
-) -> anyhow::Result<Option<Request>> {
+fn read_request(stream: &mut TcpStream, pending: &mut Vec<u8>) -> anyhow::Result<Option<Request>> {
     let mut buffer = std::mem::take(pending);
     let header_end = loop {
         if let Some(end) = find_header_end(&buffer) {
@@ -108,8 +105,7 @@ fn read_request(
             .map(|(_, v)| v.as_str())
     };
 
-    let chunked = header("transfer-encoding")
-        .is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+    let chunked = header("transfer-encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
     let request_body = if chunked {
         read_chunked(stream, &mut body)?
     } else {
@@ -160,11 +156,9 @@ fn read_chunked(stream: &mut TcpStream, buffered: &mut Vec<u8>) -> anyhow::Resul
     let mut body = Vec::new();
     loop {
         let size_line = read_line(stream, buffered)?;
-        let size = usize::from_str_radix(
-            size_line.trim().split(';').next().unwrap_or_default(),
-            16,
-        )
-        .map_err(|_| anyhow!("bad chunk size"))?;
+        let size =
+            usize::from_str_radix(size_line.trim().split(';').next().unwrap_or_default(), 16)
+                .map_err(|_| anyhow!("bad chunk size"))?;
         if size == 0 {
             // Trailers until an empty line.
             while !read_line(stream, buffered)?.trim().is_empty() {}

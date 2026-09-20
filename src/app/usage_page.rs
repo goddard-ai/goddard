@@ -1445,9 +1445,7 @@ impl Waku {
                     .when_some(path_caption, |element, path| {
                         element.child(file_link(
                             div()
-                                .id(SharedString::from(format!(
-                                    "usage-project-path-{index}"
-                                )))
+                                .id(SharedString::from(format!("usage-project-path-{index}")))
                                 .min_w_0()
                                 .truncate()
                                 .text_size(sp(12.5))
@@ -1673,12 +1671,7 @@ fn usage_chart_readout(
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .child(provider_mark(
-                    theme,
-                    kind,
-                    11.0,
-                    theme.text_tertiary,
-                ))
+                .child(provider_mark(theme, kind, 11.0, theme.text_tertiary))
                 .child(
                     div()
                         .flex_1()
@@ -1921,12 +1914,7 @@ fn usage_model_table(
                         .flex()
                         .items_center()
                         .gap(px(7.0))
-                        .child(provider_mark(
-                            theme,
-                            kind,
-                            12.0,
-                            theme.text_tertiary,
-                        ))
+                        .child(provider_mark(theme, kind, 12.0, theme.text_tertiary))
                         .child(
                             div()
                                 .min_w_0()
@@ -2036,15 +2024,15 @@ fn usage_day_table(
         }
         table = table.child(
             row.child(usage_cell(
-                    widths[provider_count],
-                    format_usd(day.cost_usd),
-                    theme.text,
-                ))
-                .child(usage_cell(
-                    widths[provider_count + 1],
-                    format_tokens_compact(day.total_tokens as f64),
-                    theme.text_tertiary,
-                )),
+                widths[provider_count],
+                format_usd(day.cost_usd),
+                theme.text,
+            ))
+            .child(usage_cell(
+                widths[provider_count + 1],
+                format_tokens_compact(day.total_tokens as f64),
+                theme.text_tertiary,
+            )),
         );
     }
     table
@@ -2428,12 +2416,7 @@ fn usage_provider_values(theme: &Theme, by_provider: &[ProviderDay; 2], by_cost:
                 .flex()
                 .items_center()
                 .gap(px(5.0))
-                .child(provider_mark(
-                    theme,
-                    kind,
-                    11.0,
-                    theme.text_tertiary,
-                ))
+                .child(provider_mark(theme, kind, 11.0, theme.text_tertiary))
                 .child(
                     div()
                         .text_size(sp(12.5))

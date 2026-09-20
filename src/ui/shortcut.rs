@@ -84,15 +84,10 @@ impl ShortcutHint {
                     // lookup returns `None` there instead; fall back to an
                     // empty stack so context-free bindings still resolve.
                     None => window.focused(cx).and_then(|focus| {
-                        window.highest_precedence_binding_for_action_in(
-                            action.as_ref(),
-                            &focus,
-                        )
+                        window.highest_precedence_binding_for_action_in(action.as_ref(), &focus)
                     }),
                 }
-                .or_else(|| {
-                    highest_precedence_binding(action.as_ref(), &[], shadowed_by, cx)
-                })?;
+                .or_else(|| highest_precedence_binding(action.as_ref(), &[], shadowed_by, cx))?;
                 Some(binding_label(&binding))
             }
         }
@@ -151,9 +146,7 @@ pub fn sequence_label(sequence: &str) -> String {
         .split_whitespace()
         .map(|stroke| {
             Keystroke::parse(stroke)
-                .map(|keystroke| {
-                    keystroke_label(&KeybindingKeystroke::from_keystroke(keystroke))
-                })
+                .map(|keystroke| keystroke_label(&KeybindingKeystroke::from_keystroke(keystroke)))
                 .unwrap_or_else(|_| stroke.to_string())
         })
         .collect::<Vec<_>>()

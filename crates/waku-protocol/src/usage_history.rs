@@ -32,9 +32,7 @@ impl UsageWindow {
     pub fn bounds(self, today: NaiveDate) -> (NaiveDate, NaiveDate) {
         match self {
             UsageWindow::TrailingDays(days) => (
-                today - chrono::Days::new(u64::from(
-                    days.min(MAX_TRAILING_DAYS).saturating_sub(1),
-                )),
+                today - chrono::Days::new(u64::from(days.min(MAX_TRAILING_DAYS).saturating_sub(1))),
                 today,
             ),
             UsageWindow::Months(months) => (

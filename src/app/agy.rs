@@ -138,7 +138,9 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_agy_submission(session_id, submission, prompt, message_id, prepared, cx);
+                waku.finish_agy_submission(
+                    session_id, submission, prompt, message_id, prepared, cx,
+                );
             });
         })
         .detach();
@@ -322,10 +324,9 @@ impl Waku {
                 model.as_deref(),
                 reasoning_effort.as_deref(),
             ),
-            AgyLaunchKind::Fresh => agy::AgyLaunch::fresh(
-                model.as_deref(),
-                reasoning_effort.as_deref(),
-            ),
+            AgyLaunchKind::Fresh => {
+                agy::AgyLaunch::fresh(model.as_deref(), reasoning_effort.as_deref())
+            }
         };
         let view = cx.new(|cx| {
             TerminalView::with_launch(
@@ -376,11 +377,7 @@ impl Waku {
     /// The session's main surface: its live TUI terminal, or a relaunch
     /// affordance once the process has exited. Renders only for a selected,
     /// started Antigravity session — drafts keep the ordinary composer.
-    pub(super) fn render_agy_surface(
-        &self,
-        width: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_agy_surface(&self, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(session_id) = self.state.selected_session else {
             return div().into_any_element();
@@ -595,18 +592,16 @@ impl Waku {
         while let Ok(update) = self.agy_poll_events.try_recv() {
             self.agy_poll_pending = false;
             for (session_id, conversation_id) in update.discovered {
-                let stale = self
-                    .state
-                    .sessions
-                    .iter()
-                    .any(|session| session.id == session_id && session.provider_cursor.is_some());
+                let stale =
+                    self.state.sessions.iter().any(|session| {
+                        session.id == session_id && session.provider_cursor.is_some()
+                    });
                 if stale {
                     continue;
                 }
                 if let Some(session) = self.state.session_mut(session_id) {
-                    session.provider_cursor = Some(ProviderResumeCursor::Antigravity {
-                        conversation_id,
-                    });
+                    session.provider_cursor =
+                        Some(ProviderResumeCursor::Antigravity { conversation_id });
                     session.updated_at = unix_time();
                     dirty = true;
                 }

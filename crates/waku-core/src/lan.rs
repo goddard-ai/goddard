@@ -42,16 +42,10 @@ impl LanAdvert {
         // collisions would merge address records across machines.
         let short_id: String = instance_id.chars().take(8).collect();
         let host_name = format!("waku-{short_id}.local.");
-        let service = mdns_sd::ServiceInfo::new(
-            SERVICE_TYPE,
-            name,
-            &host_name,
-            "",
-            port,
-            properties,
-        )
-        .context("invalid LAN service info")?
-        .enable_addr_auto();
+        let service =
+            mdns_sd::ServiceInfo::new(SERVICE_TYPE, name, &host_name, "", port, properties)
+                .context("invalid LAN service info")?
+                .enable_addr_auto();
         let fullname = service.get_fullname().to_string();
         daemon
             .register(service)

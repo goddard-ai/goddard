@@ -89,10 +89,7 @@ enum SyncJob {
         branches: Vec<String>,
     },
     /// Manual sync: unpause the branch, fetch, integrate.
-    SyncNow {
-        link_id: String,
-        branch: String,
-    },
+    SyncNow { link_id: String, branch: String },
     /// Alert decisions that touch git state. Dismiss is store-level.
     AlertAction {
         alert_id: String,
@@ -131,10 +128,7 @@ enum SyncJob {
     },
     /// Tear down one link — user disable (`notify` sends `SyncDisabled`)
     /// or the peer's own message (`notify` false).
-    TearDownLink {
-        link_id: String,
-        notify: bool,
-    },
+    TearDownLink { link_id: String, notify: bool },
     /// A friend's ref notice: fetch the moved refs into every checkout we
     /// can resolve for this origin, then bump review surfaces.
     RefNotice {
@@ -400,12 +394,9 @@ impl ShareInner {
                 .values()
                 .map(|f| {
                     let id = f.node_id.to_string();
-                    let online = self
-                        .probes
-                        .get(&id)
-                        .is_some_and(|(ok, at)| {
-                            *ok && now_ms().saturating_sub(*at) < PROBE_CACHE_MS
-                        });
+                    let online = self.probes.get(&id).is_some_and(|(ok, at)| {
+                        *ok && now_ms().saturating_sub(*at) < PROBE_CACHE_MS
+                    });
                     FriendInfo {
                         node_id: id,
                         name: f.name.clone(),
@@ -701,9 +692,7 @@ impl ShareService {
         let inner = self.state.lock();
         let mut store = inner.store.lock();
         let before = store.requests.len();
-        store
-            .requests
-            .retain(|r| !(r.node_id == id && !r.incoming));
+        store.requests.retain(|r| !(r.node_id == id && !r.incoming));
         if store.requests.len() == before {
             anyhow::bail!("no outgoing request to that code");
         }
@@ -1096,7 +1085,9 @@ fn sanitize_link_component(raw: &str, fallback: &str) -> String {
 /// title doesn't resolve to an entry inside it. Suffixes the transfer id
 /// on a name collision and removes stale links left by an older name.
 fn sync_transfer_link(base: &std::path::Path, peer: &str, transfer: &TransferInfo) {
-    let Some(dest_dir) = &transfer.dest_dir else { return };
+    let Some(dest_dir) = &transfer.dest_dir else {
+        return;
+    };
     let payload = dest_dir.join(&transfer.title);
     let dest = if payload.symlink_metadata().is_ok() {
         payload
@@ -1170,7 +1161,9 @@ fn resolved_peer_name(inner: &ShareInner, peer_id: &str, fallback: &str) -> Stri
 /// Publish a finished incoming transfer into `~/Documents/Goddard/From
 /// Friends` so the files are findable by name, not just by UUID.
 fn link_transfer(state: &Arc<Mutex<ShareInner>>, transfer: &TransferInfo) {
-    let Some(base) = friends_links_dir() else { return };
+    let Some(base) = friends_links_dir() else {
+        return;
+    };
     if std::fs::create_dir_all(&base).is_err() {
         return;
     }
@@ -1185,7 +1178,9 @@ fn link_transfer(state: &Arc<Mutex<ShareInner>>, transfer: &TransferInfo) {
 /// runs when the links directory already exists — no side effects for
 /// users who never received a file.
 fn relink_peer_transfers(state: &Arc<Mutex<ShareInner>>, peer: &EndpointId) {
-    let Some(base) = friends_links_dir() else { return };
+    let Some(base) = friends_links_dir() else {
+        return;
+    };
     if std::fs::read_dir(&base).is_err() {
         return;
     }
@@ -1236,12 +1231,7 @@ impl SyncWorker {
     fn update_incoming(&self, peer: EndpointId, projects: Vec<SharedRepo>) {
         let resolver = self.state.lock().resolver.clone();
         let repos = resolver.map(|r| r()).unwrap_or_default();
-        let peer_name = self
-            .state
-            .lock()
-            .store
-            .lock()
-            .resolved_name(&peer, "");
+        let peer_name = self.state.lock().store.lock().resolved_name(&peer, "");
         let dead = {
             let mut store = self.store();
             store.incoming.retain(|s| s.peer != peer);
@@ -1321,14 +1311,9 @@ impl SyncWorker {
         let result = (|| {
             let resolver = self.state.lock().resolver.clone();
             let repo = resolver
-                .and_then(|r| {
-                    r().into_iter()
-                        .find(|repo| repo.path == project_path)
-                })
+                .and_then(|r| r().into_iter().find(|repo| repo.path == project_path))
                 .context("no project at that path")?;
-            let origin_url = repo
-                .origin_url
-                .context("project has no origin remote")?;
+            let origin_url = repo.origin_url.context("project has no origin remote")?;
             {
                 let mut store = self.store();
                 if store.outgoing.iter().any(|s| {
@@ -1472,7 +1457,9 @@ impl SyncWorker {
                     temp_worktree,
                 }) => {
                     let mut store = self.store();
-                    store.alerts.retain(|a| !(a.link_id == link.id && a.branch == *branch));
+                    store
+                        .alerts
+                        .retain(|a| !(a.link_id == link.id && a.branch == *branch));
                     store.alerts.push(crate::sync::conflict_alert(
                         &link,
                         branch,
@@ -1490,7 +1477,9 @@ impl SyncWorker {
                         .iter()
                         .any(|a| a.link_id == link.id && a.branch == *branch)
                     {
-                        store.alerts.push(crate::sync::refused_alert(&link, branch, worktree));
+                        store
+                            .alerts
+                            .push(crate::sync::refused_alert(&link, branch, worktree));
                         changed = true;
                     }
                 }
@@ -1549,8 +1538,7 @@ impl SyncWorker {
                         let mut store = self.store();
                         store.alerts.retain(|a| a.id != alert.id);
                         if paused
-                            && let Some(l) =
-                                store.links.iter_mut().find(|l| l.id == alert.link_id)
+                            && let Some(l) = store.links.iter_mut().find(|l| l.id == alert.link_id)
                         {
                             l.paused_branches.insert(alert.branch.clone());
                         }
@@ -1560,11 +1548,8 @@ impl SyncWorker {
                     // owned goes — abort is a no-op once nothing is in
                     // progress and drops the registration either way.
                     if alert.temp_worktree
-                        && let Err(error) = crate::sync::abort(
-                            &link.repo_path,
-                            &alert.worktree_path,
-                            true,
-                        )
+                        && let Err(error) =
+                            crate::sync::abort(&link.repo_path, &alert.worktree_path, true)
                     {
                         eprintln!("share sync: temp cleanup failed: {error:#}");
                     }
@@ -1621,10 +1606,11 @@ impl SyncWorker {
             {
                 let mut store = self.store();
                 store.links.push(link);
-                if peer_initiated && let Some(share) = store
-                    .outgoing
-                    .iter_mut()
-                    .find(|s| s.peer == peer && normalize_origin(&s.origin_url) == normalize_origin(&origin_url))
+                if peer_initiated
+                    && let Some(share) = store.outgoing.iter_mut().find(|s| {
+                        s.peer == peer
+                            && normalize_origin(&s.origin_url) == normalize_origin(&origin_url)
+                    })
                 {
                     share.peer_sync_enabled = true;
                 }
@@ -1682,22 +1668,19 @@ impl SyncWorker {
                 .cloned()
                 .collect();
             store.alerts.retain(|a| a.link_id != link_id);
-            if let Some(share) = store
-                .outgoing
-                .iter_mut()
-                .find(|s| s.peer == link.peer && normalize_origin(&s.origin_url) == normalize_origin(&link.origin_url))
-            {
+            if let Some(share) = store.outgoing.iter_mut().find(|s| {
+                s.peer == link.peer
+                    && normalize_origin(&s.origin_url) == normalize_origin(&link.origin_url)
+            }) {
                 share.peer_sync_enabled = false;
             }
             let _ = store.save();
             (link, alerts)
         };
         for alert in link.1 {
-            if let Err(error) = crate::sync::abort(
-                &link.0.repo_path,
-                &alert.worktree_path,
-                alert.temp_worktree,
-            ) {
+            if let Err(error) =
+                crate::sync::abort(&link.0.repo_path, &alert.worktree_path, alert.temp_worktree)
+            {
                 eprintln!("share sync: cleanup {} failed: {error:#}", alert.branch);
             }
         }
@@ -1729,11 +1712,7 @@ impl SyncWorker {
                                     .cloned()
                                     .collect();
                                 if !branches.is_empty() {
-                                    notices.push((
-                                        link.peer,
-                                        link.origin_url.clone(),
-                                        branches,
-                                    ));
+                                    notices.push((link.peer, link.origin_url.clone(), branches));
                                 }
                             }
                             Err(error) => eprintln!(
@@ -1779,9 +1758,7 @@ impl SyncWorker {
                 SyncJob::SyncNow { link_id, branch } => {
                     {
                         let mut store = self.store();
-                        if let Some(link) =
-                            store.links.iter_mut().find(|l| l.id == link_id)
-                        {
+                        if let Some(link) = store.links.iter_mut().find(|l| l.id == link_id) {
                             link.paused_branches.remove(&branch);
                             let _ = store.save();
                         }
@@ -1796,9 +1773,9 @@ impl SyncWorker {
                     let (alert, link) = {
                         let store = self.store();
                         let alert = store.alerts.iter().find(|a| a.id == alert_id).cloned();
-                        let link = alert.as_ref().and_then(|a| {
-                            store.links.iter().find(|l| l.id == a.link_id).cloned()
-                        });
+                        let link = alert
+                            .as_ref()
+                            .and_then(|a| store.links.iter().find(|l| l.id == a.link_id).cloned());
                         (alert, link)
                     };
                     let (Some(alert), Some(link)) = (alert, link) else {
@@ -1818,8 +1795,7 @@ impl SyncWorker {
                                 temp_worktree,
                             }) => {
                                 let mut store = self.store();
-                                if let Some(a) =
-                                    store.alerts.iter_mut().find(|a| a.id == alert_id)
+                                if let Some(a) = store.alerts.iter_mut().find(|a| a.id == alert_id)
                                 {
                                     a.in_progress = Some(in_progress);
                                     a.files = files;
@@ -1848,8 +1824,7 @@ impl SyncWorker {
                             store.alerts.retain(|a| a.id != alert_id);
                             // Aborting pauses the branch until a manual
                             // sync — spec.
-                            if let Some(l) =
-                                store.links.iter_mut().find(|l| l.id == alert.link_id)
+                            if let Some(l) = store.links.iter_mut().find(|l| l.id == alert.link_id)
                             {
                                 l.paused_branches.insert(alert.branch.clone());
                             }
@@ -1864,13 +1839,7 @@ impl SyncWorker {
                     peer_initiated,
                     reply,
                 } => {
-                    self.create_link(
-                        peer,
-                        origin_url,
-                        repo_path,
-                        peer_initiated,
-                        Some(reply),
-                    );
+                    self.create_link(peer, origin_url, repo_path, peer_initiated, Some(reply));
                 }
                 SyncJob::PeerSyncState {
                     peer,
@@ -1878,8 +1847,7 @@ impl SyncWorker {
                     enabled,
                 } => {
                     if enabled {
-                        let has_link =
-                            self.store().link_for(&peer, &origin_url).is_some();
+                        let has_link = self.store().link_for(&peer, &origin_url).is_some();
                         let share = self
                             .store()
                             .outgoing
@@ -1894,20 +1862,14 @@ impl SyncWorker {
                             // Their ack — mark both flags.
                             {
                                 let mut store = self.store();
-                                if let Some(link) =
-                                    store.link_for_mut(&peer, &origin_url)
-                                {
+                                if let Some(link) = store.link_for_mut(&peer, &origin_url) {
                                     link.peer_sync_enabled = true;
                                 }
-                                if let Some(share) = store
-                                    .outgoing
-                                    .iter_mut()
-                                    .find(|s| {
-                                        s.peer == peer
-                                            && normalize_origin(&s.origin_url)
-                                                == normalize_origin(&origin_url)
-                                    })
-                                {
+                                if let Some(share) = store.outgoing.iter_mut().find(|s| {
+                                    s.peer == peer
+                                        && normalize_origin(&s.origin_url)
+                                            == normalize_origin(&origin_url)
+                                }) {
                                     share.peer_sync_enabled = true;
                                 }
                                 let _ = store.save();
@@ -1916,13 +1878,7 @@ impl SyncWorker {
                         } else if let Some(share) = share {
                             // They enabled sync on a repo we shared —
                             // create our side of the link.
-                            self.create_link(
-                                peer,
-                                origin_url,
-                                share.repo_path,
-                                true,
-                                None,
-                            );
+                            self.create_link(peer, origin_url, share.repo_path, true, None);
                         }
                     } else {
                         // Their SyncDisabled — tear our side down without
@@ -1937,15 +1893,11 @@ impl SyncWorker {
                             // No link — still clear the share's flag.
                             {
                                 let mut store = self.store();
-                                if let Some(share) = store
-                                    .outgoing
-                                    .iter_mut()
-                                    .find(|s| {
-                                        s.peer == peer
-                                            && normalize_origin(&s.origin_url)
-                                                == normalize_origin(&origin_url)
-                                    })
-                                {
+                                if let Some(share) = store.outgoing.iter_mut().find(|s| {
+                                    s.peer == peer
+                                        && normalize_origin(&s.origin_url)
+                                            == normalize_origin(&origin_url)
+                                }) {
                                     share.peer_sync_enabled = false;
                                     let _ = store.save();
                                 }

@@ -98,7 +98,9 @@ impl FriendStore {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let Some(path) = &self.path else { return Ok(()) };
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -152,8 +154,12 @@ impl FriendStore {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum FriendsMessage {
     /// "Add me as a friend." `name` is self-reported display text.
-    FriendRequest { name: String },
-    FriendAccept { name: String },
+    FriendRequest {
+        name: String,
+    },
+    FriendAccept {
+        name: String,
+    },
     FriendDecline,
     /// File offer — filled in by the transfer step. `ticket` is a
     /// sendme-compatible blob ticket string; `note` is the sender's message.
@@ -173,7 +179,9 @@ pub enum FriendsMessage {
     OfferDecline,
     /// Download finished (hash verified). Sent on a second connection after
     /// the blobs fetch completes.
-    TransferDone { ticket: String },
+    TransferDone {
+        ticket: String,
+    },
     /// Generic acknowledgement for one-way messages; needed because closing
     /// the connection right after `finish()` can drop unflushed stream data.
     Ack,
@@ -186,10 +194,14 @@ pub enum FriendsMessage {
     },
     /// Sender enabled automatic sync for `origin_url` on a repo we shared
     /// with them — the link becomes mutual.
-    SyncEnabled { origin_url: String },
+    SyncEnabled {
+        origin_url: String,
+    },
     /// Sender disabled sync for `origin_url` — both sides tear the link
     /// down.
-    SyncDisabled { origin_url: String },
+    SyncDisabled {
+        origin_url: String,
+    },
     /// Sender pushed commits to the shared origin on these branches —
     /// the recipient fetches and integrates. A hint: the receiver still
     /// verifies against origin.
@@ -251,9 +263,7 @@ pub enum RequestDecision {
 /// oneshot the acceptor awaits — the UI can take minutes to answer without
 /// blocking the protocol task. Timeout defaults to decline.
 pub type RequestHandler = Arc<
-    dyn Fn(EndpointId, String) -> tokio::sync::oneshot::Receiver<RequestDecision>
-        + Send
-        + Sync,
+    dyn Fn(EndpointId, String) -> tokio::sync::oneshot::Receiver<RequestDecision> + Send + Sync,
 >;
 
 /// An incoming transfer offer, already parsed and sender-authenticated.
@@ -275,8 +285,7 @@ pub type DoneHandler = Arc<dyn Fn(EndpointId, String) + Send + Sync>;
 
 /// Fired when a friend sends their full shared-repo set — replaces what
 /// we recorded for that peer.
-pub type ShareListHandler =
-    Arc<dyn Fn(EndpointId, Vec<crate::projects::SharedRepo>) + Send + Sync>;
+pub type ShareListHandler = Arc<dyn Fn(EndpointId, Vec<crate::projects::SharedRepo>) + Send + Sync>;
 
 /// Fired when a friend enables or disables sync on a repo we shared
 /// with them. `enabled` distinguishes `SyncEnabled` from `SyncDisabled`.
@@ -413,16 +422,14 @@ impl ProtocolHandler for FriendsProtocol {
         match msg {
             FriendsMessage::FriendRequest { name } => {
                 let decision_rx = (self.on_request)(remote, name.clone());
-                let decision = match tokio::time::timeout(
-                    std::time::Duration::from_secs(300),
-                    decision_rx,
-                )
-                .await
-                {
-                    Ok(Ok(decision)) => decision,
-                    // Timed out or the request was dropped — decline.
-                    _ => RequestDecision::Decline,
-                };
+                let decision =
+                    match tokio::time::timeout(std::time::Duration::from_secs(300), decision_rx)
+                        .await
+                    {
+                        Ok(Ok(decision)) => decision,
+                        // Timed out or the request was dropped — decline.
+                        _ => RequestDecision::Decline,
+                    };
                 let reply = match decision {
                     RequestDecision::Accept { our_name } => {
                         {
@@ -447,7 +454,13 @@ impl ProtocolHandler for FriendsProtocol {
                 write_message(&mut send, &reply).await.map_err(accept_err)?;
                 send.finish()?;
             }
-            FriendsMessage::Offer { name, file_name, size, note, ticket } => {
+            FriendsMessage::Offer {
+                name,
+                file_name,
+                size,
+                note,
+                ticket,
+            } => {
                 let is_friend = {
                     let mut store = self.store.lock();
                     let is_friend = store.is_friend(&remote);

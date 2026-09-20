@@ -11,10 +11,7 @@ use waku_protocol::workspace::GitHubRepoRef;
 use super::*;
 use crate::OpenCreatedIssueInGitHub;
 
-actions!(
-    waku_issue_dialog,
-    [ConfirmIssueDialog, DismissIssueDialog]
-);
+actions!(waku_issue_dialog, [ConfirmIssueDialog, DismissIssueDialog]);
 
 const DIALOG_CONTEXT: &str = "IssueDialog";
 const DIALOG_INPUT_CONTEXT: &str = "IssueDialog > TextInput";
@@ -87,16 +84,14 @@ impl Waku {
             .unwrap_or_else(|| {
                 settings::abbreviate_home_path(&target.cwd, self.home_directory.as_deref())
             });
-        let field = |placeholder: String,
-                     label: String,
-                     window: &mut Window,
-                     cx: &mut Context<Self>| {
-            cx.new(|cx| {
-                TextInput::new(window, cx)
-                    .accessibility_label(label)
-                    .placeholder(placeholder)
-            })
-        };
+        let field =
+            |placeholder: String, label: String, window: &mut Window, cx: &mut Context<Self>| {
+                cx.new(|cx| {
+                    TextInput::new(window, cx)
+                        .accessibility_label(label)
+                        .placeholder(placeholder)
+                })
+            };
         let title = field(
             tr!("issue.title_placeholder"),
             tr!("issue.title"),
@@ -141,9 +136,7 @@ impl Waku {
                 title.update(cx, |input, cx| input.set_content(prefix, cx));
             }
             if !template.body.is_empty() {
-                body.update(cx, |input, cx| {
-                    input.set_content(template.body.clone(), cx)
-                });
+                body.update(cx, |input, cx| input.set_content(template.body.clone(), cx));
             }
             if !template.labels.is_empty() {
                 labels.update(cx, |input, cx| {
@@ -265,15 +258,13 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace_client.request(
-                        waku_client::WorkspaceOperation::CreateIssue { cwd, input },
-                    ) {
+                    match workspace_client
+                        .request(waku_client::WorkspaceOperation::CreateIssue { cwd, input })
+                    {
                         Ok(waku_client::WorkspaceResult::IssueCreated { number, url }) => {
                             Ok((number, url))
                         }
-                        Ok(_) => {
-                            Err("the daemon returned an invalid issue response".to_owned())
-                        }
+                        Ok(_) => Err("the daemon returned an invalid issue response".to_owned()),
                         Err(error) => Err(error.to_string()),
                     }
                 })
@@ -350,13 +341,7 @@ impl Waku {
         let Some(created) = self.last_created_issue.clone() else {
             return;
         };
-        self.open_created_issue(
-            created.project,
-            created.number,
-            &created.url,
-            window,
-            cx,
-        );
+        self.open_created_issue(created.project, created.number, &created.url, window, cx);
     }
 
     pub(super) fn render_issue_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -366,35 +351,33 @@ impl Waku {
         let error = dialog.error.clone();
         let weak = cx.entity().downgrade();
 
-        let field_row = |id: &'static str,
-                         caption: String,
-                         input: &Entity<TextInput>|
-         -> Stateful<Div> {
-            div()
-                .id(id)
-                .w_full()
-                .px(px(16.0))
-                .py(px(7.0))
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(74.0))
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(caption),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .text_size(sp(13.5))
-                        .text_color(theme.text)
-                        .child(input.clone()),
-                )
-        };
+        let field_row =
+            |id: &'static str, caption: String, input: &Entity<TextInput>| -> Stateful<Div> {
+                div()
+                    .id(id)
+                    .w_full()
+                    .px(px(16.0))
+                    .py(px(7.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(74.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(caption),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .text_size(sp(13.5))
+                            .text_color(theme.text)
+                            .child(input.clone()),
+                    )
+            };
 
         let create_active = submitting;
         let create = {
@@ -429,17 +412,11 @@ impl Waku {
                     row.hover(|style| style.bg(theme.overlay_strong))
                 })
                 .child(indicator)
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .child(if create_active {
-                            tr!("issue.creating")
-                        } else {
-                            tr!("issue.create")
-                        }),
-                )
+                .child(div().min_w_0().flex_1().truncate().child(if create_active {
+                    tr!("issue.creating")
+                } else {
+                    tr!("issue.create")
+                }))
                 .child(
                     div()
                         .h(px(22.0))
@@ -461,17 +438,15 @@ impl Waku {
                 )
                 .when(!submitting, |row| {
                     row.on_click(move |_, window, cx| {
-                        let _ = click_weak.update(cx, |waku, cx| {
-                            waku.request_issue_create(window, cx)
-                        });
+                        let _ =
+                            click_weak.update(cx, |waku, cx| waku.request_issue_create(window, cx));
                     })
                     .on_key_down(move |event: &KeyDownEvent, window, cx| {
                         if !event.keystroke.modifiers.modified()
                             && matches!(event.keystroke.key.as_str(), "enter" | "space")
                         {
-                            let _ = key_weak.update(cx, |waku, cx| {
-                                waku.request_issue_create(window, cx)
-                            });
+                            let _ = key_weak
+                                .update(cx, |waku, cx| waku.request_issue_create(window, cx));
                             cx.stop_propagation();
                         }
                     })

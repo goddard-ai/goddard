@@ -37,8 +37,7 @@ use gpui::{
     FontWeight, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent,
     LayoutId, Length, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Position, RenderOnce, SharedString, Size, StatefulInteractiveElement, Style, Styled, Window,
-    actions,
-    anchored, canvas, deferred, div, img, linear_color_stop, linear_gradient,
+    actions, anchored, canvas, deferred, div, img, linear_color_stop, linear_gradient,
     prelude::FluentBuilder, px,
 };
 
@@ -878,20 +877,14 @@ where
 {
     let id: ElementId = id.into();
     let items = Rc::new(items);
-    anchored_surface(
-        trigger,
-        handle,
-        align,
-        SurfaceFocus::Card,
-        move |handle| {
-            MenuCard {
-                id: id.clone(),
-                handle: handle.clone(),
-                items: items.clone(),
-            }
-            .into_any_element()
-        },
-    )
+    anchored_surface(trigger, handle, align, SurfaceFocus::Card, move |handle| {
+        MenuCard {
+            id: id.clone(),
+            handle: handle.clone(),
+            items: items.clone(),
+        }
+        .into_any_element()
+    })
 }
 
 /// A [`dropdown_menu`] whose trigger also opens after the pointer rests on it
@@ -1502,7 +1495,11 @@ fn render_menu_item(
                             .child(value),
                     )
                 })
-                .child(icon("icons/chevron-right.svg", 10.0, theme.affordance_icon()))
+                .child(icon(
+                    "icons/chevron-right.svg",
+                    10.0,
+                    theme.affordance_icon(),
+                ))
                 .into_any_element()
         }
         MenuItem::Custom { render, on_click } => {
@@ -2219,7 +2216,10 @@ mod tests {
         cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
         cx.run_until_parked();
         cx.simulate_mouse_up(on_trigger, MouseButton::Left, Modifiers::none());
-        assert!(handle.is_open(), "a release in place is a click, not a drag");
+        assert!(
+            handle.is_open(),
+            "a release in place is a click, not a drag"
+        );
 
         // Click mode still works: a press on the row picks it on the down.
         let item = cx

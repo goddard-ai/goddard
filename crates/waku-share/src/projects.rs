@@ -167,7 +167,9 @@ impl ShareStore {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let Some(path) = &self.path else { return Ok(()) };
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -185,11 +187,7 @@ impl ShareStore {
         })
     }
 
-    pub fn link_for_mut(
-        &mut self,
-        peer: &EndpointId,
-        origin_url: &str,
-    ) -> Option<&mut SyncLink> {
+    pub fn link_for_mut(&mut self, peer: &EndpointId, origin_url: &str) -> Option<&mut SyncLink> {
         self.links.iter_mut().find(|l| {
             l.peer == *peer && normalize_origin(&l.origin_url) == normalize_origin(origin_url)
         })

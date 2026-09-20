@@ -384,13 +384,7 @@ const BOTTOM_ROW: &[KeyCap] = &[
     key("ControlRight", "ctrl", 1.25),
 ];
 
-static US_ANSI_ROWS: &[&[KeyCap]] = &[
-    ANSI_NUMBER_ROW,
-    ANSI_QWER,
-    ANSI_ASDF,
-    ANSI_ZXCV,
-    BOTTOM_ROW,
-];
+static US_ANSI_ROWS: &[&[KeyCap]] = &[ANSI_NUMBER_ROW, ANSI_QWER, ANSI_ASDF, ANSI_ZXCV, BOTTOM_ROW];
 static UK_ISO_ROWS: &[&[KeyCap]] = &[UK_NUMBER_ROW, UK_QWER, UK_ASDF, UK_ZXCV, BOTTOM_ROW];
 static DE_ISO_ROWS: &[&[KeyCap]] = &[DE_NUMBER_ROW, DE_QWER, DE_ASDF, DE_ZXCV, BOTTOM_ROW];
 static DVORAK_ROWS: &[&[KeyCap]] = &[
@@ -402,26 +396,26 @@ static DVORAK_ROWS: &[&[KeyCap]] = &[
 ];
 
 static BUNDLED: &[KeyboardLayout] = &[
-        KeyboardLayout {
-            id: LayoutId::UsAnsi,
-            name: "US ANSI",
-            rows: US_ANSI_ROWS,
-        },
-        KeyboardLayout {
-            id: LayoutId::UkIso,
-            name: "UK ISO",
-            rows: UK_ISO_ROWS,
-        },
-        KeyboardLayout {
-            id: LayoutId::DeIso,
-            name: "German ISO",
-            rows: DE_ISO_ROWS,
-        },
-        KeyboardLayout {
-            id: LayoutId::DvorakAnsi,
-            name: "Dvorak ANSI",
-            rows: DVORAK_ROWS,
-        },
+    KeyboardLayout {
+        id: LayoutId::UsAnsi,
+        name: "US ANSI",
+        rows: US_ANSI_ROWS,
+    },
+    KeyboardLayout {
+        id: LayoutId::UkIso,
+        name: "UK ISO",
+        rows: UK_ISO_ROWS,
+    },
+    KeyboardLayout {
+        id: LayoutId::DeIso,
+        name: "German ISO",
+        rows: DE_ISO_ROWS,
+    },
+    KeyboardLayout {
+        id: LayoutId::DvorakAnsi,
+        name: "Dvorak ANSI",
+        rows: DVORAK_ROWS,
+    },
 ];
 
 /// The layouts bundled in v1.

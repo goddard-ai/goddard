@@ -786,7 +786,6 @@ pub fn configure_sidebar_material(
                 }
             });
         }
-
     }
 }
 

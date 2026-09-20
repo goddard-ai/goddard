@@ -3631,9 +3631,12 @@ mod tests {
                 .all(|session| session.messages.is_empty())
         );
 
-        let matches = reopened
-            .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
-            .unwrap();
+        let matches = reopened.session_message_search(
+            "needle".into(),
+            50,
+            SessionMessageSearchScope::Active,
+        )()
+        .unwrap();
         assert_eq!(
             matches
                 .iter()
@@ -3649,28 +3652,26 @@ mod tests {
         assert!(!matches[1].snippet.contains("Streaming"));
         assert!(!matches[1].snippet.contains("System"));
         assert_eq!(
-            reopened
-                .session_message_search(
-                    "100%_literal".into(),
-                    50,
-                    SessionMessageSearchScope::Active
-                )()
-                .unwrap()
-                .iter()
-                .map(|matched| matched.session_id)
-                .collect::<Vec<_>>(),
+            reopened.session_message_search(
+                "100%_literal".into(),
+                50,
+                SessionMessageSearchScope::Active
+            )()
+            .unwrap()
+            .iter()
+            .map(|matched| matched.session_id)
+            .collect::<Vec<_>>(),
             vec![user_match_id],
             "SQL wildcard characters are searched literally"
         );
         assert!(
-            reopened
-                .session_message_search(
-                    "Hidden continue".into(),
-                    50,
-                    SessionMessageSearchScope::Active
-                )()
-                .unwrap()
-                .is_empty(),
+            reopened.session_message_search(
+                "Hidden continue".into(),
+                50,
+                SessionMessageSearchScope::Active
+            )()
+            .unwrap()
+            .is_empty(),
             "a hidden prompt never surfaces in search"
         );
 
@@ -3912,8 +3913,7 @@ mod tests {
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
         assert_eq!(
-            store
-                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
+            store.session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
                 .unwrap()
                 .len(),
             1
@@ -3934,10 +3934,13 @@ mod tests {
             "archived sessions are hidden from the active transcript search"
         );
         assert_eq!(
-            reopened
-                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Archived)()
-                .unwrap()
-                .len(),
+            reopened.session_message_search(
+                "needle".into(),
+                50,
+                SessionMessageSearchScope::Archived
+            )()
+            .unwrap()
+            .len(),
             1,
             "the archived scope finds the same transcript"
         );
@@ -3955,10 +3958,13 @@ mod tests {
             1
         );
         assert!(
-            reopened
-                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Archived)()
-                .unwrap()
-                .is_empty(),
+            reopened.session_message_search(
+                "needle".into(),
+                50,
+                SessionMessageSearchScope::Archived
+            )()
+            .unwrap()
+            .is_empty(),
             "an unarchived session leaves the archived scope"
         );
 

@@ -315,8 +315,7 @@ impl Waku {
         summary: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        if !self.state.status_markers_enabled || self.status_marker_in_flight.contains(&turn_id)
-        {
+        if !self.state.status_markers_enabled || self.status_marker_in_flight.contains(&turn_id) {
             return;
         }
         let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
@@ -355,9 +354,7 @@ impl Waku {
                     .map_err(|error| format!("{error:#}"))
                     .and_then(|payload| match payload {
                         waku_client::ResponsePayload::Evaluation { evaluation } => Ok(evaluation),
-                        _ => {
-                            Err("the daemon returned an invalid evaluation response".to_owned())
-                        }
+                        _ => Err("the daemon returned an invalid evaluation response".to_owned()),
                     });
                 if tx.send((turn_id, result)).is_ok() {
                     signal_event_pump(&event_wake);
@@ -480,4 +477,3 @@ mod tests {
         assert_eq!(state["provider"], "Codex CLI");
     }
 }
-

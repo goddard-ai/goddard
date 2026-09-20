@@ -64,8 +64,8 @@ impl Inner {
         let variant = entry
             .variant(&setting.variant_id)
             .unwrap_or_else(|| entry.default_variant());
-        let auth_header = oauth::access_token(&self.secrets, id)?
-            .map(|token| format!("Bearer {token}"));
+        let auth_header =
+            oauth::access_token(&self.secrets, id)?.map(|token| format!("Bearer {token}"));
         Ok(Some(Upstream {
             url: variant.url.to_owned(),
             auth_header,

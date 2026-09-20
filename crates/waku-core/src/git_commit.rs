@@ -195,8 +195,7 @@ pub(crate) fn agent_oneshot(
         prompt,
         amp_settings.as_deref(),
     );
-    if invocation.provider == ProviderKind::Muse
-        && muse_supports_no_session_log(&invocation.binary)
+    if invocation.provider == ProviderKind::Muse && muse_supports_no_session_log(&invocation.binary)
     {
         // Keep a commit-subject run out of the user's session history.
         args.insert(1, OsString::from("--no-session-log"));

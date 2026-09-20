@@ -18,9 +18,8 @@ pub use iroh_blobs::api::TempTag;
 use std::path::Path;
 
 use anyhow::{Context as _, bail};
-use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
 use iroh::protocol::Router;
-use iroh_mdns_address_lookup::MdnsAddressLookup;
+use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
 use iroh_blobs::{
     BlobFormat, BlobsProtocol, Hash,
     api::Store,
@@ -29,6 +28,7 @@ use iroh_blobs::{
     store::fs::FsStore,
     ticket::BlobTicket,
 };
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use n0_future::StreamExt;
 
 /// The blake3 hash of the shared content plus the sender's dialable address.

@@ -355,7 +355,10 @@ impl MuseHost {
             Ok(result) => result,
             Err(error) => {
                 host.shutdown(Duration::ZERO);
-                return Err(anyhow!("muse serve did not initialize: {}", error.message()));
+                return Err(anyhow!(
+                    "muse serve did not initialize: {}",
+                    error.message()
+                ));
             }
         };
 

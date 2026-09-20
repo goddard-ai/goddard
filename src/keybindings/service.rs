@@ -15,9 +15,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{
-    CommandDescriptor, CommandId, ENTRIES, PlatformSet, command, command_rows,
-};
+use super::{CommandDescriptor, CommandId, ENTRIES, PlatformSet, command, command_rows};
 use crate::keybindings::CommandRow;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -140,14 +138,8 @@ pub enum CommitError {
 /// Events emitted after service operations; the app layer broadcasts these.
 #[derive(Clone, Debug)]
 pub enum KeybindingEvent {
-    KeymapChanged {
-        revision: u64,
-        changed: Vec<String>,
-    },
-    FileError {
-        recoverable: bool,
-        message: String,
-    },
+    KeymapChanged { revision: u64, changed: Vec<String> },
+    FileError { recoverable: bool, message: String },
 }
 
 /// Where the file lives: `~/.goddard/keybindings.json`, matching the app's
@@ -191,7 +183,8 @@ impl KeybindingService {
                             return service;
                         }
                         if file.overrides.len() > MAX_OVERRIDES {
-                            service.load_error = Some("keybindings.json has too many overrides".into());
+                            service.load_error =
+                                Some("keybindings.json has too many overrides".into());
                             return service;
                         }
                         service.file = file;
@@ -347,16 +340,14 @@ impl KeybindingService {
     /// Restore the `.bak` of last known-good data, if present.
     pub fn restore_backup(&mut self) -> Result<(), CommitError> {
         let backup = self.path.with_extension("json.bak");
-        let bytes =
-            fs::read(&backup).map_err(|e| CommitError::Io(format!("backup: {e}")))?;
+        let bytes = fs::read(&backup).map_err(|e| CommitError::Io(format!("backup: {e}")))?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(CommitError::Io("backup exceeds size limit".into()));
         }
         let file: KeybindingsFile = serde_json::from_slice(&bytes)
             .map_err(|e| CommitError::Io(format!("backup unreadable: {e}")))?;
         self.file = file;
-        self.write()
-            .map(|_| self.load_error = None)
+        self.write().map(|_| self.load_error = None)
     }
 
     /// Serialize → temp → fsync → rename, keeping `.bak` of the previous
@@ -365,8 +356,7 @@ impl KeybindingService {
         let bytes = serde_json::to_vec_pretty(&self.file)
             .map_err(|e| CommitError::Io(format!("serialize: {e}")))?;
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| CommitError::Io(format!("create dir: {e}")))?;
+            fs::create_dir_all(parent).map_err(|e| CommitError::Io(format!("create dir: {e}")))?;
         }
         let temp = self.path.with_extension("json.tmp");
         fs::write(&temp, &bytes).map_err(|e| CommitError::Io(format!("write temp: {e}")))?;
@@ -460,9 +450,7 @@ fn resolve(overrides: &[UserOverride]) -> Vec<EffectiveBinding> {
             .unwrap_or_default()
             .into_iter()
             .filter(|over| platform_applies(&over.platforms))
-            .filter(|over| {
-                over.context.as_deref() == entry.context || over.context.is_none()
-            })
+            .filter(|over| over.context.as_deref() == entry.context || over.context.is_none())
             .collect::<Vec<_>>();
 
         // An unbind kills the default; a replace rewrites it in place; adds

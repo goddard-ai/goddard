@@ -8,18 +8,17 @@
 use gpui::{Action, KeyBinding, actions};
 
 use super::archive_dialog::{ConfirmArchiveDialog, DismissArchiveDialog};
-use super::full_access_dialog::{ConfirmFullAccessDialog, DismissFullAccessDialog};
 use super::command_palette::{
     Confirm, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown, SelectPageUp,
     SelectPrevious,
 };
+use super::full_access_dialog::{ConfirmFullAccessDialog, DismissFullAccessDialog};
 use super::*;
 use crate::{
     AdjustFontSize, BrowserAddressCancel, BrowserBack, BrowserDevtools, BrowserForward,
     BrowserHardReload, BrowserReload, BrowserStop, FocusBrowserAddress, FontSizeDirection,
     FontSizeTarget, OpenCreatedIssueInGitHub, OpenLocalhostUrl, OpenLocalhostUrlInTab,
-    OpenToastSession, Quit,
-    WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
+    OpenToastSession, Quit, WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
 };
 #[cfg(target_os = "macos")]
 use crate::{Hide, HideOthers};
@@ -180,7 +179,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         (
             "shortcuts.section.workspace",
             vec![
-                bound(tr!("shortcuts.navigate_back"), NavigateBack, Some("Workspace")),
+                bound(
+                    tr!("shortcuts.navigate_back"),
+                    NavigateBack,
+                    Some("Workspace"),
+                ),
                 bound(
                     tr!("shortcuts.navigate_forward"),
                     NavigateForward,
@@ -246,18 +249,38 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     AddToChat,
                     Some("Transcript || FileEditorPane"),
                 ),
-                bound(tr!("shortcuts.archive_task"), ArchiveSession, Some("Workspace")),
-                bound(tr!("shortcuts.pin_task"), ToggleSessionPin, Some("Workspace")),
-                bound(tr!("shortcuts.copy_selection"), CopySelection, Some("Workspace")),
+                bound(
+                    tr!("shortcuts.archive_task"),
+                    ArchiveSession,
+                    Some("Workspace"),
+                ),
+                bound(
+                    tr!("shortcuts.pin_task"),
+                    ToggleSessionPin,
+                    Some("Workspace"),
+                ),
+                bound(
+                    tr!("shortcuts.copy_selection"),
+                    CopySelection,
+                    Some("Workspace"),
+                ),
                 bound(
                     tr!("shortcuts.copy_workdir"),
                     CopyWorkingDirectory,
                     Some("Workspace"),
                 ),
                 bound(tr!("shortcuts.find"), OpenFind, Some("Workspace")),
-                bound(tr!("shortcuts.find_replace"), OpenFindReplace, Some("Workspace")),
+                bound(
+                    tr!("shortcuts.find_replace"),
+                    OpenFindReplace,
+                    Some("Workspace"),
+                ),
                 bound(tr!("shortcuts.find_next"), FindNext, Some("Workspace")),
-                bound(tr!("shortcuts.find_previous"), FindPrevious, Some("Workspace")),
+                bound(
+                    tr!("shortcuts.find_previous"),
+                    FindPrevious,
+                    Some("Workspace"),
+                ),
                 bound(
                     tr!("shortcuts.go_to_line"),
                     OpenGoToLine,
@@ -894,11 +917,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     sidebar::CancelSessionRename,
                     Some("SessionRename > TextInput"),
                 ),
-                bound(
-                    tr!("shortcuts.dismiss"),
-                    DismissMenu,
-                    Some("Annotation"),
-                ),
+                bound(tr!("shortcuts.dismiss"), DismissMenu, Some("Annotation")),
                 bound(
                     tr!("shortcuts.close_preview"),
                     image_preview::DismissImagePreview,

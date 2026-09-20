@@ -195,7 +195,10 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|waku, _, window, cx| waku.dismiss_terminal_close_dialog(window, cx)),
             )
-            .child(motion::modal_enter("terminal-close-dialog-card-enter", card));
+            .child(motion::modal_enter(
+                "terminal-close-dialog-card-enter",
+                card,
+            ));
         Some(
             gpui::deferred(motion::fade_in("terminal-close-dialog-layer-enter", layer))
                 .with_priority(4)

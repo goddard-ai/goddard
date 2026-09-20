@@ -353,7 +353,11 @@ mod tests {
         pairs.iter().cloned().collect()
     }
 
-    fn entry(provider: ProviderKind, model: Option<&str>, effort: Option<&str>) -> RouteClassTarget {
+    fn entry(
+        provider: ProviderKind,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> RouteClassTarget {
         RouteClassTarget {
             provider,
             model: model.map(str::to_owned),

@@ -227,10 +227,7 @@ impl Waku {
                             )
                             .child(file_link(
                                 div()
-                                    .id(SharedString::from(format!(
-                                        "archive-file-{}",
-                                        file.path
-                                    )))
+                                    .id(SharedString::from(format!("archive-file-{}", file.path)))
                                     .min_w_0()
                                     .flex_1()
                                     .truncate()

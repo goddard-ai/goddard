@@ -1113,9 +1113,7 @@ impl Waku {
                     .entries
                     .iter()
                     .find(|entry| entry.commit.sha == sha)
-                    .map(|entry| {
-                        format!("{} {}", entry.commit.short_sha, entry.commit.subject)
-                    }),
+                    .map(|entry| format!("{} {}", entry.commit.short_sha, entry.commit.subject)),
                 _ => None,
             })
             .unwrap_or_else(|| sha.clone());
@@ -1214,9 +1212,8 @@ impl Waku {
             })
             .flat_map(|(index, entry)| {
                 std::iter::once(ProjectsListRow::Review { index }).chain(
-                    (0..entry.test_plans.len()).map(move |plan_index| {
-                        ProjectsListRow::ReviewPlan { index, plan_index }
-                    }),
+                    (0..entry.test_plans.len())
+                        .map(move |plan_index| ProjectsListRow::ReviewPlan { index, plan_index }),
                 )
             })
             .collect()
@@ -1690,11 +1687,11 @@ impl Waku {
     fn projects_github_enabled(&self, project_id: Uuid) -> bool {
         self.state.github_enabled
             && !matches!(
-            self.github_browsers
-                .get(&project_id)
-                .and_then(|browser| browser.repo.as_ref()),
-            Some((None, GitHubAvailability::Ready))
-        )
+                self.github_browsers
+                    .get(&project_id)
+                    .and_then(|browser| browser.repo.as_ref()),
+                Some((None, GitHubAvailability::Ready))
+            )
     }
 
     pub(super) fn render_projects_page(
@@ -1714,8 +1711,7 @@ impl Waku {
         // repo disables them but the tab still shows its hint. A git
         // sub-tab held over from shared state — or a Review tab left over
         // after its experiment turned off — falls back to Issues.
-        let tab = if state.tab.is_git_tab()
-            || !state.tab.available(self.state.review_queue_enabled)
+        let tab = if state.tab.is_git_tab() || !state.tab.available(self.state.review_queue_enabled)
         {
             ProjectsTab::Issues
         } else {
@@ -1886,7 +1882,11 @@ impl Waku {
                         .truncate()
                         .child(project_name),
                 )
-                .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon())),
+                .child(icon(
+                    "icons/chevron-down.svg",
+                    11.0,
+                    theme.affordance_icon(),
+                )),
             "projects-selector-menu",
             &selector_menu,
             MenuAlign::BelowLeft,
@@ -1941,8 +1941,7 @@ impl Waku {
                             .into_iter()
                             .filter(|candidate| candidate.available(review_queue_enabled))
                             .map(|candidate| {
-                                let enabled =
-                                    github_enabled || candidate.github_tab().is_none();
+                                let enabled = github_enabled || candidate.github_tab().is_none();
                                 self.projects_tab_button(
                                     project_id, candidate, tab, enabled, false, cx,
                                 )
@@ -2056,7 +2055,11 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(state_label),
                     )
-                    .child(icon("icons/chevron-down.svg", 11.0, theme.affordance_icon())),
+                    .child(icon(
+                        "icons/chevron-down.svg",
+                        11.0,
+                        theme.affordance_icon(),
+                    )),
                 "projects-state-menu",
                 &menu,
                 MenuAlign::BelowLeft,
@@ -2238,52 +2241,49 @@ impl Waku {
             .flex_col()
             .child(projects_column_header(project_id, tab, state, &theme, cx))
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        list(list_state.clone(), move |index, _window, cx| {
-                            let Some(row) = rows.get(index) else {
-                                return div().into_any_element();
-                            };
-                            let row = match row {
-                                ProjectsListRow::Worktree { index } => {
-                                    ProjectsListRow::Worktree { index: *index }
+                div().flex_1().min_h_0().child(
+                    list(list_state.clone(), move |index, _window, cx| {
+                        let Some(row) = rows.get(index) else {
+                            return div().into_any_element();
+                        };
+                        let row = match row {
+                            ProjectsListRow::Worktree { index } => {
+                                ProjectsListRow::Worktree { index: *index }
+                            }
+                            ProjectsListRow::RemoteHeader {
+                                remote,
+                                count,
+                                expanded,
+                            } => ProjectsListRow::RemoteHeader {
+                                remote: remote.clone(),
+                                count: *count,
+                                expanded: *expanded,
+                            },
+                            ProjectsListRow::Branch { index } => {
+                                ProjectsListRow::Branch { index: *index }
+                            }
+                            ProjectsListRow::Review { index } => {
+                                ProjectsListRow::Review { index: *index }
+                            }
+                            ProjectsListRow::ReviewPlan { index, plan_index } => {
+                                ProjectsListRow::ReviewPlan {
+                                    index: *index,
+                                    plan_index: *plan_index,
                                 }
-                                ProjectsListRow::RemoteHeader {
-                                    remote,
-                                    count,
-                                    expanded,
-                                } => ProjectsListRow::RemoteHeader {
-                                    remote: remote.clone(),
-                                    count: *count,
-                                    expanded: *expanded,
-                                },
-                                ProjectsListRow::Branch { index } => {
-                                    ProjectsListRow::Branch { index: *index }
-                                }
-                                ProjectsListRow::Review { index } => {
-                                    ProjectsListRow::Review { index: *index }
-                                }
-                                ProjectsListRow::ReviewPlan { index, plan_index } => {
-                                    ProjectsListRow::ReviewPlan {
-                                        index: *index,
-                                        plan_index: *plan_index,
-                                    }
-                                }
-                            };
-                            entity
-                                .upgrade()
-                                .map(|entity| {
-                                    entity.update(cx, |this, cx| {
-                                        this.render_projects_row(project_id, row, cx)
-                                    })
+                            }
+                        };
+                        entity
+                            .upgrade()
+                            .map(|entity| {
+                                entity.update(cx, |this, cx| {
+                                    this.render_projects_row(project_id, row, cx)
                                 })
-                                .unwrap_or_else(|| div().into_any_element())
-                        })
-                        .pb(px(PROJECTS_LIST_BOTTOM_PADDING))
-                        .size_full(),
-                    ),
+                            })
+                            .unwrap_or_else(|| div().into_any_element())
+                    })
+                    .pb(px(PROJECTS_LIST_BOTTOM_PADDING))
+                    .size_full(),
+                ),
             )
             .into_any_element()
     }
@@ -2425,7 +2425,10 @@ impl Waku {
                 div()
                     .text_size(sp(13.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(tr!("projects.review_promote", branch = base.unwrap_or_default())),
+                    .child(tr!(
+                        "projects.review_promote",
+                        branch = base.unwrap_or_default()
+                    )),
             );
 
         div()
@@ -3886,20 +3889,19 @@ fn projects_column_header(
     theme: &Theme,
     cx: &mut Context<Waku>,
 ) -> Div {
-    let set_width =
-        move |this: &mut Waku, column: usize, width: f32, cx: &mut Context<Waku>| {
-            if let Some(state) = this.projects_page_states.get_mut(&project_id) {
-                let widths = match tab {
-                    ProjectsTab::Worktrees => Some(&mut state.worktree_col_widths[..]),
-                    ProjectsTab::Branches => Some(&mut state.branch_col_widths[..]),
-                    _ => None,
-                };
-                if let Some(slot) = widths.and_then(|widths| widths.get_mut(column)) {
-                    *slot = width;
-                    cx.notify();
-                }
+    let set_width = move |this: &mut Waku, column: usize, width: f32, cx: &mut Context<Waku>| {
+        if let Some(state) = this.projects_page_states.get_mut(&project_id) {
+            let widths = match tab {
+                ProjectsTab::Worktrees => Some(&mut state.worktree_col_widths[..]),
+                ProjectsTab::Branches => Some(&mut state.branch_col_widths[..]),
+                _ => None,
+            };
+            if let Some(slot) = widths.and_then(|widths| widths.get_mut(column)) {
+                *slot = width;
+                cx.notify();
             }
-        };
+        }
+    };
     let label = |text: String| {
         div()
             .min_w_0()

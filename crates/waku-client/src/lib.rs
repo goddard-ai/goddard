@@ -18,8 +18,8 @@ mod process;
 mod workspace_client;
 
 pub use client::{DaemonClient, PairReply, pair};
-pub use discover::DaemonDiscovery;
 pub use daemons::{DaemonKey, DaemonMap};
+pub use discover::DaemonDiscovery;
 pub use process::{
     DEFAULT_EXPOSED_DAEMON_PORT, DaemonExposureSettings, DaemonProcess, DaemonStatus,
     DaemonSupervisor, parse_allowed_origins,

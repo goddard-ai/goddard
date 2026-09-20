@@ -749,7 +749,11 @@ impl RenderOnce for MenuChip {
                     }),
             )
             .when(self.caret, |element| {
-                element.child(icon("icons/chevron-down.svg", 10.5, theme.affordance_icon()))
+                element.child(icon(
+                    "icons/chevron-down.svg",
+                    10.5,
+                    theme.affordance_icon(),
+                ))
             })
     }
 }

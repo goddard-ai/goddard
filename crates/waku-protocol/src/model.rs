@@ -660,10 +660,7 @@ impl ProviderModelOption {
     }
 
     /// A `localized!` pair supplies both the English label and its semantic.
-    pub fn keyed(
-        id: impl Into<String>,
-        pair: (String, crate::protocol::WireTranslation),
-    ) -> Self {
+    pub fn keyed(id: impl Into<String>, pair: (String, crate::protocol::WireTranslation)) -> Self {
         Self {
             label_i18n: Some(pair.1),
             ..Self::new(id, pair.0)
@@ -678,10 +675,7 @@ impl ProviderModelOption {
     }
 
     /// A `localized!` pair for `description`, same contract as `keyed`.
-    pub fn keyed_description(
-        mut self,
-        pair: (String, crate::protocol::WireTranslation),
-    ) -> Self {
+    pub fn keyed_description(mut self, pair: (String, crate::protocol::WireTranslation)) -> Self {
         self.description = Some(pair.0);
         self.description_i18n = Some(pair.1);
         self
@@ -860,10 +854,7 @@ impl ProviderModel {
     }
 
     /// A `localized!` pair supplies both the English name and its semantic.
-    pub fn keyed(
-        id: impl Into<String>,
-        pair: (String, crate::protocol::WireTranslation),
-    ) -> Self {
+    pub fn keyed(id: impl Into<String>, pair: (String, crate::protocol::WireTranslation)) -> Self {
         Self {
             name_i18n: Some(pair.1),
             ..Self::new(id, pair.0)
@@ -2683,7 +2674,11 @@ pub fn is_delegation_tool_name(name: &str) -> bool {
 /// experiment opt-in is on. Clients surface it as a small status chip and,
 /// for `Sent`, a transcript artifact carrying the injected text.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
-#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ProjectMapStatus {
     /// The workspace index is building.
     Building,
@@ -2708,7 +2703,11 @@ pub enum ProjectMapStatus {
 /// renders the phase; `Ready` clears it. Ephemeral — setup noise never lands
 /// in the persisted transcript.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
-#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SandboxSetupStatus {
     /// The VM OS image is absent and downloading — only on a machine's first
     /// sandboxed session.

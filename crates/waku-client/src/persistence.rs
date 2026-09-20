@@ -596,7 +596,9 @@ pub enum PersistedRightPanelSurface {
     Files,
     Diff,
     File(String),
-    PullRequest { number: u64 },
+    PullRequest {
+        number: u64,
+    },
     GitHub(Uuid),
     /// The side-chat session's id; the tab restores only while that session
     /// still lives under this panel's owner.
@@ -903,15 +905,8 @@ pub const DEFAULT_DORMANT_AFTER_DAYS: u32 = 7;
 
 /// The choices the dormancy-threshold picker offers, in days; `None` is its
 /// "Never" row, which disables auto-dormancy.
-pub const DORMANT_AFTER_DAYS_OPTIONS: [Option<u32>; 7] = [
-    Some(1),
-    Some(2),
-    Some(3),
-    Some(7),
-    Some(14),
-    Some(30),
-    None,
-];
+pub const DORMANT_AFTER_DAYS_OPTIONS: [Option<u32>; 7] =
+    [Some(1), Some(2), Some(3), Some(7), Some(14), Some(30), None];
 
 /// The completion sound's relative volume tops out at twice its recorded level.
 pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
@@ -1575,8 +1570,7 @@ impl PersistedState {
             base_branch: Some(base),
         } = workspace
         {
-            self.project_worktree_bases
-                .insert(project_id, base.clone());
+            self.project_worktree_bases.insert(project_id, base.clone());
         }
     }
 
@@ -2764,10 +2758,7 @@ mod tests {
         assert_eq!(state.border_intensity, DEFAULT_BORDER_INTENSITY);
         state.border_intensity = 0.25;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
-        assert_eq!(
-            settings["border_intensity"].as_f64().unwrap() as f32,
-            0.25
-        );
+        assert_eq!(settings["border_intensity"].as_f64().unwrap() as f32, 0.25);
         assert!(
             serde_json::to_value(state.app_state())
                 .unwrap()

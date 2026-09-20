@@ -986,16 +986,8 @@ fn handle_approval_request(
         title: format!("Allow {tool_name}?"),
         detail: reason.to_owned(),
         options: vec![
-            PermissionOption::keyed(
-                "allow",
-                localized!("permission.allow_once"),
-                true,
-            ),
-            PermissionOption::keyed(
-                "reject",
-                localized!("common.deny"),
-                false,
-            ),
+            PermissionOption::keyed("allow", localized!("permission.allow_once"), true),
+            PermissionOption::keyed("reject", localized!("common.deny"), false),
         ],
         title_i18n: None,
         detail_i18n: None,
@@ -1041,12 +1033,10 @@ fn handle_approval_request(
                 action,
                 move |verdict| {
                     let message = match verdict {
-                        crate::permission_review::ReviewVerdict::Allow => {
-                            CommandMessage::Respond {
-                                request_id: rpc_id,
-                                option_id: "allow".into(),
-                            }
-                        }
+                        crate::permission_review::ReviewVerdict::Allow => CommandMessage::Respond {
+                            request_id: rpc_id,
+                            option_id: "allow".into(),
+                        },
                         crate::permission_review::ReviewVerdict::Escalate => {
                             CommandMessage::Emit(event)
                         }

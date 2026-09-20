@@ -1991,9 +1991,9 @@ impl Waku {
                                         editor.provider = *kind;
                                         // Model ids are provider-scoped — a
                                         // stale pick would fail at dispatch.
-                                        editor.model.update(cx, |input, cx| {
-                                            input.set_content("", cx)
-                                        });
+                                        editor
+                                            .model
+                                            .update(cx, |input, cx| input.set_content("", cx));
                                     }
                                     cx.notify();
                                 }

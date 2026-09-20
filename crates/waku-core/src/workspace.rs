@@ -30,12 +30,13 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         },
         WorkspaceOperation::BrowseDirectory { path } => {
             let home = dirs::home_dir().ok_or_else(|| anyhow!("home directory is unavailable"))?;
-            let path = dunce::canonicalize(path.as_deref().unwrap_or(&home)).with_context(|| {
-                format!(
-                    "could not open directory {}",
-                    path.as_deref().unwrap_or(&home).display()
-                )
-            })?;
+            let path =
+                dunce::canonicalize(path.as_deref().unwrap_or(&home)).with_context(|| {
+                    format!(
+                        "could not open directory {}",
+                        path.as_deref().unwrap_or(&home).display()
+                    )
+                })?;
             if !fs::metadata(&path)?.is_dir() {
                 bail!("not a directory: {}", path.display());
             }
@@ -65,9 +66,7 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             let path = resolve_workspace_path(&root, &relative_path)?;
             let size = fs::metadata(&path)?.len();
             if size > MAX_BINARY_FILE_BYTES {
-                bail!(
-                    "file is too large to preview ({size} bytes, limit {MAX_BINARY_FILE_BYTES})"
-                );
+                bail!("file is too large to preview ({size} bytes, limit {MAX_BINARY_FILE_BYTES})");
             }
             let data = fs::read(&path)?;
             if data.len() as u64 > MAX_BINARY_FILE_BYTES {
@@ -451,11 +450,7 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             etag,
             if_modified_since,
         } => WorkspaceResult::Notifications {
-            poll: crate::notifications::list(
-                etag.as_deref(),
-                if_modified_since.as_deref(),
-                all,
-            )?,
+            poll: crate::notifications::list(etag.as_deref(), if_modified_since.as_deref(), all)?,
         },
         WorkspaceOperation::MarkNotificationRead { thread_id } => {
             crate::notifications::mark_read(&thread_id)?;

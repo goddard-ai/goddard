@@ -126,15 +126,15 @@ fn json_target(provider: ProviderKind) -> Option<(PathBuf, &'static [&'static st
         ProviderKind::Claude => (home.join(".claude.json"), &["mcpServers"]),
         ProviderKind::Copilot => (home.join(".copilot/mcp-config.json"), &["mcpServers"]),
         ProviderKind::Cursor => (home.join(".cursor/mcp.json"), &["mcpServers"]),
-        ProviderKind::Amp => (home.join(".config/amp/settings.json"), &["amp", "mcpServers"]),
+        ProviderKind::Amp => (
+            home.join(".config/amp/settings.json"),
+            &["amp", "mcpServers"],
+        ),
         ProviderKind::Droid => (home.join(".factory/mcp.json"), &["mcpServers"]),
         ProviderKind::Devin => (home.join(".config/devin/mcp_config.json"), &["mcpServers"]),
         ProviderKind::Kimi => (home.join(".kimi/mcp.json"), &["mcpServers"]),
         ProviderKind::Fx => (home.join(".fx/mcp.json"), &["mcp"]),
-        ProviderKind::Antigravity => (
-            home.join(".gemini/config/mcp_config.json"),
-            &["mcpServers"],
-        ),
+        ProviderKind::Antigravity => (home.join(".gemini/config/mcp_config.json"), &["mcpServers"]),
         ProviderKind::OhMyPi => (home.join(".omp/agent/mcp.json"), &["mcpServers"]),
         ProviderKind::Muse => (home.join(".muse/settings.json"), &["mcp_servers"]),
         _ => return None,
@@ -154,7 +154,9 @@ fn sync_json(
         Ok(bytes) => serde_json::from_slice(&bytes)
             .with_context(|| format!("{} is not valid JSON; skipping", path.display()))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Value::Object(Map::new()),
-        Err(error) => return Err(error).with_context(|| format!("could not read {}", path.display())),
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not read {}", path.display()));
+        }
     };
     let mut node = document
         .as_object_mut()
@@ -209,10 +211,7 @@ fn sync_grok(entries: &BTreeMap<String, Value>) -> anyhow::Result<()> {
         );
         let mut table = toml::Table::new();
         table.insert("url".to_owned(), toml::Value::String(url.to_owned()));
-        table.insert(
-            "http_headers".to_owned(),
-            toml::Value::Table(headers),
-        );
+        table.insert("http_headers".to_owned(), toml::Value::Table(headers));
         table.insert("enabled".to_owned(), toml::Value::Boolean(true));
         servers.insert(name.clone(), toml::Value::Table(table));
     }
@@ -309,8 +308,7 @@ mod tests {
     fn sync_json_writes_entries_into_an_empty_file() {
         let path = temp_path("empty.json");
         sync_json(&path, &["mcpServers"], &entries()).unwrap();
-        let document: Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(
             document["mcpServers"]["goddard_linear"]["url"],
             "http://127.0.0.1:9999/mcp/linear"
@@ -335,10 +333,7 @@ mod tests {
         sync_json(&path, &["mcpServers"], &entries()).unwrap();
         let document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(document["theme"], "dark");
-        assert_eq!(
-            document["mcpServers"]["mine"]["url"],
-            "https://example.com"
-        );
+        assert_eq!(document["mcpServers"]["mine"]["url"], "https://example.com");
         assert!(document["mcpServers"].get("goddard_stale").is_none());
         assert!(document["mcpServers"].get("goddard_linear").is_some());
         fs::remove_file(path).ok();

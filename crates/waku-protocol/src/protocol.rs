@@ -271,7 +271,9 @@ pub enum Command {
     RemoveSession,
     /// Remove a project and every task it owns from the daemon catalog. Like
     /// `RemoveSession`, this is explicit because `SaveTaskState` is merge-only.
-    RemoveProject { project_id: Uuid },
+    RemoveProject {
+        project_id: Uuid,
+    },
     HydrateSession {
         session_id: Uuid,
     },
@@ -315,7 +317,9 @@ pub enum Command {
     /// Smoke-test an evaluation backend configuration for the settings
     /// pane. Carries the full settings so unsaved field edits can be tested;
     /// the daemon makes one minimal call and writes no decision log record.
-    TestEvalConnection { settings: EvalSettings },
+    TestEvalConnection {
+        settings: EvalSettings,
+    },
     /// Route a new session's first prompt: evaluate the task into a class,
     /// resolve the daemon's class map against `candidates`, and answer with
     /// the provider, model, and effort to start on. `last_used` is the
@@ -357,10 +361,14 @@ pub enum Command {
     },
     /// Remove one integration: drops the provider config entries it wrote
     /// and deletes the stored credential.
-    DisconnectIntegration { id: String },
+    DisconnectIntegration {
+        id: String,
+    },
     /// Re-run the OAuth browser flow for an integration whose credential is
     /// missing or was revoked.
-    StartIntegrationAuth { id: String },
+    StartIntegrationAuth {
+        id: String,
+    },
     LoadComposerDrafts,
     SaveComposerDrafts {
         drafts: ComposerDrafts,
@@ -491,7 +499,9 @@ pub enum Command {
     },
     /// Withdraw a pending outgoing friend request. Local removal only —
     /// the peer's incoming card lingers until they decline it.
-    WithdrawFriendRequest { node_id: String },
+    WithdrawFriendRequest {
+        node_id: String,
+    },
     RemoveFriend {
         node_id: String,
     },
@@ -793,7 +803,9 @@ pub enum ServerMessage {
     /// `refs/notes/qa` (or a promoted base branch) moved for this `origin`
     /// — here or on a friend's machine. Review surfaces for a project
     /// with that remote should re-read their queue.
-    ReviewChanged { origin_url: String },
+    ReviewChanged {
+        origin_url: String,
+    },
     /// A watched friend session's stream ended. `revoked` means the friend
     /// turned session sharing off or unshared the project — render that,
     /// not a disconnect. Otherwise the peer went away or the session was
@@ -865,7 +877,9 @@ pub enum ResponsePayload {
         settings: DaemonSettings,
     },
     /// The bound port after `setDaemonExposure` — `None` once unexposed.
-    Exposure { port: Option<u16> },
+    Exposure {
+        port: Option<u16>,
+    },
     /// The integrations catalog joined with the user's configuration.
     Integrations {
         snapshots: Vec<crate::integrations::IntegrationSnapshot>,

@@ -49,9 +49,7 @@ impl ColumnResize {
     /// Whether `column`'s boundary is currently held — the grip's active
     /// styling reads this.
     fn dragging(&self, column: usize) -> bool {
-        self.drag
-            .get()
-            .is_some_and(|drag| drag.column == column)
+        self.drag.get().is_some_and(|drag| drag.column == column)
     }
 }
 
@@ -164,9 +162,8 @@ where
                     let Some(drag) = state.drag.get() else {
                         return;
                     };
-                    let width = (drag.start_width
-                        + f32::from(event.position.x - drag.start_x))
-                    .max(MIN_COLUMN_WIDTH);
+                    let width = (drag.start_width + f32::from(event.position.x - drag.start_x))
+                        .max(MIN_COLUMN_WIDTH);
                     let _ = weak.update(cx, |this, cx| set(this, drag.column, width, cx));
                     window.refresh();
                 }

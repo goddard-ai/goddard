@@ -181,11 +181,7 @@ impl MemoryService {
         }
 
         let memory_md = read_memory(&store);
-        let notes = rank_notes(
-            settings.eval.as_ref(),
-            task,
-            &read_log_lines(&store),
-        );
+        let notes = rank_notes(settings.eval.as_ref(), task, &read_log_lines(&store));
         let block = compose_block(&memory_md, &notes, &store.join(LOG_FILE))?;
         memory_state
             .sessions
@@ -304,11 +300,7 @@ impl MemoryService {
             .map(|index| segments[*index].as_str())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let prompt = distill_prompt(
-            &read_memory(&store),
-            &log_tail(&store, 30),
-            &excerpts,
-        );
+        let prompt = distill_prompt(&read_memory(&store), &log_tail(&store, 30), &excerpts);
 
         let binary = provider_binary(&settings, source.provider)?;
         let output = headless_prompt(
@@ -410,13 +402,14 @@ fn triage_segments(
                 record.latency_ms = Some(evaluation.latency_ms);
                 record.answers = Some(evaluation.answers.clone());
                 for index in batch_start..batch_end {
-                    let keep = evaluation
-                        .answers
-                        .get(&format!("seg_{index}"))
-                        .is_some_and(|answer| match answer {
-                            waku_protocol::eval::EvalAnswer::Noul { noul } => *noul >= 0.5,
-                            _ => false,
-                        });
+                    let keep =
+                        evaluation
+                            .answers
+                            .get(&format!("seg_{index}"))
+                            .is_some_and(|answer| match answer {
+                                waku_protocol::eval::EvalAnswer::Noul { noul } => *noul >= 0.5,
+                                _ => false,
+                            });
                     if keep {
                         kept.push(index);
                     }
@@ -864,12 +857,16 @@ fn headless_prompt(
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             handle.cancel();
-            bail!("memory distillation exceeded {}s", DISTILL_TIMEOUT.as_secs());
+            bail!(
+                "memory distillation exceeded {}s",
+                DISTILL_TIMEOUT.as_secs()
+            );
         }
         match receiver.recv_timeout(remaining.min(Duration::from_secs(30))) {
             Ok(DriverEvent::TextDelta(delta)) => text.push_str(&delta),
             Ok(DriverEvent::TurnFinished { .. }) | Ok(DriverEvent::ProcessExited) => break,
-            Ok(DriverEvent::Error(error)) | Ok(DriverEvent::LocalizedError { message: error, .. }) => {
+            Ok(DriverEvent::Error(error))
+            | Ok(DriverEvent::LocalizedError { message: error, .. }) => {
                 eprintln!("memory distillation driver reported: {error}");
             }
             Ok(_) => {}
@@ -910,11 +907,17 @@ mod tests {
 
     #[test]
     fn scrub_drops_credentials_and_collapses_whitespace() {
-        assert_eq!(scrub_note("  user   prefers  tabs "), Some("user prefers tabs".into()));
+        assert_eq!(
+            scrub_note("  user   prefers  tabs "),
+            Some("user prefers tabs".into())
+        );
         assert!(scrub_note("the api_key is stored in ~/.config").is_none());
         assert!(scrub_note("token sk-abc123 lives in env").is_none());
         assert!(scrub_note("uses bearer token auth").is_none());
-        assert_eq!(scrub_note("decided against JWT sessions"), Some("decided against JWT sessions".into()));
+        assert_eq!(
+            scrub_note("decided against JWT sessions"),
+            Some("decided against JWT sessions".into())
+        );
     }
 
     #[test]
@@ -927,7 +930,9 @@ mod tests {
     fn tail_fallback_prefers_recent_segments() {
         // Ten ~10k segments exceed the 60k fallback budget, so the oldest
         // are dropped and the result stays in ascending order.
-        let segments: Vec<String> = (0..10).map(|i| format!("segment {i} {}", "x".repeat(10_000))).collect();
+        let segments: Vec<String> = (0..10)
+            .map(|i| format!("segment {i} {}", "x".repeat(10_000)))
+            .collect();
         let kept = tail_fallback(&segments);
         assert_eq!(kept, vec![5, 6, 7, 8, 9]);
     }
@@ -936,7 +941,10 @@ mod tests {
     fn write_memory_caps_and_restores() {
         let store = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&store).unwrap();
-        let content: String = (0..80).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let content: String = (0..80)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         write_memory(&store, &content).unwrap();
         let restored = read_memory(&store);
         assert_eq!(restored.lines().count(), MAX_MEMORY_LINES);
@@ -948,10 +956,14 @@ mod tests {
     fn notes_append_scrubbed_and_dated() {
         let store = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&store).unwrap();
-        append_notes(&store, &[
-            "uses bun for scripts".to_owned(),
-            "the password is hunter2".to_owned(),
-        ]).unwrap();
+        append_notes(
+            &store,
+            &[
+                "uses bun for scripts".to_owned(),
+                "the password is hunter2".to_owned(),
+            ],
+        )
+        .unwrap();
         let lines = log_tail(&store, 10);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].ends_with("uses bun for scripts"));
@@ -1014,8 +1026,8 @@ mod tests {
     #[test]
     fn compose_block_omits_empty_sections() {
         let log = Path::new("/tmp/proj/.goddard/memory/LOG.txt");
-        let block = compose_block("# Facts\n- uses bun", &["2026-01-01 decided x".into()], log)
-            .unwrap();
+        let block =
+            compose_block("# Facts\n- uses bun", &["2026-01-01 decided x".into()], log).unwrap();
         assert!(block.contains("## Memory\n# Facts\n- uses bun"));
         assert!(block.contains("## Notes\n2026-01-01 decided x"));
         assert!(block.contains(log.to_str().unwrap()));

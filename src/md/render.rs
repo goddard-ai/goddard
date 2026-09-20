@@ -452,13 +452,12 @@ pub fn flatten(
 /// plain — `** **` would just decorate the gap.
 fn markdown_fragment(run: &InlineRun) -> Option<Rc<str>> {
     let style = &run.style;
-    let linked = style.link.as_deref().is_some_and(|url| url != PENDING_LINK_URL);
-    let styled = style.bold
-        || style.italic
-        || style.code
-        || style.strikethrough
-        || style.math
-        || linked;
+    let linked = style
+        .link
+        .as_deref()
+        .is_some_and(|url| url != PENDING_LINK_URL);
+    let styled =
+        style.bold || style.italic || style.code || style.strikethrough || style.math || linked;
     if !styled || run.text.trim().is_empty() {
         return None;
     }
@@ -2012,8 +2011,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
-                let mut flat =
-                    flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text);
+                let mut flat = flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text);
                 flat.copy = Rc::new(CopySpec {
                     prefix: Rc::from(format!("{} ", "#".repeat(*level as usize))),
                     ..(*flat.copy).clone()
@@ -2107,11 +2105,11 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
         Block::Rule => {
             ctx.copy_lead.take();
             div()
-            .w_full()
-            .h(hairline())
-            .my(px(4.0))
-            .bg(ctx.palette.separator)
-            .into_any_element()
+                .w_full()
+                .h(hairline())
+                .my(px(4.0))
+                .bg(ctx.palette.separator)
+                .into_any_element()
         }
     }
 }
@@ -2147,8 +2145,10 @@ fn render_list(ordered_start: Option<u64>, items: &[ListItem], ctx: &Ctx) -> Any
             };
             let base = ctx.copy_margin();
             let margin = ctx.push_copy_margin(&" ".repeat(lead.len()));
-            ctx.copy_lead
-                .set(Some(Rc::from(format!("{}{lead}", base.as_deref().unwrap_or("")))));
+            ctx.copy_lead.set(Some(Rc::from(format!(
+                "{}{lead}",
+                base.as_deref().unwrap_or("")
+            ))));
             let blocks = item
                 .blocks
                 .iter()
@@ -2574,10 +2574,17 @@ fn render_table(
         // needs its own radii to follow the parent's rounded corners.
         let inner_radius = px(10.0) - hairline();
         table = table.child(
-            table_row(header, &widths, align, ctx, FontWeight::SEMIBOLD, !rows.is_empty())
-                .bg(ctx.palette.overlay)
-                .rounded_t(inner_radius)
-                .when(rows.is_empty(), |row| row.rounded_b(inner_radius)),
+            table_row(
+                header,
+                &widths,
+                align,
+                ctx,
+                FontWeight::SEMIBOLD,
+                !rows.is_empty(),
+            )
+            .bg(ctx.palette.overlay)
+            .rounded_t(inner_radius)
+            .when(rows.is_empty(), |row| row.rounded_b(inner_radius)),
         );
     }
     for (index, row) in rows.iter().enumerate() {
@@ -2618,9 +2625,11 @@ fn table_resize_handle(
     ctx: &Ctx,
 ) -> impl IntoElement {
     let group = SharedString::from(format!("table-resize-grip-{table_id}-{column}"));
-    let active = state.borrow().drag.as_ref().is_some_and(|drag| {
-        drag.table == table_id && drag.column == column
-    });
+    let active = state
+        .borrow()
+        .drag
+        .as_ref()
+        .is_some_and(|drag| drag.table == table_id && drag.column == column);
     let pressed = widths.to_vec();
     let drag_state = state.clone();
     let key_state = state.clone();
@@ -2697,10 +2706,7 @@ fn table_resize_handle(
 /// move/up listeners each paint — the same pattern as [`crate::ui::slider`].
 /// Element-level move handlers would stop receiving events once the pointer
 /// leaves the handle; these run for as long as a drag is armed.
-fn table_resize_listeners(
-    table_id: usize,
-    state: Rc<RefCell<TableResize>>,
-) -> impl IntoElement {
+fn table_resize_listeners(table_id: usize, state: Rc<RefCell<TableResize>>) -> impl IntoElement {
     canvas(|_, _, _| (), {
         move |bounds, _, window: &mut Window, _| {
             window.on_mouse_event({
@@ -2967,9 +2973,7 @@ mod tests {
             .copy
             .fragments
             .iter()
-            .map(|(range, markdown)| {
-                (flat.text[range.clone()].to_owned(), markdown.to_string())
-            })
+            .map(|(range, markdown)| (flat.text[range.clone()].to_owned(), markdown.to_string()))
             .collect::<Vec<_>>();
         assert_eq!(
             fragments,
@@ -3376,9 +3380,7 @@ mod tests {
     #[test]
     fn commit_references_skip_hyphenated_hex_tokens() {
         // Every UUID segment is word-bounded hex; none is a commit.
-        assert!(
-            commit_refs("id 3f8a2b1c-9d4e-4f5a-8b6c-7d8e9f0a1b2c done").is_empty()
-        );
+        assert!(commit_refs("id 3f8a2b1c-9d4e-4f5a-8b6c-7d8e9f0a1b2c done").is_empty());
         assert!(commit_refs("deadbeef-1234").is_empty());
         // A hyphenated token with non-hex letters is prose around a SHA.
         assert_eq!(

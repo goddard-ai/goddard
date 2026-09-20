@@ -703,7 +703,10 @@ mod tests {
     fn compact_submission_needs_a_waku_or_builtin_entry() {
         let waku = command("compact", CommandScope::Waku);
         let builtin = command("compact", CommandScope::Builtin);
-        assert!(is_compact_submission("/compact", std::slice::from_ref(&waku)));
+        assert!(is_compact_submission(
+            "/compact",
+            std::slice::from_ref(&waku)
+        ));
         assert!(is_compact_submission(
             "  /compact  ",
             std::slice::from_ref(&builtin)
@@ -722,7 +725,10 @@ mod tests {
             "/compact",
             std::slice::from_ref(&templated)
         ));
-        assert!(!is_compact_submission("/compact now", std::slice::from_ref(&waku)));
+        assert!(!is_compact_submission(
+            "/compact now",
+            std::slice::from_ref(&waku)
+        ));
     }
 
     #[test]

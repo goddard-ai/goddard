@@ -75,7 +75,12 @@ impl ContextDnf {
 
     fn or(&self, other: &Self) -> Self {
         Self {
-            terms: self.terms.iter().chain(other.terms.iter()).cloned().collect(),
+            terms: self
+                .terms
+                .iter()
+                .chain(other.terms.iter())
+                .cloned()
+                .collect(),
             parsed: self.parsed && other.parsed,
         }
     }
@@ -85,9 +90,9 @@ impl ContextDnf {
     pub fn can_overlap(&self, other: &Self) -> bool {
         self.terms.iter().any(|left| {
             other.terms.iter().any(|right| {
-                !left.iter().any(|(id, neg)| {
-                    right.iter().any(|(rid, rneg)| id == rid && neg != rneg)
-                })
+                !left
+                    .iter()
+                    .any(|(id, neg)| right.iter().any(|(rid, rneg)| id == rid && neg != rneg))
             })
         })
     }

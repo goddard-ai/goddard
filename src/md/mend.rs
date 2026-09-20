@@ -76,9 +76,7 @@ pub fn close_hanging(text: &str) -> Option<String> {
                 Some(_) => last_content = Some(index + run - 1),
                 // `Ctrl+`` is a keycap, not an opener: count it as content
                 // so whatever streams in next cannot become a code span.
-                None if run == 1
-                    && super::escape::is_shortcut_key(text, chars[index].0) =>
-                {
+                None if run == 1 && super::escape::is_shortcut_key(text, chars[index].0) => {
                     last_content = Some(index);
                 }
                 None => code = Some((run, index + run)),

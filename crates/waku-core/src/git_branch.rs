@@ -250,7 +250,9 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
             if !contained {
                 return None;
             }
-            let sha = optional_stdout(cwd, &["rev-parse", "HEAD"]).ok().flatten()?;
+            let sha = optional_stdout(cwd, &["rev-parse", "HEAD"])
+                .ok()
+                .flatten()?;
             Some((sha.clone(), sha))
         });
     let Some((refname, reference)) = candidate else {

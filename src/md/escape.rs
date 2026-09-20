@@ -36,9 +36,7 @@ pub fn repair_code_spans(
     events: &[(Event<'_>, Range<usize>)],
 ) -> Option<(String, Vec<Repair>)> {
     // Neither signature can exist without its bytes.
-    if !(source.contains("\\`")
-        || source.contains("+`")
-        || source.contains(['⌘', '⌃', '⌥', '⇧']))
+    if !(source.contains("\\`") || source.contains("+`") || source.contains(['⌘', '⌃', '⌥', '⇧']))
     {
         return None;
     }
@@ -295,12 +293,7 @@ mod tests {
 
     #[test]
     fn leaves_non_shortcut_backticks_alone() {
-        for source in [
-            "x + `y` is code",
-            "the `a`+`b` pair",
-            "`x+`",
-            "2+`x`",
-        ] {
+        for source in ["x + `y` is code", "the `a`+`b` pair", "`x+`", "2+`x`"] {
             assert_eq!(repair(source), None, "unexpected repair for {source:?}");
         }
     }

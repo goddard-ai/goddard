@@ -14,8 +14,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{
-    AgentTurn, Message, MessageRole, ProviderKind, ProviderResumeCursor,
-    ProviderSessionHistory, ProviderSessionSummary, TurnStatus,
+    AgentTurn, Message, MessageRole, ProviderKind, ProviderResumeCursor, ProviderSessionHistory,
+    ProviderSessionSummary, TurnStatus,
 };
 
 /// `$COPILOT_HOME/session-state`, defaulting to `~/.copilot/session-state`.
@@ -265,10 +265,7 @@ pub fn provider_session_history(
                     turn_count: history.turns.len() + 1,
                     status: TurnStatus::Completed,
                     provider_turn_started: true,
-                    provider_resume_at: event
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
+                    provider_resume_at: event.get("id").and_then(Value::as_str).map(str::to_owned),
                     started_at: timestamp,
                     completed_at: Some(timestamp),
                     checkpoint: None,
@@ -292,8 +289,7 @@ pub fn provider_session_history(
                 if let Some(id) = event.get("id").and_then(Value::as_str) {
                     turn.provider_resume_at = Some(id.to_owned());
                 }
-                turn.completed_at =
-                    Some(turn.completed_at.unwrap_or(timestamp).max(timestamp));
+                turn.completed_at = Some(turn.completed_at.unwrap_or(timestamp).max(timestamp));
                 let content = event
                     .pointer("/data/content")
                     .and_then(Value::as_str)

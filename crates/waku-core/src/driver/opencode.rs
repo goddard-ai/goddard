@@ -1302,21 +1302,9 @@ fn request_permission(
         detail,
         detail_i18n: Some(detail_i18n),
         options: vec![
-            PermissionOption::keyed(
-                "once",
-                localized!("permission.allow_once"),
-                true,
-            ),
-            PermissionOption::keyed(
-                "always",
-                localized!("permission.always_allow"),
-                true,
-            ),
-            PermissionOption::keyed(
-                "reject",
-                localized!("common.deny"),
-                false,
-            ),
+            PermissionOption::keyed("once", localized!("permission.allow_once"), true),
+            PermissionOption::keyed("always", localized!("permission.always_allow"), true),
+            PermissionOption::keyed("reject", localized!("common.deny"), false),
         ],
     };
 

@@ -151,11 +151,7 @@ fn language_specs() -> Vec<LangSpec> {
         },
         LangSpec {
             language: tree_sitter_python::LANGUAGE.into(),
-            def_kinds: &[
-                "function_definition",
-                "class_definition",
-                "assignment",
-            ],
+            def_kinds: &["function_definition", "class_definition", "assignment"],
             container_kinds: &["class_definition"],
             import_kinds: &["import_statement", "import_from_statement"],
             wrapper_kinds: &["decorated_definition"],
@@ -259,7 +255,9 @@ const CONTAINER_BODY_KINDS: &[&str] = &[
 ];
 
 fn emit_signature(node: Node, source: &[u8], depth: usize, out: &mut Vec<(usize, String)>) {
-    let Ok(text) = node.utf8_text(source) else { return };
+    let Ok(text) = node.utf8_text(source) else {
+        return;
+    };
     let signature = first_line(text);
     if !signature.is_empty() {
         out.push((depth, signature));
@@ -315,14 +313,23 @@ fn collect_defs(
                         .to_owned(),
                 )
             });
-            collect_defs(child, source, spec, inner_prefix.or_else(|| pending.take()), out);
+            collect_defs(
+                child,
+                source,
+                spec,
+                inner_prefix.or_else(|| pending.take()),
+                out,
+            );
             continue;
         }
         if !spec.def_kinds.contains(&kind) {
             continue;
         }
         let signature = match pending.take() {
-            Some(prefix) => format!("{prefix}{}", first_line(child.utf8_text(source).unwrap_or(""))),
+            Some(prefix) => format!(
+                "{prefix}{}",
+                first_line(child.utf8_text(source).unwrap_or(""))
+            ),
             None => first_line(child.utf8_text(source).unwrap_or("")),
         };
         if signature.is_empty() || signature.starts_with("mod tests") {
@@ -346,11 +353,7 @@ fn collect_defs(
 /// Looks for string literals first (JS/Go), then dotted/relative module names
 /// (Python), then path-ish identifiers (Rust `use`/`mod`).
 fn collect_import_specs(node: Node, source: &[u8], out: &mut Vec<String>) {
-    const STRING_KINDS: &[&str] = &[
-        "string",
-        "interpreted_string_literal",
-        "raw_string_literal",
-    ];
+    const STRING_KINDS: &[&str] = &["string", "interpreted_string_literal", "raw_string_literal"];
     const NAME_KINDS: &[&str] = &[
         "dotted_name",
         "relative_import",
@@ -392,7 +395,9 @@ fn resolve_import(file: &Path, spec: &str) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let mut push_variants = |base: PathBuf| {
         candidates.push(base.clone());
-        for ext in ["ts", "tsx", "js", "jsx", "mts", "cts", "py", "rs", "go", "swift"] {
+        for ext in [
+            "ts", "tsx", "js", "jsx", "mts", "cts", "py", "rs", "go", "swift",
+        ] {
             candidates.push(base.with_extension(ext));
         }
         for index in ["index.ts", "index.tsx", "index.js", "mod.rs", "__init__.py"] {
@@ -406,7 +411,10 @@ fn resolve_import(file: &Path, spec: &str) -> Vec<PathBuf> {
         for take in (1..=segments.len()).rev() {
             push_variants(Path::new("src").join(segments[..take].join("/")));
         }
-    } else if let Some(rest) = spec.strip_prefix("self::").or_else(|| spec.strip_prefix("super::")) {
+    } else if let Some(rest) = spec
+        .strip_prefix("self::")
+        .or_else(|| spec.strip_prefix("super::"))
+    {
         let base = if spec.starts_with("super::") {
             dir.parent().unwrap_or(dir).to_path_buf()
         } else {
@@ -684,10 +692,7 @@ mod tests {
     use std::fs;
 
     fn fixture(files: &[(&str, &str)]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "repo-map-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("repo-map-test-{}", uuid::Uuid::new_v4()));
         for (rel, contents) in files {
             let path = dir.join(rel);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -699,18 +704,36 @@ mod tests {
     #[test]
     fn extracts_top_level_symbols_per_language() {
         let dir = fixture(&[
-            ("src/util.ts", "export function helper(a: number): string {\n  return '';\n}\nexport const LIMIT = 3;\n"),
-            ("src/app.py", "class App:\n    def run(self):\n        pass\n\ndef main():\n    pass\n"),
-            ("src/lib.rs", "pub fn entry() {}\nstruct State { x: i32 }\nimpl State {\n    fn go(&self) {}\n}\n"),
-            ("main.go", "package main\n\nfunc main() {}\nfunc helper() {}\n"),
-            ("App.swift", "class App {\n    func launch() {}\n}\nstruct Config {}\n"),
+            (
+                "src/util.ts",
+                "export function helper(a: number): string {\n  return '';\n}\nexport const LIMIT = 3;\n",
+            ),
+            (
+                "src/app.py",
+                "class App:\n    def run(self):\n        pass\n\ndef main():\n    pass\n",
+            ),
+            (
+                "src/lib.rs",
+                "pub fn entry() {}\nstruct State { x: i32 }\nimpl State {\n    fn go(&self) {}\n}\n",
+            ),
+            (
+                "main.go",
+                "package main\n\nfunc main() {}\nfunc helper() {}\n",
+            ),
+            (
+                "App.swift",
+                "class App {\n    func launch() {}\n}\nstruct Config {}\n",
+            ),
             ("README.md", "# not code\n"),
         ]);
         let index = RepoMapIndex::scan(&dir).unwrap();
         let map = index.render(10_000);
         assert_eq!(map.indexed_files, 5);
         assert!(map.text.contains("src/util.ts:"));
-        assert!(map.text.contains("export function helper(a: number): string {"));
+        assert!(
+            map.text
+                .contains("export function helper(a: number): string {")
+        );
         assert!(map.text.contains("class App:"));
         assert!(map.text.contains("def run(self):"));
         assert!(map.text.contains("impl State {"));
@@ -724,7 +747,10 @@ mod tests {
         let dir = fixture(&[
             ("src/z_unrelated.ts", "export const z = 1;\n"),
             ("src/core.ts", "export function core() {}\n"),
-            ("src/app.ts", "import { core } from './core';\nexport function app() { core(); }\n"),
+            (
+                "src/app.ts",
+                "import { core } from './core';\nexport function app() { core(); }\n",
+            ),
         ]);
         let index = RepoMapIndex::scan(&dir).unwrap();
         let map = index.render(10_000);
@@ -746,7 +772,10 @@ mod tests {
                 )
             })
             .collect();
-        let refs: Vec<(&str, &str)> = files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+        let refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
         let dir = fixture(&refs);
         let index = RepoMapIndex::scan(&dir).unwrap();
         let map = index.render(100); // 400 chars
@@ -758,7 +787,10 @@ mod tests {
 
     #[test]
     fn refresh_reparses_only_changed_files() {
-        let dir = fixture(&[("a.ts", "export const a = 1;\n"), ("b.ts", "export const b = 1;\n")]);
+        let dir = fixture(&[
+            ("a.ts", "export const a = 1;\n"),
+            ("b.ts", "export const b = 1;\n"),
+        ]);
         let mut index = RepoMapIndex::scan(&dir).unwrap();
         fs::write(dir.join("a.ts"), "export function renamed() {}\n").unwrap();
         index.refresh().unwrap();
@@ -773,7 +805,10 @@ mod tests {
     #[test]
     fn resolves_rust_mod_and_use_edges() {
         let dir = fixture(&[
-            ("src/lib.rs", "mod util;\nuse crate::deep::thing;\npub fn root() {}\n"),
+            (
+                "src/lib.rs",
+                "mod util;\nuse crate::deep::thing;\npub fn root() {}\n",
+            ),
             ("src/util.rs", "pub fn helper() {}\n"),
             ("src/deep/mod.rs", "pub mod thing;\n"),
             ("src/deep/thing.rs", "pub fn stuff() {}\n"),
@@ -781,8 +816,10 @@ mod tests {
         let index = RepoMapIndex::scan(&dir).unwrap();
         let edges = &index.edges[&PathBuf::from("src/lib.rs")];
         assert!(edges.contains(&PathBuf::from("src/util.rs")));
-        assert!(edges.contains(&PathBuf::from("src/deep/thing.rs"))
-            || edges.contains(&PathBuf::from("src/deep/mod.rs")));
+        assert!(
+            edges.contains(&PathBuf::from("src/deep/thing.rs"))
+                || edges.contains(&PathBuf::from("src/deep/mod.rs"))
+        );
     }
 
     #[test]

@@ -264,16 +264,11 @@ impl Waku {
                         .background_executor()
                         .spawn(async move {
                             match workspace.request(
-                                waku_client::WorkspaceOperation::ResolveRemoteFile {
-                                    cwd,
-                                    path,
-                                },
+                                waku_client::WorkspaceOperation::ResolveRemoteFile { cwd, path },
                             ) {
                                 Ok(waku_client::WorkspaceResult::RemoteFile { file }) => Ok(file),
-                                Ok(_) => {
-                                    Err("the daemon returned an invalid remote-file response"
-                                        .to_owned())
-                                }
+                                Ok(_) => Err("the daemon returned an invalid remote-file response"
+                                    .to_owned()),
                                 Err(error) => Err(error.to_string()),
                             }
                         })

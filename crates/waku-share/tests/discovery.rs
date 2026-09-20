@@ -2,8 +2,8 @@
 // nodes) discovering and reaching each other over n0's public DNS +
 // relays. Ignored — they need network access and are for manual runs:
 // `cargo test -p waku-share --test discovery -- --ignored --nocapture`.
-use iroh::endpoint::presets;
 use iroh::Endpoint;
+use iroh::endpoint::presets;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -113,13 +113,7 @@ async fn share_nodes_friend_request_over_n0() {
     let mut last_err = None;
     let mut peer_name = None;
     while std::time::Instant::now() < deadline {
-        match waku_share::friends::send_friend_request(
-            node_a.endpoint(),
-            b_id,
-            "A",
-            &store_a,
-        )
-        .await
+        match waku_share::friends::send_friend_request(node_a.endpoint(), b_id, "A", &store_a).await
         {
             Ok(name) => {
                 peer_name = Some(name);
@@ -131,7 +125,11 @@ async fn share_nodes_friend_request_over_n0() {
             }
         }
     }
-    assert_eq!(peer_name.as_deref(), Some("B"), "request failed: {last_err:?}");
+    assert_eq!(
+        peer_name.as_deref(),
+        Some("B"),
+        "request failed: {last_err:?}"
+    );
     assert!(store_b.lock().is_friend(&node_a.endpoint().id()));
     node_a.shutdown().await.unwrap();
     node_b.shutdown().await.unwrap();

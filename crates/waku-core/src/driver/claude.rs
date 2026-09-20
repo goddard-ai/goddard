@@ -1797,16 +1797,8 @@ fn request_permission(
         detail,
         detail_i18n,
         options: vec![
-            PermissionOption::keyed(
-                "allow",
-                localized!("permission.allow_once"),
-                true,
-            ),
-            PermissionOption::keyed(
-                "deny",
-                localized!("common.deny"),
-                false,
-            ),
+            PermissionOption::keyed("allow", localized!("permission.allow_once"), true),
+            PermissionOption::keyed("deny", localized!("common.deny"), false),
         ],
     });
 }

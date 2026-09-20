@@ -4304,8 +4304,8 @@ impl Waku {
         // text — SVGs alone keep a source view behind the toggle, since
         // their text stays editable.
         let is_markdown = file_highlighter_language(&relative_path) == "markdown";
-        let is_svg = image_preview::image_format_for_name(&relative_path)
-            == Some(gpui::ImageFormat::Svg);
+        let is_svg =
+            image_preview::image_format_for_name(&relative_path) == Some(gpui::ImageFormat::Svg);
         let image_mode = self
             .right_panel_file_editors
             .get(&relative_path)
@@ -4789,8 +4789,7 @@ impl Waku {
                     .get(&relative_path)
                     .is_some_and(|editor| {
                         (editor.show_source && !editor.text_loaded)
-                            || (file_shows_image(editor, &relative_path)
-                                && editor.image.is_none())
+                            || (file_shows_image(editor, &relative_path) && editor.image.is_none())
                     });
                 if needs_read {
                     waku.read_right_panel_file_into_editor(relative_path.clone(), cx);
@@ -5036,15 +5035,15 @@ impl Waku {
                     })
                     .child(canvas(
                         move |bounds, window, cx| {
-                            let natural = image
-                                .clone()
-                                .use_render_image(window, cx)
-                                .and_then(|render| {
-                                    let size = render.size(0);
-                                    (size.width.0 > 0 && size.height.0 > 0).then(|| {
-                                        (size.width.0 as f32, size.height.0 as f32)
-                                    })
-                                });
+                            let natural =
+                                image
+                                    .clone()
+                                    .use_render_image(window, cx)
+                                    .and_then(|render| {
+                                        let size = render.size(0);
+                                        (size.width.0 > 0 && size.height.0 > 0)
+                                            .then(|| (size.width.0 as f32, size.height.0 as f32))
+                                    });
                             weak.update(cx, |this, _| {
                                 let editor = this.right_panel_file_editors.get_mut(&path)?;
                                 editor.image_viewport = Some(bounds);
@@ -5170,9 +5169,8 @@ impl Waku {
             if scaled_h <= viewport_h {
                 return;
             }
-            editor.image_pan_y = px(
-                (f32::from(editor.image_pan_y) + delta_y).clamp(viewport_h - scaled_h, 0.0),
-            );
+            editor.image_pan_y =
+                px((f32::from(editor.image_pan_y) + delta_y).clamp(viewport_h - scaled_h, 0.0));
         }
         cx.notify(entity_id);
     }
@@ -5823,8 +5821,7 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .tooltip(Tooltip::text(file.path.clone()))
                     .child(file.path.clone()),
-                &self
-                    .transcript_control_focus(format!("{id_prefix}-path-{index}"), cx),
+                &self.transcript_control_focus(format!("{id_prefix}-path-{index}"), cx),
                 file.path.clone(),
                 &cx.entity().downgrade(),
             ))

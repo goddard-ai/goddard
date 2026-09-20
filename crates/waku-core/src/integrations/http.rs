@@ -46,7 +46,10 @@ pub fn spawn_with(job: &CurlJob<'_>, stderr: Stdio) -> anyhow::Result<Child> {
     if let Some(body) = job.body_file {
         config.push_str(&format!(
             "data-binary = \"@{}\"\n",
-            body.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+            body.display()
+                .to_string()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
         ));
     }
     let mut child = Command::new(CURL_PATH)

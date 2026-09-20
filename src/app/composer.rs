@@ -353,12 +353,12 @@ impl Waku {
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
                                     .child(SharedString::from(
-                                            permission
-                                                .title_i18n
-                                                .as_ref()
-                                                .map(waku_client::WireTranslation::render)
-                                                .unwrap_or_else(|| permission.title.clone()),
-                                        )),
+                                        permission
+                                            .title_i18n
+                                            .as_ref()
+                                            .map(waku_client::WireTranslation::render)
+                                            .unwrap_or_else(|| permission.title.clone()),
+                                    )),
                             ),
                     )
                     .child(
@@ -1478,353 +1478,330 @@ impl Waku {
             let weak = weak.clone();
             let session_selection = session_selection.clone();
             let jev_credential_missing = self.jev_credential_missing();
-            let render =
-                move |_row_index: usize,
-                      row: &ModelPickerRow,
-                      is_highlighted: bool,
-                      popover: &ContextMenuHandle,
-                      window: &mut Window,
-                      cx: &mut App|
-                      -> AnyElement {
-                    let theme = Theme::current(cx);
-                    if row.auto {
-                        // The router row: same hit target and highlight
-                        // treatment as a model row, but where a model
-                        // row carries its star this one carries a
-                        // shortcut to the Jev settings page — there is
-                        // no concrete model to favorite.
-                        let select_weak = weak.clone();
-                        let select_popover = popover.clone();
-                        let settings_weak = weak.clone();
-                        let settings_popover = popover.clone();
-                        return model_picker_row_shell(
-                                "model-row-auto",
-                                auto_route,
-                                is_highlighted,
-                                &theme,
-                            )
+            let render = move |_row_index: usize,
+                               row: &ModelPickerRow,
+                               is_highlighted: bool,
+                               popover: &ContextMenuHandle,
+                               window: &mut Window,
+                               cx: &mut App|
+                  -> AnyElement {
+                let theme = Theme::current(cx);
+                if row.auto {
+                    // The router row: same hit target and highlight
+                    // treatment as a model row, but where a model
+                    // row carries its star this one carries a
+                    // shortcut to the Jev settings page — there is
+                    // no concrete model to favorite.
+                    let select_weak = weak.clone();
+                    let select_popover = popover.clone();
+                    let settings_weak = weak.clone();
+                    let settings_popover = popover.clone();
+                    return model_picker_row_shell(
+                        "model-row-auto",
+                        auto_route,
+                        is_highlighted,
+                        &theme,
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
                             .child(
                                 div()
-                                    .min_w_0()
-                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
                                     .child(
                                         div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(
-                                                div()
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_size(sp(13.0))
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.text)
-                                                    .child(SharedString::from(tr!(
-                                                        "models.auto"
-                                                    ))),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex_none()
-                                                    .truncate()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(SharedString::from(tr!(
-                                                        "models.auto_hint"
-                                                    ))),
-                                            ),
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(13.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(theme.text)
+                                            .child(SharedString::from(tr!("models.auto"))),
                                     )
                                     .child(
                                         div()
-                                            .mt(px(4.0))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(icon(
-                                                "icons/provider-typesafe.svg",
-                                                12.0,
-                                                theme.text_tertiary,
-                                            ))
-                                            .child(
-                                                div()
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child("Jev"),
-                                            ),
+                                            .flex_none()
+                                            .truncate()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_tertiary)
+                                            .child(SharedString::from(tr!("models.auto_hint"))),
                                     ),
                             )
-                            // The selected backend has no usable
-                            // credential — flag it beside the
-                            // settings shortcut that fixes it.
-                            .when(jev_credential_missing, |element| {
-                                element.child(
-                                    div()
-                                        .id("jev-credential-warning")
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .tooltip(Tooltip::text(tr!(
-                                            "models.auto_missing_credential"
-                                        )))
-                                        .child(icon(
-                                            "icons/alert.svg",
-                                            13.0,
-                                            theme.warning,
-                                        )),
-                                )
-                            })
                             .child(
                                 div()
-                                    .id("jev-settings")
-                                    .w(px(28.0))
-                                    .h(px(28.0))
-                                    .rounded(px(8.0))
+                                    .mt(px(4.0))
                                     .flex()
                                     .items_center()
-                                    .justify_center()
-                                    .hover(|element| element.bg(theme.overlay_strong))
-                                    .tooltip(Tooltip::text(tr!("settings.jev")))
+                                    .gap(px(8.0))
                                     .child(icon(
-                                        "icons/settings.svg",
-                                        14.0,
-                                        theme.text_ghost,
+                                        "icons/provider-typesafe.svg",
+                                        12.0,
+                                        theme.text_tertiary,
                                     ))
-                                    .on_click(move |_, window, cx| {
-                                        cx.stop_propagation();
-                                        open_settings_page_from_picker(
-                                            &settings_weak,
-                                            &settings_popover,
-                                            SettingsPage::Jev,
-                                            window,
-                                            cx,
-                                        );
-                                    }),
-                            )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_tertiary)
+                                            .child("Jev"),
+                                    ),
+                            ),
+                    )
+                    // The selected backend has no usable
+                    // credential — flag it beside the
+                    // settings shortcut that fixes it.
+                    .when(jev_credential_missing, |element| {
+                        element.child(
+                            div()
+                                .id("jev-credential-warning")
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .tooltip(Tooltip::text(tr!("models.auto_missing_credential")))
+                                .child(icon("icons/alert.svg", 13.0, theme.warning)),
+                        )
+                    })
+                    .child(
+                        div()
+                            .id("jev-settings")
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .rounded(px(8.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|element| element.bg(theme.overlay_strong))
+                            .tooltip(Tooltip::text(tr!("settings.jev")))
+                            .child(icon("icons/settings.svg", 14.0, theme.text_ghost))
                             .on_click(move |_, window, cx| {
-                                let _ = select_weak.update(cx, |this, cx| {
-                                    this.choose_auto_route(cx);
-                                });
-                                select_popover.close(window, cx);
-                            })
-                            .into_any_element();
-                    }
-                    let kind = row.provider;
-                    let model = &row.model;
-                    let is_selected = session_selection.as_ref().is_some_and(
-                        |(provider, model_id, effort, fast)| {
+                                cx.stop_propagation();
+                                open_settings_page_from_picker(
+                                    &settings_weak,
+                                    &settings_popover,
+                                    SettingsPage::Jev,
+                                    window,
+                                    cx,
+                                );
+                            }),
+                    )
+                    .on_click(move |_, window, cx| {
+                        let _ = select_weak.update(cx, |this, cx| {
+                            this.choose_auto_route(cx);
+                        });
+                        select_popover.close(window, cx);
+                    })
+                    .into_any_element();
+                }
+                let kind = row.provider;
+                let model = &row.model;
+                let is_selected =
+                    session_selection
+                        .as_ref()
+                        .is_some_and(|(provider, model_id, effort, fast)| {
                             *provider == kind
                                 && model_id == &model.id
                                 && effort == &row.effort
                                 && *fast == row.fast
-                        },
-                    );
-                    let favorite_index = row.favorite_index;
-                    let is_favorite = favorite_index.is_some();
-                    let model_id = model.id.clone();
-                    let favorite_model_id = model.id.clone();
-                    let effort = row.effort.clone();
-                    let favorite_effort = row.effort.clone();
-                    let fast = row.fast;
-                    let select_weak = weak.clone();
-                    let select_popover = popover.clone();
-                    let favorite_weak = weak.clone();
-                    let drop_weak = weak.clone();
-                    let effort_label = row.effort.as_deref().and_then(|effort| {
-                        model
-                            .reasoning_efforts
-                            .iter()
-                            .find(|option| option.id == effort)
-                            .map(|option| {
-                                option
-                                    .label_i18n
-                                    .as_ref()
-                                    .map(waku_client::WireTranslation::render)
-                                    .unwrap_or_else(|| option.label.clone())
-                            })
-                    });
-                    let sub_provider = model
-                        .sub_provider
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|name| !name.is_empty());
-                    let detail = model_picker_subtitle(kind, sub_provider);
-                    // The ⌘⌥1–⌘⌥9 chord rides on the first nine starred rows.
-                    // Resolve against the live keymap so a remapped chord
-                    // still advertises itself; fall back to the default's
-                    // label when the picker's own context path cannot see the
-                    // scoped binding.
-                    let shortcut_hint = favorite_index.filter(|index| *index < 9).map(|index| {
-                        crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
-                            .resolve(window, cx)
-                            .unwrap_or_else(|| {
-                                crate::ui::shortcut::sequence_label(&format!(
-                                    "secondary-alt-{}",
-                                    index + 1
-                                ))
-                            })
-                    });
-                    let mut row_element = model_picker_row_shell(
-                        SharedString::from(format!(
-                            "model-row-{}-{}-{}-{}",
+                        });
+                let favorite_index = row.favorite_index;
+                let is_favorite = favorite_index.is_some();
+                let model_id = model.id.clone();
+                let favorite_model_id = model.id.clone();
+                let effort = row.effort.clone();
+                let favorite_effort = row.effort.clone();
+                let fast = row.fast;
+                let select_weak = weak.clone();
+                let select_popover = popover.clone();
+                let favorite_weak = weak.clone();
+                let drop_weak = weak.clone();
+                let effort_label = row.effort.as_deref().and_then(|effort| {
+                    model
+                        .reasoning_efforts
+                        .iter()
+                        .find(|option| option.id == effort)
+                        .map(|option| {
+                            option
+                                .label_i18n
+                                .as_ref()
+                                .map(waku_client::WireTranslation::render)
+                                .unwrap_or_else(|| option.label.clone())
+                        })
+                });
+                let sub_provider = model
+                    .sub_provider
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty());
+                let detail = model_picker_subtitle(kind, sub_provider);
+                // The ⌘⌥1–⌘⌥9 chord rides on the first nine starred rows.
+                // Resolve against the live keymap so a remapped chord
+                // still advertises itself; fall back to the default's
+                // label when the picker's own context path cannot see the
+                // scoped binding.
+                let shortcut_hint = favorite_index.filter(|index| *index < 9).map(|index| {
+                    crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                        .resolve(window, cx)
+                        .unwrap_or_else(|| {
+                            crate::ui::shortcut::sequence_label(&format!(
+                                "secondary-alt-{}",
+                                index + 1
+                            ))
+                        })
+                });
+                let mut row_element = model_picker_row_shell(
+                    SharedString::from(format!(
+                        "model-row-{}-{}-{}-{}",
+                        kind.id(),
+                        model.id,
+                        row.effort.as_deref().unwrap_or("base"),
+                        row.fast
+                    )),
+                    is_selected,
+                    is_highlighted,
+                    &theme,
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(13.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(theme.text)
+                                        .child(SharedString::from(
+                                            model
+                                                .name_i18n
+                                                .as_ref()
+                                                .map(waku_client::WireTranslation::render)
+                                                .unwrap_or_else(|| model.name.clone()),
+                                        )),
+                                )
+                                .when_some(effort_label, |element, label| {
+                                    element.child(
+                                        div()
+                                            .flex_none()
+                                            .truncate()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_tertiary)
+                                            .child(SharedString::from(label)),
+                                    )
+                                })
+                                .when(fast, |element| {
+                                    element.child(icon("icons/zap.svg", 11.5, theme.text_tertiary))
+                                }),
+                        )
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(provider_mark(&theme, kind, 12.0, theme.text_tertiary))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_tertiary)
+                                        .child(SharedString::from(detail)),
+                                ),
+                        ),
+                )
+                .when_some(shortcut_hint, |element, hint| {
+                    element.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(SharedString::from(hint)),
+                    )
+                })
+                .child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "favorite-model-{}-{}-{}-{}",
                             kind.id(),
                             model.id,
                             row.effort.as_deref().unwrap_or("base"),
                             row.fast
-                        )),
-                        is_selected,
-                        is_highlighted,
-                        &theme,
-                    )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_size(sp(13.0))
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(theme.text)
-                                                .child(SharedString::from(
-                                                    model
-                                                        .name_i18n
-                                                        .as_ref()
-                                                        .map(waku_client::WireTranslation::render)
-                                                        .unwrap_or_else(|| model.name.clone()),
-                                                )),
-                                        )
-                                        .when_some(effort_label, |element, label| {
-                                            element.child(
-                                                div()
-                                                    .flex_none()
-                                                    .truncate()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(SharedString::from(label)),
-                                            )
-                                        })
-                                        .when(fast, |element| {
-                                            element.child(icon(
-                                                "icons/zap.svg",
-                                                11.5,
-                                                theme.text_tertiary,
-                                            ))
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .mt(px(4.0))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(8.0))
-                                        .child(provider_mark(
-                                            &theme,
-                                            kind,
-                                            12.0,
-                                            theme.text_tertiary,
-                                        ))
-                                        .child(
-                                            div()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_size(sp(12.5))
-                                                .text_color(theme.text_tertiary)
-                                                .child(SharedString::from(detail)),
-                                        ),
-                                ),
+                        )))
+                        .w(px(28.0))
+                        .h(px(28.0))
+                        .rounded(px(8.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|element| element.bg(theme.overlay_strong))
+                        .child(icon(
+                            if is_favorite {
+                                "icons/star-filled.svg"
+                            } else {
+                                "icons/star.svg"
+                            },
+                            14.0,
+                            if is_favorite {
+                                theme.favorite
+                            } else {
+                                theme.text_ghost
+                            },
+                        ))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            let _ = favorite_weak.update(cx, |this, cx| {
+                                this.toggle_favorite_model(
+                                    kind,
+                                    favorite_model_id.clone(),
+                                    favorite_effort.clone(),
+                                    fast,
+                                    cx,
+                                );
+                            });
+                        }),
+                )
+                .on_click(move |_, window, cx| {
+                    let _ = select_weak.update(cx, |this, cx| {
+                        this.choose_model(kind, model_id.clone(), effort.clone(), fast, cx);
+                    });
+                    select_popover.close(window, cx);
+                });
+                // Starred rows are the drag-reorder surface: dragging one
+                // onto another favorite takes that row's slot.
+                if let Some(target) = favorite_index {
+                    let label = SharedString::from(model.name.clone());
+                    row_element = row_element
+                        .on_drag(
+                            FavoriteModelDrag {
+                                index: target,
+                                label,
+                            },
+                            move |drag, _, _, cx| {
+                                cx.new(|_| FavoriteModelDragView {
+                                    label: drag.label.clone(),
+                                })
+                            },
                         )
-                        .when_some(shortcut_hint, |element, hint| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_ghost)
-                                    .child(SharedString::from(hint)),
-                            )
+                        .drag_over::<FavoriteModelDrag>(move |style, _, _, _| {
+                            style.bg(theme.overlay_strong)
                         })
-                        .child(
-                            div()
-                                .id(SharedString::from(format!(
-                                    "favorite-model-{}-{}-{}-{}",
-                                    kind.id(),
-                                    model.id,
-                                    row.effort.as_deref().unwrap_or("base"),
-                                    row.fast
-                                )))
-                                .w(px(28.0))
-                                .h(px(28.0))
-                                .rounded(px(8.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .hover(|element| element.bg(theme.overlay_strong))
-                                .child(icon(
-                                    if is_favorite {
-                                        "icons/star-filled.svg"
-                                    } else {
-                                        "icons/star.svg"
-                                    },
-                                    14.0,
-                                    if is_favorite {
-                                        theme.favorite
-                                    } else {
-                                        theme.text_ghost
-                                    },
-                                ))
-                                .on_click(move |_, _, cx| {
-                                    cx.stop_propagation();
-                                    let _ = favorite_weak.update(cx, |this, cx| {
-                                        this.toggle_favorite_model(
-                                            kind,
-                                            favorite_model_id.clone(),
-                                            favorite_effort.clone(),
-                                            fast,
-                                            cx,
-                                        );
-                                    });
-                                }),
-                        )
-                        .on_click(move |_, window, cx| {
-                            let _ = select_weak.update(cx, |this, cx| {
-                                this.choose_model(kind, model_id.clone(), effort.clone(), fast, cx);
+                        .on_drop(move |drag: &FavoriteModelDrag, _, cx| {
+                            let _ = drop_weak.update(cx, |this, cx| {
+                                this.move_favorite_model(drag.index, target, cx);
                             });
-                            select_popover.close(window, cx);
                         });
-                    // Starred rows are the drag-reorder surface: dragging one
-                    // onto another favorite takes that row's slot.
-                    if let Some(target) = favorite_index {
-                        let label = SharedString::from(model.name.clone());
-                        row_element = row_element
-                            .on_drag(
-                                FavoriteModelDrag {
-                                    index: target,
-                                    label,
-                                },
-                                move |drag, _, _, cx| {
-                                    cx.new(|_| FavoriteModelDragView {
-                                        label: drag.label.clone(),
-                                    })
-                                },
-                            )
-                            .drag_over::<FavoriteModelDrag>(move |style, _, _, _| {
-                                style.bg(theme.overlay_strong)
-                            })
-                            .on_drop(move |drag: &FavoriteModelDrag, _, cx| {
-                                let _ = drop_weak.update(cx, |this, cx| {
-                                    this.move_favorite_model(drag.index, target, cx);
-                                });
-                            });
-                    }
-                    row_element.into_any_element()
-                };
+                }
+                row_element.into_any_element()
+            };
             render
         });
 
@@ -1967,8 +1944,7 @@ impl Waku {
             && self
                 .composer_session()
                 .is_some_and(|session| session.auto_route);
-        let index =
-            picker_selected_row_index(selection.as_ref(), auto_route, &rows).unwrap_or(0);
+        let index = picker_selected_row_index(selection.as_ref(), auto_route, &rows).unwrap_or(0);
         self.sync_model_picker_list(rows.len());
         self.model_picker_list.scroll_to(ListOffset {
             item_ix: index,
@@ -2273,16 +2249,12 @@ impl Waku {
                     if supports_default_reset {
                         let weak_default = weak.clone();
                         items.push(
-                            traits_choice(
-                                theme,
-                                tr!("common.default"),
-                                selected_effort.is_none(),
-                            )
-                            .on_click(move |_, cx| {
-                                let _ = weak_default.update(cx, |this, cx| {
-                                    this.clear_reasoning_effort(cx);
-                                });
-                            }),
+                            traits_choice(theme, tr!("common.default"), selected_effort.is_none())
+                                .on_click(move |_, cx| {
+                                    let _ = weak_default.update(cx, |this, cx| {
+                                        this.clear_reasoning_effort(cx);
+                                    });
+                                }),
                         );
                     }
                     for option in reasoning_efforts.clone() {
@@ -2295,13 +2267,11 @@ impl Waku {
                         let effort = option.id;
                         let selected = selected_effort.as_deref() == Some(effort.as_str());
                         items.push(
-                            traits_choice(theme, label, selected).on_click(
-                                move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_reasoning_effort(effort.clone(), cx);
-                                    });
-                                },
-                            ),
+                            traits_choice(theme, label, selected).on_click(move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_reasoning_effort(effort.clone(), cx);
+                                });
+                            }),
                         );
                     }
                 }
@@ -2312,16 +2282,12 @@ impl Waku {
                     items.push(MenuItem::Header(tr!("models.service_tier").into()));
                     let weak_standard = weak.clone();
                     items.push(
-                        traits_choice(
-                            theme,
-                            tr!("models.standard"),
-                            selected_tier == "default",
-                        )
-                        .on_click(move |_, cx| {
-                            let _ = weak_standard.update(cx, |this, cx| {
-                                this.set_service_tier("default".to_owned(), cx);
-                            });
-                        }),
+                        traits_choice(theme, tr!("models.standard"), selected_tier == "default")
+                            .on_click(move |_, cx| {
+                                let _ = weak_standard.update(cx, |this, cx| {
+                                    this.set_service_tier("default".to_owned(), cx);
+                                });
+                            }),
                     );
                     for option in service_tiers.clone() {
                         let weak = weak.clone();
@@ -2333,13 +2299,11 @@ impl Waku {
                         let tier = option.id;
                         let selected = selected_tier == tier;
                         items.push(
-                            traits_choice(theme, label, selected).on_click(
-                                move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_service_tier(tier.clone(), cx);
-                                    });
-                                },
-                            ),
+                            traits_choice(theme, label, selected).on_click(move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_service_tier(tier.clone(), cx);
+                                });
+                            }),
                         );
                     }
                 }
@@ -2358,13 +2322,11 @@ impl Waku {
                         let window = option.id;
                         let selected = selected_window.as_deref() == Some(window.as_str());
                         items.push(
-                            traits_choice(theme, label, selected).on_click(
-                                move |_, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_context_window(window.clone(), cx);
-                                    });
-                                },
-                            ),
+                            traits_choice(theme, label, selected).on_click(move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_context_window(window.clone(), cx);
+                                });
+                            }),
                         );
                     }
                 }
@@ -2717,21 +2679,16 @@ impl Waku {
     /// The daemon's project-map state for the composer session, as a chip.
     /// Hidden entirely while the experiment emits nothing for the session.
     #[track_caller]
-    pub(super) fn render_project_map_control(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_project_map_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session_id = self.composer_session()?.id;
         let status = self.runtimes.get(&session_id)?.project_map.as_ref()?;
         let theme = Theme::current(cx);
         let color = theme.text_tertiary;
         use crate::model::ProjectMapStatus;
         let (label, icon_path, busy) = match status {
-            ProjectMapStatus::Building => (
-                tr!("project_map.indexing"),
-                "icons/loader-circle.svg",
-                true,
-            ),
+            ProjectMapStatus::Building => {
+                (tr!("project_map.indexing"), "icons/loader-circle.svg", true)
+            }
             ProjectMapStatus::Ready { indexed_files } => (
                 tr!("project_map.ready", files = *indexed_files),
                 "icons/projects.svg",
@@ -4449,10 +4406,7 @@ impl Waku {
         &self,
         session: &AgentSession,
     ) -> Option<TransferInfo> {
-        if !session.quarantined
-            || session.status.is_busy()
-            || session.provider_turns_after(0) > 0
-        {
+        if !session.quarantined || session.status.is_busy() || session.provider_turns_after(0) > 0 {
             return None;
         }
         self.friends_state
@@ -4585,10 +4539,7 @@ impl Waku {
                             .on_key_down(cx.listener(
                                 move |this, event: &KeyDownEvent, _window, cx| {
                                     if !event.keystroke.modifiers.modified()
-                                        && matches!(
-                                            event.keystroke.key.as_str(),
-                                            "enter" | "space"
-                                        )
+                                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
                                     {
                                         this.trust_transfer_session(session_id, cx);
                                         cx.stop_propagation();
@@ -6374,7 +6325,10 @@ pub(super) fn splice_pasted_blocks(content: &str, pasted_blocks: &[String]) -> S
     }
     body.push_str(rest);
     let mut body = body.trim().to_owned();
-    for block in blocks.map(|block| block.trim()).filter(|block| !block.is_empty()) {
+    for block in blocks
+        .map(|block| block.trim())
+        .filter(|block| !block.is_empty())
+    {
         if !body.is_empty() {
             body.push_str("\n\n");
         }
@@ -6764,8 +6718,7 @@ pub(super) enum ModelPickerTarget {
 /// instead. Everything else the user typed is preserved, in place when a
 /// token is replaced and appended when none exists.
 pub(super) fn picker_provider_query(content: &str, id: &str) -> String {
-    let is_provider_token =
-        |token: &str| matches!(token.split_once(':'), Some((key, _)) if key.eq_ignore_ascii_case("provider"));
+    let is_provider_token = |token: &str| matches!(token.split_once(':'), Some((key, _)) if key.eq_ignore_ascii_case("provider"));
     let active = content.split_whitespace().any(|token| {
         is_provider_token(token) && token.split_once(':').unwrap().1.eq_ignore_ascii_case(id)
     });

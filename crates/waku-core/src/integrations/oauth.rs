@@ -43,10 +43,7 @@ pub enum StoredCredential {
 /// The credential currently stored for `integration_id`, ready to send
 /// upstream. OAuth tokens are refreshed (and the store updated) when expired.
 /// `Ok(None)` means no credential exists yet.
-pub fn access_token(
-    secrets: &SecretStore,
-    integration_id: &str,
-) -> anyhow::Result<Option<String>> {
+pub fn access_token(secrets: &SecretStore, integration_id: &str) -> anyhow::Result<Option<String>> {
     let Some(raw) = secrets.read(integration_id) else {
         return Ok(None);
     };
@@ -223,7 +220,9 @@ fn protected_resource_urls(server: &url::Url) -> Vec<String> {
     } else {
         server.path()
     };
-    let mut urls = vec![format!("{origin}/.well-known/oauth-protected-resource{path}")];
+    let mut urls = vec![format!(
+        "{origin}/.well-known/oauth-protected-resource{path}"
+    )];
     if !path.is_empty() {
         urls.push(format!("{origin}/.well-known/oauth-protected-resource"));
     }
@@ -307,18 +306,15 @@ fn register_client(endpoint: &str) -> anyhow::Result<(String, Option<String>)> {
     let _ = std::fs::remove_file(&tmp);
     let response = response?;
     if !(200..300).contains(&response.status) {
-        bail!(
-            "dynamic client registration failed ({})",
-            response.status
-        );
+        bail!("dynamic client registration failed ({})", response.status);
     }
     #[derive(Deserialize)]
     struct Registration {
         client_id: String,
         client_secret: Option<String>,
     }
-    let registration: Registration = serde_json::from_slice(&response.body)
-        .context("registration response is unreadable")?;
+    let registration: Registration =
+        serde_json::from_slice(&response.body).context("registration response is unreadable")?;
     Ok((registration.client_id, registration.client_secret))
 }
 

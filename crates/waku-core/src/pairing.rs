@@ -29,10 +29,16 @@ pub type PairingSink = Arc<dyn Fn(PairingState) + Send + Sync>;
 /// What a pair request resolved to, as the requesting transport sees it.
 #[derive(Clone, Debug)]
 pub enum PairReply {
-    Granted { token: String },
-    Declined { message: String },
+    Granted {
+        token: String,
+    },
+    Declined {
+        message: String,
+    },
     /// Never queued — the pending list is full.
-    Busy { message: String },
+    Busy {
+        message: String,
+    },
 }
 
 /// A pending request's terminal outcome — the link transport maps it onto

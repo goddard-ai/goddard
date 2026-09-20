@@ -357,8 +357,8 @@ pub(crate) fn finished_turns(
             if event.get("method").and_then(Value::as_str) == Some("turn/completed")
                 && let Some(turn_id) = event.pointer("/params/turnId").and_then(Value::as_str)
             {
-                let completed = event.pointer("/params/terminal").and_then(Value::as_str)
-                    == Some("completed");
+                let completed =
+                    event.pointer("/params/terminal").and_then(Value::as_str) == Some("completed");
                 if let Some(turn) = turns.iter_mut().find(|turn| turn.turn_id == turn_id) {
                     turn.completed |= completed;
                 } else {
