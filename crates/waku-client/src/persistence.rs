@@ -157,9 +157,9 @@ fn default_render_math() -> bool {
 }
 
 /// Sidebar transparency rides on macOS Sidebar vibrancy — a real backdrop
-/// blur. Where no blur exists the feature stays off by default.
+/// blur. It's opt-in everywhere: off by default even where blur exists.
 fn default_sidebar_transparency() -> bool {
-    cfg!(target_os = "macos")
+    false
 }
 
 fn default_sidebar_transparency_amount() -> f32 {
@@ -2455,12 +2455,12 @@ mod tests {
     #[test]
     fn sidebar_transparency_defaults_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(defaults.sidebar_transparency, cfg!(target_os = "macos"));
+        assert!(!defaults.sidebar_transparency);
         let mut state = PersistedState::empty();
-        assert_eq!(state.sidebar_transparency, cfg!(target_os = "macos"));
-        state.sidebar_transparency = false;
+        assert!(!state.sidebar_transparency);
+        state.sidebar_transparency = true;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
-        assert_eq!(settings["sidebar_transparency"], false);
+        assert_eq!(settings["sidebar_transparency"], true);
         assert!(
             serde_json::to_value(state.app_state())
                 .unwrap()
@@ -2469,7 +2469,7 @@ mod tests {
         );
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
-        assert!(!restored.sidebar_transparency);
+        assert!(restored.sidebar_transparency);
     }
 
     #[test]
