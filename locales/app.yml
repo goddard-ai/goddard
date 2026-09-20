@@ -2059,6 +2059,8 @@ activity.activity:
   en: Activity
 activity.tool:
   en: Tool
+activity.subagent:
+  en: "Subagent: %{title}"
 activity.plan_updated:
   en: Plan updated
 activity.compacting_context:

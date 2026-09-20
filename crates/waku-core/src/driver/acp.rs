@@ -2479,6 +2479,13 @@ fn fx_context_notice(text: &str) -> bool {
 #[derive(Default)]
 struct AcpStreamState {
     tools: HashMap<String, (ActivityKind, String)>,
+    /// Open subagent calls keyed by their parent's agent id. Devin surfaces
+    /// them as `tool_call`s but never sends their `tool_call_update`; the
+    /// agent's `subagent_completed` lifecycle update settles them all.
+    subagent_calls: HashMap<String, HashSet<String>>,
+    /// Agent ids whose completion already arrived, mapped to their success,
+    /// so a subagent call that surfaces late still settles at once.
+    subagent_finished: HashMap<String, bool>,
     /// Whether the running turn has produced anything visible. A turn that
     /// ends having produced nothing is the shape a swallowed provider error
     /// takes, which is what makes a native failure worth looking up.
@@ -2524,8 +2531,42 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("pending");
-    let complete = matches!(status, "completed" | "failed");
-    let failed = status == "failed";
+    let mut complete = matches!(status, "completed" | "failed");
+    let mut failed = status == "failed";
+
+    // Devin delegates work to subagent chains. A subagent's calls surface as
+    // ordinary `tool_call` notifications tagged with the parent's agent id
+    // under `_meta`, but no `tool_call_update` ever follows them — the
+    // agent's own `subagent_completed` lifecycle update is their only
+    // terminal signal.
+    let meta = update.get("_meta");
+    let parent_agent = meta
+        .and_then(|meta| meta.get("cognition.ai/subagent_context"))
+        .and_then(|context| context.get("parentAgentId"))
+        .and_then(Value::as_str);
+    let subagent_started = meta.and_then(|meta| meta.get("cognition.ai/subagent_started"));
+    let subagent_completed = meta.and_then(|meta| meta.get("cognition.ai/subagent_completed"));
+
+    if let Some(parent) = parent_agent {
+        if let Some(success) = state.subagent_finished.get(parent) {
+            // The agent finished before this call surfaced — settle it now.
+            complete = true;
+            failed = !success;
+        } else if !complete && let Some(id) = id.as_ref() {
+            state
+                .subagent_calls
+                .entry(parent.to_owned())
+                .or_default()
+                .insert(id.clone());
+        }
+    }
+    if let Some(completed) = subagent_completed {
+        failed = failed
+            || !completed
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+    }
 
     let wire_kind = update.get("kind").and_then(Value::as_str);
     let wire_title = update.get("title").and_then(Value::as_str);
@@ -2555,6 +2596,12 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
                 .filter(|title| !title.is_empty())
                 .map(str::to_owned)
         })
+        .or_else(|| {
+            subagent_started
+                .and_then(|started| started.get("title"))
+                .and_then(Value::as_str)
+                .map(|title| tr!("activity.subagent", title = title))
+        })
         .or_else(|| stored.map(|(_, title)| title))
         .unwrap_or_else(|| "Tool".to_owned());
     if !complete && let Some(id) = id.as_ref() {
@@ -2564,16 +2611,64 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
     let output = update
         .get("content")
         .filter(|value| !value.is_null())
-        .or_else(|| update.get("rawOutput").filter(|value| !value.is_null()));
-    let item =
-        activity::tool_activity(id, kind, title, arguments, output, output, failed, complete)
-            .with_tool_name(
-                arguments
-                    .and_then(|input| input.get("tool_name"))
-                    .and_then(Value::as_str)
-                    .or_else(|| wire_title.filter(|title| title.starts_with("mcp__"))),
-            );
+        .or_else(|| update.get("rawOutput").filter(|value| !value.is_null()))
+        .or_else(|| {
+            subagent_completed
+                .and_then(|completed| completed.get("summary"))
+                .filter(|value| !value.is_null())
+        });
+    let item = activity::tool_activity(
+        id.clone(),
+        kind,
+        title,
+        arguments,
+        output,
+        output,
+        failed,
+        complete,
+    )
+    .with_tool_name(
+        arguments
+            .and_then(|input| input.get("tool_name"))
+            .and_then(Value::as_str)
+            .or_else(|| wire_title.filter(|title| title.starts_with("mcp__"))),
+    );
     let _ = events.send(DriverEvent::RichActivity(item));
+
+    // `subagent_completed` is keyed by the agent id, not the calls it owned —
+    // settle every tracked call the agent leaves behind.
+    if let Some(completed) = subagent_completed {
+        let agent_id = completed
+            .get("agentId")
+            .and_then(Value::as_str)
+            .or(id.as_deref());
+        let success = completed
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        if let Some(agent_id) = agent_id {
+            state.subagent_finished.insert(agent_id.to_owned(), success);
+            if let Some(children) = state.subagent_calls.remove(agent_id) {
+                for child in children {
+                    let (kind, title) = state
+                        .tools
+                        .remove(&child)
+                        .unwrap_or((ActivityKind::Tool, "Tool".to_owned()));
+                    let item = activity::tool_activity(
+                        Some(child),
+                        kind,
+                        title,
+                        None,
+                        None,
+                        None,
+                        !success,
+                        true,
+                    );
+                    let _ = events.send(DriverEvent::RichActivity(item));
+                }
+            }
+        }
+    }
 }
 
 fn classify(kind: &str) -> ActivityKind {
@@ -3335,6 +3430,86 @@ mod tests {
                 context_window: Some(500000),
             }
         ));
+    }
+
+    #[test]
+    fn devin_subagent_calls_settle_on_the_agents_lifecycle_update() {
+        // Devin surfaces a subagent's calls as `tool_call`s tagged with the
+        // parent's agent id but never sends their `tool_call_update`; the
+        // `subagent_completed` lifecycle update on the agent id is the only
+        // terminal signal and must settle them.
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+        let updates = [
+            json!({"sessionUpdate":"tool_call_update","toolCallId":"agent1","status":"in_progress",
+                   "_meta":{"cognition.ai/subagent_started":{"agentId":"agent1","title":"Echo hello","task":"run echo","isBackground":true}}}),
+            json!({"sessionUpdate":"tool_call","toolCallId":"exec:0#child","title":"Ran echo","kind":"execute","rawInput":{"command":"echo hi"},
+                   "_meta":{"cognition.ai/subagent_context":{"parentAgentId":"agent1"}}}),
+            json!({"sessionUpdate":"tool_call_update","toolCallId":"agent1","status":"completed",
+                   "_meta":{"cognition.ai/subagent_completed":{"agentId":"agent1","success":true,"summary":"ran echo"}}}),
+        ];
+        for update in updates {
+            let update = serde_json::from_value(update).unwrap();
+            handle_session_update(
+                ProviderKind::Devin,
+                SessionNotification::new("s", update),
+                &events,
+                &mut state,
+                None,
+            )
+            .unwrap();
+        }
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(seen.len(), 4);
+        assert!(matches!(&seen[0], DriverEvent::RichActivity(item)
+                if item.title == "Subagent: Echo hello" && !item.complete));
+        assert!(matches!(&seen[1], DriverEvent::RichActivity(item)
+                if item.kind == ActivityKind::Command && !item.complete));
+        assert!(matches!(&seen[2], DriverEvent::RichActivity(item)
+                if item.complete && !item.failed && item.output.as_deref() == Some("ran echo")));
+        assert!(matches!(&seen[3], DriverEvent::RichActivity(item)
+                if item.source_id.as_deref() == Some("exec:0#child")
+                    && item.kind == ActivityKind::Command
+                    && item.complete
+                    && !item.failed));
+    }
+
+    #[test]
+    fn failed_devin_subagent_fails_its_open_and_late_calls() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+        let updates = [
+            json!({"sessionUpdate":"tool_call","toolCallId":"exec:0#child","title":"Ran echo","kind":"execute","rawInput":{"command":"echo hi"},
+                   "_meta":{"cognition.ai/subagent_context":{"parentAgentId":"agent1"}}}),
+            json!({"sessionUpdate":"tool_call_update","toolCallId":"agent1","status":"completed",
+                   "_meta":{"cognition.ai/subagent_completed":{"agentId":"agent1","success":false}}}),
+            // A call that surfaces only after the agent finished still settles.
+            json!({"sessionUpdate":"tool_call","toolCallId":"read:0#late","title":"read","kind":"read",
+                   "_meta":{"cognition.ai/subagent_context":{"parentAgentId":"agent1"}}}),
+        ];
+        for update in updates {
+            let update = serde_json::from_value(update).unwrap();
+            handle_session_update(
+                ProviderKind::Devin,
+                SessionNotification::new("s", update),
+                &events,
+                &mut state,
+                None,
+            )
+            .unwrap();
+        }
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(seen.len(), 4);
+        assert!(matches!(&seen[2], DriverEvent::RichActivity(item)
+                if item.source_id.as_deref() == Some("exec:0#child")
+                    && item.complete
+                    && item.failed));
+        assert!(matches!(&seen[3], DriverEvent::RichActivity(item)
+                if item.source_id.as_deref() == Some("read:0#late")
+                    && item.complete
+                    && item.failed));
     }
 
     #[test]

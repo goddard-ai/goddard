@@ -1,0 +1,1 @@
+- Devin sessions no longer leave a subagent's tool calls stuck on "Running" — they settle when the subagent's lifecycle update arrives, and each subagent now shows up as a labeled "Subagent: …" row instead of a bare Tool entry
