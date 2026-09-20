@@ -7,9 +7,11 @@ the native Linux and Windows updaters read architecture-specific feeds and
 verify artifacts with the same EdDSA key. One release workflow produces all
 platform artifacts and feeds.
 
-Once set up, cutting a release is pushing a `v*` tag (or running the Release
-workflow manually) — see [Cutting a release](#cutting-a-release). `bun run
-release` only ever builds local artifacts; publishing is CI's job.
+Once set up, cutting a release is the checklist in
+[Cutting a release](#cutting-a-release): prep on `dev`, fast-forward `main` to
+it, push a `v*` tag (or run the Release workflow manually), and stop at the
+draft GitHub release for human review. `bun run release` only ever builds
+local artifacts; publishing is CI's job.
 
 - Updater code: [`src/updater.rs`](src/updater.rs) — loads the embedded
   Sparkle.framework on macOS and owns the signed native flows on Linux and
@@ -105,7 +107,55 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
 
 ## Cutting a release
 
-1. **Bump `version` in `Cargo.toml`** — the single source of truth.
+All release prep lands on `dev`; `main` only ever fast-forwards to it, so it
+never carries a commit `dev` lacks. The one exception is publishing the draft
+GitHub release at the end — that stays a human's click.
+
+1. **Rebase `dev` onto `main`** so its commits replay on top of any hotfixes:
+   ```sh
+   git checkout dev && git rebase main
+   ```
+   Rebasing rewrites `dev`'s SHAs — check for `refs/notes/qa` approvals first,
+   since they bind to commit SHAs and a rewrite orphans them.
+2. **Audit the changelog** — review the feature and fix commits since the last
+   release tag:
+   ```sh
+   git log --oneline "$(git describe --tags --abbrev=0)"..dev
+   ```
+   Give any changelog-worthy commit missing a `.changelog/` fragment one of its
+   own, and check every pending fragment's filename: the category prefix
+   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section, and an optional
+   second segment — `<prefix>-<group>-<slug>.md`, with `group` one of
+   `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
+   `panels`, `terminals`, `keyboard`, `navigation`, `appearance`,
+   `permissions`, `settings`, `friends`, `ssh`, `platform` — files it under a
+   `- **Group**` subsection. Rename mis-tagged fragments, then preview the fold:
+   ```sh
+   bun ./scripts/changelog.ts check
+   ```
+   An unrecognized group token lands the bullet in the flat tail, so check is
+   how a mistyped group gets caught.
+3. **Format the Rust code**:
+   ```sh
+   cargo fmt
+   ```
+   If it changes anything, commit the diff as `chore: format`. The TypeScript
+   workspaces have no formatter — typecheck, below, is their gate.
+4. **Run the tests** — everything CI runs, plus the mobile and web apps:
+   ```sh
+   bun install --frozen-lockfile
+   cargo test --locked
+   bun run protocol:check
+   bun run --filter @waku/client check
+   bun run --filter @waku/client test
+   bun run --filter @waku/mobile typecheck
+   bun run --filter @waku/mobile test
+   bun run --filter @waku/web typecheck
+   bun run --filter @waku/web test
+   ```
+   Land fixes for failing tests as their own `fix:` commits on `dev` — not
+   folded into the release commit.
+5. **Bump `version` in `Cargo.toml`** — the single source of truth.
    Until v1.0, always bump the **minor** version for a release (patch versions
    are reserved for hotfixes), so after `v0.2.x` the next release is `v0.3.0`.
    `CFBundleShortVersionString` is the version, and `CFBundleVersion` is
@@ -115,23 +165,26 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    CI: their versioned assets upload normally, but `sync-release` skips the
    appcasts and `latest-*` pointers, so the update feeds keep serving the
    stable channel.
-2. **Write the release notes** — changes accumulate as fragments in
+6. **Write the release notes** — changes accumulate as fragments in
    `.changelog/` (one `.md` file per change, one bullet each, named
    `highlight-`/`feat-`/`exp-`/`fix-<slug>.md` to pick the `###` section, or
    `<prefix>-<group>-<slug>.md` to also file under a `- **Group**`
    subsection; highlights
    must also commit a screenshot or recording at `.changelog/media/<slug>`
-   and embed it via `![](media/<slug>.<ext>)`). Preview the fold:
-   ```sh
-   bun ./scripts/changelog.ts check
-   ```
-   then fold the fragments into `CHANGELOG.md`:
+   and embed it via `![](media/<slug>.<ext>)`). Fold them into `CHANGELOG.md`:
    ```sh
    bun run changelog
    ```
    This creates the `## [<version>]` section for the Cargo version and deletes
-   the consumed fragments. Commit it with the version bump.
-3. **Release it through CI** — push a `v<version>` tag, or Actions → Release →
+   the consumed fragments. Commit it with the version bump
+   (`chore: release v<version>`).
+7. **Promote `dev` to `main`** — fast-forward and push:
+   ```sh
+   git checkout main && git merge --ff-only dev && git push
+   ```
+   If CI fails after this, the fix lands on `dev` and `main` fast-forwards
+   again — never commit to `main` directly.
+8. **Release it through CI** — push a `v<version>` tag, or Actions → Release →
    Run workflow (see below). `bun run release` stays local-only: it builds,
    signs, notarizes, and writes the DMG + zip + appcast into `dist/`, which is
    what the workflow uploads as the GitHub release's assets and
@@ -139,6 +192,8 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    ```sh
    bun run release --local
    ```
+   The workflow opens a **draft** GitHub release — stop there. A human reviews
+   the notes and publishes it, which is what syncs the assets to R2.
 
 The script builds and signs the app via `scripts/bundle.sh release`, verifies
 the bundled JS REPL and computer-use helper, builds the styled DMG, notarizes
