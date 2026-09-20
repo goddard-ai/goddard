@@ -1178,6 +1178,9 @@ impl Waku {
             .cursor_default()
             .text_size(sp(12.5))
             .line_height(sp(14.0))
+            // Chrome, not content: the file editor wraps its pane in the code
+            // face, and deferred surfaces inherit it.
+            .font_family(crate::fonts::current(cx).ui)
             .text_color(theme.text)
             .focus_visible(|element| element.bg(theme.focus_highlight()))
             .child(icon("icons/compose.svg", 12.0, theme.text_secondary))
@@ -1336,6 +1339,9 @@ impl Waku {
                     .id(element_id)
                     .w(px(280.0))
                     .p(px(6.0))
+                    // See `add_to_chat_button`: the comment field inherits
+                    // whatever face the anchoring pane set.
+                    .font_family(crate::fonts::current(cx).ui)
                     .rounded(px(11.0))
                     .border(hairline())
                     .border_color(theme.border_subtle)
@@ -1440,6 +1446,7 @@ impl Waku {
             .shadow_md()
             .text_size(sp(12.5))
             .line_height(sp(15.0))
+            .font_family(crate::fonts::current(cx).ui)
             .text_color(theme.text_secondary)
             .child(comment);
         deferred(FloatingSurface::new(
