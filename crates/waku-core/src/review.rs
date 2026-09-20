@@ -466,7 +466,18 @@ mod tests {
     fn commit(dir: &Path, file: &str, contents: &str, message: &str) -> String {
         fs::write(dir.join(file), contents).unwrap();
         run_git(dir, &["add", file]);
-        run_git(dir, &["commit", "-m", message]);
+        run_git(
+            dir,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                message,
+            ],
+        );
         run_git(dir, &["rev-parse", "HEAD"])
     }
 

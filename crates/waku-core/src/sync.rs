@@ -571,6 +571,13 @@ mod tests {
         run_git(&seed, &["clone", "--bare", ".", remote.to_str().unwrap()]);
         run_git(&seed, &["clone", remote.to_str().unwrap(), friend.to_str().unwrap()]);
         run_git(&seed, &["clone", remote.to_str().unwrap(), ours.to_str().unwrap()]);
+        // integrate()'s rebase and merge paths commit without -c flags, so
+        // the repos that sync need a configured identity on hosts (CI) that
+        // have no global one.
+        for repo in [&friend, &ours] {
+            run_git(repo, &["config", "user.name", "Goddard Tests"]);
+            run_git(repo, &["config", "user.email", "waku@example.com"]);
+        }
         (remote, friend, ours)
     }
 
