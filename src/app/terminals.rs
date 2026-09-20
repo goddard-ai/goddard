@@ -803,9 +803,12 @@ impl Waku {
         cx.notify();
     }
 
-    /// `secondary-shift-t` — the Terminals chord. While a full-width
-    /// terminal is active it opens another in the same directory and
-    /// scope; otherwise it expands the group.
+    /// `secondary-shift-t` — the Terminals chord. It opens the group on
+    /// the last-shown terminal — spawning a global one in ~ when the
+    /// group is empty — or, while a terminal holds the main area, cycles
+    /// to the next one in sidebar order, wrapping past the end. A lone
+    /// terminal has nowhere to cycle, so the chord folds back to where
+    /// it took over instead.
     pub(super) fn toggle_terminals_action(
         &mut self,
         _: &ToggleTerminals,
@@ -814,16 +817,25 @@ impl Waku {
     ) {
         self.settings_page = None;
         if let Some(terminal_id) = self.selected_terminal {
-            let working_directory = self.terminal_cwd(terminal_id, cx);
-            let session = self
-                .terminal_records
-                .get(&terminal_id)
-                .and_then(|record| record.session);
-            if let Some(working_directory) = working_directory
-                && let Some(new_terminal) =
-                    self.create_terminal(working_directory, session, None, cx)
-            {
-                self.select_terminal(new_terminal, window, cx);
+            // The next record after the selected one, wrapping — the
+            // selected id itself sits out of the chained slices, so a
+            // lone terminal finds nothing.
+            let next = self
+                .terminal_order
+                .iter()
+                .position(|id| *id == terminal_id)
+                .and_then(|index| {
+                    self.terminal_order[index + 1..]
+                        .iter()
+                        .chain(self.terminal_order[..index].iter())
+                        .copied()
+                        .find(|id| self.terminal_records.contains_key(id))
+                });
+            if let Some(next) = next {
+                self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+                self.select_terminal(next, window, cx);
+            } else {
+                self.collapse_terminals_group(window, cx);
             }
         } else {
             self.expand_terminals_group(window, cx);
