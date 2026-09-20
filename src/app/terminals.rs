@@ -486,6 +486,13 @@ impl Waku {
             session,
             (!workspace_bound).then(|| working_directory.clone()),
         );
+        let kind = if command.is_some() {
+            "command"
+        } else if session.is_some() {
+            "session"
+        } else {
+            "global"
+        };
         if let Some(command) = command {
             self.right_panel_terminal_commands
                 .insert(terminal_id, command);
@@ -505,6 +512,8 @@ impl Waku {
             }
         }
         self.spawn_terminal_entity(terminal_id, working_directory, cx);
+        self.analytics
+            .track(crate::analytics::Event::TerminalOpened { kind });
         cx.notify();
         Some(terminal_id)
     }

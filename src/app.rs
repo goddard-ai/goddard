@@ -2612,6 +2612,10 @@ pub struct Waku {
     /// keyed by the provider they set up. They live outside the right panel
     /// surfaces because Settings covers the workspace while they run.
     provider_setup_terminals: HashMap<ProviderKind, Entity<TerminalView>>,
+    /// Providers whose setup terminal just exited and whose next detection
+    /// probe answers "did setup produce a working install" — consumed by
+    /// `drain_provider_detection_events` for `provider.setup.finished`.
+    provider_setup_outcomes: HashSet<ProviderKind>,
     /// The PTY running an Antigravity session's TUI, keyed by session id.
     /// It is the session's main surface — not a right-panel tab — and it
     /// exists only while the process does.
@@ -3330,15 +3334,25 @@ impl Waku {
             crate::updater::UpdaterEvent::UpToDate => {
                 self.updater_status = crate::updater::UpdateStatus::Idle;
                 self.reset_updater_button_animation();
+                self.analytics
+                    .track(crate::analytics::Event::UpdateResolved {
+                        outcome: "up_to_date",
+                    });
                 self.show_success_toast(tr!("updater.up_to_date"));
             }
             crate::updater::UpdaterEvent::Failed(error) => {
                 self.updater_status = crate::updater::UpdateStatus::Idle;
                 self.reset_updater_button_animation();
+                self.analytics
+                    .track(crate::analytics::Event::UpdateResolved { outcome: "failed" });
                 self.show_toast(tr!("updater.failed", error = error));
             }
             #[cfg(target_os = "linux")]
             crate::updater::UpdaterEvent::QuitAndInstall => {
+                self.analytics
+                    .track(crate::analytics::Event::UpdateResolved {
+                        outcome: "installing",
+                    });
                 // The helper has already validated both prefixes and now
                 // waits for GPUI's normal asynchronous quit hooks to finish
                 // saving drafts and window state before it swaps them.
@@ -5562,6 +5576,7 @@ impl Waku {
                 right_panel_terminal_commands: HashMap::new(),
                 custom_command_runs: HashMap::new(),
                 provider_setup_terminals: HashMap::new(),
+                provider_setup_outcomes: HashSet::new(),
                 agy_terminals: HashMap::new(),
                 agy_last_visible: HashMap::new(),
                 agy_spawned_at: HashMap::new(),

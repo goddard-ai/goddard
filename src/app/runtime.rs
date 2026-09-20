@@ -24,6 +24,15 @@ fn workspace_has_ref(
     }
 }
 
+fn transfer_is_terminal(status: waku_client::friends::TransferStatus) -> bool {
+    matches!(
+        status,
+        waku_client::friends::TransferStatus::Done
+            | waku_client::friends::TransferStatus::Failed
+            | waku_client::friends::TransferStatus::Cancelled
+    )
+}
+
 pub(super) fn start_driver(
     mut request: DriverStartRequest,
     cwd: PathBuf,
@@ -1593,6 +1602,45 @@ impl Waku {
         let Some(state) = latest else {
             return false;
         };
+        // The first document is a baseline — without a prior `friend_code`
+        // there is nothing to diff against, so its contents count as
+        // history, not new activity.
+        let have_baseline = !self.friends_state.friend_code.is_empty();
+        if have_baseline {
+            for friend in &state.friends {
+                let known = self
+                    .friends_state
+                    .friends
+                    .iter()
+                    .any(|old| old.node_id == friend.node_id);
+                if !known {
+                    self.analytics.track(crate::analytics::Event::FriendAdded);
+                }
+            }
+            for transfer in &state.transfers {
+                let was_terminal = self
+                    .friends_state
+                    .transfers
+                    .iter()
+                    .find(|old| old.id == transfer.id)
+                    .is_some_and(|old| transfer_is_terminal(old.status));
+                if transfer_is_terminal(transfer.status) && !was_terminal {
+                    self.analytics
+                        .track(crate::analytics::Event::TransferFinished {
+                            direction: match transfer.direction {
+                                waku_client::friends::TransferDirection::Outgoing => "outgoing",
+                                waku_client::friends::TransferDirection::Incoming => "incoming",
+                            },
+                            outcome: match transfer.status {
+                                waku_client::friends::TransferStatus::Done => "done",
+                                waku_client::friends::TransferStatus::Failed => "failed",
+                                waku_client::friends::TransferStatus::Cancelled => "cancelled",
+                                _ => unreachable!("checked by transfer_is_terminal"),
+                            },
+                        });
+                }
+            }
+        }
         // Transfers that gained a session since the last document are fresh
         // receipts — badge them so the bell offers "go to latest".
         for transfer in &state.transfers {
@@ -1712,6 +1760,48 @@ impl Waku {
     fn drain_automations_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok((key, state)) = self.automations_events.try_recv() {
+            // A daemon's first document is a baseline — its history is
+            // already terminal, so only transitions after it count.
+            if let Some(previous) = self.automations.get(&key) {
+                for run in &state.runs {
+                    let was_terminal = previous
+                        .runs
+                        .iter()
+                        .find(|old| old.id == run.id)
+                        .is_some_and(|old| old.status.is_terminal());
+                    if run.status.is_terminal() && !was_terminal {
+                        self.analytics.track(crate::analytics::Event::AutomationRunFinished {
+                            trigger: match run.trigger {
+                                waku_client::automations::AutomationTrigger::Scheduled => {
+                                    "scheduled"
+                                }
+                                waku_client::automations::AutomationTrigger::Manual => "manual",
+                                waku_client::automations::AutomationTrigger::Webhook => "webhook",
+                            },
+                            outcome: match run.status {
+                                waku_client::automations::AutomationRunStatus::Completed => {
+                                    "completed"
+                                }
+                                waku_client::automations::AutomationRunStatus::Failed => "failed",
+                                waku_client::automations::AutomationRunStatus::SkippedPrecheck => {
+                                    "skipped_precheck"
+                                }
+                                waku_client::automations::AutomationRunStatus::SkippedMissed => {
+                                    "skipped_missed"
+                                }
+                                waku_client::automations::AutomationRunStatus::SkippedUnavailable => {
+                                    "skipped_unavailable"
+                                }
+                                _ => unreachable!("checked by is_terminal"),
+                            },
+                            duration_seconds: run
+                                .started_at
+                                .zip(run.finished_at)
+                                .map(|(started, finished)| finished.saturating_sub(started)),
+                        });
+                    }
+                }
+            }
             self.automations.insert(key, state);
             changed = true;
         }
@@ -2074,6 +2164,12 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
+        let known_session_ids = self
+            .state
+            .sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<HashSet<_>>();
         // Only this daemon's rows may be removed or replaced — the merged
         // list also carries every other host's sessions and projects.
         let removed = merge_remote_session_catalog(
@@ -2106,6 +2202,13 @@ impl Waku {
         self.state
             .projects
             .extend(snapshot.projects.iter().cloned());
+        // Sessions the merge just learned about were made outside this UI —
+        // an automation run, the CLI, or another client on this daemon.
+        for session in &self.state.sessions {
+            if !known_session_ids.contains(&session.id) {
+                self.track_task_created(session, "external");
+            }
+        }
         if let waku_client::DaemonKey::Remote(host) = key {
             self.daemons.replace_remote_catalog(
                 host,
@@ -2569,6 +2672,11 @@ impl Waku {
         link: RemoteDaemonLink,
         cx: &mut Context<Self>,
     ) {
+        self.analytics
+            .track(crate::analytics::Event::RemoteConnectFinished {
+                transport: self.remote_host_transport(host),
+                outcome: "connected",
+            });
         #[cfg(unix)]
         if let Some(ssh) = link.ssh {
             self.ssh_transports.insert(host, ssh);
@@ -2634,6 +2742,11 @@ impl Waku {
         error: &anyhow::Error,
         cx: &mut Context<Self>,
     ) {
+        self.analytics
+            .track(crate::analytics::Event::RemoteConnectFinished {
+                transport: self.remote_host_transport(host),
+                outcome: "failed",
+            });
         self.restore_pending_remote_submissions(host, cx);
         let name = self
             .remote_host_name(host)
@@ -2852,6 +2965,17 @@ impl Waku {
             self.state.selected_project = self.state.projects.first().map(|project| project.id);
         }
         cx.notify();
+    }
+
+    /// The transport a saved host record connects over — `"ssh"` when it
+    /// carries a destination, `"direct"` for a websocket host.
+    fn remote_host_transport(&self, host: Uuid) -> &'static str {
+        self.state
+            .remote_hosts
+            .iter()
+            .find(|record| record.id == host)
+            .filter(|record| record.ssh_destination.is_some())
+            .map_or("direct", |_| "ssh")
     }
 
     /// Display label for a host id — the saved name, for sidebar grouping and
@@ -3540,6 +3664,19 @@ impl Waku {
         while let Ok(probe) = self.provider_detection_events.try_recv() {
             let provider = probe.provider;
             let installed = probe.installed;
+            // A probe answering a just-finished setup terminal is the only
+            // place "did setup produce a working provider" is known.
+            if self.provider_setup_outcomes.remove(&provider) {
+                self.analytics
+                    .track(crate::analytics::Event::ProviderSetupFinished {
+                        provider: provider.id(),
+                        outcome: if installed {
+                            "installed"
+                        } else {
+                            "not_detected"
+                        },
+                    });
+            }
             self.provider_detection_remaining = self.provider_detection_remaining.saturating_sub(1);
             if self.provider_detection_remaining == 0 {
                 self.provider_detection_checked_at = Some(Instant::now());

@@ -1485,6 +1485,10 @@ impl Waku {
         if started {
             self.updater_status = crate::updater::UpdateStatus::Updating;
             self.reset_updater_button_animation();
+            self.analytics
+                .track(crate::analytics::Event::UpdateResolved {
+                    outcome: "accepted",
+                });
             cx.notify();
         }
     }

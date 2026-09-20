@@ -3546,6 +3546,7 @@ impl Waku {
         session.turns = history.turns;
         let session_id = session.id;
         self.daemons.claim_session(session_id, key);
+        self.track_task_created(&session, "imported");
         self.state.push_session(session);
 
         self.close_command_palette(window, cx);

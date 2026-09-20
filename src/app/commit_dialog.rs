@@ -502,6 +502,19 @@ impl Waku {
                 }
                 let (result, refreshed_snapshot) = result;
                 waku.commit_operation = None;
+                waku.analytics
+                    .track(crate::analytics::Event::GitActionFinished {
+                        action: match action {
+                            CommitAction::Commit => "commit",
+                            CommitAction::CommitAndPush => "commit_push",
+                            CommitAction::Push => "push",
+                        },
+                        outcome: if result.is_ok() {
+                            "completed"
+                        } else {
+                            "failed"
+                        },
+                    });
                 if waku
                     .selected_workspace_path()
                     .is_some_and(|path| path == workspace)

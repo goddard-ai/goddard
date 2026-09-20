@@ -296,6 +296,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                let outcome = if result.is_ok() { "applied" } else { "failed" };
+                this.analytics
+                    .track(crate::analytics::Event::SkillToggled { enabled, outcome });
                 if let Err(error) = result {
                     this.show_toast(tr!("skills.toggle_failed", error = error));
                 }

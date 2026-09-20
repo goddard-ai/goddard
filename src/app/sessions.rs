@@ -812,8 +812,33 @@ impl Waku {
         let id = session.id;
         self.daemons
             .claim_session(id, self.daemons.project_owner(project_id));
+        self.track_task_created(&session, "interactive");
         self.state.push_session(session);
         self.select_session(id, cx);
+    }
+
+    /// Report a session record joining the catalog. `origin` names the path
+    /// that created it: `interactive` for UI-made tasks, `side_chat`,
+    /// `imported` for provider-history imports, `external` for sessions that
+    /// arrived through a daemon's task-state sync (automations, the CLI,
+    /// other clients).
+    pub(super) fn track_task_created(&self, session: &AgentSession, origin: &'static str) {
+        let projectless = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .is_some_and(|project| project.is_projectless());
+        self.analytics.track(crate::analytics::Event::TaskCreated {
+            provider: session.provider.id(),
+            workspace: if session.workspace.is_worktree() {
+                "worktree"
+            } else {
+                "local"
+            },
+            projectless,
+            origin,
+        });
     }
 
     /// A `/side` invocation's session: a fresh task that shares its parent's
@@ -851,6 +876,7 @@ impl Waku {
         let id = session.id;
         self.daemons
             .claim_session(id, self.daemons.project_owner(parent.project_id));
+        self.track_task_created(&session, "side_chat");
         self.state.push_session(session);
         self.save();
         cx.notify();
@@ -913,6 +939,7 @@ impl Waku {
         let session_id = session.id;
         self.daemons
             .claim_session(session_id, self.daemons.project_owner(project_id));
+        self.track_task_created(&session, "interactive");
         self.state.push_session(session);
         self.save();
         cx.notify();
@@ -951,6 +978,7 @@ impl Waku {
                 session.runtime_mode = runtime_mode;
                 session.sandboxed = sandboxed;
                 let id = session.id;
+                self.track_task_created(&session, "interactive");
                 self.state.push_session(session);
                 id
             });
@@ -2313,8 +2341,12 @@ impl Waku {
         self.right_panel_visible = visible;
         self.right_panel_slide = self.begin_panel_slide(self.right_panel_rendered_width, cx);
         if opening {
+            let surface = self
+                .active_right_panel_surface()
+                .map(RightPanelSurface::kind)
+                .unwrap_or("none");
             self.analytics
-                .track(crate::analytics::Event::RightPanelOpened);
+                .track(crate::analytics::Event::RightPanelOpened { surface });
             self.request_active_browser_focus();
             self.request_active_file_focus();
             if self.right_panel_pending_terminal_focus.is_none()

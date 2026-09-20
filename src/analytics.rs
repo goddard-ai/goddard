@@ -86,7 +86,77 @@ pub enum Event {
         project_count: usize,
     },
     ProjectAdded,
-    RightPanelOpened,
+    RightPanelOpened {
+        surface: &'static str,
+    },
+    GitPanelOpened,
+    TaskCreated {
+        provider: &'static str,
+        workspace: &'static str,
+        projectless: bool,
+        /// `interactive` | `side_chat` | `imported` | `external` — external
+        /// covers sessions another client, the CLI, or an automation made.
+        origin: &'static str,
+    },
+    ProviderSetupFinished {
+        provider: &'static str,
+        /// `installed` | `not_detected`
+        outcome: &'static str,
+    },
+    UpdateResolved {
+        /// `accepted` | `installing` | `up_to_date` | `failed`
+        outcome: &'static str,
+    },
+    RemoteConnectFinished {
+        /// `ssh` | `direct`
+        transport: &'static str,
+        /// `connected` | `failed`
+        outcome: &'static str,
+    },
+    PairingFinished {
+        /// `granted` | `no_address` | `declined` | `failed`
+        outcome: &'static str,
+    },
+    DaemonExposureChanged {
+        enabled: bool,
+    },
+    FriendAdded,
+    TransferFinished {
+        /// `outgoing` | `incoming`
+        direction: &'static str,
+        /// `done` | `failed` | `cancelled`
+        outcome: &'static str,
+    },
+    AutomationRunFinished {
+        /// `scheduled` | `manual` | `webhook`
+        trigger: &'static str,
+        /// `completed` | `failed` | `skipped_precheck` | `skipped_missed` |
+        /// `skipped_unavailable`
+        outcome: &'static str,
+        duration_seconds: Option<u64>,
+    },
+    GitActionFinished {
+        /// `commit` | `commit_push` | `push` | `sync` | `land` | `rebase` |
+        /// `abort_sync`
+        action: &'static str,
+        /// `completed` | `conflict` | `failed`
+        outcome: &'static str,
+    },
+    TerminalOpened {
+        /// `session` | `global` | `command` | `panel`
+        kind: &'static str,
+    },
+    SkillToggled {
+        enabled: bool,
+        /// `applied` | `failed`
+        outcome: &'static str,
+    },
+    GoalSubmitted {
+        replace: bool,
+    },
+    ComputerUseToggled {
+        enabled: bool,
+    },
     TurnSubmitted {
         provider: &'static str,
         model: String,
@@ -154,7 +224,111 @@ impl Event {
                 }),
             ),
             Self::ProjectAdded => ("project.added", json!({})),
-            Self::RightPanelOpened => ("right_panel.opened", json!({})),
+            Self::RightPanelOpened { surface } => (
+                "right_panel.opened",
+                json!({
+                    "surface": surface,
+                }),
+            ),
+            Self::GitPanelOpened => ("git_panel.opened", json!({})),
+            Self::TaskCreated {
+                provider,
+                workspace,
+                projectless,
+                origin,
+            } => (
+                "task.created",
+                json!({
+                    "provider": provider,
+                    "workspace": workspace,
+                    "projectless": projectless,
+                    "origin": origin,
+                }),
+            ),
+            Self::ProviderSetupFinished { provider, outcome } => (
+                "provider.setup.finished",
+                json!({
+                    "provider": provider,
+                    "outcome": outcome,
+                }),
+            ),
+            Self::UpdateResolved { outcome } => (
+                "app.update.resolved",
+                json!({
+                    "outcome": outcome,
+                }),
+            ),
+            Self::RemoteConnectFinished { transport, outcome } => (
+                "remote.connect.finished",
+                json!({
+                    "transport": transport,
+                    "outcome": outcome,
+                }),
+            ),
+            Self::PairingFinished { outcome } => (
+                "daemon.pair.finished",
+                json!({
+                    "outcome": outcome,
+                }),
+            ),
+            Self::DaemonExposureChanged { enabled } => (
+                "daemon.exposure.changed",
+                json!({
+                    "enabled": enabled,
+                }),
+            ),
+            Self::FriendAdded => ("friend.added", json!({})),
+            Self::TransferFinished { direction, outcome } => (
+                "friend.transfer.finished",
+                json!({
+                    "direction": direction,
+                    "outcome": outcome,
+                }),
+            ),
+            Self::AutomationRunFinished {
+                trigger,
+                outcome,
+                duration_seconds,
+            } => (
+                "automation.run.finished",
+                json!({
+                    "trigger": trigger,
+                    "outcome": outcome,
+                    "durationSeconds": duration_seconds,
+                }),
+            ),
+            Self::GitActionFinished { action, outcome } => (
+                "git.action.finished",
+                json!({
+                    "action": action,
+                    "outcome": outcome,
+                }),
+            ),
+            Self::TerminalOpened { kind } => (
+                "terminal.opened",
+                json!({
+                    "kind": kind,
+                }),
+            ),
+            Self::SkillToggled { enabled, outcome } => (
+                "skill.toggled",
+                json!({
+                    "enabled": enabled,
+                    "outcome": outcome,
+                }),
+            ),
+            Self::GoalSubmitted { replace } => (
+                "goal.submitted",
+                json!({
+                    "replace": replace,
+                }),
+            ),
+            Self::ComputerUseToggled { enabled } => (
+                "computer_use.toggled",
+                json!({
+                    "enabled": enabled,
+                }),
+            ),
             Self::TurnSubmitted {
                 provider,
                 model,
@@ -362,5 +536,62 @@ mod tests {
         assert!(data.get("prompt").is_none());
         assert!(data.get("project_path").is_none());
         assert!(data.get("user_id").is_none());
+    }
+
+    #[test]
+    fn lifecycle_events_expose_only_coarse_product_metadata() {
+        let events = [
+            Event::TaskCreated {
+                provider: "claude",
+                workspace: "local",
+                projectless: true,
+                origin: "external",
+            },
+            Event::ProviderSetupFinished {
+                provider: "codex",
+                outcome: "installed",
+            },
+            Event::RemoteConnectFinished {
+                transport: "ssh",
+                outcome: "connected",
+            },
+            Event::AutomationRunFinished {
+                trigger: "scheduled",
+                outcome: "failed",
+                duration_seconds: Some(42),
+            },
+            Event::GitActionFinished {
+                action: "land",
+                outcome: "conflict",
+            },
+            Event::TransferFinished {
+                direction: "incoming",
+                outcome: "done",
+            },
+        ];
+
+        for event in events {
+            let (_, data) = event.into_track();
+            // Names, paths, ids, hosts, and content never ride along — only
+            // the declared product vocabulary.
+            for key in [
+                "session_id",
+                "task_id",
+                "run_id",
+                "project_id",
+                "project_path",
+                "peer_id",
+                "node_id",
+                "host",
+                "address",
+                "name",
+                "title",
+                "prompt",
+                "error",
+                "user_id",
+            ] {
+                assert!(data.get(key).is_none(), "event leaked {key}: {data}");
+            }
+        }
     }
 }

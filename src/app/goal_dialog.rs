@@ -300,6 +300,8 @@ impl Waku {
             Some(_) => (ThreadGoalStatus::Active, true),
             None => (ThreadGoalStatus::Active, false),
         };
+        self.analytics
+            .track(crate::analytics::Event::GoalSubmitted { replace });
         self.dispatch_goal_operation(
             session_id,
             GoalOperation::Set {

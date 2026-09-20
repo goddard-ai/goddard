@@ -995,6 +995,22 @@ impl RightPanelSurface {
         }
     }
 
+    /// Analytics surface name — unlike `label` this is stable English, not
+    /// the localized tab text.
+    pub(super) fn kind(&self) -> &'static str {
+        match self {
+            Self::Browser(_) => "browser",
+            Self::Terminal(_) => "terminal",
+            Self::BackgroundWork { .. } => "background_work",
+            Self::PullRequest { .. } => "pull_request",
+            Self::Files => "files",
+            Self::Diff => "diff",
+            Self::File(_) => "file",
+            Self::GitHub(_) => "github",
+            Self::SideChat(_) => "side_chat",
+        }
+    }
+
     fn label(&self) -> String {
         match self {
             Self::Browser(_) => tr!("right_panel.browser"),
@@ -2377,6 +2393,7 @@ impl Waku {
         }
         // Browser views are created on the surface's first render, which has
         // the `Window` their webview must attach to.
+        let is_fresh_terminal = reusable_index.is_none() && surface.terminal_id().is_some();
         let index = match reusable_index {
             Some(index) => index,
             None => {
@@ -2384,6 +2401,10 @@ impl Waku {
                 self.right_panel_surfaces.len() - 1
             }
         };
+        if is_fresh_terminal {
+            self.analytics
+                .track(crate::analytics::Event::TerminalOpened { kind: "panel" });
+        }
         self.right_panel_active_surface = Some(index);
         self.reveal_right_panel_tab(index);
         if reveal {

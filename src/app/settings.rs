@@ -2260,16 +2260,30 @@ impl Waku {
                 match outcome {
                     Ok(waku_client::discover::PairOutcome::Granted { token }) => {
                         if let Some(address) = address {
+                            this.analytics
+                                .track(crate::analytics::Event::PairingFinished {
+                                    outcome: "granted",
+                                });
                             this.add_remote_host(name.clone(), address, token, None, cx);
                             this.show_success_toast(tr!("daemon.pair_added", name = name));
                         } else {
+                            this.analytics
+                                .track(crate::analytics::Event::PairingFinished {
+                                    outcome: "no_address",
+                                });
                             this.show_toast(tr!("daemon.pair_no_address", name = name));
                         }
                     }
                     Ok(waku_client::discover::PairOutcome::Declined) => {
+                        this.analytics
+                            .track(crate::analytics::Event::PairingFinished {
+                                outcome: "declined",
+                            });
                         this.show_toast(tr!("daemon.pair_declined", name = name));
                     }
                     Err(error) => {
+                        this.analytics
+                            .track(crate::analytics::Event::PairingFinished { outcome: "failed" });
                         this.show_toast(tr!("daemon.pair_failed", error = format!("{error:#}")));
                     }
                 }
@@ -5724,6 +5738,8 @@ impl Waku {
             settings.enabled = false;
             settings
         };
+        self.analytics
+            .track(crate::analytics::Event::DaemonExposureChanged { enabled });
         self.apply_daemon_exposure(settings, cx);
     }
 
@@ -8450,6 +8466,7 @@ impl Waku {
     /// the row reflects whatever the script changed.
     fn provider_setup_terminal_exited(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
         self.provider_setup_terminals.remove(&provider);
+        self.provider_setup_outcomes.insert(provider);
         self.refresh_provider_detection(Some(provider));
         cx.notify();
     }
@@ -8875,6 +8892,8 @@ impl Waku {
 
     fn set_computer_use_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.computer_use_enabled = enabled;
+        self.analytics
+            .track(crate::analytics::Event::ComputerUseToggled { enabled });
         self.save();
         if enabled {
             self.request_computer_permissions(true, cx);

@@ -499,6 +499,8 @@ impl Waku {
             self.right_panel_pending_terminal_focus = None;
             self.git_panel_visible = true;
             self.open_git_panel(window, cx);
+            self.analytics
+                .track(crate::analytics::Event::GitPanelOpened);
         } else {
             self.close_git_panel_state();
         }
@@ -1613,6 +1615,35 @@ impl Waku {
         // The "Sync branch…" picker's pending row: the branch name the card
         // is holding for its completion toast, taken once the op lands.
         let picker_sync = self.sync_branch.take_syncing(op_id);
+        // Message generation is a step toward a commit, not a user-facing
+        // action — its follow-up commit op lands here separately.
+        let action = match op.pending {
+            GitPanelPending::Committing => Some("commit"),
+            GitPanelPending::Pushing => Some("push"),
+            GitPanelPending::Syncing(_) => Some("sync"),
+            GitPanelPending::Landing => Some("land"),
+            GitPanelPending::Rebasing => Some("rebase"),
+            GitPanelPending::AbortingSync => Some("abort_sync"),
+            GitPanelPending::Generating { .. } => None,
+        };
+        let outcome = match &result {
+            Err(_) => Some("failed"),
+            Ok(WorkspaceResult::CommitMessage { .. }) => None,
+            Ok(WorkspaceResult::Pull {
+                outcome: PullOutcome::Conflict { .. },
+            })
+            | Ok(WorkspaceResult::Land {
+                outcome: LandOutcome::Conflict { .. },
+            })
+            | Ok(WorkspaceResult::Rebase {
+                outcome: RebaseOutcome::Conflict { .. },
+            }) => Some("conflict"),
+            Ok(_) => Some("completed"),
+        };
+        if let (Some(action), Some(outcome)) = (action, outcome) {
+            self.analytics
+                .track(crate::analytics::Event::GitActionFinished { action, outcome });
+        }
         match result {
             Ok(WorkspaceResult::CommitMessage { message }) => {
                 if let GitPanelPending::Generating { include_unstaged } = op.pending
