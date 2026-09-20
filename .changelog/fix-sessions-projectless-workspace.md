@@ -1,0 +1,1 @@
+- Creating a task with no project no longer fails at submit — the daemon swept a freshly provisioned workspace's project row before the first prompt could attach a task, and a missing workspace directory is now recreated (or restored from its archive) instead of dying inside an opaque provider spawn error

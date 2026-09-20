@@ -2643,6 +2643,229 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The projectless workspace root is a process-global slot, so tests that
+    /// need it point it at one shared throwaway directory — every test writes
+    /// the same value, making the set idempotent regardless of ordering, and
+    /// per-test paths stay unique through their uuid names.
+    #[cfg(unix)]
+    fn projectless_test_root() -> PathBuf {
+        std::env::temp_dir()
+            .join("waku-projectless-test-root")
+            .join("projects")
+    }
+
+    /// Clients that provision a projectless workspace persist its project
+    /// row before the first prompt's session exists; the save's orphan sweep
+    /// must leave a freshly created row alone or the submit fails on a
+    /// project the daemon forgot it just catalogued. Classification is
+    /// path-based, so the workspace directory never needs to exist.
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_projectless_project_survives_until_its_first_task() {
+        crate::projectless::set_workspace_root(Some(projectless_test_root()));
+        let root = std::env::temp_dir().join(format!("waku-projectless-gc-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let workspace_root = projectless_test_root();
+        let project = Project::from_path(
+            workspace_root
+                .join("2026-01-01")
+                .join(format!("grace-{}", Uuid::new_v4())),
+        );
+        assert!(project.is_projectless());
+        client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![project.clone()],
+                    live_session_ids: vec![],
+                    sessions: vec![],
+                },
+            )
+            .unwrap();
+        let ResponsePayload::TaskState { projects, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected task state");
+        };
+        assert!(
+            projects.iter().any(|item| item.id == project.id),
+            "a pending projectless project must outlive the save"
+        );
+
+        // A row past the grace window with no task is still swept — the
+        // window only covers provisioning, not abandoned orphans.
+        let mut stale = Project::from_path(
+            workspace_root
+                .join("2026-01-01")
+                .join(format!("orphan-{}", Uuid::new_v4())),
+        );
+        stale.created_at = crate::model::unix_time() - 2 * 24 * 60 * 60;
+        client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![stale.clone()],
+                    live_session_ids: vec![],
+                    sessions: vec![],
+                },
+            )
+            .unwrap();
+        let ResponsePayload::TaskState { projects, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected task state");
+        };
+        assert!(
+            !projects.iter().any(|item| item.id == stale.id),
+            "an orphaned projectless project must still be swept"
+        );
+
+        // A task-claimed row survives regardless of age.
+        let mut claimed = Project::from_path(
+            workspace_root
+                .join("2026-01-01")
+                .join(format!("claimed-{}", Uuid::new_v4())),
+        );
+        claimed.created_at = stale.created_at;
+        let mut session = AgentSession::new(claimed.id, ProviderKind::Codex);
+        session.begin_turn("run it");
+        client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![claimed.clone()],
+                    live_session_ids: vec![session.id],
+                    sessions: vec![session],
+                },
+            )
+            .unwrap();
+        let ResponsePayload::TaskState { projects, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected task state");
+        };
+        assert!(
+            projects.iter().any(|item| item.id == claimed.id),
+            "a projectless project with a task is never swept"
+        );
+
+        client.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A projectless workspace directory can vanish between draft creation
+    /// and the first prompt — trash emptied, archive cleanup, a stale
+    /// listing. The daemon owns the scratch space, so Start recreates it
+    /// instead of dying inside the provider spawn with an opaque ENOENT.
+    #[cfg(unix)]
+    #[test]
+    fn start_recreates_a_missing_projectless_workspace() {
+        let root = std::env::temp_dir().join(format!("waku-start-cwd-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        // The daemon's restore writes land under the shared test root, not
+        // the real home.
+        crate::projectless::set_workspace_root(Some(projectless_test_root()));
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let missing_workspace = projectless_test_root()
+            .join("2026-01-01")
+            .join(format!("gone-{}", Uuid::new_v4()));
+        let mut options = WireDriverStartOptions {
+            binary: PathBuf::from("/nonexistent/waku-test-provider"),
+            cwd: missing_workspace.clone(),
+            ..test_start_options()
+        };
+        // The launch still fails — no provider binary — but the missing
+        // projectless cwd is recreated first.
+        let _ = client.request(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Command::Start {
+                options: options.clone(),
+            },
+        );
+        assert!(
+            missing_workspace.is_dir(),
+            "start must recreate a missing projectless workspace"
+        );
+
+        // An ordinary missing cwd names the path instead of spawning blind.
+        options.cwd = root.join("repo-that-was-deleted");
+        let error = client
+            .request(Uuid::new_v4(), Uuid::new_v4(), Command::Start { options })
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("the task's working directory does not exist"),
+            "{error}"
+        );
+        assert!(!root.join("repo-that-was-deleted").exists());
+
+        client.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).ok();
+        std::fs::remove_dir_all(
+            projectless_test_root()
+                .parent()
+                .expect("the test root has a parent"),
+        )
+        .ok();
+    }
+
     #[cfg(unix)]
     fn serve_task_state(
         root: &std::path::Path,

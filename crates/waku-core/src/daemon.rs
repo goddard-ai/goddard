@@ -44,6 +44,12 @@ const RESIDENT_TRANSCRIPT_WINDOW: usize = 24;
 /// timer, so this bounds retention without scheduling exact deletions.
 const ARCHIVED_SESSION_RETENTION_SECONDS: u64 = 30 * 24 * 60 * 60;
 
+/// How long a projectless project may sit in the catalog without a task.
+/// Clients that provision a workspace ahead of the first prompt — mobile
+/// and web save the project row, then submit — need the row to survive the
+/// saves in between; anything older is an orphan a removal left behind.
+const UNUSED_PROJECTLESS_GRACE_SECONDS: u64 = 24 * 60 * 60;
+
 /// Releases resident transcripts beyond the recency window after a save.
 /// `pinned` names sessions with live runtimes; dirty sessions are skipped
 /// inside [`PersistedState::trim_idle_transcripts`] because they hold unsaved
@@ -1403,8 +1409,11 @@ impl Backend for WakuBackend {
                     .iter()
                     .map(|session| session.project_id)
                     .collect::<std::collections::HashSet<_>>();
+                let now = crate::model::unix_time();
                 state.projects.retain(|project| {
-                    !project.is_projectless() || used_project_ids.contains(&project.id)
+                    !project.is_projectless()
+                        || used_project_ids.contains(&project.id)
+                        || now.saturating_sub(project.created_at) < UNUSED_PROJECTLESS_GRACE_SECONDS
                 });
                 for session_id in &saved_ids {
                     state.mark_session_dirty(*session_id);
@@ -3079,6 +3088,27 @@ impl WakuBackend {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
         let mut options = options;
+        // A projectless workspace is daemon-owned scratch state: its
+        // directory can vanish between draft creation and the first prompt —
+        // emptied trash, an archive sweep, a client that provisioned it on a
+        // stale listing. Restore unzips its archive or recreates it empty
+        // instead of failing the launch on a path the user never manages.
+        // Any other missing cwd is a real problem and fails here with the
+        // path named, not inside the provider's spawn error.
+        if !options.cwd.is_dir() && crate::projectless::is_projectless_path(&options.cwd) {
+            crate::projectless::restore_workspace(&options.cwd).with_context(|| {
+                format!(
+                    "could not recreate the task's projectless workspace {}",
+                    options.cwd.display()
+                )
+            })?;
+        }
+        if !options.cwd.is_dir() {
+            bail!(
+                "the task's working directory does not exist: {}",
+                options.cwd.display()
+            );
+        }
         // The credential exists before the process does so it can travel
         // with the runtime's launch environment. A missing CLI or unset
         // daemon address disables injection for this launch only. Either
