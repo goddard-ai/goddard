@@ -445,6 +445,50 @@ fn runtime_install_argv(runtimes: &[RuntimeSpec]) -> Vec<String> {
     ]
 }
 
+/// Keep a guest-state directory out of the worktree's git surface. Uses
+/// `.git/info/exclude` — the repo's local ignore, shared by its worktrees —
+/// so it never touches the `.gitignore` a real commit might ship.
+/// Best-effort: a non-git directory or an unwritable exclude file is not a
+/// launch failure.
+fn exclude_from_git(worktree: &Path, pattern: &str) {
+    let output = crate::command_env::plain_command("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["rev-parse", "--git-path", "info/exclude"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return;
+    }
+    let listed = String::from_utf8_lossy(&output.stdout);
+    let exclude = PathBuf::from(listed.trim());
+    let exclude = if exclude.is_absolute() {
+        exclude
+    } else {
+        worktree.join(exclude)
+    };
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|line| line.trim().trim_end_matches('/') == pattern.trim_end_matches('/'))
+    {
+        return;
+    }
+    if let Some(parent) = exclude.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&exclude)
+        .map(|mut file| {
+            use std::io::Write;
+            let _ = writeln!(file, "{pattern}");
+        });
+}
+
 /// Environment variables that mean something only on the host: the agent
 /// surface points at this daemon's loopback (unreachable in the guest), and
 /// secret names are dropped so the proxy's placeholders are the only values
@@ -543,13 +587,30 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
         );
     }
 
+    // The guest HOME lives inside the worktree's `.goddard/` directory —
+    // provider session state (`~/.codex`, `~/.claude`) then survives a VM
+    // restart, which is what makes `--resume` work across launches. The
+    // directory is git-excluded via `.git/info/exclude` so it never shows
+    // as worktree noise.
+    let guest_home = worktree.join(".goddard").join("sandbox-home");
+    std::fs::create_dir_all(&guest_home).with_context(|| {
+        format!(
+            "could not create the sandbox home directory {}",
+            guest_home.display()
+        )
+    })?;
+    exclude_from_git(worktree, ".goddard/");
+
     let vm = ShuruVm::launch(GuestConfig {
         shuru,
         // shuru only mounts host paths beneath its own working directory —
         // run it from the worktree's parent so the mount validates.
         cwd: worktree.parent().unwrap_or(worktree).to_path_buf(),
         checkpoint,
-        mounts: vec![(worktree.to_path_buf(), GUEST_WORKSPACE.to_owned())],
+        mounts: vec![
+            (worktree.to_path_buf(), GUEST_WORKSPACE.to_owned()),
+            (guest_home, "/root".to_owned()),
+        ],
         allow_hosts: spec
             .allow_hosts
             .iter()
