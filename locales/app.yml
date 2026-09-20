@@ -4158,6 +4158,8 @@ keybind.command.sidebar_task:
   en: Select Sidebar Task %{n}
 keybind.command.projects_tab:
   en: Select Projects Tab %{n}
+keybind.command.automations_tab:
+  en: Select Automations Tab %{n}
 keybind.command.favorite_model:
   en: Select Favorite Model %{n}
 keybind.command.cycle_effort:

@@ -688,7 +688,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "alt-tab",
             CycleFavoriteModel,
-            Some("Waku && !Terminal && !ProjectsPage"),
+            Some("Waku && !Terminal && !ProjectsPage && !AutomationsPage"),
         ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own

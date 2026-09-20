@@ -219,6 +219,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "provider-devin",
     "provider-droid",
     "provider-fx",
+    "provider-goose",
     "provider-grok",
     "provider-kimi",
     "provider-muse",

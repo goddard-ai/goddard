@@ -419,6 +419,21 @@ mod tests {
                 .collect()
         });
 
+        {
+            let gen_set: std::collections::HashSet<&String> =
+                generated_serialized.iter().collect();
+            let live_set: std::collections::HashSet<&String> =
+                live.iter().collect();
+            for row in live.iter().filter(|r| !gen_set.contains(*r)) {
+                eprintln!("LIVE-ONLY:  {row}");
+            }
+            for row in generated_serialized
+                .iter()
+                .filter(|r| !live_set.contains(*r))
+            {
+                eprintln!("GEN-ONLY:   {row}");
+            }
+        }
         assert_eq!(
             live.len(),
             generated.len(),
