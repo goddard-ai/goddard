@@ -2687,6 +2687,8 @@ session.agent_declined_turn:
   en: The agent declined this turn
 session.agent_stopped_reason:
   en: "The agent stopped: %{reason}"
+session.daemon_restarted_resuming:
+  en: The Goddard daemon restarted — resuming the interrupted turn
 
 errors.open_session:
   en: "Could not open that session: %{error}"

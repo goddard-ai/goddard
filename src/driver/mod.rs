@@ -187,11 +187,7 @@ fn connect_remote(
                         remote_events = client.subscribe(session_id, runtime_id);
                     }
                     Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
-                        let _ = forwarding_events.send(DriverEvent::Error(
-                            "the Goddard daemon restarted and this turn could not be reattached"
-                                .into(),
-                        ));
-                        let _ = forwarding_events.send(DriverEvent::ProcessExited);
+                        let _ = forwarding_events.send(DriverEvent::RuntimeLost);
                         break;
                     }
                     Ok(_) => {

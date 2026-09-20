@@ -2399,6 +2399,47 @@ fn a_hidden_prompt_renders_no_row_but_keeps_its_turn() {
     assert_eq!(nav[0].response, "Built it.");
 }
 
+/// A daemon restart auto-resumes only a session whose turn the provider
+/// actually began and whose cursor can reload it — idle sessions, unconfirmed
+/// turns, and cursorless providers keep the ordinary loss path.
+#[test]
+fn daemon_restart_resume_requires_a_started_turn_and_a_cursor() {
+    use super::runtime::session_resume_eligible;
+    use crate::model::ProviderResumeCursor;
+
+    let eligible = || {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Devin);
+        session.begin_turn("run the suite");
+        session.mark_active_turn_provider_started();
+        session.status = SessionStatus::Working;
+        session.provider_cursor = Some(ProviderResumeCursor::Devin {
+            session_id: "devin-session".into(),
+        });
+        session
+    };
+    assert!(session_resume_eligible(&eligible()));
+
+    let mut waiting = eligible();
+    waiting.status = SessionStatus::Waiting;
+    assert!(session_resume_eligible(&waiting));
+
+    let mut idle = eligible();
+    idle.finish_active_turn(TurnStatus::Completed);
+    idle.status = SessionStatus::Idle;
+    assert!(!session_resume_eligible(&idle));
+
+    let mut cursorless = eligible();
+    cursorless.provider_cursor = None;
+    assert!(!session_resume_eligible(&cursorless));
+
+    // Connecting without the provider's TurnStarted: the prompt may never
+    // have arrived, so "continue" has nothing to resume.
+    let mut unconfirmed = eligible();
+    unconfirmed.turns.last_mut().unwrap().provider_turn_started = false;
+    unconfirmed.status = SessionStatus::Connecting;
+    assert!(!session_resume_eligible(&unconfirmed));
+}
+
 /// Providers split one answer across several text parts. They arrive with no
 /// work between them, so they are all answer and none of them folds.
 #[test]

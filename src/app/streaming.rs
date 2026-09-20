@@ -249,6 +249,10 @@ impl Waku {
             DriverEvent::LocalizedError { i18n, .. } => DriverEvent::Error(i18n.render()),
             event => event,
         };
+        // The daemon owning this runtime restarted; its provider process is
+        // gone. The exit arm below settles the session, but a resumable turn
+        // gets one labeled continuation on a fresh runtime first.
+        let runtime_lost = matches!(event, DriverEvent::RuntimeLost);
         match event {
             // Unreachable: normalized into `Error` above so it renders in the
             // client's locale before any dispatch runs.
@@ -842,6 +846,11 @@ impl Waku {
                 runtime.computer_use_previews.clear();
                 runtime.driver.refresh_background_work();
                 self.capture_latest_turn_checkpoint_for(session_id);
+                // A completed turn clears the restart-resume bound: only
+                // consecutive resume losses should ever stop auto-resuming.
+                if success {
+                    self.runtime_auto_resumes.remove(&session_id);
+                }
                 // A natural end is the only finish the status-marker eval
                 // scores; failed and interrupted turns keep their own status.
                 if success {
@@ -929,7 +938,7 @@ impl Waku {
                     }
                 }
             }
-            DriverEvent::ProcessExited => {
+            DriverEvent::RuntimeLost | DriverEvent::ProcessExited => {
                 // The parked driver died mid-drain: queued follow-ups go to
                 // the fresh runtime the next submission spawns.
                 if allow_queue_drain && self.cancel_drains.remove(&session_id).is_some() {
@@ -945,6 +954,24 @@ impl Waku {
                 runtime.pending_computer_approval = None;
                 runtime.driver.cancel_computer_use();
                 runtime.computer_use_previews.clear();
+                if runtime_lost {
+                    // A resumable turn moves onto a fresh runtime; the dead
+                    // handle still leaves the map via `false` below.
+                    if self.resume_lost_runtime(session_id, cx) {
+                        if let Some(previous_kinds) = previous_kinds.as_deref() {
+                            self.splice_active_transcript_rows_after_visibility_change(
+                                previous_kinds,
+                            );
+                        }
+                        return false;
+                    }
+                    // Not resumable — report the daemon restart, not a bare
+                    // provider exit, as the turn's failure.
+                    runtime.last_driver_error = Some(
+                        "the Goddard daemon restarted and this turn could not be reattached"
+                            .to_owned(),
+                    );
+                }
                 let needs_fallback = !self.turn_has_assistant_message(session_id);
                 let failure_kind = if runtime.last_driver_error.is_some() {
                     TranscriptNoticeStatus::Error

@@ -2278,6 +2278,10 @@ pub struct Waku {
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
+    /// Automatic turn resumptions after a daemon restart, per session.
+    /// Cleared when a turn completes successfully; capped so a daemon that
+    /// keeps dying on the resumed prompt cannot loop continuations forever.
+    runtime_auto_resumes: HashMap<Uuid, u8>,
     /// Provider-neutral session work which may remain live after a turn ends.
     /// Runtime-only by design: providers reconcile their authoritative state
     /// when the resident transport reconnects.
@@ -5463,6 +5467,7 @@ impl Waku {
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),
+                runtime_auto_resumes: HashMap::new(),
                 background_work: HashMap::new(),
                 last_background_work_tick: Instant::now(),
                 submission_preparations: HashSet::new(),

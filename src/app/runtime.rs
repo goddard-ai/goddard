@@ -1,5 +1,24 @@
 use super::*;
 
+/// Consecutive automatic resumptions one session gets across daemon
+/// restarts. The count clears when a turn completes, so a daemon that keeps
+/// dying on the resumed prompt is what stops the loop — not steady work.
+const MAX_RUNTIME_AUTO_RESUMES: u8 = 3;
+
+/// Whether a daemon-restart loss can auto-resume this session: a live
+/// provider turn was in flight and the provider session can be reloaded
+/// from its persisted cursor. A `Connecting` turn the provider never
+/// confirmed does not qualify — its prompt never arrived, so a bare
+/// "continue" would resume nothing.
+pub(super) fn session_resume_eligible(session: &AgentSession) -> bool {
+    session.is_busy()
+        && session.provider_cursor.is_some()
+        && session
+            .turns
+            .last()
+            .is_some_and(|turn| turn.status == TurnStatus::Running && turn.provider_turn_started)
+}
+
 fn workspace_ack(
     workspace: &waku_client::WorkspaceClient,
     operation: waku_client::WorkspaceOperation,
@@ -2298,6 +2317,10 @@ impl Waku {
 
     pub(super) fn start_runtime_attachment(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.runtimes.contains_key(&session_id)
+            // A submission already starting this session installs its own
+            // runtime; an attach racing it would subscribe a second handle
+            // to the same daemon runtime.
+            || self.submission_preparations.contains(&session_id)
             || !self.runtime_attach_pending.insert(session_id)
         {
             return;
@@ -3277,7 +3300,9 @@ impl Waku {
                     .detach();
                 } else {
                     self.runtime_attach_misses.remove(&session_id);
-                    self.interrupt_orphaned_runtime(session_id, cx);
+                    if !self.resume_lost_runtime(session_id, cx) {
+                        self.interrupt_orphaned_runtime(session_id, cx);
+                    }
                 }
             }
             Err(error) => {
@@ -3351,6 +3376,54 @@ impl Waku {
         }
         self.save();
         cx.notify();
+    }
+
+    /// The daemon owning this session's runtime restarted and killed the
+    /// provider process with it. When the lost turn had reached the provider
+    /// and the session carries a resume cursor, settle that turn as
+    /// interrupted, mark the restart in the transcript, and send the hidden
+    /// continue nudge — the same submission the composer's Continue
+    /// affordance makes — so the work resumes on a fresh runtime without
+    /// waiting on the user.
+    ///
+    /// Bounded by [`MAX_RUNTIME_AUTO_RESUMES`]: a daemon that keeps dying on
+    /// the resumed prompt must not loop continuations forever. The count
+    /// resets when a turn completes, so only consecutive failures stop it.
+    /// Returns false when the session is ineligible and the caller should
+    /// run the ordinary loss handling instead.
+    pub(super) fn resume_lost_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) -> bool {
+        let eligible = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(session_resume_eligible);
+        if !eligible
+            || self.runtime_attach_pending.contains(&session_id)
+            || self.submission_preparations.contains(&session_id)
+            || self.goal_runtime_starts.contains(&session_id)
+            || self.worktree_move_pending.contains(&session_id)
+            || self.response_fork_preparations.contains_key(&session_id)
+        {
+            return false;
+        }
+        let attempts = self.runtime_auto_resumes.entry(session_id).or_default();
+        if *attempts >= MAX_RUNTIME_AUTO_RESUMES {
+            return false;
+        }
+        *attempts += 1;
+        self.interrupt_orphaned_runtime(session_id, cx);
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.push_message(
+                MessageRole::System,
+                tr!("session.daemon_restarted_resuming"),
+            );
+            session.updated_at = unix_time();
+        }
+        self.state.mark_session_dirty(session_id);
+        signal_event_pump(&self.event_wake_tx);
+        self.submit_composer_submission_to(session_id, ComposerSubmission::hidden_continue(), cx);
+        true
     }
 
     pub fn composer_focus(&self, cx: &App) -> FocusHandle {
@@ -6502,6 +6575,7 @@ impl Waku {
                         | DriverEvent::SteerRejected { .. }
                         | DriverEvent::TurnFinished { .. }
                         | DriverEvent::Error(_)
+                        | DriverEvent::RuntimeLost
                         | DriverEvent::ProcessExited
                 );
                 // Reasoning is markdown too (the live peek renders it), and

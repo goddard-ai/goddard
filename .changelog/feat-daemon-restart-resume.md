@@ -1,0 +1,1 @@
+- A Goddard daemon restart no longer kills in-flight work: the session reloads its provider transcript from the saved resume cursor, shows a "daemon restarted — resuming" marker, and continues the interrupted turn automatically (once per restart, only for turns the provider had actually started)

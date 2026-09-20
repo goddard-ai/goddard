@@ -2923,6 +2923,11 @@ pub enum DriverEvent {
         i18n: crate::protocol::WireTranslation,
     },
     Error(String),
+    /// The daemon owning this runtime restarted and the runtime could not
+    /// be reattached — its provider process was killed with it. Client-only,
+    /// like [`Self::RuntimeEventCursorAdvanced`]: the desktop's daemon proxy
+    /// synthesizes it on a failed reattach, so it never crosses the wire.
+    RuntimeLost,
     ProcessExited,
 }
 

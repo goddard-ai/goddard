@@ -25,6 +25,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::RuntimeEventCursorAdvanced(_) => {
             bail!("client-only runtime cursors cannot be sent by the daemon")
         }
+        DriverEvent::RuntimeLost => {
+            bail!("client-only runtime loss cannot be sent by the daemon")
+        }
         DriverEvent::Connected { provider_cursor } => {
             ("connected", serde_json::to_value(provider_cursor)?)
         }
