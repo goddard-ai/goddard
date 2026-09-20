@@ -72,14 +72,17 @@ timeoutSecs?: number | null, } | { "type": "testEvalConnection", settings: EvalS
  */
 project?: string | null, candidates: Array<RouteCandidate>, lastUsed?: RouteTarget | null, } | { "type": "recordRouteOverride", sessionId: string, target: RouteTarget, } | { "type": "listIntegrations" } | { "type": "connectIntegration", id: string, variantId: string, providers: Array<ProviderKind>, apiKey?: string | null, } | { "type": "setIntegrationProviders", id: string, providers: Array<ProviderKind>, } | { "type": "disconnectIntegration", id: string, } | { "type": "startIntegrationAuth", id: string, } | { "type": "loadComposerDrafts" } | { "type": "saveComposerDrafts", drafts: ComposerDrafts, generation: number, } | { "type": "applyComposerDraftChanges", changes: Array<ComposerDraftChange>, } | { "type": "storeBlob", mimeType: string, bytes: string, } | { "type": "importAttachment", name: string, upload: AttachmentUpload, } | { "type": "importPathAttachment", path: string, } | { "type": "readBlob", reference: string, } | { "type": "readAttachment", reference: string, path: string, } | { "type": "sweepBlobs" } | { "type": "forkSessionFromResponse", turnCount: number, } | { "type": "rewindSessionToMessage", turnCount: number, } | { "type": "forkProviderSession", request: ProviderSessionForkRequest, } | { "type": "workspace", operation: WorkspaceOperation, } | { "type": "openTerminal", cwd: string, cols: number, rows: number, } | { "type": "writeTerminal", data: string, } | { "type": "resizeTerminal", cols: number, rows: number, } | { "type": "closeTerminal" } | { "type": "closeSession" } | { "type": "agentCreateSession",
 /**
- * Any provider Waku can drive.
+ * Any provider Waku can drive. `None` inherits the sending task's
+ * provider; the daemon rejects the command when no sending task is
+ * known to inherit from.
  */
-provider: ProviderKind,
+provider?: ProviderKind | null,
 /**
- * An explicit provider model id, or `"default"` to select the
- * provider's own default model.
+ * An explicit provider model id, `"default"` (or empty) to select
+ * the provider's own default model, or `None` to inherit the
+ * sending task's model when it runs the resolved provider.
  */
-model: string,
+model?: string | null,
 /**
  * Absolute path of the project the task runs in. The daemon
  * resolves an existing project at that path, or registers a
@@ -95,7 +98,15 @@ baseBranch?: string | null,
  * The task's first prompt, delivered as a normal turn the moment
  * its session is running. There is no idle task creation path.
  */
-prompt: string, } | { "type": "agentPrompt",
+prompt: string,
+/**
+ * Reasoning effort, service tier, and context window for the new
+ * session. `None` inherits the sending task's value when it runs
+ * the resolved provider and the resolved model's catalog still
+ * lists it; `"default"` (or empty) selects the provider's own
+ * default.
+ */
+reasoningEffort?: string | null, serviceTier?: string | null, contextWindow?: string | null, } | { "type": "agentPrompt",
 /**
  * Waku task id. Exactly one of `task_id` and `thread_id` is
  * required.

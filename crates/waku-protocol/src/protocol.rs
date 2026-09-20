@@ -446,11 +446,16 @@ pub enum Command {
     /// with the sending task's id, which keeps agent-originated turns
     /// visible in the target transcript.
     AgentCreateSession {
-        /// Any provider Waku can drive.
-        provider: ProviderKind,
-        /// An explicit provider model id, or `"default"` to select the
-        /// provider's own default model.
-        model: String,
+        /// Any provider Waku can drive. `None` inherits the sending task's
+        /// provider; the daemon rejects the command when no sending task is
+        /// known to inherit from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<ProviderKind>,
+        /// An explicit provider model id, `"default"` (or empty) to select
+        /// the provider's own default model, or `None` to inherit the
+        /// sending task's model when it runs the resolved provider.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
         /// Absolute path of the project the task runs in. The daemon
         /// resolves an existing project at that path, or registers a
         /// primary Git checkout. Linked worktrees are never registered.
@@ -464,6 +469,17 @@ pub enum Command {
         /// The task's first prompt, delivered as a normal turn the moment
         /// its session is running. There is no idle task creation path.
         prompt: String,
+        /// Reasoning effort, service tier, and context window for the new
+        /// session. `None` inherits the sending task's value when it runs
+        /// the resolved provider and the resolved model's catalog still
+        /// lists it; `"default"` (or empty) selects the provider's own
+        /// default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        service_tier: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_window: Option<String>,
     },
     /// Scoped agent credential only: submit a prompt to an existing task,
     /// addressed by Waku task id or provider-native Agent CLI thread id.

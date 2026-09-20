@@ -75,14 +75,17 @@ fn schema() -> serde_json::Value {
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
             "fields": {
-                "provider": {"type": "string", "required": true, "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "goose", "grok", "kimi", "muse", "ohmypi", "pi"]},
-                "model": {"type": "string", "required": true, "notes": "explicit provider model id, or \"default\" for the provider's own default"},
+                "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider"},
+                "model": {"type": "string", "notes": "explicit provider model id; \"default\" selects the provider's own default; omit to inherit this task's model when it runs the resolved provider"},
                 "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
                 "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
                 "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
-                "prompt": {"type": "string", "required": true}
+                "prompt": {"type": "string", "required": true},
+                "reasoning_effort": {"type": "string", "notes": "provider-specific effort id; \"default\" selects the provider's own default; omit to inherit this task's effort when it runs the resolved provider (falls back to the model's default when the resolved model does not list it)"},
+                "service_tier": {"type": "string", "notes": "provider-specific tier id; inherits like reasoning_effort"},
+                "context_window": {"type": "string", "notes": "provider-specific window id; inherits like reasoning_effort"}
             },
-            "example": "{\"provider\":\"codex\",\"model\":\"default\",\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\"}",
+            "example": "{\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\"}",
             "returns": {"task_id": "uuid of the created task"}
         },
         "prompt": {
@@ -143,13 +146,21 @@ fn schema() -> serde_json::Value {
 
 #[derive(Deserialize)]
 struct CreatePayload {
-    provider: String,
-    model: String,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
     project: PathBuf,
     workspace: AgentWorkspaceArg,
     #[serde(default)]
     base_branch: Option<String>,
     prompt: String,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
+    service_tier: Option<String>,
+    #[serde(default)]
+    context_window: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -328,7 +339,11 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 "`create` takes a JSON object; run `goddard-agent schema` for its shape",
             )?;
             Ok(Command::AgentCreateSession {
-                provider: provider_kind(&payload.provider)?,
+                provider: payload
+                    .provider
+                    .as_deref()
+                    .map(provider_kind)
+                    .transpose()?,
                 model: payload.model,
                 project: payload.project,
                 workspace: match payload.workspace {
@@ -337,6 +352,9 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 },
                 base_branch: payload.base_branch,
                 prompt: payload.prompt,
+                reasoning_effort: payload.reasoning_effort,
+                service_tier: payload.service_tier,
+                context_window: payload.context_window,
             })
         }
         "prompt" => {
@@ -409,7 +427,7 @@ mod tests {
     fn a_create_payload_becomes_an_agent_create_command() {
         let command = build_command(
             "create",
-            r#"{"provider":"codex","model":"default","project":"/tmp/project","workspace":"worktree","base_branch":"main","prompt":"Summarize the diff"}"#,
+            r#"{"provider":"codex","model":"default","project":"/tmp/project","workspace":"worktree","base_branch":"main","prompt":"Summarize the diff","reasoning_effort":"high"}"#,
         )
         .expect("a valid create payload parses");
 
@@ -421,13 +439,46 @@ mod tests {
                 workspace,
                 base_branch,
                 prompt,
+                reasoning_effort,
+                service_tier,
+                context_window,
             } => {
-                assert_eq!(provider, ProviderKind::Codex);
-                assert_eq!(model, "default");
+                assert_eq!(provider, Some(ProviderKind::Codex));
+                assert_eq!(model.as_deref(), Some("default"));
                 assert_eq!(project, PathBuf::from("/tmp/project"));
                 assert_eq!(workspace, AgentWorkspace::Worktree);
                 assert_eq!(base_branch.as_deref(), Some("main"));
                 assert_eq!(prompt, "Summarize the diff");
+                assert_eq!(reasoning_effort.as_deref(), Some("high"));
+                assert_eq!(service_tier, None);
+                assert_eq!(context_window, None);
+            }
+            other => panic!("expected AgentCreateSession, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_create_payload_may_omit_provider_model_and_traits_to_inherit() {
+        let command = build_command(
+            "create",
+            r#"{"project":"/tmp/project","workspace":"local","prompt":"Summarize the diff"}"#,
+        )
+        .expect("a create payload without provider or traits parses");
+
+        match command {
+            Command::AgentCreateSession {
+                provider,
+                model,
+                reasoning_effort,
+                service_tier,
+                context_window,
+                ..
+            } => {
+                assert_eq!(provider, None);
+                assert_eq!(model, None);
+                assert_eq!(reasoning_effort, None);
+                assert_eq!(service_tier, None);
+                assert_eq!(context_window, None);
             }
             other => panic!("expected AgentCreateSession, got {other:?}"),
         }

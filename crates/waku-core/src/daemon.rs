@@ -18,8 +18,8 @@ use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentSession, Checkpoint, CheckpointStatus, DriverEvent, Project, ProjectMapStatus,
-    ProviderKind, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
-    SessionWorkspace, TurnStatus,
+    ProviderKind, ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus,
+    SessionStatus, SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -82,6 +82,45 @@ struct RepoMaps {
     indexes: HashMap<PathBuf, crate::repo_map::RepoMapIndex>,
     /// Roots with a build/refresh in flight, so triggers don't pile up.
     building: HashSet<PathBuf>,
+}
+
+/// The provider/model selection an `agent create` request carried. Every
+/// `None` field inherits the sending task's configuration where the resolved
+/// provider still matches it; see [`WakuBackend::create_agent_task`].
+pub(crate) struct AgentCreateSelection {
+    pub provider: Option<ProviderKind>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub context_window: Option<String>,
+}
+
+/// Resolve one `agent create` trait field. An explicit value wins as sent —
+/// `"default"` (or empty) selects the provider's own default, and an unknown
+/// id passes through untouched, matching how `model` is handled. An omitted
+/// field takes the sending task's `inherited` value only when the resolved
+/// model's catalog still lists it; otherwise the model's own `default`
+/// applies. An empty `options` list cannot constrain, so the inherited value
+/// survives.
+fn resolve_agent_trait(
+    explicit: Option<String>,
+    inherited: Option<String>,
+    options: Option<&[ProviderModelOption]>,
+    default: Option<&str>,
+) -> Option<String> {
+    if let Some(value) = explicit {
+        return match value.trim() {
+            "" | "default" => None,
+            value => Some(value.to_owned()),
+        };
+    }
+    let value = inherited?;
+    let options = options.unwrap_or(&[]);
+    if options.is_empty() || options.iter().any(|option| option.id == value) {
+        Some(value)
+    } else {
+        default.map(str::to_owned)
+    }
 }
 
 pub struct WakuBackend {
@@ -1899,6 +1938,9 @@ impl Backend for WakuBackend {
                 workspace,
                 base_branch,
                 prompt,
+                reasoning_effort,
+                service_tier,
+                context_window,
             } => {
                 // A scoped credential names its owning session; a master-token
                 // request may attribute the prompt to `request.session_id`
@@ -1908,8 +1950,13 @@ impl Backend for WakuBackend {
                 });
                 self.agent_create_session(
                     sender,
-                    provider,
-                    model,
+                    AgentCreateSelection {
+                        provider,
+                        model,
+                        reasoning_effort,
+                        service_tier,
+                        context_window,
+                    },
                     project,
                     workspace,
                     base_branch,
@@ -3278,8 +3325,7 @@ impl WakuBackend {
     fn agent_create_session(
         &self,
         sender: Option<Uuid>,
-        provider: ProviderKind,
-        model: String,
+        selection: AgentCreateSelection,
         project: PathBuf,
         workspace: AgentWorkspace,
         base_branch: Option<String>,
@@ -3289,8 +3335,7 @@ impl WakuBackend {
         self.require_agent_tools()?;
         let session_id = self.create_agent_task(
             sender,
-            provider,
-            model,
+            selection,
             project,
             workspace,
             base_branch,
@@ -3306,8 +3351,7 @@ impl WakuBackend {
     pub(crate) fn create_agent_task(
         &self,
         sender: Option<Uuid>,
-        provider: ProviderKind,
-        model: String,
+        selection: AgentCreateSelection,
         project: PathBuf,
         workspace: AgentWorkspace,
         base_branch: Option<String>,
@@ -3320,10 +3364,75 @@ impl WakuBackend {
         if !project.is_absolute() {
             bail!("the project path must be absolute");
         }
-        let model = match model.trim() {
-            "" | "default" => None,
-            model => Some(model.to_owned()),
+        // Fields the payload omits inherit the sending task's configuration,
+        // but only while it runs the resolved provider — a different
+        // provider's model and trait vocabularies may not carry over.
+        let sender_config = sender.and_then(|id| {
+            self.task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .map(|session| {
+                    (
+                        session.provider,
+                        session.model.clone(),
+                        session.reasoning_effort.clone(),
+                        session.service_tier.clone(),
+                        session.context_window.clone(),
+                    )
+                })
+        });
+        let provider = selection
+            .provider
+            .or(sender_config.as_ref().map(|config| config.0))
+            .ok_or_else(|| {
+                anyhow!("`provider` is required when no sending task is known to inherit from")
+            })?;
+        let sender_config = sender_config.filter(|config| config.0 == provider);
+        let model = match selection.model.as_deref().map(str::trim) {
+            Some("" | "default") => None,
+            Some(model) => Some(model.to_owned()),
+            None => sender_config
+                .as_ref()
+                .and_then(|config| config.1.clone()),
         };
+        let (inherited_effort, inherited_tier, inherited_window) = sender_config
+            .map(|config| (config.2, config.3, config.4))
+            .unwrap_or_default();
+        // The resolved model's catalog entry bounds which inherited traits
+        // still apply; an empty or missing entry cannot constrain them.
+        let catalog = crate::model_catalog::cached_models(provider)
+            .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
+        let catalog_model = match model.as_deref() {
+            Some(requested) => {
+                waku_protocol::model_catalog::packed_catalog_model(&catalog, requested, provider)
+                    .map(|matched| matched.model)
+            }
+            None => catalog
+                .iter()
+                .find(|entry| entry.is_default)
+                .or_else(|| catalog.first()),
+        };
+        let reasoning_effort = resolve_agent_trait(
+            selection.reasoning_effort,
+            inherited_effort
+                .map(|value| waku_protocol::model_catalog::normalize_reasoning_effort(&value)),
+            catalog_model.map(|model| model.reasoning_efforts.as_slice()),
+            catalog_model.and_then(|model| model.default_reasoning_effort.as_deref()),
+        );
+        let service_tier = resolve_agent_trait(
+            selection.service_tier,
+            inherited_tier,
+            catalog_model.map(|model| model.service_tiers.as_slice()),
+            catalog_model.and_then(|model| model.default_service_tier.as_deref()),
+        );
+        let context_window = resolve_agent_trait(
+            selection.context_window,
+            inherited_window,
+            catalog_model.map(|model| model.context_windows.as_slice()),
+            catalog_model.and_then(|model| model.default_context_window.as_deref()),
+        );
         if matches!(workspace, AgentWorkspace::Worktree)
             && base_branch
                 .as_deref()
@@ -3360,6 +3469,9 @@ impl WakuBackend {
         };
         let mut session = AgentSession::new(project_id, provider);
         session.model = model;
+        session.reasoning_effort = reasoning_effort;
+        session.service_tier = service_tier;
+        session.context_window = context_window;
         session.workspace = match workspace {
             AgentWorkspace::Local => SessionWorkspace::Local,
             AgentWorkspace::Worktree => {
@@ -4376,6 +4488,63 @@ fn record_provider_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_create_trait_resolution() {
+        let options = vec![
+            ProviderModelOption::new("medium", "Medium"),
+            ProviderModelOption::new("high", "High"),
+        ];
+
+        // An explicit id wins, even one the catalog does not list.
+        assert_eq!(
+            resolve_agent_trait(
+                Some("xhigh".into()),
+                Some("medium".into()),
+                Some(&options),
+                Some("medium"),
+            ),
+            Some("xhigh".into())
+        );
+        // An explicit "default" (or empty) selects the provider's own
+        // default rather than inheriting.
+        for value in ["default", ""] {
+            assert_eq!(
+                resolve_agent_trait(
+                    Some(value.into()),
+                    Some("high".into()),
+                    Some(&options),
+                    Some("medium"),
+                ),
+                None
+            );
+        }
+        // An omitted field inherits a value the resolved model still lists.
+        assert_eq!(
+            resolve_agent_trait(None, Some("high".into()), Some(&options), Some("medium")),
+            Some("high".into())
+        );
+        // An inherited value the model no longer lists falls back to the
+        // model's own default, or nothing when it declares none.
+        assert_eq!(
+            resolve_agent_trait(None, Some("ultra".into()), Some(&options), Some("medium")),
+            Some("medium".into())
+        );
+        assert_eq!(
+            resolve_agent_trait(None, Some("ultra".into()), Some(&options), None),
+            None
+        );
+        // A catalog entry without options cannot constrain inheritance.
+        assert_eq!(
+            resolve_agent_trait(None, Some("ultra".into()), Some(&[]), None),
+            Some("ultra".into())
+        );
+        // No catalog entry at all behaves the same.
+        assert_eq!(
+            resolve_agent_trait(None, Some("ultra".into()), None, None),
+            Some("ultra".into())
+        );
+    }
 
     #[test]
     fn stale_runtime_projection_keeps_newer_transcript_cursor() {

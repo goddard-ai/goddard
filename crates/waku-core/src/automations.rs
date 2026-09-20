@@ -32,7 +32,7 @@ use waku_protocol::automations::{
 };
 use waku_protocol::model::unix_time;
 
-use crate::daemon::WakuBackend;
+use crate::daemon::{AgentCreateSelection, WakuBackend};
 use crate::model::DriverEvent;
 use crate::server::EventSink;
 
@@ -673,8 +673,13 @@ impl AutomationService {
                 };
                 let result = backend.create_agent_task(
                     None,
-                    automation.provider,
-                    automation.model.clone().unwrap_or_default(),
+                    AgentCreateSelection {
+                        provider: Some(automation.provider),
+                        model: automation.model.clone(),
+                        reasoning_effort: None,
+                        service_tier: None,
+                        context_window: None,
+                    },
                     automation.project_path.clone(),
                     workspace,
                     automation.base_branch.clone(),
