@@ -1406,181 +1406,87 @@ impl Waku {
 
         // The favorites and recents rail buttons jump: a click drops
         // the query and brings the section's first row into view.
-        let rail_target = |id: SharedString, section: ModelPickerSection| {
-            let rail_weak = weak.clone();
-            div()
-                .id(id)
-                .w(px(38.0))
-                .h(px(38.0))
-                .rounded(px(9.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .hover(|element| element.bg(theme.overlay))
-                .on_click(move |_, _, cx| {
-                    let _ = rail_weak.update(cx, |this, cx| {
-                        this.scroll_model_picker_to_section(section, cx);
-                    });
-                })
-        };
-        let mut rail = div()
-            .w(px(50.0))
-            .h_full()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(4.0))
-            .p(px(5.0))
-            .rounded_tl(px(15.0))
-            .rounded_bl(px(15.0))
-            .bg(theme.canvas)
-            .border_r(hairline())
-            .border_color(theme.separator);
+        let mut rail_sections = Vec::new();
         if rail_favorites {
-            rail = rail.child(
-                rail_target("model-rail-favorites".into(), ModelPickerSection::Favorites)
-                    .child(icon("icons/star.svg", 17.0, theme.text_tertiary)),
-            );
+            rail_sections.push(ModelPickerRailItem {
+                id: "model-rail-favorites".into(),
+                mark: icon("icons/star.svg", 17.0, theme.text_tertiary).into_any_element(),
+                active: false,
+                on_activate: Rc::new(|this, cx| {
+                    this.scroll_model_picker_to_section(ModelPickerSection::Favorites, cx);
+                }),
+            });
         }
         if rail_recents {
-            rail = rail.child(
-                rail_target("model-rail-recents".into(), ModelPickerSection::Recents)
-                    .child(icon("icons/hourglass.svg", 17.0, theme.text_tertiary)),
-            );
-        }
-        if rail_favorites || rail_recents {
-            rail = rail.child(
-                div()
-                    .w(px(34.0))
-                    .h(hairline())
-                    .my(px(3.0))
-                    .bg(theme.separator),
-            );
-        }
-        for kind in ProviderKind::ALL {
-            if !picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, kind) {
-                continue;
-            }
-            // No provider block in the merged list means nothing to
-            // filter to — a locked session's other providers land
-            // here, as does one whose combos are all favorites or
-            // recents.
-            if !section_rows
-                .iter()
-                .any(|row| picker_row_section(row) == ModelPickerSection::Provider(kind))
-            {
-                continue;
-            }
-            // Provider buttons filter rather than jump: a click
-            // toggles a `provider:<id>` token in the query. The wash
-            // on the button mirrors the token's presence.
-            let provider_active = normalized_query.split_whitespace().any(|token| {
-                token
-                    .strip_prefix("provider:")
-                    .is_some_and(|value| value == kind.id())
+            rail_sections.push(ModelPickerRailItem {
+                id: "model-rail-recents".into(),
+                mark: icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
+                active: false,
+                on_activate: Rc::new(|this, cx| {
+                    this.scroll_model_picker_to_section(ModelPickerSection::Recents, cx);
+                }),
             });
-            let provider_weak = weak.clone();
-            rail = rail.child(
-                div()
-                    .id(SharedString::from(format!("model-rail-{}", kind.id())))
-                    .w(px(38.0))
-                    .h(px(38.0))
-                    .rounded(px(9.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .when(provider_active, |element| element.bg(theme.overlay))
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(move |_, _, cx| {
-                        let _ = provider_weak.update(cx, |this, cx| {
-                            this.toggle_model_picker_provider(kind, cx);
-                        });
-                    })
-                    .child(provider_mark(&theme, kind, 18.0, theme.text_tertiary)),
-            );
         }
+        // Provider buttons filter rather than jump: a click toggles a
+        // `provider:<id>` token in the query, and the button's wash mirrors
+        // the token's presence. No provider block in the merged list means
+        // nothing to filter to — a locked session's other providers land
+        // here, as does one whose combos are all favorites or recents.
+        let rail_providers = ProviderKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, *kind)
+                    && section_rows
+                        .iter()
+                        .any(|row| picker_row_section(row) == ModelPickerSection::Provider(*kind))
+            })
+            .map(|kind| {
+                let active = normalized_query.split_whitespace().any(|token| {
+                    token
+                        .strip_prefix("provider:")
+                        .is_some_and(|value| value == kind.id())
+                });
+                ModelPickerRailItem {
+                    id: SharedString::from(format!("model-rail-{}", kind.id())),
+                    mark: provider_mark(&theme, kind, 18.0, theme.text_tertiary).into_any_element(),
+                    active,
+                    on_activate: Rc::new(move |this, cx| {
+                        this.toggle_model_picker_provider(kind, cx);
+                    }),
+                }
+            })
+            .collect();
 
-        let search_input = div()
-            .h(px(52.0))
-            .px(px(12.0))
-            .pt(px(10.0))
-            .pb(px(8.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .w_full()
-                    .h(px(34.0))
-                    .px(px(10.0))
-                    .rounded(px(11.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(icon("icons/search.svg", 15.0, theme.text_secondary))
-                    .child(div().flex_1().min_w_0().child(search.clone())),
-            );
-
-        let mut rows = div().id("model-picker-list").size_full();
-        if available_rows.is_empty() {
-            let label = if searching {
-                tr!("models.none_found")
-            } else if ProviderKind::ALL.into_iter().any(|kind| {
-                pending_discoveries.contains(&kind)
-                    && picker_lists_provider(
-                        &probes,
-                        &disabled_providers,
-                        locked_provider,
-                        remote,
-                        kind,
-                    )
-            }) {
-                tr!("models.loading")
-            } else {
-                tr!("models.none_reported")
-            };
-            rows = rows.p(px(9.0)).child(
-                div()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(sp(12.5))
-                    .text_color(theme.text_ghost)
-                    .child(label),
-            );
+        let empty_label = if searching {
+            tr!("models.none_found")
+        } else if ProviderKind::ALL.into_iter().any(|kind| {
+            pending_discoveries.contains(&kind)
+                && picker_lists_provider(
+                    &probes,
+                    &disabled_providers,
+                    locked_provider,
+                    remote,
+                    kind,
+                )
+        }) {
+            tr!("models.loading")
         } else {
-            // The list is virtualized and every row is one height, so
-            // the item count resyncs here and before every scroll —
-            // `reset` drops the scroll position, which is also what a
-            // changed total should mean.
-            if list_state.item_count() != available_rows.len() {
-                list_state.reset_with_uniform_height(
-                    available_rows.len(),
-                    MODEL_PICKER_ROW_HEIGHT,
-                );
-            }
-            let list_rows = available_rows.clone();
-            let list_weak = weak.clone();
-            let list_popover = popover.clone();
-            let list_selection = session_selection.clone();
-            let list_auto = auto_route;
+            tr!("models.none_reported")
+        };
+
+        let render_row = Rc::new({
+            let weak = weak.clone();
+            let session_selection = session_selection.clone();
             let jev_credential_missing = self.jev_credential_missing();
-            rows = rows.child(
-                list(list_state.clone(), move |row_index, window, cx| {
+            let render =
+                move |_row_index: usize,
+                      row: &ModelPickerRow,
+                      is_highlighted: bool,
+                      popover: &ContextMenuHandle,
+                      window: &mut Window,
+                      cx: &mut App|
+                      -> AnyElement {
                     let theme = Theme::current(cx);
-                    let weak = &list_weak;
-                    let popover = &list_popover;
-                    let session_selection = &list_selection;
-                    let auto_route = list_auto;
-                    let Some(row) = list_rows.get(row_index) else {
-                        return div().into_any_element();
-                    };
-                    let is_highlighted = highlight == Some(row_index);
                     if row.auto {
                         // The router row: same hit target and highlight
                         // treatment as a model row, but where a model
@@ -1591,22 +1497,12 @@ impl Waku {
                         let select_popover = popover.clone();
                         let settings_weak = weak.clone();
                         let settings_popover = popover.clone();
-                        return div()
-                            .id("model-row-auto")
-                            .w_full()
-                            .h(MODEL_PICKER_ROW_HEIGHT)
-                            .px(px(12.0))
-                            .rounded(px(11.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(10.0))
-                            .cursor_default()
-                            .when(auto_route, |element| element.bg(theme.overlay_strong))
-                            .hover(|element| element.bg(theme.overlay))
-                            .active(|element| element.opacity(0.85))
-                            .when(is_highlighted, |element| {
-                                element.bg(theme.accent.opacity(0.14))
-                            })
+                        return model_picker_row_shell(
+                                "model-row-auto",
+                                auto_route,
+                                is_highlighted,
+                                &theme,
+                            )
                             .child(
                                 div()
                                     .min_w_0()
@@ -1769,31 +1665,18 @@ impl Waku {
                                 ))
                             })
                     });
-                    let mut row_element = div()
-                        .id(SharedString::from(format!(
+                    let mut row_element = model_picker_row_shell(
+                        SharedString::from(format!(
                             "model-row-{}-{}-{}-{}",
                             kind.id(),
                             model.id,
                             row.effort.as_deref().unwrap_or("base"),
                             row.fast
-                        )))
-                        .w_full()
-                        .h(MODEL_PICKER_ROW_HEIGHT)
-                        .px(px(12.0))
-                        .rounded(px(11.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .cursor_default()
-                        .when(is_selected, |element| element.bg(theme.overlay_strong))
-                        .hover(|element| element.bg(theme.overlay))
-                        .active(|element| element.opacity(0.85))
-                        // The keyboard cursor reads as an accent tint rather
-                        // than a ring, so it stays legible on the current
-                        // model's already-filled row.
-                        .when(is_highlighted, |element| {
-                            element.bg(theme.accent.opacity(0.14))
-                        })
+                        )),
+                        is_selected,
+                        is_highlighted,
+                        &theme,
+                    )
                         .child(
                             div()
                                 .min_w_0()
@@ -1941,87 +1824,35 @@ impl Waku {
                             });
                     }
                     row_element.into_any_element()
-                })
-                .size_full()
-                .py(px(9.0))
-                // Extra horizontal inset keeps the rows' hover and
-                // highlight fills off the panel's edges.
-                .px(px(12.0)),
-            );
-        }
+                };
+            render
+        });
 
-        let next_models = available_rows.clone();
-        let previous_models = available_rows.clone();
-        let confirm_models = available_rows.clone();
-        let next_weak = weak.clone();
-        let previous_weak = weak.clone();
-        let next_section_weak = weak.clone();
-        let previous_section_weak = weak.clone();
-        let confirm_weak = weak.clone();
-        let confirm_popover = popover.clone();
-        div()
-            .w(px(460.0))
-            .h(px(390.0))
-            .rounded(px(16.0))
-            .overflow_hidden()
-            .border(hairline())
-            .border_color(theme.border_subtle)
-            .bg(theme.surface)
-            .shadow_lg()
-            .flex()
-            // The filter field keeps focus and the selected row is only
-            // drawn, never focused — the same split Zed's picker uses.
-            // These arrive as actions bound to `WakuMenu > TextInput`,
-            // which is the only way to claim a key out from under a
-            // focused text field.
-            .on_action(move |_: &SelectNextEntry, _, cx| {
-                let _ = next_weak.update(cx, |this, cx| {
-                    this.move_model_picker_highlight("down", &next_models, cx);
-                });
-            })
-            .on_action(move |_: &SelectPreviousEntry, _, cx| {
-                let _ = previous_weak.update(cx, |this, cx| {
-                    this.move_model_picker_highlight("up", &previous_models, cx);
-                });
-            })
-            .on_action(move |_: &SelectNextTab, _, cx| {
-                let _ = next_section_weak.update(cx, |this, cx| {
-                    this.cycle_model_picker_section("down", cx);
-                });
-            })
-            .on_action(move |_: &SelectPreviousTab, _, cx| {
-                let _ = previous_section_weak.update(cx, |this, cx| {
-                    this.cycle_model_picker_section("up", cx);
-                });
-            })
-            .on_action(move |_: &ConfirmEntry, window, cx| {
-                let _ = confirm_weak.update(cx, |this, cx| {
-                    this.choose_highlighted_model(&confirm_models, cx);
-                });
-                confirm_popover.close(window, cx);
-                window.refresh();
-            })
-            .child(rail)
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .rounded_tr(px(15.0))
-                    .rounded_br(px(15.0))
-                    .bg(theme.surface)
-                    .child(search_input)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .relative()
-                            .child(rows)
-                            .child(scrollbar::vertical(&list_state, &scrollbar_state)),
-                    ),
-            )
-            .into_any_element()
+        model_picker_panel(
+            ModelPickerPanel {
+                rows: available_rows.clone(),
+                search: search.clone(),
+                list_state: list_state.clone(),
+                scrollbar_state: scrollbar_state.clone(),
+                highlight,
+                empty_label: empty_label.into(),
+                rail_sections,
+                rail_providers,
+                render_row,
+                on_move: Rc::new(|this, key, rows, cx| {
+                    this.move_model_picker_highlight(key, rows, cx);
+                }),
+                on_confirm: Rc::new(|this, rows, cx| {
+                    this.choose_highlighted_model(rows, cx);
+                }),
+                on_cycle_section: Some(Rc::new(|this, key, cx| {
+                    this.cycle_model_picker_section(key, cx);
+                })),
+            },
+            &popover,
+            &theme,
+            &weak,
+        )
     }
 
     /// The provider the picker cannot switch away from — a session that has
@@ -7017,7 +6848,7 @@ fn picker_model_rows(provider: ProviderKind, model: ProviderModel) -> Vec<ModelP
 
 /// The provider's slot in `ProviderKind::ALL`, which keeps the merged list's
 /// fallback ordering stable and consistent with the rest of the app.
-fn provider_sort_rank(provider: ProviderKind) -> usize {
+pub(super) fn provider_sort_rank(provider: ProviderKind) -> usize {
     ProviderKind::ALL
         .iter()
         .position(|kind| *kind == provider)
@@ -7218,4 +7049,291 @@ pub(super) fn visible_picker_rows(
     }
     picker_rows.extend(rows);
     picker_rows
+}
+
+/// A button on the model-picker panel's left rail: a mark that runs the
+/// activation the call site attached — a section jump or a query filter.
+/// `active` paints the wash that mirrors a live filter token.
+pub(super) struct ModelPickerRailItem {
+    pub id: SharedString,
+    pub mark: AnyElement,
+    pub active: bool,
+    pub on_activate: Rc<dyn Fn(&mut Waku, &mut Context<Waku>)>,
+}
+
+/// Everything the shared model-picker panel needs from a call site: the rows
+/// in display order, the state it draws, and what a pick does. `R` is the
+/// site's row type — the panel owns the frame, rail, filter field,
+/// virtualized list, scrollbar, and the arrow/tab/enter contract; the site
+/// owns row content and selection semantics.
+pub(super) struct ModelPickerPanel<R: 'static> {
+    /// Rows in display order — the same list `enter`'s handler indexes, so a
+    /// keyboard cursor always means the same row in both.
+    pub rows: Rc<Vec<R>>,
+    /// The filter field inside the panel; it keeps focus while open.
+    pub search: Entity<TextInput>,
+    /// The virtualized row list and its overlay scrollbar.
+    pub list_state: ListState,
+    pub scrollbar_state: Rc<ScrollbarState>,
+    /// The drawn keyboard cursor, when it has moved.
+    pub highlight: Option<usize>,
+    /// What an empty list says — the site picks the wording.
+    pub empty_label: SharedString,
+    /// Rail buttons above the divider — the site's leading sections.
+    pub rail_sections: Vec<ModelPickerRailItem>,
+    /// Provider buttons below the divider.
+    pub rail_providers: Vec<ModelPickerRailItem>,
+    /// A row's full element — build it on [`model_picker_row_shell`] so every
+    /// surface's rows share chrome.
+    pub render_row:
+        Rc<dyn Fn(usize, &R, bool, &ContextMenuHandle, &mut Window, &mut App) -> AnyElement>,
+    /// Arrow keys — move the drawn cursor and scroll its row into view.
+    pub on_move: Rc<dyn Fn(&mut Waku, &str, &[R], &mut Context<Waku>)>,
+    /// `enter` — take the highlighted row, defaulting to the first.
+    pub on_confirm: Rc<dyn Fn(&mut Waku, &[R], &mut Context<Waku>)>,
+    /// Tab / shift-tab section cycling, when the site has sections.
+    pub on_cycle_section: Option<Rc<dyn Fn(&mut Waku, &str, &mut Context<Waku>)>>,
+}
+
+/// The model picker's whole panel body: the rail, the filter field, a
+/// virtualized row list with its overlay scrollbar, and the keyboard
+/// contract — the one component every model-target picker draws so the
+/// surfaces cannot drift apart.
+pub(super) fn model_picker_panel<R>(
+    spec: ModelPickerPanel<R>,
+    popover: &ContextMenuHandle,
+    theme: &Theme,
+    weak: &WeakEntity<Waku>,
+) -> AnyElement {
+    let ModelPickerPanel {
+        rows,
+        search,
+        list_state,
+        scrollbar_state,
+        highlight,
+        empty_label,
+        rail_sections,
+        rail_providers,
+        render_row,
+        on_move,
+        on_confirm,
+        on_cycle_section,
+    } = spec;
+
+    let rail_button = |item: ModelPickerRailItem| {
+        let activate_weak = weak.clone();
+        let on_activate = item.on_activate;
+        div()
+            .id(item.id)
+            .w(px(38.0))
+            .h(px(38.0))
+            .rounded(px(9.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .when(item.active, |element| element.bg(theme.overlay))
+            .hover(|element| element.bg(theme.overlay))
+            .child(item.mark)
+            .on_click(move |_, _, cx| {
+                let on_activate = on_activate.clone();
+                let _ = activate_weak.update(cx, |this, cx| on_activate(this, cx));
+            })
+    };
+    let mut rail = div()
+        .w(px(50.0))
+        .h_full()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(px(4.0))
+        .p(px(5.0))
+        .rounded_tl(px(15.0))
+        .rounded_bl(px(15.0))
+        .bg(theme.canvas)
+        .border_r(hairline())
+        .border_color(theme.separator);
+    let separated = !rail_sections.is_empty();
+    for item in rail_sections {
+        rail = rail.child(rail_button(item));
+    }
+    if separated {
+        rail = rail.child(
+            div()
+                .w(px(34.0))
+                .h(hairline())
+                .my(px(3.0))
+                .bg(theme.separator),
+        );
+    }
+    for item in rail_providers {
+        rail = rail.child(rail_button(item));
+    }
+
+    let search_input = div()
+        .h(px(52.0))
+        .px(px(12.0))
+        .pt(px(10.0))
+        .pb(px(8.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .w_full()
+                .h(px(34.0))
+                .px(px(10.0))
+                .rounded(px(11.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                .child(div().flex_1().min_w_0().child(search.clone())),
+        );
+
+    let mut list_element = div().id("model-picker-list").size_full();
+    if rows.is_empty() {
+        list_element = list_element.p(px(9.0)).child(
+            div()
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(sp(12.5))
+                .text_color(theme.text_ghost)
+                .child(empty_label),
+        );
+    } else {
+        // The list is virtualized and every row is one height, so the item
+        // count resyncs here and before every scroll — `reset` drops the
+        // scroll position, which is also what a changed total should mean.
+        if list_state.item_count() != rows.len() {
+            list_state.reset_with_uniform_height(rows.len(), MODEL_PICKER_ROW_HEIGHT);
+        }
+        let list_rows = rows.clone();
+        let list_popover = popover.clone();
+        list_element = list_element.child(
+            list(list_state.clone(), move |row_index, window, cx| {
+                let Some(row) = list_rows.get(row_index) else {
+                    return div().into_any_element();
+                };
+                render_row(
+                    row_index,
+                    row,
+                    highlight == Some(row_index),
+                    &list_popover,
+                    window,
+                    cx,
+                )
+            })
+            .size_full()
+            .py(px(9.0))
+            // Extra horizontal inset keeps the rows' hover and highlight
+            // fills off the panel's edges.
+            .px(px(12.0)),
+        );
+    }
+
+    let down_rows = rows.clone();
+    let up_rows = rows;
+    let confirm_rows = down_rows.clone();
+    let down_weak = weak.clone();
+    let up_weak = weak.clone();
+    let confirm_weak = weak.clone();
+    let confirm_popover = popover.clone();
+    let on_move_down = on_move.clone();
+    let mut panel = div()
+        .w(px(460.0))
+        .h(px(390.0))
+        .rounded(px(16.0))
+        .overflow_hidden()
+        .border(hairline())
+        .border_color(theme.border_subtle)
+        .bg(theme.surface)
+        .shadow_lg()
+        .flex()
+        // The filter field keeps focus and the selected row is only drawn,
+        // never focused — the same split Zed's picker uses. These arrive as
+        // actions bound to `WakuMenu > TextInput`, which is the only way to
+        // claim a key out from under a focused text field.
+        .on_action(move |_: &SelectNextEntry, _, cx| {
+            let on_move = on_move_down.clone();
+            let rows = down_rows.clone();
+            let _ = down_weak.update(cx, |this, cx| on_move(this, "down", &rows, cx));
+        })
+        .on_action(move |_: &SelectPreviousEntry, _, cx| {
+            let rows = up_rows.clone();
+            let _ = up_weak.update(cx, |this, cx| on_move(this, "up", &rows, cx));
+        })
+        .on_action(move |_: &ConfirmEntry, window, cx| {
+            let rows = confirm_rows.clone();
+            let _ = confirm_weak.update(cx, |this, cx| on_confirm(this, &rows, cx));
+            confirm_popover.close(window, cx);
+            window.refresh();
+        });
+    if let Some(on_cycle_section) = on_cycle_section {
+        let down_weak = weak.clone();
+        let up_weak = weak.clone();
+        let cycle_down = on_cycle_section.clone();
+        panel = panel
+            .on_action(move |_: &SelectNextTab, _, cx| {
+                let cycle = cycle_down.clone();
+                let _ = down_weak.update(cx, |this, cx| cycle(this, "down", cx));
+            })
+            .on_action(move |_: &SelectPreviousTab, _, cx| {
+                let _ = up_weak.update(cx, |this, cx| on_cycle_section(this, "up", cx));
+            });
+    }
+    panel
+        .child(rail)
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .rounded_tr(px(15.0))
+                .rounded_br(px(15.0))
+                .bg(theme.surface)
+                .child(search_input)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .relative()
+                        .child(list_element)
+                        .child(scrollbar::vertical(&list_state, &scrollbar_state)),
+                ),
+        )
+        .into_any_element()
+}
+
+/// Every picker row's chrome: fixed height, hit area, and the
+/// selected/highlighted/hover fills — shared so a row reads identically on
+/// every surface the panel serves.
+#[track_caller]
+pub(super) fn model_picker_row_shell(
+    id: impl Into<gpui::ElementId>,
+    selected: bool,
+    highlighted: bool,
+    theme: &Theme,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .w_full()
+        .h(MODEL_PICKER_ROW_HEIGHT)
+        .px(px(12.0))
+        .rounded(px(11.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .cursor_default()
+        .when(selected, |element| element.bg(theme.overlay_strong))
+        .hover(|element| element.bg(theme.overlay))
+        .active(|element| element.opacity(0.85))
+        // The keyboard cursor reads as an accent tint rather than a ring, so
+        // it stays legible on the current row's already-filled surface.
+        .when(highlighted, |element| element.bg(theme.accent.opacity(0.14)))
 }

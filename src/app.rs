@@ -1971,7 +1971,7 @@ pub struct Waku {
     /// The class-target picker's drawn selection and list state — same shape
     /// as the model picker's, shared by the three class menus.
     route_class_highlight: Option<usize>,
-    route_class_scroll: ScrollHandle,
+    route_class_list: ListState,
     route_class_scrollbar: Rc<ScrollbarState>,
     /// The class whose target picker is open — routes `enter` and the
     /// empty-query reveal to the right policy slot.
@@ -4722,7 +4722,10 @@ impl Waku {
                             }
                         } else {
                             this.route_class_highlight = Some(0);
-                            this.route_class_scroll.scroll_to_item(0);
+                            this.route_class_list.scroll_to(ListOffset {
+                                item_ix: 0,
+                                offset_in_item: Pixels::ZERO,
+                            });
                         }
                         cx.notify();
                     }
@@ -5215,7 +5218,8 @@ impl Waku {
                     .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 model_picker_scrollbar: ScrollbarState::new(),
                 route_class_highlight: None,
-                route_class_scroll: ScrollHandle::new(),
+                route_class_list: ListState::new(0, ListAlignment::Top, px(512.0))
+                    .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 route_class_scrollbar: ScrollbarState::new(),
                 route_class_picker: None,
                 model_picker_empty_focus,
