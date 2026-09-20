@@ -1,0 +1,1 @@
+- The Sandboxed badge no longer shows in the window title when a page other than the session is on screen — terminals, Drafts, Automations, Projects, and the inbox now leave it off

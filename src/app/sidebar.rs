@@ -4804,7 +4804,17 @@ impl Waku {
         let agent_preset_label = session
             .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
             .and_then(|session| self.agent_preset_label_for_session(session));
-        let sandboxed = session.is_some_and(|session| session.sandboxed);
+        // The badge belongs to the session surface — the new-task composer or
+        // a selected session's transcript. When another page owns the main
+        // column the title still names that session, but the badge is not
+        // its to wear.
+        let session_surface = self.selected_terminal.is_none()
+            && !self.drafts_page
+            && !self.automations_page
+            && self.projects_page.is_none()
+            && !self.notifications.open;
+        let sandboxed =
+            session_surface && session.is_some_and(|session| session.sandboxed);
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(
