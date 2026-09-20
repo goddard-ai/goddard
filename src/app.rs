@@ -1823,16 +1823,27 @@ pub struct Waku {
     /// Selection is committed only after this target's transcript arrives, so
     /// the currently visible task stays intact during daemon latency.
     pending_session_activation: Option<PendingSessionActivation>,
-    /// The sessions ⌘⇧D has parked so far — stamped unread, then left
-    /// mid-sweep. They stay GoToNextUnreadCompletion candidates for ⌘D, but
-    /// the session-departure fallback skips them so archiving the landing
-    /// task cannot bounce selection straight back onto a task the sweep
-    /// deliberately parked. Cleared when an activation arrives from anywhere
-    /// but the sweep's own jump.
-    unread_sweep: HashSet<Uuid>,
+    /// Every session the current ⌘⇧D chain has shown — the session it
+    /// started from plus each landing. The chain's jump never targets them,
+    /// so repeated presses cannot revisit one, and the session-departure
+    /// fallback skips them so archiving the landing task cannot bounce
+    /// selection straight back onto a task the chain deliberately passed.
+    /// They stay ordinary GoToNextUnreadCompletion candidates for ⌘D.
+    /// Cleared when an activation arrives from anywhere but the chain's own
+    /// jump.
+    sweep_visited: HashSet<Uuid>,
     /// The session ⌘⇧D is flying to — lets `activate_session` tell the
-    /// sweep's own landing from an outside selection change.
-    unread_sweep_target: Option<Uuid>,
+    /// chain's own landing from an outside selection change.
+    sweep_target: Option<Uuid>,
+    /// The selected session carried an unseen-completion stamp when its
+    /// activation landed — one half of ⌘⇧D's "parked without reading"
+    /// signal, consumed when the press decides whether to re-stamp it.
+    unread_when_selected: Option<Uuid>,
+    /// A turn settled while this session was on screen — selected or
+    /// pending activation — the other half of that signal. Kept across the
+    /// pending activation's landing, cleared when a different session is
+    /// selected.
+    turn_settled_while_visible: Option<Uuid>,
     analytics: crate::analytics::Analytics,
     state: PersistedState,
     store: StateStore,
@@ -5209,8 +5220,10 @@ impl Waku {
                 daemon_hostname,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
-                unread_sweep: HashSet::new(),
-                unread_sweep_target: None,
+                sweep_visited: HashSet::new(),
+                sweep_target: None,
+                unread_when_selected: None,
+                turn_settled_while_visible: None,
                 analytics,
                 state,
                 store,

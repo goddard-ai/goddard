@@ -911,40 +911,40 @@ fn next_unread_completion_skips_ineligible_sessions() {
 }
 
 #[test]
-fn next_unread_completion_skips_sweep_parked_sessions() {
-    let parked = Uuid::new_v4();
+fn next_unread_completion_skips_chain_seen_sessions() {
+    let seen = Uuid::new_v4();
     let unread = Uuid::new_v4();
     let idle = Uuid::new_v4();
     let sessions = vec![
-        started_session(parked),
+        started_session(seen),
         started_session(unread),
         started_session(idle),
     ];
     let rows = vec![
-        SidebarRow::Session(parked),
+        SidebarRow::Session(seen),
         SidebarRow::Session(unread),
         SidebarRow::Session(idle),
     ];
-    let unseen = HashMap::from([(parked, 100), (unread, 200)]);
-    let sweep = HashSet::from([parked]);
+    let unseen = HashMap::from([(seen, 100), (unread, 200)]);
+    let sweep = HashSet::from([seen]);
 
-    // The departure fallback's scan: a parked row is passed over for the
+    // The ⌘⇧D chain and the departure fallback pass a seen row over for the
     // next genuinely unread one, even though it sits higher in the sidebar.
     assert_eq!(
         next_unread_completion(&sessions, &unseen, &rows, None, None, Some(&sweep)),
         Some(unread)
     );
-    // With every unread row parked there is no unread target, so the caller
-    // falls to the idle rotation — where parked rows still count.
-    let only_parked = HashMap::from([(parked, 100)]);
+    // With every unread row seen there is no unread target, so the caller
+    // falls to the idle rotation.
+    let only_seen = HashMap::from([(seen, 100)]);
     assert_eq!(
-        next_unread_completion(&sessions, &only_parked, &rows, None, None, Some(&sweep)),
+        next_unread_completion(&sessions, &only_seen, &rows, None, None, Some(&sweep)),
         None
     );
-    // ⌘D proper keeps parked rows as candidates.
+    // ⌘D proper keeps seen rows as candidates.
     assert_eq!(
         next_unread_completion(&sessions, &unseen, &rows, None, None, None),
-        Some(parked)
+        Some(seen)
     );
 }
 
@@ -971,23 +971,42 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
 
     // ⌘⇧D's jump: below the marked session's row, busy rows skipped.
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(top), None, 1),
+        next_non_busy_session(&sessions, &rows, Some(top), None, 1, None),
         Some(middle)
     );
     // It wraps to the top at the bottom of the list — including rows above
     // the anchor — but never lands on the selected session itself.
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4),
+        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4, None),
         Some(top)
     );
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(top), None, 4),
+        next_non_busy_session(&sessions, &rows, Some(top), None, 4, None),
         Some(middle)
     );
     // A pending activation counts as on-screen.
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(top), Some(middle), 1),
+        next_non_busy_session(&sessions, &rows, Some(top), Some(middle), 1, None),
         Some(bottom)
+    );
+    // The chain's seen set is skipped on the wrap: the jump can never land
+    // back on a session it has already shown, including the one it started
+    // from.
+    let seen = HashSet::from([top, middle]);
+    assert_eq!(
+        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4, Some(&seen)),
+        None
+    );
+    assert_eq!(
+        next_non_busy_session(
+            &sessions,
+            &rows,
+            Some(bottom),
+            None,
+            4,
+            Some(&HashSet::from([top])),
+        ),
+        Some(middle)
     );
     // Everything busy or claimed: no target, the caller lands on New task.
     let mut all_busy = sessions;
@@ -995,7 +1014,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
         session.status = SessionStatus::Working;
     }
     assert_eq!(
-        next_non_busy_session(&all_busy, &rows, Some(top), None, 1),
+        next_non_busy_session(&all_busy, &rows, Some(top), None, 1, None),
         None
     );
 }
@@ -1018,16 +1037,30 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
 
     // With no current session — the New task page, or just after an archive —
     // the rotation enters at the topmost non-busy row.
-    assert_eq!(next_idle_session(&sessions, &rows, None, None), Some(top));
+    assert_eq!(
+        next_idle_session(&sessions, &rows, None, None, None),
+        Some(top)
+    );
     // On an idle session the walk continues below it.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(top), None),
+        next_idle_session(&sessions, &rows, Some(top), None, None),
         Some(middle)
     );
     // …and wraps to the top at the bottom of the list.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None),
+        next_idle_session(&sessions, &rows, Some(bottom), None, None),
         Some(top)
+    );
+    // …but never onto a row the ⌘⇧D chain has already shown.
+    let seen = HashSet::from([top]);
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(bottom), None, Some(&seen)),
+        Some(middle)
+    );
+    let seen = HashSet::from([top, middle, bottom]);
+    assert_eq!(
+        next_idle_session(&sessions, &rows, Some(bottom), None, Some(&seen)),
+        None
     );
 
     // A busy current session is not in the rotation, so the entry point is
@@ -1035,28 +1068,28 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
     let mut sessions = sessions;
     sessions[0].status = SessionStatus::Working;
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(top), None),
+        next_idle_session(&sessions, &rows, Some(top), None, None),
         Some(middle)
     );
     // Busy rows are skipped outright: wrapping from the bottom lands past
     // the busy top row on middle.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None),
+        next_idle_session(&sessions, &rows, Some(bottom), None, None),
         Some(middle)
     );
     // A pending activation counts as on-screen, and when every other row is
     // busy or claimed there is no target.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), Some(middle)),
+        next_idle_session(&sessions, &rows, Some(bottom), Some(middle), None),
         None
     );
     sessions[1].status = SessionStatus::Waiting;
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None),
+        next_idle_session(&sessions, &rows, None, None, None),
         Some(bottom)
     );
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None),
+        next_idle_session(&sessions, &rows, Some(bottom), None, None),
         None
     );
 
@@ -1072,11 +1105,11 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
         SidebarRow::Session(unpinned),
     ];
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(pinned_top), None),
+        next_idle_session(&sessions, &rows, Some(pinned_top), None, None),
         Some(unpinned)
     );
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(unpinned), None),
+        next_idle_session(&sessions, &rows, Some(unpinned), None, None),
         Some(pinned_top)
     );
 }

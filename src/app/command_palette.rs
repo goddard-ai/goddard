@@ -2026,7 +2026,7 @@ impl Waku {
             pending,
             None,
         )
-        .or_else(|| sessions::next_idle_session(&self.state.sessions, &rows, selected, pending))
+        .or_else(|| sessions::next_idle_session(&self.state.sessions, &rows, selected, pending, None))
         .is_some()
         {
             commands.push(CommandPaletteItem::command(

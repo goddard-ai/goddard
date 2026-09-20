@@ -87,9 +87,9 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
 /// permission or question cannot make progress until someone answers.
 /// Sessions with queued prompts are about to be busy again, so they are
 /// skipped, and the on-screen or pending-activation session is never a
-/// candidate. `sweep_parked` lets the departure fallback pass the tasks the
-/// ⌘⇧D sweep parked, so an archive or removal cannot bounce selection
-/// straight back onto one of them; ⌘D itself keeps them as candidates.
+/// candidate. `excluded` lets the ⌘⇧D chain and the departure fallback pass
+/// the sessions the chain has already shown, so neither can land back on
+/// one of them; ⌘D itself keeps them as candidates.
 ///
 /// Sidebar order is the importance order — pinned tasks sort to the top of
 /// the sidebar and lead automatically — and landing on a session clears its
@@ -100,7 +100,7 @@ pub(super) fn next_unread_completion(
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
-    sweep_parked: Option<&HashSet<Uuid>>,
+    excluded: Option<&HashSet<Uuid>>,
 ) -> Option<Uuid> {
     let by_id = sessions
         .iter()
@@ -109,7 +109,7 @@ pub(super) fn next_unread_completion(
     sidebar::next_sidebar_session_in_rows(rows, 0, |session_id| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
-            && sweep_parked.map_or(true, |parked| !parked.contains(&session_id))
+            && excluded.map_or(true, |excluded| !excluded.contains(&session_id))
             && by_id.get(&session_id).is_some_and(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
@@ -122,14 +122,16 @@ pub(super) fn next_unread_completion(
 
 /// The next non-busy session at-or-below `start_row` in the sidebar's
 /// displayed order, wrapping to the top — the shared walk behind the idle
-/// rotation and ⌘⇧D's park-and-move-down jump. The selected or
-/// pending-activation session is never a candidate.
+/// rotation and ⌘⇧D's park-and-jump chain. The selected or
+/// pending-activation session is never a candidate, and `excluded` lets the
+/// chain skip the sessions it has already shown.
 pub(super) fn next_non_busy_session(
     sessions: &[AgentSession],
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
     start_row: usize,
+    excluded: Option<&HashSet<Uuid>>,
 ) -> Option<Uuid> {
     let by_id = sessions
         .iter()
@@ -138,6 +140,7 @@ pub(super) fn next_non_busy_session(
     sidebar::next_sidebar_session_in_rows(rows, start_row, |session_id| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
+            && excluded.map_or(true, |excluded| !excluded.contains(&session_id))
             && by_id
                 .get(&session_id)
                 .is_some_and(|session| !session.is_busy())
@@ -155,6 +158,7 @@ pub(super) fn next_idle_session(
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
+    excluded: Option<&HashSet<Uuid>>,
 ) -> Option<Uuid> {
     let start = selected_session
         .filter(|session_id| {
@@ -164,7 +168,14 @@ pub(super) fn next_idle_session(
         })
         .and_then(|session_id| sidebar::sidebar_session_row_index(rows, session_id))
         .map_or(0, |index| index + 1);
-    next_non_busy_session(sessions, rows, selected_session, pending_activation, start)
+    next_non_busy_session(
+        sessions,
+        rows,
+        selected_session,
+        pending_activation,
+        start,
+        excluded,
+    )
 }
 
 impl Waku {
@@ -389,11 +400,11 @@ impl Waku {
             self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
-        // A landing the ⌘⇧D sweep aimed keeps its parked set; any other
-        // activation ends the sweep, so parked tasks become ordinary unread
+        // A landing the ⌘⇧D chain aimed keeps its seen set; any other
+        // activation ends the chain, so its sessions become ordinary
         // candidates again.
-        if self.unread_sweep_target.take() != Some(session_id) {
-            self.unread_sweep.clear();
+        if self.sweep_target.take() != Some(session_id) {
+            self.sweep_visited.clear();
         }
         // Turns that settled off screen get their marker evals now that the
         // session is on it.
@@ -406,6 +417,18 @@ impl Waku {
         // it decides whether the transcript opens on the last turn instead
         // of the position the reader left it at.
         let had_unseen = self.state.unseen_completions.remove(&session_id).is_some();
+        // ⌘⇧D's park signal: a chain departure re-stamps the session only
+        // when it was unread on arrival or a turn settled while it was on
+        // screen. A settle during the pending activation keeps its flag
+        // across this landing; a different session's stint resets both.
+        if had_unseen {
+            self.unread_when_selected = Some(session_id);
+        } else if session_changed {
+            self.unread_when_selected = None;
+        }
+        if session_changed && self.turn_settled_while_visible != Some(session_id) {
+            self.turn_settled_while_visible = None;
+        }
         let attention = had_unseen
             || self
                 .state
@@ -1353,9 +1376,10 @@ impl Waku {
 
     /// Moves selection after the viewed task departs: the topmost unread
     /// session like GoToNextUnreadCompletion — skipping the tasks a live
-    /// ⌘⇧D sweep parked, so the departure cannot bounce selection straight
-    /// back onto one — then the top of the idle rotation, then the
-    /// project's New task composer when nothing navigable remains.
+    /// ⌘⇧D chain has already shown, so the departure cannot bounce
+    /// selection straight back onto one — then the top of the idle
+    /// rotation under the same exclusion, then the project's New task
+    /// composer when nothing navigable remains.
     fn select_session_fallback(
         &mut self,
         project_id: Uuid,
@@ -1375,9 +1399,17 @@ impl Waku {
             &rows,
             self.state.selected_session,
             pending,
-            Some(&self.unread_sweep),
+            Some(&self.sweep_visited),
         )
-        .or_else(|| next_idle_session(&self.state.sessions, &rows, None, pending))
+        .or_else(|| {
+            next_idle_session(
+                &self.state.sessions,
+                &rows,
+                None,
+                pending,
+                Some(&self.sweep_visited),
+            )
+        })
         {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
@@ -2692,7 +2724,7 @@ impl Waku {
             pending,
             None,
         )
-        .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending));
+        .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending, None));
         match target {
             Some(target) => self.go_to_unread_target(target, window, cx),
             None => self.new_session_action(&NewSession, window, cx),
@@ -2747,37 +2779,44 @@ impl Waku {
             return;
         }
         self.state.unseen_completions.clear();
-        self.unread_sweep.clear();
-        self.unread_sweep_target = None;
+        self.sweep_visited.clear();
+        self.sweep_target = None;
         self.save();
         cx.notify();
     }
 
-    /// ⌘⇧D: mark the viewed task unread — it stays a GoToNextUnreadCompletion
-    /// candidate for a later ⌘D — then move to the next non-busy session
-    /// below its row, wrapping to the top. The jump is positional rather
-    /// than next-unread: the command is a sweep down the sidebar, and a
-    /// topmost-unread jump would bounce between the top two stamped tasks on
-    /// repeated presses. The parked task joins `unread_sweep`, which keeps
-    /// the departure fallback from landing back on it; the sweep ends when
-    /// an activation arrives from anywhere but this jump.
+    /// ⌘⇧D: "I'll come back to this later — show me the next most important
+    /// thing." The viewed task joins the chain's seen set, so consecutive
+    /// presses can never revisit it or any earlier landing, then the jump
+    /// picks ⌘D's target — the topmost unread completion, then the idle
+    /// rotation — minus everything the chain has shown. The departure
+    /// re-stamps the task unread only when it is non-busy and it carried an
+    /// unseen stamp on arrival or settled a turn while on screen: parking
+    /// preserves a dot the user never read, but never manufactures one for
+    /// a task that was already read. A sidebar multi-selection makes the
+    /// chord a no-op. The chain ends when an activation arrives from
+    /// anywhere but this jump.
     pub(super) fn mark_unread_and_go_to_next_idle_action(
         &mut self,
         _: &MarkUnreadAndGoToNextIdle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let targets = self.sidebar_multi_selection_targets();
+        if !self.sidebar_multi_selection.is_empty() {
+            return;
+        }
         let mut stamped = 0;
-        if targets.is_empty() {
-            if let Some(session_id) = self.composer_session_id() {
+        if let Some(session_id) = self.composer_session_id() {
+            self.sweep_visited.insert(session_id);
+            let non_busy = self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && !session.is_busy());
+            let parked_unread = self.unread_when_selected == Some(session_id)
+                || self.turn_settled_while_visible == Some(session_id);
+            if non_busy && parked_unread {
                 stamped += self.mark_session_unread(session_id, cx) as usize;
-                self.unread_sweep.insert(session_id);
-            }
-        } else {
-            for session_id in targets {
-                stamped += self.mark_session_unread(session_id, cx) as usize;
-                self.unread_sweep.insert(session_id);
             }
         }
         self.show_unread_toast(stamped);
@@ -2786,16 +2825,30 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
-        let start = selected
-            .and_then(|session_id| sidebar::sidebar_session_row_index(&rows, session_id))
-            .map_or(0, |index| index + 1);
-        match next_non_busy_session(&self.state.sessions, &rows, selected, pending, start) {
+        let target = next_unread_completion(
+            &self.state.sessions,
+            &self.state.unseen_completions,
+            &rows,
+            selected,
+            pending,
+            Some(&self.sweep_visited),
+        )
+        .or_else(|| {
+            next_idle_session(
+                &self.state.sessions,
+                &rows,
+                selected,
+                pending,
+                Some(&self.sweep_visited),
+            )
+        });
+        match target {
             Some(target) => {
-                self.unread_sweep_target = Some(target);
+                self.sweep_target = Some(target);
                 self.go_to_unread_target(target, window, cx);
             }
             None => {
-                self.unread_sweep_target = None;
+                self.sweep_target = None;
                 self.new_session_action(&NewSession, window, cx);
             }
         }

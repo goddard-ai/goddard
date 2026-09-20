@@ -3403,7 +3403,9 @@ impl Waku {
     /// A turn that settled off-screen earns an unread dot in the sidebar's
     /// status slot and a GoToNextUnreadCompletion candidate until the task
     /// is activated. Interrupted turns are user-driven stops, not completions,
-    /// so the caller's status filter keeps them out.
+    /// so the caller's status filter keeps them out. A settle on screen
+    /// stamps nothing — but ⌘⇧D remembers it: parking a task whose turn
+    /// finished while it was selected restores the unread marker.
     fn mark_unseen_turn_settled(&mut self, session_id: Uuid) {
         if sidebar::sidebar_session_selected(
             self.state.selected_session,
@@ -3411,6 +3413,7 @@ impl Waku {
                 .map(|pending| pending.session_id),
             session_id,
         ) {
+            self.turn_settled_while_visible = Some(session_id);
             return;
         }
         self.state
