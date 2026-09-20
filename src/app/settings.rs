@@ -1940,6 +1940,23 @@ impl Waku {
                     search,
                 )
             })
+            .children(setting_card(
+                tr!("settings.terminal_copy_on_select"),
+                tr!("settings.terminal_copy_on_select_description"),
+                toggle_switch(
+                    "terminal-copy-on-select-toggle",
+                    self.state.terminal_copy_on_select,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.terminal_copy_on_select;
+                        move |this, _, cx| this.set_terminal_copy_on_select(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ))
             .when(updater_available, |column| {
                 let enabled = self.automatic_updates_enabled;
                 column.children(setting_card(
@@ -1999,6 +2016,16 @@ impl Waku {
         }
         self.state.terminal_link_modifier = modifier;
         crate::terminal::install_link_modifier(modifier, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_terminal_copy_on_select(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.terminal_copy_on_select == enabled {
+            return;
+        }
+        self.state.terminal_copy_on_select = enabled;
+        crate::terminal::install_copy_on_select(enabled, cx);
         self.save();
         cx.notify();
     }

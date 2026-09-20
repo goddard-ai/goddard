@@ -1112,6 +1112,10 @@ settings.terminal_link_modifier:
   en: Terminal link modifier
 settings.terminal_link_modifier_description:
   en: The key that opens links and file paths when clicked in the integrated terminal; the other key does a plain click
+settings.terminal_copy_on_select:
+  en: Copy on select
+settings.terminal_copy_on_select_description:
+  en: Copy text to the clipboard as soon as it's selected in the integrated terminal; the selection itself stays visible
 settings.completion_sound:
   en: Play sound on completed turn
 settings.completion_sound_description:

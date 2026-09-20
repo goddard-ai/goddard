@@ -366,6 +366,8 @@ settings.terminal_open_links_in_mouse_mode: 在响应鼠标的终端程序中打
 settings.terminal_open_links_in_mouse_mode_description: "当 vim、htop 等程序接管鼠标时，%{modifier}-点击仍会打开链接和文件路径。关闭后这些点击会发送给程序；Shift-%{modifier}-点击仍可打开链接"
 settings.terminal_link_modifier: 终端链接修饰键
 settings.terminal_link_modifier_description: 在终端中点击以打开链接和文件路径的按键；另一个键保持普通点击
+settings.terminal_copy_on_select: 选中即复制
+settings.terminal_copy_on_select_description: 在终端中选中文字后立即复制到剪贴板；选中区域保持可见
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音

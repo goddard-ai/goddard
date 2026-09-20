@@ -100,6 +100,23 @@ pub fn install_link_modifier(modifier: crate::persistence::TerminalLinkModifier,
     cx.set_global(ActiveTerminalLinkModifier(modifier));
 }
 
+/// Whether finishing a selection copies it to the clipboard; published by
+/// the app when settings load or change.
+struct ActiveTerminalCopyOnSelect(bool);
+impl Global for ActiveTerminalCopyOnSelect {}
+
+/// The resolved copy-on-select preference — on until the app publishes the
+/// stored value.
+fn copy_on_select(cx: &App) -> bool {
+    cx.try_global::<ActiveTerminalCopyOnSelect>()
+        .map_or(true, |enabled| enabled.0)
+}
+
+/// Publish the resolved preference so every terminal view tracks it.
+pub fn install_copy_on_select(enabled: bool, cx: &mut App) {
+    cx.set_global(ActiveTerminalCopyOnSelect(enabled));
+}
+
 /// Whether `modifiers` holds the key that owns the link gesture — the
 /// platform's primary key (⌘/Ctrl) for `CmdOrCtrl`, ⌥/Alt for `Alt`. The
 /// other key keeps its plain-click meaning, so the two never compete.
@@ -1525,6 +1542,7 @@ impl TerminalView {
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let was_selecting = self.selecting;
         self.selecting = false;
         self.last_mouse_cell = None;
 
@@ -1558,6 +1576,12 @@ impl TerminalView {
                 mouse_button_report(point, event.button, event.modifiers, false, session.mode())
         {
             session.write(report);
+        }
+
+        // Copy-on-select resolves at release, once the drag's selection is
+        // final. The selection itself stays visible.
+        if was_selecting && copy_on_select(cx) {
+            self.copy_selection(cx);
         }
     }
 

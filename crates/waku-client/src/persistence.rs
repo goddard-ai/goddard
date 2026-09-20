@@ -232,6 +232,10 @@ fn default_terminal_open_links_in_mouse_mode() -> bool {
     true
 }
 
+fn default_terminal_copy_on_select() -> bool {
+    true
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -773,6 +777,9 @@ pub struct AppSettings {
     /// The key that opens links and file paths in the integrated terminal
     /// when clicked — ⌘ or ⌥ on macOS, Ctrl or Alt elsewhere.
     pub terminal_link_modifier: TerminalLinkModifier,
+    /// Finishing a text selection in the integrated terminal copies it to
+    /// the clipboard, like iTerm2's "Copy to pasteboard on selection".
+    pub terminal_copy_on_select: bool,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -863,6 +870,7 @@ impl Default for AppSettings {
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
             terminal_link_modifier: TerminalLinkModifier::default(),
+            terminal_copy_on_select: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1227,6 +1235,10 @@ pub struct PersistedState {
     /// when clicked.
     #[serde(default)]
     pub terminal_link_modifier: TerminalLinkModifier,
+    /// Finishing a text selection in the integrated terminal copies it to
+    /// the clipboard.
+    #[serde(default = "default_terminal_copy_on_select")]
+    pub terminal_copy_on_select: bool,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1454,6 +1466,7 @@ impl PersistedState {
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
             terminal_link_modifier: TerminalLinkModifier::default(),
+            terminal_copy_on_select: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -1782,6 +1795,7 @@ impl PersistedState {
             dormant_after_days: self.dormant_after_days,
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
             terminal_link_modifier: self.terminal_link_modifier,
+            terminal_copy_on_select: self.terminal_copy_on_select,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -1880,6 +1894,7 @@ impl PersistedState {
         self.dormant_after_days = settings.dormant_after_days;
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
         self.terminal_link_modifier = settings.terminal_link_modifier;
+        self.terminal_copy_on_select = settings.terminal_copy_on_select;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -2889,6 +2904,20 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert_eq!(restored.terminal_link_modifier, TerminalLinkModifier::Alt);
+    }
+
+    #[test]
+    fn terminal_copy_on_select_defaults_on_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.terminal_copy_on_select);
+        let mut state = PersistedState::empty();
+        assert!(state.terminal_copy_on_select);
+        state.terminal_copy_on_select = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["terminal_copy_on_select"], false);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.terminal_copy_on_select);
     }
 
     #[test]

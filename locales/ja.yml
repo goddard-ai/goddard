@@ -362,6 +362,8 @@ settings.terminal_open_links_in_mouse_mode: マウス対応ターミナルプロ
 settings.terminal_open_links_in_mouse_mode_description: "vim や htop などのプログラムがマウスを使用中でも、%{modifier}-クリックでリンクやファイルパスを開きます。オフにするとクリックはプログラムに送られ、Shift-%{modifier}-click でも引き続きリンクを開けます"
 settings.terminal_link_modifier: ターミナルのリンク修飾キー
 settings.terminal_link_modifier_description: ターミナルでクリックしてリンクやファイルパスを開くキー。もう一方のキーは通常のクリックになります
+settings.terminal_copy_on_select: 選択時にコピー
+settings.terminal_copy_on_select_description: ターミナルでテキストを選択した時点でクリップボードにコピーします。選択表示はそのまま残ります
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
