@@ -3386,8 +3386,18 @@ mod tests {
         apply_migrations(&connection).unwrap();
 
         // Drop the record of the last migration without dropping its tables,
-        // as an interrupted run would leave things.
-        let (last, _) = MIGRATIONS.last().expect("at least one migration");
+        // as an interrupted run would leave things. The last migration with
+        // real statements — trailing no-ops replay cleanly and prove nothing.
+        let (last, _) = MIGRATIONS
+            .iter()
+            .rev()
+            .find(|(_, sql)| {
+                sql.lines().any(|line| {
+                    let line = line.trim();
+                    !line.is_empty() && !line.starts_with("--")
+                })
+            })
+            .expect("at least one migration with statements");
         connection
             .execute("DELETE FROM migrations WHERE tag = ?1", params![last])
             .unwrap();
