@@ -1,0 +1,1 @@
+- The "Landed on `<base>`" transcript card now spans the message column and starts collapsed: its header opens the commit list, subjects take the width the hashes don't need, and a "Show N more commits" row reveals commits beyond the first five

@@ -1525,6 +1525,18 @@ impl Waku {
                             view.set_text(message.visible_content(), message.streaming);
                             &*view
                         });
+                    let landed_notice = matches!(
+                        message.notice,
+                        Some(TranscriptNotice::Landed { .. })
+                    )
+                    .then(|| LandedNoticeState {
+                        expanded: self.expanded_landed_notices.contains(&message.id),
+                        show_all: self.landed_notice_show_all.contains(&message.id),
+                        header_focus: self
+                            .transcript_control_focus(format!("landed-notice-{}", message.id), cx),
+                        commits_focus: self
+                            .transcript_control_focus(format!("landed-commits-{}", message.id), cx),
+                    });
                     let rendered = render_message(
                         MessageRender {
                             theme: &theme,
@@ -1548,6 +1560,7 @@ impl Waku {
                             menu,
                             waku,
                             composer,
+                            landed_notice,
                         },
                         cx,
                     );
@@ -1737,6 +1750,43 @@ impl Waku {
         }
         self.remeasure_changed_files(turn_id);
         cx.notify();
+    }
+
+    /// A landed notice lives inside its `Message` row, so both of its
+    /// disclosures — the card header and the "Show N more commits" row —
+    /// remeasure that row.
+    pub(super) fn toggle_landed_notice(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+        self.pin_transcript_for_disclosure();
+        if !self.expanded_landed_notices.remove(&message_id) {
+            self.expanded_landed_notices.insert(message_id);
+        }
+        self.remeasure_landed_notice(message_id);
+        cx.notify();
+    }
+
+    pub(super) fn toggle_landed_notice_commits(
+        &mut self,
+        message_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.pin_transcript_for_disclosure();
+        if !self.landed_notice_show_all.remove(&message_id) {
+            self.landed_notice_show_all.insert(message_id);
+        }
+        self.remeasure_landed_notice(message_id);
+        cx.notify();
+    }
+
+    fn remeasure_landed_notice(&self, message_id: Uuid) {
+        let Some(message_index) = self.selected_session().and_then(|session| {
+            session
+                .messages
+                .iter()
+                .position(|message| message.id == message_id)
+        }) else {
+            return;
+        };
+        self.remeasure_transcript_message(message_index);
     }
 
     /// Track the pointer over a changed-files row. A dwell opens the row's

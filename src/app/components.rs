@@ -374,6 +374,20 @@ pub(super) struct MessageRender<'a> {
     pub(super) menu: ContextMenuHandle,
     pub(super) waku: gpui::WeakEntity<Waku>,
     pub(super) composer: Entity<ComposerInput>,
+    /// Disclosure state for a `TranscriptNotice::Landed` row — `None` in the
+    /// card renderings (side chat, big picture), where the notice stays a
+    /// collapsed summary.
+    pub(super) landed_notice: Option<LandedNoticeState>,
+}
+
+/// How far a landed notice is opened and the focus handles its controls
+/// track. `expanded` reveals the commit list; `show_all` lifts the
+/// [`LANDED_NOTICE_SHOWN_COMMITS`] preview cap within it.
+pub(super) struct LandedNoticeState {
+    pub(super) expanded: bool,
+    pub(super) show_all: bool,
+    pub(super) header_focus: FocusHandle,
+    pub(super) commits_focus: FocusHandle,
 }
 
 fn render_sent_message_attachments(
@@ -740,6 +754,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         menu,
         waku,
         composer,
+        landed_notice,
     } = params;
 
     let content = message.visible_content().to_owned();
@@ -1108,7 +1123,16 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 base,
                 commits,
                 ahead,
-            }) => landed_notice_row(theme, base, commits, *ahead, ctx),
+            }) => landed_notice_row(
+                theme,
+                message_id,
+                base,
+                commits,
+                *ahead,
+                landed_notice.as_ref(),
+                &waku,
+                ctx,
+            ),
             _ => div().w_full().flex().justify_center().child(
                 div()
                     .px(px(10.0))
@@ -1148,81 +1172,235 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     )
 }
 
-/// How many commits the landed notice lists before folding the rest behind
-/// an "and N more" line.
+/// How many commits an expanded landed notice lists before folding the rest
+/// behind a "Show N more commits" row.
 const LANDED_NOTICE_SHOWN_COMMITS: usize = 5;
 
-/// The "Landed on `base`" card a [`TranscriptNotice::Landed`] renders as:
-/// merge icon and title over the commit list. The SHAs ride the ctx's
-/// commit-ref detection — enabled for notice messages — so each one
-/// underlines and opens the commit diff on click.
+/// The "Landed on `base`" card a [`TranscriptNotice::Landed`] renders as: a
+/// collapsed disclosure header over the commit list, wearing the changed-files
+/// card's chrome. The SHAs ride the ctx's commit-ref detection — enabled for
+/// notice messages — so each one underlines and opens the commit diff on
+/// click. `ahead` is the true landed count; `commits` may be capped shorter,
+/// and what the daemon never sent can only surface as a count.
+#[allow(clippy::too_many_arguments)]
 fn landed_notice_row(
     theme: &Theme,
+    message_id: Uuid,
     base: &str,
     commits: &[CommitEntry],
     ahead: u64,
+    state: Option<&LandedNoticeState>,
+    waku: &gpui::WeakEntity<Waku>,
     ctx: &MarkdownCtx,
 ) -> Div {
-    let title = div()
+    let expanded = state.is_some_and(|state| state.expanded);
+    let show_all = state.is_some_and(|state| state.show_all);
+    let shown = if show_all {
+        commits.len()
+    } else {
+        commits.len().min(LANDED_NOTICE_SHOWN_COMMITS)
+    };
+    let can_show_more = commits.len() > LANDED_NOTICE_SHOWN_COMMITS;
+    let unloaded = ahead.saturating_sub(commits.len() as u64);
+
+    let header_waku = waku.clone();
+    let header_key_waku = waku.clone();
+    let mut header = div()
+        .id(SharedString::from(format!("landed-notice-{message_id}")))
+        .h(px(34.0))
+        .px(px(12.0))
         .flex()
         .items_center()
         .gap(px(6.0))
         .child(icon("icons/git-merge.svg", 12.0, theme.text_tertiary))
-        .child(md::render::plain_text(
-            tr!("transcript.landed", base = base),
-            ctx.families().ui.clone(),
-            FontWeight::MEDIUM,
-            theme.text_secondary,
-            ctx,
-        ));
-    let mut lines = commits
-        .iter()
-        .take(LANDED_NOTICE_SHOWN_COMMITS)
-        .map(|commit| {
+        .child(
             div()
-                .flex()
-                .items_baseline()
-                .gap(px(8.0))
+                .min_w_0()
+                .flex_1()
+                .truncate()
                 .child(md::render::plain_text(
-                    commit.short_sha.clone(),
-                    ctx.families().code.clone(),
-                    FontWeight::NORMAL,
-                    theme.text_tertiary,
-                    ctx,
-                ))
-                .child(md::render::plain_text(
-                    commit.subject.clone(),
+                    tr!("transcript.landed", base = base),
                     ctx.families().ui.clone(),
-                    FontWeight::NORMAL,
-                    theme.text_tertiary,
+                    FontWeight::MEDIUM,
+                    theme.text_secondary,
                     ctx,
-                ))
-        })
-        .collect::<Vec<_>>();
-    let hidden = ahead.saturating_sub(lines.len() as u64);
-    if hidden > 0 {
-        lines.push(div().child(md::render::plain_text(
-            tr!("transcript.landed_more", count = hidden),
-            ctx.families().ui.clone(),
-            FontWeight::NORMAL,
-            theme.text_ghost,
-            ctx,
-        )));
+                )),
+        );
+    if let Some(state) = state {
+        header = header
+            .track_focus(&state.header_focus)
+            .tab_index(0)
+            .cursor_default()
+            // `overflow_hidden` clips to a rectangle, not the card's corner
+            // curve, so the header's hover fill carries its own radius —
+            // all four corners when the collapsed card ends with it.
+            .rounded_t(px(13.0))
+            .when(!expanded, |header| header.rounded_b(px(13.0)))
+            .hover(|style| style.bg(theme.overlay_strong))
+            .focus_visible(|style| style.bg(theme.overlay_strong))
+            .child(icon(
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                11.0,
+                theme.affordance_icon(),
+            ))
+            .on_click(move |_, _, cx| {
+                let _ = header_waku.update(cx, |this, cx| {
+                    this.toggle_landed_notice(message_id, cx);
+                });
+            })
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let _ = header_key_waku.update(cx, |this, cx| {
+                        this.toggle_landed_notice(message_id, cx);
+                    });
+                    cx.stop_propagation();
+                }
+            });
     }
-    div().w_full().flex().justify_center().child(
-        div()
+
+    let mut card = div()
+        .w_full()
+        .min_w_0()
+        .rounded(px(15.0))
+        .border(hairline())
+        .border_color(theme.border_subtle)
+        .bg(theme.overlay)
+        .text_size(sp(12.5))
+        .line_height(sp(16.0))
+        .overflow_hidden()
+        .child(header);
+
+    if expanded {
+        let mut rows = div()
+            .w_full()
+            .min_w_0()
             .flex()
             .flex_col()
-            .gap(px(4.0))
-            .px(px(12.0))
-            .py(px(8.0))
-            .rounded(px(10.0))
-            .bg(theme.overlay)
-            .text_size(sp(12.5))
-            .line_height(sp(16.0))
-            .child(title)
-            .children(lines),
-    )
+            .border_t(hairline())
+            .border_color(theme.separator);
+        for commit in commits.iter().take(shown) {
+            rows = rows.child(
+                div()
+                    .h(px(31.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().flex_none().child(md::render::plain_text(
+                        commit.short_sha.clone(),
+                        ctx.families().code.clone(),
+                        FontWeight::NORMAL,
+                        theme.text_tertiary,
+                        ctx,
+                    )))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .child(md::render::plain_text(
+                                commit.subject.clone(),
+                                ctx.families().ui.clone(),
+                                FontWeight::NORMAL,
+                                theme.text_secondary,
+                                ctx,
+                            )),
+                    ),
+            );
+        }
+        // When every loaded commit is listed and `ahead` is still larger, the
+        // daemon's cap — not this card — is what hides the rest.
+        if !can_show_more && unloaded > 0 {
+            rows = rows.child(div().h(px(31.0)).px(px(12.0)).flex().items_center().child(
+                md::render::plain_text(
+                    tr!("transcript.landed_more", count = unloaded),
+                    ctx.families().ui.clone(),
+                    FontWeight::NORMAL,
+                    theme.text_ghost,
+                    ctx,
+                ),
+            ));
+        }
+        card = card.child(rows);
+    }
+
+    if expanded && can_show_more {
+        let commits_focus = state.map(|state| state.commits_focus.clone());
+        let toggle_waku = waku.clone();
+        let toggle_key_waku = waku.clone();
+        let label = if show_all {
+            tr!("transcript.show_fewer_commits")
+        } else {
+            tr!(
+                "transcript.show_more_commits",
+                count = commits.len() - LANDED_NOTICE_SHOWN_COMMITS
+            )
+        };
+        card = card.child(
+            div()
+                .id(SharedString::from(format!("landed-commits-{message_id}")))
+                .when_some(commits_focus, |row, focus| row.track_focus(&focus))
+                .tab_index(0)
+                .h(px(34.0))
+                .px(px(12.0))
+                .border_t(hairline())
+                .border_color(theme.separator)
+                .rounded_b(px(13.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_default()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.bg(theme.overlay_strong))
+                .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+                .active(|style| style.bg(theme.overlay))
+                .child(SharedString::from(label))
+                .when(show_all && unloaded > 0, |row| {
+                    row.child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(theme.text_ghost)
+                            .child(tr!(
+                                "transcript.showing_first_commits",
+                                count = commits.len(),
+                                total = ahead
+                            )),
+                    )
+                })
+                .child(div().flex_1())
+                .child(icon(
+                    if show_all {
+                        "icons/chevron-down.svg"
+                    } else {
+                        "icons/chevron-right.svg"
+                    },
+                    11.0,
+                    theme.affordance_icon(),
+                ))
+                .on_click(move |_, _, cx| {
+                    let _ = toggle_waku.update(cx, |this, cx| {
+                        this.toggle_landed_notice_commits(message_id, cx);
+                    });
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        let _ = toggle_key_waku.update(cx, |this, cx| {
+                            this.toggle_landed_notice_commits(message_id, cx);
+                        });
+                        cx.stop_propagation();
+                    }
+                }),
+        );
+    }
+
+    card
 }
 
 /// The message row's context menu. Rebuilt on each open, so availability checks

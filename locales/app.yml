@@ -3395,6 +3395,12 @@ transcript.landed:
   en: Landed on %{base}
 transcript.landed_more:
   en: "…and %{count} more"
+transcript.show_more_commits:
+  en: Show %{count} more commits
+transcript.show_fewer_commits:
+  en: Show fewer commits
+transcript.showing_first_commits:
+  en: Showing first %{count} of %{total}
 
 duration.second:
   en: "%{count} second"

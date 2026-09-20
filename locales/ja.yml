@@ -1409,6 +1409,9 @@ transcript.edit_message: メッセージを編集
 transcript.sent_by_agent: エージェントから送信
 transcript.landed: "%{base} に取り込みました"
 transcript.landed_more: "…その他 %{count} 件のコミット"
+transcript.show_more_commits: "さらに %{count} 件のコミットを表示"
+transcript.show_fewer_commits: 表示するコミットを減らす
+transcript.showing_first_commits: "%{total} 件中、先頭 %{count} 件を表示"
 
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"

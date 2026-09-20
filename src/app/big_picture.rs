@@ -1397,6 +1397,7 @@ impl Waku {
                             menu,
                             waku: cx.entity().downgrade(),
                             composer: self.composer.clone(),
+                            landed_notice: None,
                         },
                         cx,
                     );

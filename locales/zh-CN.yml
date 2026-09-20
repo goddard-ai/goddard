@@ -1369,6 +1369,9 @@ transcript.edit_message: 编辑消息
 transcript.sent_by_agent: 由智能体发送
 transcript.landed: 已合入 %{base}
 transcript.landed_more: "…以及另外 %{count} 个提交"
+transcript.show_more_commits: 再显示 %{count} 个提交
+transcript.show_fewer_commits: 收起提交列表
+transcript.showing_first_commits: 仅显示前 %{count}/%{total} 个
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
 duration.minute: "%{count} 分钟"

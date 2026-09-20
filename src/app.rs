@@ -2234,6 +2234,11 @@ pub struct Waku {
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
+    /// "Landed on `<base>`" notice cards the user opened, keyed by message id.
+    expanded_landed_notices: HashSet<Uuid>,
+    /// Opened landed notices showing their whole loaded commit list rather
+    /// than the five-commit preview.
+    landed_notice_show_all: HashSet<Uuid>,
     /// The changed-files row under the pointer — and its floating diff card
     /// once open — or `None` when neither holds the pointer.
     changed_files_diff_hover: Option<ChangedFilesDiffHover>,
@@ -5301,6 +5306,8 @@ impl Waku {
                 expanded_activity_items: HashMap::new(),
                 expanded_turns: HashSet::new(),
                 expanded_changed_files: HashSet::new(),
+                expanded_landed_notices: HashSet::new(),
+                landed_notice_show_all: HashSet::new(),
                 changed_files_diff_hover: None,
                 changed_files_diffs: HashMap::new(),
                 changed_files_diff_generation: 0,
