@@ -341,6 +341,11 @@ impl SshTransport {
                 command
                     .arg("-o")
                     .arg("NumberOfPasswordPrompts=1")
+                    // First contact trusts on use: there is no tty to answer
+                    // a host-key prompt, so an unknown key would fail every
+                    // attempt. Batch attempts keep the user's strict default.
+                    .arg("-o")
+                    .arg("StrictHostKeyChecking=accept-new")
                     .env("SSH_ASKPASS", askpass_script_path())
                     .env("SSH_ASKPASS_REQUIRE", "force")
                     .env("DISPLAY", "goddard:0");

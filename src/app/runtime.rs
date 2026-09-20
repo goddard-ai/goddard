@@ -2499,7 +2499,7 @@ impl Waku {
                                 if current {
                                     waku.remote_errors.insert(host_id, error.to_string());
                                     if interactive {
-                                        waku.fail_pending_remote_submissions(host_id, &error, cx);
+                                        waku.fail_interactive_remote_connect(host_id, &error, cx);
                                     }
                                     cx.notify();
                                 }
@@ -2618,26 +2618,16 @@ impl Waku {
         cx.notify();
     }
 
-    /// The connect attempt these submissions waited on failed — return each
-    /// prompt to its composer and surface the cause once.
-    fn fail_pending_remote_submissions(
+    /// An interactive connect attempt failed — the user asked for this, so
+    /// the cause is always worth a toast, and submissions held on the host
+    /// go back to their drafts.
+    fn fail_interactive_remote_connect(
         &mut self,
         host: Uuid,
         error: &anyhow::Error,
         cx: &mut Context<Self>,
     ) {
-        let pending = self
-            .pending_remote_submissions
-            .remove(&host)
-            .unwrap_or_default();
-        if pending.is_empty() {
-            return;
-        }
-        for (session_id, submission) in pending {
-            if self.state.selected_session == Some(session_id) {
-                self.restore_composer_submission(submission, cx);
-            }
-        }
+        self.restore_pending_remote_submissions(host, cx);
         let name = self
             .remote_host_name(host)
             .unwrap_or_else(|| "remote host".to_string());
@@ -2649,9 +2639,12 @@ impl Waku {
         cx.notify();
     }
 
-    /// Return submissions held on a host's connect to the composer without
-    /// an error toast — the host record itself changed or went away.
+    /// Return submissions held on a host's connect: the selected session's
+    /// goes back to the live composer; every other session's becomes a
+    /// saved draft so a failed connect never loses typed work. Hidden
+    /// nudges restore nowhere — they were never the user's text.
     fn restore_pending_remote_submissions(&mut self, host: Uuid, cx: &mut Context<Self>) {
+        let mut drafts_changed = false;
         for (session_id, submission) in self
             .pending_remote_submissions
             .remove(&host)
@@ -2659,7 +2652,41 @@ impl Waku {
         {
             if self.state.selected_session == Some(session_id) {
                 self.restore_composer_submission(submission, cx);
+                continue;
             }
+            if submission.hidden {
+                continue;
+            }
+            let draft = crate::persistence::ComposerDraft {
+                text: super::composer::splice_pasted_blocks(
+                    &submission
+                        .human_content
+                        .or(submission.display_content)
+                        .unwrap_or(submission.prompt),
+                    &submission.pasted_blocks,
+                ),
+                attachments: submission
+                    .attachments
+                    .into_iter()
+                    .map(ComposerAttachment::from)
+                    .map(|attachment| {
+                        crate::persistence::ComposerDraftAttachment::from(&attachment)
+                    })
+                    .collect(),
+                annotations: submission
+                    .annotations
+                    .iter()
+                    .map(crate::persistence::ComposerDraftAnnotation::from)
+                    .collect(),
+            };
+            if !draft.is_empty() {
+                self.composer_drafts
+                    .set(crate::persistence::ComposerDraftKey::Session(session_id), draft);
+                drafts_changed = true;
+            }
+        }
+        if drafts_changed {
+            self.schedule_composer_draft_save(cx);
         }
     }
 
@@ -2681,7 +2708,12 @@ impl Waku {
         };
         self.state.remote_hosts.push(host.clone());
         self.save();
+        let host_id = host.id;
         self.connect_remote_host(host, cx);
+        // Saving a host is use: a fresh record has no catalog rows to carry
+        // a trigger, so the save itself runs the interactive attempt that
+        // can authenticate and accept a first-contact host key.
+        self.use_remote_host(host_id, cx);
         cx.notify();
     }
 
@@ -2725,6 +2757,9 @@ impl Waku {
         self.remote_connect_triggers.remove(&host_id);
         self.restore_pending_remote_submissions(host_id, cx);
         self.connect_remote_host(record, cx);
+        // New coordinates are new intent — the edit runs an interactive
+        // attempt rather than waiting out the backoff.
+        self.use_remote_host(host_id, cx);
         cx.notify();
     }
 
@@ -6276,5 +6311,54 @@ mod version_tests {
             parse_cli_version("cursor-agent 2025.09.12-4f8d8e2"),
             Some("2025.09.12-4f8d8e2".to_owned())
         );
+    }
+}
+
+#[cfg(test)]
+mod remote_retry_delay_tests {
+    use super::remote_retry_delay;
+    use std::time::Duration;
+
+    fn ceiling(failures: u32) -> Duration {
+        Duration::from_secs(
+            5_u64
+                .saturating_mul(1_u64 << failures.saturating_sub(1).min(6))
+                .min(300),
+        )
+    }
+
+    #[test]
+    fn delay_stays_within_the_top_half_of_its_ceiling() {
+        for failures in 0..=12 {
+            for _ in 0..32 {
+                let delay = remote_retry_delay(failures);
+                let ceiling = ceiling(failures);
+                let floor = Duration::from_secs(ceiling.as_secs() / 2);
+                assert!(
+                    delay >= floor && delay < ceiling,
+                    "failures={failures} produced {delay:?} outside [{floor:?}, {ceiling:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn delay_caps_at_five_minutes() {
+        assert_eq!(ceiling(7), Duration::from_secs(300));
+        for failures in 7..=40 {
+            let delay = remote_retry_delay(failures);
+            assert!(
+                delay >= Duration::from_secs(150) && delay < Duration::from_secs(300),
+                "failures={failures} produced {delay:?} outside the capped band"
+            );
+        }
+    }
+
+    #[test]
+    fn delay_jitters_instead_of_lockstepping() {
+        let delays: std::collections::HashSet<_> = (0..16)
+            .map(|_| remote_retry_delay(3).as_secs())
+            .collect();
+        assert!(delays.len() > 1, "jitter produced a single delay");
     }
 }

@@ -3500,6 +3500,27 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }));
+            // An explicit connect affordance for offline hosts — the only
+            // trigger a catalog-less host has, and the retry path for one
+            // whose auth the user cancelled.
+            let connect_button = (!self.remote_host_connected(host_id)).then(|| {
+                action_button(
+                    SharedString::from(format!("remote-host-connect-{host_id}")),
+                    "icons/rotate-cw.svg",
+                    tr!("daemon.reconnect"),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.use_remote_host(host_id, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        this.use_remote_host(host_id, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+            });
             rows = rows.child(
                 div()
                     .when(index > 0, |element| {
@@ -3565,6 +3586,7 @@ impl Waku {
                                 )
                             }),
                     )
+                    .when_some(connect_button, |element, button| element.child(button))
                     .child(edit_button)
                     .child(remove_button),
             );
