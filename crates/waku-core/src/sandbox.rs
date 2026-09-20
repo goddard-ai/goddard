@@ -31,6 +31,27 @@ use waku_protocol::model::ProviderKind;
 /// working directory inside the VM.
 const GUEST_WORKSPACE: &str = "/workspace";
 
+/// Dev-server ports worth forwarding host:guest at boot. `shuru -p` is a
+/// boot-time-only switch, so the set has to be guessed ahead — these cover
+/// the usual frameworks (Vite/Next/Angular/Astro/Flask/Django/Rails/Hugo/
+/// Jupyter) plus a couple of retries. A port that's busy on the host is
+/// skipped rather than failing the launch, so a host dev server never
+/// breaks sandboxed session start.
+const DEV_PORTS: &[u16] = &[
+    3000, 3001, 3002, 4000, 4173, 4200, 4321, 5000, 5173, 5174, 5175, 5176, 8000, 8001, 8080, 8888,
+    9000, 9090, 1313,
+];
+
+/// The subset of [`DEV_PORTS`] currently free on the host — forwarding a
+/// bound port would abort the whole `shuru run`.
+fn free_dev_ports() -> Vec<u16> {
+    DEV_PORTS
+        .iter()
+        .copied()
+        .filter(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok())
+        .collect()
+}
+
 /// What one provider needs inside the guest: where its CLI lives, which
 /// checkpoint provides it, which hosts its traffic may reach, and which
 /// secrets the proxy substitutes.
@@ -619,6 +640,7 @@ pub fn launch_for_provider(provider: ProviderKind, worktree: &Path) -> anyhow::R
             .iter()
             .map(|host| host.to_string())
             .collect(),
+        ports: free_dev_ports(),
         secrets,
         scrub,
     })?;
@@ -651,6 +673,9 @@ struct GuestConfig {
     checkpoint: String,
     mounts: Vec<(PathBuf, String)>,
     allow_hosts: Vec<String>,
+    /// Dev-server ports forwarded host:guest — the printed `localhost:N`
+    /// URL keeps working on the host.
+    ports: Vec<u16>,
     secrets: Vec<SecretSpec>,
     /// Secret env names — their real values are stripped from spawn env so
     /// the proxy's placeholders are the only values the guest ever sees.
@@ -694,6 +719,9 @@ impl ShuruVm {
         }
         for host in &config.allow_hosts {
             command.arg("--allow-host").arg(host);
+        }
+        for port in &config.ports {
+            command.arg("-p").arg(format!("{port}:{port}"));
         }
         for secret in &config.secrets {
             command.arg("--secret").arg(format!(
@@ -1299,6 +1327,7 @@ mod tests {
             checkpoint: "waku-provider-codex".to_owned(),
             mounts: vec![],
             allow_hosts: vec![],
+            ports: vec![],
             secrets: vec![],
             scrub: vec![],
         })
