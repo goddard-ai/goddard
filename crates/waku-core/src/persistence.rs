@@ -356,6 +356,10 @@ pub struct PersistedState {
     /// settings surface can read and edit it without duplicating secrets.
     #[serde(skip)]
     pub eval: Option<waku_protocol::eval::EvalSettings>,
+    /// The user's class-level routing map (provider/model/effort per task
+    /// class), mirrored from the settings document.
+    #[serde(skip)]
+    pub route_classes: waku_protocol::routing::RouteClassMap,
     /// Unknown daemon settings survive edits made by this desktop version.
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
@@ -469,6 +473,7 @@ impl PersistedState {
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
             eval: None,
+            route_classes: Default::default(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -620,6 +625,7 @@ impl PersistedState {
             memory_experiment_enabled: self.memory_experiment_enabled,
             project_map_enabled: self.project_map_enabled,
             eval: self.eval.clone(),
+            route_classes: self.route_classes.clone(),
             // Integrations postdate the legacy combined document; defaults
             // are the correct migration (on in dev builds, opt-in in release).
             integrations_enabled: cfg!(debug_assertions),
@@ -669,6 +675,7 @@ impl PersistedState {
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.project_map_enabled = settings.project_map_enabled;
         self.eval = settings.eval;
+        self.route_classes = settings.route_classes;
         self.daemon_settings_extra = settings.extra;
     }
 
