@@ -107,7 +107,7 @@ commits. Highlights, grouped by area:
 
 - **macOS:** download the signed `.dmg` from [goddardai.org](https://goddardai.org). It
   updates itself.
-- **Linux:** `curl -fsSL https://goddardai.org/install.sh | sh` — installs into
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh` — installs into
   `~/.local` without root, adds an applications-menu entry, and keeps itself
   updated. Requires glibc 2.35+ (Ubuntu 22.04, Debian 12, Fedora 36 or newer),
   a working Vulkan or OpenGL driver, and x86_64 or aarch64.
@@ -673,7 +673,7 @@ isn't code-signed — choose **More info → Run anyway**.
 
 - **macOS:** move Goddard to the Trash. Settings, tasks, and workspaces live in
   `~/.goddard` — delete it to remove them too.
-- **Linux:** `curl -fsSL https://goddardai.org/install.sh | sh -s -- --uninstall`
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh -s -- --uninstall`
   removes `~/.local/goddard.app`, the symlink, and the desktop entry. `~/.goddard`
   stays; delete it to remove projects and settings.
 - **Windows:** uninstall from Settings → Apps, or delete the portable folder.

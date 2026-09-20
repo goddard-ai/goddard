@@ -6,7 +6,7 @@ set -eu
 # ~/.local/goddard.app, links the binary onto PATH, and registers the desktop
 # entry. docs/linux.md documents the equivalent manual steps.
 #
-#   curl -fsSL https://goddardai.org/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh
 #
 # Environment:
 #   GODDARD_VERSION        install this version instead of the latest
@@ -18,8 +18,8 @@ usage() {
 Install Goddard for Linux into ~/.local.
 
 Usage:
-  curl -fsSL https://goddardai.org/install.sh | sh
-  curl -fsSL https://goddardai.org/install.sh | sh -s -- --uninstall
+  curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh -s -- --uninstall
 
 Options:
   --uninstall   Remove Goddard, leaving ~/.goddard (projects and settings) alone

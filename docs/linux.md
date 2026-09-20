@@ -3,7 +3,7 @@
 ## Install
 
 ```sh
-curl -fsSL https://goddardai.org/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh
 ```
 
 The script needs no root. It unpacks the release tarball into
@@ -90,7 +90,7 @@ manual fallback for the default `~/.local/goddard.app` install.
 ## Uninstalling
 
 ```sh
-curl -fsSL https://goddardai.org/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh -s -- --uninstall
 ```
 
 This removes `~/.local/goddard.app`, the symlink, and the desktop entry. Projects
@@ -110,7 +110,7 @@ To exercise the install script against that local build:
 
 ```sh
 GODDARD_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
-  sh website/public/install.sh
+  sh install.sh
 ```
 
 ## Computer Use

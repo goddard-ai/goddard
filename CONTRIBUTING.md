@@ -62,13 +62,14 @@ The archive is written under `target/release` with an install-prefix layout
 not bundle system graphics libraries; distribution packages should declare
 those runtime dependencies normally.
 
-`website/public/install.sh` (served at `https://goddardai.org/install.sh`) is what
+`install.sh` — fetched from
+`https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh` — is what
 users run to install that archive. Point it at a local build to exercise it
 without publishing:
 
 ```sh
 GODDARD_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
-  sh website/public/install.sh
+  sh install.sh
 ```
 
 [docs/linux.md](docs/linux.md) documents both paths for users.

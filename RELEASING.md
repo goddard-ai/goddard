@@ -226,15 +226,20 @@ assets — including every signed update feed — to R2.
 
 Every GitHub release's notes open with a **### Downloads** section — direct
 links to the macOS DMG, the Windows installers and portable zips, and the Linux
-tarballs plus the `install.sh` one-liner — above the changelog. Keep it there
-when editing a draft's notes, and add it when cutting a release by hand.
+tarballs plus the `install.sh` one-liner — above the changelog. The one-liner
+pins the release's own tag so it always fetches a published script:
+`curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/<tag>/install.sh | sh`.
+Keep it there when editing a draft's notes, and add it when cutting a release
+by hand — but only on releases whose tag contains `install.sh` at the repo
+root; older tags 404 and must not recommend it.
 
 `appcast.xml`, the architecture-specific Linux/Windows appcasts,
 `latest-linux.txt`, and `latest-windows.txt` are the bucket's mutable pointers
 and upload with a short cache lifetime; everything else is versioned and
 cached forever. Linux users install from that bucket via
-[`website/public/install.sh`](website/public/install.sh), served at
-`https://goddardai.org/install.sh` — see [docs/linux.md](docs/linux.md).
+[`install.sh`](install.sh), fetched from the repo's raw GitHub URL
+(`https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh`) — see
+[docs/linux.md](docs/linux.md).
 
 Publishing that GitHub release (or running **Sync release** from Actions)
 uploads the assets to the `goddard-releases` R2 bucket. Configure these repository
