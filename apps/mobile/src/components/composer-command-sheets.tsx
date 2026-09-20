@@ -35,6 +35,7 @@ import {
   providerSessionKey,
 } from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
+import { useDaemonSettings } from '@/hooks/use-daemon-data';
 import { createResumedSession } from '@/lib/mobile-runtime';
 import { providerLabel } from '@/lib/session-presentation';
 
@@ -63,6 +64,7 @@ export function useComposerLocalCommands({
   onClear: () => void;
 }) {
   const daemon = useDaemon();
+  const settings = useDaemonSettings();
   const [resumeOpen, setResumeOpen] = useState(false);
   const [goalDialog, setGoalDialog] = useState<{ prefill: string | null; replace: boolean } | null>(null);
   useEffect(() => {
@@ -73,6 +75,12 @@ export function useComposerLocalCommands({
   async function execute(prompt: string, commands: SlashCommand[]): Promise<boolean> {
     if (!provider) return false;
     if (isResumeSubmission(prompt)) {
+      // Resume lists sessions the provider itself ran, so a disabled
+      // provider has nothing to offer; say so instead of opening an
+      // empty sheet.
+      if (settings.data?.disabled_providers.includes(provider)) {
+        throw new Error(`${providerLabel(provider)} is disabled`);
+      }
       setResumeOpen(true);
     } else if (isLandSubmission(prompt)) {
       // `/land` is always intercepted so it never leaks into a turn; a

@@ -1,0 +1,1 @@
+- Mobile's /resume command no longer offers resume for a provider that's disabled in Settings
