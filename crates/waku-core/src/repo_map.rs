@@ -647,7 +647,9 @@ impl RepoMapIndex {
         let mut omitted = 0usize;
         for (path, file) in ranked {
             let mut block = String::new();
-            block.push_str(&path.display().to_string());
+            // Provider-facing paths keep forward slashes on every platform —
+            // `Path::display` would emit `\` on Windows.
+            block.push_str(&path.to_string_lossy().replace('\\', "/"));
             block.push_str(":\n");
             for (depth, signature) in &file.symbols {
                 let indent = 2 + depth * 2;

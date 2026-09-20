@@ -415,6 +415,9 @@ mod tests {
         let root = std::env::temp_dir().join(format!("waku-branch-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         run_git(&root, &["init", "-b", "main"]);
+        // Byte-exact file assertions: Windows CI checks out CRLF under the
+        // runner's global autocrlf unless the repo pins it off.
+        run_git(&root, &["config", "core.autocrlf", "false"]);
         fs::write(root.join("README.md"), "main\n").unwrap();
         run_git(&root, &["add", "."]);
         run_git(

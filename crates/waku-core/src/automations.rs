@@ -1261,7 +1261,7 @@ mod tests {
             prompt: "do the thing".to_owned(),
             provider: ProviderKind::Claude,
             model: None,
-            project_path: PathBuf::from("/tmp"),
+            project_path: std::env::temp_dir(),
             workspace: AutomationWorkspace::Local,
             base_branch: None,
             session_id: None,
