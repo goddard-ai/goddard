@@ -249,6 +249,8 @@ daemon.agent_tools_title: エージェントツール
 daemon.agent_tools_description: エージェントがタスクを作成し、他のタスクにメッセージを送れるようにします。有効な間に開始されたセッションにはセッション限定の goddard-agent コマンドが提供され、送信されたプロンプトは対象のトランスクリプトに記録されます。
 daemon.agent_settings_title: エージェント設定
 daemon.agent_settings_description: エージェントがカスタムコマンドを作成・編集できるようにします。デフォルトで有効です。エージェントが追加したコマンドには印が付き、どのタスクが変更したかが記録されます。
+daemon.sandbox_default_title: 新しいタスクをデフォルトでサンドボックス化
+daemon.sandbox_default_description: 新しいタスクをこの Mac ではなくサンドボックス VM 環境で開始します。タスクごとの環境の選択はそのタスクに優先します。
 daemon.build_title: ビルド
 daemon.build_description: このアプリと接続中のデーモンがビルドされたコミット。
 daemon.build_app: アプリ

@@ -2609,6 +2609,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let agent_tools_card = self.agent_tools_card(theme, search, cx);
         let agent_settings_card = self.agent_settings_card(theme, search, cx);
+        let sandbox_default_card = self.sandbox_default_card(theme, search, cx);
         let remote_hosts_card = self.render_remote_hosts_card(theme, search, cx);
         let build_card = self.render_build_card(theme, search, cx);
         if self.daemon.is_externally_managed() {
@@ -2635,6 +2636,7 @@ impl Waku {
                 .children(external_card)
                 .children(agent_tools_card)
                 .children(agent_settings_card)
+                .children(sandbox_default_card)
                 .children(build_card)
                 .into_any_element();
         }
@@ -3232,6 +3234,7 @@ impl Waku {
             .children(remote_hosts_card)
             .children(agent_tools_card)
             .children(agent_settings_card)
+            .children(sandbox_default_card)
             .children(build_card)
             .into_any_element()
     }
@@ -4060,6 +4063,53 @@ impl Waku {
 
     fn set_agent_settings_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.agent_settings_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The daemon-scoped "sandbox new tasks by default" pref. It only changes
+    /// the environment a fresh task seeds — a task's own Environment pick
+    /// still wins, and the card only exists while the sandbox experiment
+    /// exposes the surface.
+    fn sandbox_default_card(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.state.sandbox_experiment_enabled {
+            return None;
+        }
+        let enabled = self.state.sandbox_default_enabled;
+        let title = tr!("daemon.sandbox_default_title");
+        let description = tr!("daemon.sandbox_default_description");
+        let matched = search.matched(&title, &description)?;
+        let toggle = toggle_switch(
+            "sandbox-default-toggle",
+            enabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| this.set_sandbox_default_enabled(!enabled, cx),
+        );
+        Some(
+            div()
+                .min_h(px(66.0))
+                .px(px(20.0))
+                .py(px(13.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(24.0))
+                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(toggle)
+                .into_any_element(),
+        )
+    }
+
+    fn set_sandbox_default_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.sandbox_default_enabled = enabled;
         self.save();
         cx.notify();
     }

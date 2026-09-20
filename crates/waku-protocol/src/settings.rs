@@ -80,6 +80,12 @@ pub struct DaemonSettings {
     /// toggle all stay hidden while this is off. Defaults on in development
     /// builds, opt-in in release builds.
     pub sandbox_experiment_enabled: bool,
+    /// Whether fresh tasks start in the Sandbox VM environment instead of
+    /// This Mac. The experiment opt-in still gates the surface; this only
+    /// changes which environment a new task seeds. A per-task choice in the
+    /// access menu still wins for that task.
+    #[serde(default)]
+    pub sandbox_default_enabled: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -110,6 +116,7 @@ impl Default for DaemonSettings {
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
+            sandbox_default_enabled: false,
             extra: BTreeMap::new(),
         }
     }

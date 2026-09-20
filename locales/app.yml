@@ -646,6 +646,10 @@ daemon.agent_settings_title:
   en: Agent settings
 daemon.agent_settings_description:
   en: Let agents create and edit custom commands for you. On by default; commands an agent adds are marked, and the daemon records which task made each change.
+daemon.sandbox_default_title:
+  en: Sandbox new tasks by default
+daemon.sandbox_default_description:
+  en: Start fresh tasks in the Sandbox VM environment instead of This Mac. A task's own Environment choice still wins for that task.
 daemon.build_title:
   en: Build
 daemon.build_description:

@@ -90,4 +90,11 @@ integrations_proxy_token?: string,
  * toggle all stay hidden while this is off. Defaults on in development
  * builds, opt-in in release builds.
  */
-sandbox_experiment_enabled: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+sandbox_experiment_enabled: boolean,
+/**
+ * Whether fresh tasks start in the Sandbox VM environment instead of
+ * This Mac. The experiment opt-in still gates the surface; this only
+ * changes which environment a new task seeds. A per-task choice in the
+ * access menu still wins for that task.
+ */
+sandbox_default_enabled: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

@@ -14,11 +14,17 @@ fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode
         .unwrap_or(remembered)
 }
 
-fn new_task_sandboxed(current: Option<&AgentSession>, remembered: bool, enabled: bool) -> bool {
+fn new_task_sandboxed(
+    current: Option<&AgentSession>,
+    remembered: bool,
+    enabled: bool,
+    default: bool,
+) -> bool {
     enabled
-        && current
-            .map(|session| session.sandboxed)
-            .unwrap_or(remembered)
+        && (default
+            || current
+                .map(|session| session.sandboxed)
+                .unwrap_or(remembered))
 }
 
 /// Whether picking `mode` must pause on the one-time Full access
@@ -793,6 +799,7 @@ impl Waku {
             self.selected_session(),
             self.state.last_sandboxed,
             self.state.sandbox_experiment_enabled,
+            self.state.sandbox_default_enabled,
         );
         let mut session = self.state.new_session(project_id, provider);
         session.runtime_mode = runtime_mode;
@@ -933,6 +940,7 @@ impl Waku {
                     self.selected_session(),
                     self.state.last_sandboxed,
                     self.state.sandbox_experiment_enabled,
+                    self.state.sandbox_default_enabled,
                 );
                 let mut session = self.state.new_session(project_id, self.state.last_provider);
                 session.runtime_mode = runtime_mode;
@@ -4608,12 +4616,16 @@ mod tests {
         let mut current = AgentSession::new(Uuid::new_v4(), ProviderKind::OpenCode);
         current.sandboxed = true;
 
-        assert!(new_task_sandboxed(Some(&current), false, true));
-        assert!(!new_task_sandboxed(None, false, true));
-        assert!(new_task_sandboxed(None, true, true));
+        assert!(new_task_sandboxed(Some(&current), false, true, false));
+        assert!(!new_task_sandboxed(None, false, true, false));
+        assert!(new_task_sandboxed(None, true, true, false));
         // The experiment gate keeps remembered or inherited intent from
         // reaching a draft while the surface is hidden.
-        assert!(!new_task_sandboxed(Some(&current), true, false));
+        assert!(!new_task_sandboxed(Some(&current), true, false, false));
+        // The daemon's sandbox-by-default pref overrides the remembered
+        // choice for fresh tasks; the experiment gate still wins over it.
+        assert!(new_task_sandboxed(None, false, true, true));
+        assert!(!new_task_sandboxed(None, false, false, true));
     }
 
     #[test]

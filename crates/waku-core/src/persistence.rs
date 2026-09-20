@@ -633,6 +633,7 @@ impl PersistedState {
             integrations_proxy_token: String::new(),
             // The sandbox experiment postdates the document the same way.
             sandbox_experiment_enabled: cfg!(debug_assertions),
+            sandbox_default_enabled: false,
             extra: self.daemon_settings_extra.clone(),
         }
     }

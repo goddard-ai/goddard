@@ -1261,6 +1261,10 @@ pub struct PersistedState {
     /// mirrored here so clients can gate the environment choice.
     #[serde(default = "default_experiment_enabled")]
     pub sandbox_experiment_enabled: bool,
+    /// Whether fresh tasks start in the Sandbox VM environment by default.
+    /// Daemon-owned; mirrored here so new-task seeding can read it.
+    #[serde(default)]
+    pub sandbox_default_enabled: bool,
     /// Connected integrations. Daemon-owned; mirrored in memory so a client
     /// `UpdateSettings` round-trips them instead of wiping the list. Writes
     /// go through the integration commands.
@@ -1397,6 +1401,7 @@ impl PersistedState {
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
+            sandbox_default_enabled: false,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -1417,7 +1422,8 @@ impl PersistedState {
     pub fn new_session(&self, project_id: Uuid, provider: ProviderKind) -> AgentSession {
         let mut session = AgentSession::new(project_id, provider);
         session.runtime_mode = self.last_runtime_mode;
-        session.sandboxed = self.last_sandboxed && self.sandbox_experiment_enabled;
+        session.sandboxed = self.sandbox_experiment_enabled
+            && (self.sandbox_default_enabled || self.last_sandboxed);
         // An Auto pick carries to the next draft like the provider/model do;
         // the seeded provider/model stay as the route's last-used hint.
         session.auto_route = self.last_auto_route && self.model_router_enabled;
@@ -1600,6 +1606,7 @@ impl PersistedState {
             integrations: self.integrations.clone(),
             integrations_proxy_token: self.integrations_proxy_token.clone(),
             sandbox_experiment_enabled: self.sandbox_experiment_enabled,
+            sandbox_default_enabled: self.sandbox_default_enabled,
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -1626,6 +1633,7 @@ impl PersistedState {
         self.integrations = settings.integrations;
         self.integrations_proxy_token = settings.integrations_proxy_token;
         self.sandbox_experiment_enabled = settings.sandbox_experiment_enabled;
+        self.sandbox_default_enabled = settings.sandbox_default_enabled;
         self.daemon_settings_extra = settings.extra;
     }
 
@@ -3116,6 +3124,27 @@ mod tests {
         mirror.sandbox_experiment_enabled = false;
         mirror.apply_daemon_settings(state.daemon_settings());
         assert!(mirror.sandbox_experiment_enabled);
+    }
+
+    #[test]
+    fn sandbox_default_seeds_and_mirrors() {
+        let mut state = PersistedState::empty();
+        state.sandbox_experiment_enabled = true;
+        state.sandbox_default_enabled = true;
+
+        // The daemon pref arms a draft even when nothing was remembered.
+        let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(session.sandboxed);
+
+        // And it round-trips through the daemon settings mirror.
+        let mut mirror = PersistedState::empty();
+        mirror.apply_daemon_settings(state.daemon_settings());
+        assert!(mirror.sandbox_default_enabled);
+
+        // The experiment gate still wins over the default.
+        state.sandbox_experiment_enabled = false;
+        let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(!session.sandboxed);
     }
 }
 
