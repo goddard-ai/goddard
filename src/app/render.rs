@@ -509,6 +509,8 @@ impl Render for Waku {
             let content = div()
                 .relative()
                 .size_full()
+                .on_action(cx.listener(Self::new_session_action))
+                .on_action(cx.listener(Self::new_task_in_action))
                 .on_action(cx.listener(Self::toggle_command_palette_action))
                 .on_action(cx.listener(Self::toggle_file_finder_action))
                 .on_action(cx.listener(Self::toggle_big_picture_action))

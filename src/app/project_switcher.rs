@@ -292,16 +292,21 @@ impl Waku {
         self.set_project_switcher_highlight(next, cx);
     }
 
-    /// Only a New Task draft can retarget its project; elsewhere the open
-    /// fails and the caller propagates the chord. The draft's own project
-    /// pins the head of the list so the first press lands on the next most
-    /// recent one.
+    /// Only the New Task page's own draft can retarget its project — the
+    /// switcher answers "which project" for the draft on screen. On any
+    /// other surface (a page, a full-width terminal, Settings) the open
+    /// fails and the chord falls through to New Session, which navigates
+    /// to the New Task page. The draft's own project pins the head of the
+    /// list so the first press lands on the next most recent one.
     fn open_project_switcher(
         &mut self,
         reverse: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if !self.session_surface_active() {
+            return false;
+        }
         let Some(current_project) = self
             .selected_session()
             .filter(|session| !session.has_started() && !session.is_busy())

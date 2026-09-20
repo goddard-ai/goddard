@@ -1,0 +1,1 @@
+- ⌘N always lands on the New task page now — on Projects, Drafts, Automations, Inbox, and Settings it opened the recent-project switcher over the page (or did nothing in Settings) instead of navigating; the switcher still answers ⌘N while New task is the page on screen

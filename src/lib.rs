@@ -743,11 +743,13 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("end", SelectLastTask, Some("TaskSwitcher")),
         KeyBinding::new("enter", ConfirmTaskSwitch, Some("TaskSwitcher")),
         KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
-        // The project switcher opens from a New Task draft and
+        // The project switcher opens from the New Task page's draft and
         // commits when the platform modifier is released, the same
         // gesture as ctrl-tab above. Registered after New Session at
         // the same depth, the chord wins the tie and only falls
-        // through to creating a task when no draft can take it.
+        // through to it when the New Task page is not on screen —
+        // creating or revisiting a draft navigates there from any
+        // other surface.
         KeyBinding::new("secondary-n", SwitchProjectForward, None),
         // ⌘⇧N mirrors the forward chord at the root: the overlay's focus
         // lands on a two-frame defer, so only a root binding keeps a fast

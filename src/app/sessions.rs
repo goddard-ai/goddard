@@ -2569,6 +2569,21 @@ impl Waku {
         }
     }
 
+    /// Whether the session surface — a task transcript or the New Task
+    /// composer — owns the main column. The pages (Projects, Drafts,
+    /// Automations, Inbox), a full-width terminal, and the Settings
+    /// window each claim it instead; a page joining the family sets its
+    /// flag here and clears the rest in its `show_*`, the contract they
+    /// all share.
+    pub(super) fn session_surface_active(&self) -> bool {
+        self.settings_page.is_none()
+            && self.selected_terminal.is_none()
+            && !self.drafts_page
+            && !self.automations_page
+            && self.projects_page.is_none()
+            && !self.notifications.open
+    }
+
     /// Drop page targets whose project is gone — or whose experiment is off;
     /// a stale entry would leave a live-looking button that does nothing.
     pub(super) fn prune_navigation_stack(
