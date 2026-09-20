@@ -46,7 +46,7 @@ use super::selection::{
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
 use crate::theme::{Theme, hairline};
-use crate::ui::menu::{ContextMenuHandle, context_menu};
+use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::tooltip::Tooltip;
 
 mod math_text;
@@ -90,6 +90,12 @@ pub type TranscriptSelection = SelectionState<TextGeometry>;
 /// callers that do have that context can intercept a link, while every other
 /// markdown view continues to use GPUI's ordinary URL opener.
 pub type LinkHandler = Rc<dyn Fn(&str, &mut Window, &mut gpui::App)>;
+
+/// The rows a right-clicked `@`-mention contributes to the row's context
+/// menu, built from the mention's resolved absolute path. The renderer stays
+/// unaware of remotes and workspace surfaces, so the caller decides what a
+/// path can do.
+pub type FileRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 
 // ── Layout metrics ─────────────────────────────────────────────────────────
 //
@@ -310,7 +316,8 @@ pub struct FlatText {
     pub commit_refs: Vec<(Range<usize>, String)>,
     /// `@`-mention file references: byte ranges painted with a dotted
     /// underline. The click itself rides `links` — each range has a matching
-    /// entry there whose "URL" is the mention's resolved absolute path.
+    /// entry there whose "URL" is the mention's resolved absolute path — and
+    /// a right-click contributes that path's actions to the row's menu.
     pub file_refs: Vec<Range<usize>>,
     pub math: Option<Rc<math_text::MathData>>,
     /// How the flat text maps back to markdown for copy; default emits the
@@ -918,8 +925,15 @@ pub struct Ctx<'a> {
     copy_lead: Cell<Option<Rc<str>>>,
     animate_streaming: bool,
     math_enabled: bool,
-    math_menu: Option<ContextMenuHandle>,
-    wrap_math_menu: bool,
+    /// The enclosing context menu inner affordances contribute actions to —
+    /// formulas and `@`-mention file references. `None` where the surface has
+    /// no menu to join.
+    context_menu: Option<ContextMenuHandle>,
+    /// Whether [`markdown`] wraps the body in that menu itself — standalone
+    /// surfaces only; a transcript row's own menu already wraps it.
+    wrap_context_menu: bool,
+    /// Builds the menu rows a right-clicked `@`-mention contributes.
+    file_ref_items: Option<FileRefMenuItems>,
     now: Instant,
 }
 
@@ -950,8 +964,9 @@ impl<'a> Ctx<'a> {
             copy_lead: Cell::new(None),
             animate_streaming: true,
             math_enabled: true,
-            math_menu: None,
-            wrap_math_menu: false,
+            context_menu: None,
+            wrap_context_menu: false,
+            file_ref_items: None,
             now: Instant::now(),
         }
     }
@@ -1025,17 +1040,24 @@ impl<'a> Ctx<'a> {
         self
     }
 
-    /// Contribute formula actions to an existing message menu.
+    /// Contribute formula and file-reference actions to an existing menu —
+    /// a transcript row's message menu.
     pub fn with_context_menu(mut self, menu: ContextMenuHandle) -> Self {
-        self.math_menu = Some(menu);
-        self.wrap_math_menu = false;
+        self.context_menu = Some(menu);
+        self.wrap_context_menu = false;
         self
     }
 
-    /// Give a standalone Markdown surface its own formula context menu.
-    pub fn with_math_context_menu(mut self, menu: ContextMenuHandle) -> Self {
-        self.math_menu = Some(menu);
-        self.wrap_math_menu = true;
+    /// Give a standalone Markdown surface its own context menu.
+    pub fn with_standalone_context_menu(mut self, menu: ContextMenuHandle) -> Self {
+        self.context_menu = Some(menu);
+        self.wrap_context_menu = true;
+        self
+    }
+
+    /// Enable `@`-mention context actions — see `file_ref_items`.
+    pub fn with_file_ref_items(mut self, items: FileRefMenuItems) -> Self {
+        self.file_ref_items = Some(items);
         self
     }
 
@@ -1060,8 +1082,9 @@ impl<'a> Ctx<'a> {
             copy_lead: Cell::new(None),
             animate_streaming: self.animate_streaming,
             math_enabled: self.math_enabled,
-            math_menu: self.math_menu.clone(),
-            wrap_math_menu: self.wrap_math_menu,
+            context_menu: self.context_menu.clone(),
+            wrap_context_menu: self.wrap_context_menu,
+            file_ref_items: self.file_ref_items.clone(),
             now: Instant::now(),
         }
     }
@@ -1168,6 +1191,7 @@ fn text_element_with_selection(
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
+    file_menu: Option<(ContextMenuHandle, FileRefMenuItems)>,
     code_wash: Hsla,
     selection_wash: Hsla,
     search_match_wash: Hsla,
@@ -1361,14 +1385,26 @@ fn text_element_with_selection(
     .absolute()
     .size_full();
 
-    div()
+    let mut element = div()
         .relative()
         .w_full()
         .min_w_0()
-        .cursor(CursorStyle::IBeam)
-        .child(underlay)
-        .child(body)
-        .into_any_element()
+        .cursor(CursorStyle::IBeam);
+    if !flat.file_refs.is_empty()
+        && let Some((menu, items)) = file_menu
+    {
+        let geometry = TextGeometry::Text(layout.clone());
+        let file_refs = flat.file_refs.clone();
+        let links = flat.links.clone();
+        element = element.on_mouse_down(MouseButton::Right, move |event, _, cx| {
+            if let Some(path) = file_ref_at(&geometry, &file_refs, &links, event.position) {
+                menu.set_context_items(items(&path, cx));
+            }
+            // Bubble to the row's own menu so it opens with these actions
+            // ahead of its usual ones.
+        });
+    }
+    element.child(underlay).child(body).into_any_element()
 }
 
 fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
@@ -1395,6 +1431,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.selection.clone(),
         ctx.search.clone(),
         ctx.link_handler.clone(),
+        ctx.context_menu.clone().zip(ctx.file_ref_items.clone()),
         ctx.palette.code_wash,
         ctx.palette.selection,
         ctx.palette.search_match,
@@ -1426,6 +1463,7 @@ pub fn selectable_flat_text(
         flat.runs.clone(),
         key,
         selection,
+        None,
         None,
         None,
         code_wash,
@@ -1571,6 +1609,33 @@ pub fn text_range_bounds(layout: &TextGeometry, range: &Range<usize>) -> Vec<Bou
         TextGeometry::Text(layout) => range_rects(layout, range, 0.0, 0.0),
         TextGeometry::Math(layout) => layout.range_rects(range),
     }
+}
+
+/// The resolved path of the `@`-mention under `position`, when the point
+/// lands inside one of the mention's glyph boxes. The index probe alone would
+/// also claim clicks in the slack beside the token.
+pub(super) fn file_ref_at(
+    geometry: &TextGeometry,
+    file_refs: &[Range<usize>],
+    links: &[(Range<usize>, String)],
+    position: Point<Pixels>,
+) -> Option<String> {
+    if file_refs.is_empty() || geometry.is_missing() {
+        return None;
+    }
+    let index = geometry
+        .index_for_position(position)
+        .unwrap_or_else(|index| index);
+    let range = file_refs.iter().find(|range| {
+        range.contains(&index)
+            && text_range_bounds(geometry, range)
+                .iter()
+                .any(|rect| rect.contains(&position))
+    })?;
+    links
+        .iter()
+        .find(|(link, _)| link == range)
+        .map(|(_, path)| path.clone())
 }
 
 /// `TextLayout::bounds` panics before prepaint has run. A row that was spliced
@@ -1969,13 +2034,13 @@ fn markdown_capped<'a>(
         .gap(px(ctx.metrics.block_gap))
         .children(children);
     Some(
-        if ctx.math_enabled
-            && ctx.wrap_math_menu
-            && let Some(menu) = &ctx.math_menu
+        if ctx.wrap_context_menu
+            && (ctx.math_enabled || ctx.file_link_root.is_some())
+            && let Some(menu) = &ctx.context_menu
         {
             context_menu(
                 element,
-                SharedString::from(format!("math-menu-{}", ctx.row)),
+                SharedString::from(format!("context-menu-{}", ctx.row)),
                 menu,
                 |_| Vec::new(),
             )

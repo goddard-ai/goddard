@@ -1328,6 +1328,7 @@ impl Waku {
             .with_families(crate::fonts::current(cx))
             .with_math_enabled(self.state.render_math)
             .with_link_handler(self.markdown_link_handler.clone())
+            .with_file_ref_items(self.markdown_file_menu_items.clone())
             .with_streaming_animation(animate_streaming)
     }
 
@@ -3287,7 +3288,9 @@ impl Waku {
                         reasoning_live && !cx.reduce_motion(),
                         cx,
                     )
-                    .with_math_context_menu(self.menu_handle(format!("reasoning-math-{id}"), cx));
+                    .with_standalone_context_menu(
+                        self.menu_handle(format!("reasoning-math-{id}"), cx),
+                    );
                 let reasoning_viewport = self
                     .activity_scroll_viewports
                     .borrow_mut()

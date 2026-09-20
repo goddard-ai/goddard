@@ -3033,6 +3033,10 @@ pub struct Waku {
     /// callback knows about the active workspace; the renderer deliberately
     /// does not.
     markdown_link_handler: md::render::LinkHandler,
+    /// The rows a right-clicked `@`-mention contributes to a prompt's menu.
+    /// Built once for the same reason as the link handler — remote-path
+    /// checks need the app, and the renderer does not have it.
+    markdown_file_menu_items: md::render::FileRefMenuItems,
     /// Transcript-wide text selection, spanning messages and tool output. Its
     /// `annotations` handle holds the commented highlights of the session on
     /// screen.
@@ -5198,6 +5202,29 @@ impl Waku {
                 })
             };
 
+            let markdown_file_menu_items: md::render::FileRefMenuItems = {
+                let waku = cx.entity().downgrade();
+                Rc::new(move |path, cx| {
+                    let copied_path = path.to_owned();
+                    let reveal_path = PathBuf::from(path);
+                    let remote = waku
+                        .update(cx, |this, _| this.is_remote_path(&reveal_path))
+                        .unwrap_or(true);
+                    vec![
+                        MenuItem::new(tr!("files.copy_path"), move |_, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copied_path.clone()));
+                        })
+                        .icon("icons/copy.svg"),
+                        MenuItem::new(tr!("common.reveal_in_finder"), move |_, cx| {
+                            crate::platform::reveal_in_file_manager(&reveal_path, cx);
+                        })
+                        .icon("icons/folder-open.svg")
+                        .disabled(remote),
+                        MenuItem::Separator,
+                    ]
+                })
+            };
+
             // Read before `state` moves into the struct literal below.
             let initial_session = state.selected_session;
 
@@ -5772,6 +5799,7 @@ impl Waku {
                 activity_diffs: RefCell::new(HashMap::new()),
                 activity_diff_viewports: RefCell::new(HashMap::new()),
                 markdown_link_handler,
+                markdown_file_menu_items,
                 transcript_selection,
                 transcript_annotations: HashMap::new(),
                 annotation_session: initial_session,

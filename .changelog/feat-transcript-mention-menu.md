@@ -1,0 +1,1 @@
+- Right-click an `@` file mention in a sent prompt to copy its path or show it in the file manager

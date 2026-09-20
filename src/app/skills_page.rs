@@ -1257,7 +1257,7 @@ impl Waku {
             )
             .with_families(crate::fonts::current(cx))
             .with_math_enabled(self.state.render_math)
-            .with_math_context_menu(self.menu_handle("skill-detail-math", cx));
+            .with_standalone_context_menu(self.menu_handle("skill-detail-math", cx));
             div()
                 .mt(px(18.0))
                 .pt(px(14.0))

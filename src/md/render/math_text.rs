@@ -286,24 +286,32 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
         });
     }
     let has_links = !flat.links.is_empty();
-    let has_menu = ctx.math_menu.is_some();
-    if let Some(menu) = &ctx.math_menu {
+    let has_menu = ctx.context_menu.is_some();
+    if let Some(menu) = &ctx.context_menu {
         let data = flat.math.as_ref().unwrap().clone();
         let hit = geometry.clone();
+        let file_hit = TextGeometry::Math(geometry.clone());
+        let file_refs = flat.file_refs.clone();
+        let links = flat.links.clone();
+        let file_items = ctx.file_ref_items.clone();
         let menu = menu.clone();
-        wrapper = wrapper.on_mouse_down(MouseButton::Right, move |event, _, _| {
+        wrapper = wrapper.on_mouse_down(MouseButton::Right, move |event, _, cx| {
             if let Some(index) = hit.formula_at(event.position) {
                 menu.set_context_items(vec![copy_expression_item(
                     data.spans[index].latex.clone(),
                     tr!("common.copy_expression"),
                 )]);
+            } else if let Some(items) = &file_items
+                && let Some(path) = file_ref_at(&file_hit, &file_refs, &links, event.position)
+            {
+                menu.set_context_items(items(&path, cx));
             }
             // Bubble to the Markdown/message wrapper so its usual actions
             // remain in the same menu.
         });
         let data = flat.math.as_ref().unwrap().clone();
         let hit = geometry.clone();
-        let menu = ctx.math_menu.as_ref().unwrap().clone();
+        let menu = ctx.context_menu.as_ref().unwrap().clone();
         wrapper = wrapper.on_key_down(move |event, window, cx| {
             if event.keystroke.key != "contextmenu"
                 && !(event.keystroke.key == "f10" && event.keystroke.modifiers.shift)
@@ -856,7 +864,14 @@ mod tests {
                 self.selection.clone(),
             )
             .with_math_enabled(self.enabled)
-            .with_context_menu(self.menu.clone());
+            .with_context_menu(self.menu.clone())
+            .with_file_link_root(Some(PathBuf::from("/repo")))
+            .with_file_ref_items(Rc::new(|path: &str, _| {
+                let path = path.to_owned();
+                vec![MenuItem::new(format!("Copy {path}"), move |_, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+                })]
+            }));
             context_menu(
                 div()
                     .w(px(500.0))
@@ -1023,6 +1038,72 @@ mod tests {
             assert_eq!(
                 cx.read_from_clipboard().unwrap().text().unwrap(),
                 r"\frac{1}{2}"
+            )
+        });
+    }
+
+    #[gpui::test]
+    fn file_reference_context_actions_lead_the_message_menu(cx: &mut gpui::TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text("look at @src/app.rs please", false);
+        let menu = cx.update(ContextMenuHandle::new);
+        let (view, cx) = cx.add_window_view(|_, _| MenuHarness {
+            markdown,
+            menu: menu.clone(),
+            selection: TranscriptSelection::default(),
+            enabled: true,
+        });
+        cx.run_until_parked();
+        let mention_point = view.read_with(cx, |view, _| {
+            let flat = view
+                .markdown
+                .flats
+                .borrow()
+                .values()
+                .find(|flat| !flat.file_refs.is_empty())
+                .unwrap()
+                .clone();
+            let registry = view.selection.registry.borrow();
+            let entry = registry.entries().first().unwrap();
+            text_range_bounds(&entry.geometry, &flat.file_refs[0])
+                .first()
+                .unwrap()
+                .center()
+        });
+        cx.simulate_mouse_down(mention_point, MouseButton::Right, gpui::Modifiers::none());
+        assert!(menu.is_open());
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("down enter");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "/repo/src/app.rs"
+            )
+        });
+
+        // The ordinary message action remains after the mention's own.
+        cx.simulate_mouse_down(mention_point, MouseButton::Right, gpui::Modifiers::none());
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("down down enter");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "whole message"
+            )
+        });
+
+        // A right-click away from the mention leaves only the message action.
+        cx.simulate_mouse_down(
+            point(px(2.0), px(2.0)),
+            MouseButton::Right,
+            gpui::Modifiers::none(),
+        );
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("down enter");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "whole message"
             )
         });
     }

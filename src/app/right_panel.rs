@@ -5261,7 +5261,7 @@ impl Waku {
         )
         .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
-        .with_math_context_menu(self.menu_handle("file-preview-math", cx))
+        .with_standalone_context_menu(self.menu_handle("file-preview-math", cx))
         .with_link_handler(self.markdown_link_handler.clone());
         let document = md::render::markdown(view, &ctx);
 
