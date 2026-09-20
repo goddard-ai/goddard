@@ -873,7 +873,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                         .child(icon("icons/bot.svg", 10.0, theme.text_tertiary))
                         .child(
                             div()
-                                .text_size(sp(10.5))
+                                .text_size(sp(12.5))
                                 .text_color(theme.text_tertiary)
                                 .child(tr!("transcript.sent_by_agent")),
                         ),
