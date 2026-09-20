@@ -7233,10 +7233,7 @@ pub(super) fn model_picker_panel<R>(
                 )
             })
             .size_full()
-            .py(px(9.0))
-            // Extra horizontal inset keeps the rows' hover and highlight
-            // fills off the panel's edges.
-            .px(px(12.0)),
+            .p(px(9.0)),
         );
     }
 
@@ -7327,6 +7324,9 @@ pub(super) fn model_picker_row_shell(
     div()
         .id(id)
         .w_full()
+        // Margin, not list padding, so the fill stays off the item's own
+        // bounds — padding on the row would just move the edge it paints to.
+        .mx(px(4.0))
         .h(MODEL_PICKER_ROW_HEIGHT)
         .px(px(12.0))
         .rounded(px(11.0))
