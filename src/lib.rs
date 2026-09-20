@@ -375,6 +375,7 @@ pub fn run() {
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_full_access_dialog_keys(cx);
             crate::app::init_terminal_close_dialog_keys(cx);
+            crate::app::init_close_dialog_keys(cx);
             crate::app::init_provider_switch_dialog_keys(cx);
             crate::app::init_push_base_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);
@@ -466,7 +467,6 @@ pub fn run() {
                         ..Default::default()
                     },
                     move |window, cx| {
-                        crate::platform::configure_main_window_close_behavior(window, cx);
                         let waku = Waku::new(window, cx, daemon);
                         let composer_focus = waku.read(cx).composer_focus(cx);
                         window.focus(&composer_focus, cx);

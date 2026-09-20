@@ -87,7 +87,7 @@ use crate::{
     FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
     GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
     NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
-    OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, PushBaseBranch,
+    OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, PushBaseBranch, Quit,
     ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows, SelectAutomationsTab,
     SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
     SelectProjectsTab, SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward,
@@ -2205,6 +2205,9 @@ pub struct Waku {
     /// The kill confirmation ⌘W raises on a main-area terminal whose shell
     /// still has a command running.
     terminal_close_dialog: Option<terminal_close_dialog::TerminalCloseDialogState>,
+    /// The confirmation ⌘Q and a window close raise while sessions or
+    /// terminals still have work in flight.
+    close_dialog: Option<close_dialog::CloseDialogState>,
     /// The cost warning a provider pick on a locked session raises; the pick
     /// rides along so confirming applies the whole row.
     provider_switch_dialog: Option<provider_switch_dialog::ProviderSwitchDialogState>,
@@ -3286,6 +3289,7 @@ mod automations;
 mod background_work;
 mod big_picture;
 mod branches;
+mod close_dialog;
 mod command_palette;
 mod commit_dialog;
 mod components;
@@ -3345,6 +3349,7 @@ use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
 pub use big_picture::init as init_big_picture_keys;
+pub use close_dialog::init as init_close_dialog_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
@@ -3373,6 +3378,7 @@ pub use archive_dialog::{ConfirmArchiveDialog, DismissArchiveDialog};
 pub use big_picture::{
     BigPictureConfirm, BigPictureLeft, BigPictureRight, DismissBigPicture, SelectBigPictureCard,
 };
+pub use close_dialog::{ConfirmAppClose, DismissAppClose};
 pub use command_palette::{
     Confirm, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown, SelectPageUp,
     SelectPrevious,
@@ -4766,6 +4772,21 @@ impl Waku {
             })
             .detach();
 
+            // The red close button runs the same gate ⌘W's last step does:
+            // hide the window outright when idle, confirm first while
+            // sessions or terminals still have work in flight. The window
+            // itself never closes — a Dock activation reveals it again.
+            #[cfg(target_os = "macos")]
+            {
+                let this = cx.entity().downgrade();
+                window.on_window_should_close(cx, move |window, cx| {
+                    let _ = this.update(cx, |waku, cx| {
+                        waku.request_window_close(window, cx)
+                    });
+                    false
+                });
+            }
+
             // A closed surface can take the window's focus down with it —
             // closing a browser tab drops the focused address input — and
             // with nothing focused, action availability walks only the root
@@ -5571,6 +5592,7 @@ impl Waku {
                 last_created_issue: None,
                 archive_dialog: None,
                 terminal_close_dialog: None,
+                close_dialog: None,
                 provider_switch_dialog: None,
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),

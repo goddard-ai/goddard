@@ -752,6 +752,24 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "dialog.app_close.confirm",
+        action: || Box::new(crate::app::ConfirmAppClose),
+        title_key: "shortcuts.confirm_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "dialog.app_close.dismiss",
+        action: || Box::new(crate::app::DismissAppClose),
+        title_key: "shortcuts.dismiss_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "dialog.provider_switch.confirm",
         action: || Box::new(crate::app::ConfirmProviderSwitchDialog),
         title_key: "shortcuts.confirm_dialog",
@@ -2416,6 +2434,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "escape",
         TerminalCloseDialog,
     ),
+    // === app::init_close_dialog_keys ===============================================
+    e("dialog.app_close.confirm", All, "enter", AppCloseDialog),
+    e("dialog.app_close.dismiss", All, "escape", AppCloseDialog),
     // === app::init_provider_switch_dialog_keys =========================================
     e(
         "dialog.provider_switch.confirm",
@@ -2764,6 +2785,7 @@ mod ctx {
     pub const GitPanelModal: &str = "GitPanelModal";
     pub const ArchiveDialog: &str = "ArchiveDialog";
     pub const TerminalCloseDialog: &str = "TerminalCloseDialog";
+    pub const AppCloseDialog: &str = "AppCloseDialog";
     pub const ProviderSwitchDialog: &str = "ProviderSwitchDialog";
     pub const PushBaseDialog: &str = "PushBaseDialog";
     pub const BigPicture: &str = "BigPicture";

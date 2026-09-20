@@ -2756,13 +2756,28 @@ impl Waku {
             return;
         }
         if let Some(active) = self.right_panel_active_surface {
+            // The same running-command guard the main terminal gets: a
+            // busy tab's shell dies with the surface, so it asks first.
+            if let Some(terminal_id) = self
+                .right_panel_surfaces
+                .get(active)
+                .and_then(|surface| surface.terminal_id())
+                && self
+                    .right_panel_terminals
+                    .get(&terminal_id)
+                    .is_some_and(|terminal| terminal.read(cx).command_running())
+            {
+                let focus = self.open_terminal_close_dialog(terminal_id, cx);
+                window.focus(&focus, cx);
+                return;
+            }
             self.close_right_panel_surface(active, cx);
             if self.right_panel_surfaces.is_empty() {
                 let focus_handle = self.composer_focus(cx);
                 window.focus(&focus_handle, cx);
             }
         } else {
-            crate::platform::hide_window(window);
+            self.request_window_close(window, cx);
         }
     }
 

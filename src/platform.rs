@@ -571,19 +571,6 @@ pub const fn primary_shortcut<'a>(macos: &'a str, other: &'a str) -> &'a str {
     }
 }
 
-/// Keep Goddard's single main window alive when the user closes it. This preserves
-/// the current session and lets a Dock activation reveal the same GPUI window.
-#[cfg(target_os = "macos")]
-pub fn configure_main_window_close_behavior(window: &Window, cx: &gpui::App) {
-    window.on_window_should_close(cx, |window, _| {
-        hide_window(window);
-        false
-    });
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn configure_main_window_close_behavior(_: &Window, _: &gpui::App) {}
-
 #[cfg(target_os = "macos")]
 pub fn hide_window(window: &mut Window) {
     use objc2::MainThreadMarker;

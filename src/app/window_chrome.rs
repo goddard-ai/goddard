@@ -7,7 +7,7 @@ use gpui::{
     Tiling, Window, div, prelude::*, px, transparent_black,
 };
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-use gpui::{KeyDownEvent, WindowButton};
+use gpui::{App, KeyDownEvent, WeakEntity, WindowButton};
 
 use super::Waku;
 use crate::theme::Theme;
@@ -242,6 +242,7 @@ fn client_window_button(
         ),
     };
     let focus = cx.focus_handle();
+    let waku = cx.entity().downgrade();
     let icon_color = if enabled {
         theme.text_secondary
     } else {
@@ -286,10 +287,13 @@ fn client_window_button(
         .tooltip(Tooltip::text(label))
         .child(icon(icon_path, 14.0, icon_color))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            if enabled {
-                activate_window_button(button, window);
+        .on_click({
+            let waku = waku.clone();
+            move |_, window, cx| {
+                cx.stop_propagation();
+                if enabled {
+                    activate_window_button(button, window, cx, &waku);
+                }
             }
         })
         .on_key_down(move |event: &KeyDownEvent, window, cx| {
@@ -297,7 +301,7 @@ fn client_window_button(
                 && !event.keystroke.modifiers.modified()
                 && matches!(event.keystroke.key.as_str(), "enter" | "space")
             {
-                activate_window_button(button, window);
+                activate_window_button(button, window, cx, &waku);
                 cx.stop_propagation();
             }
         })
@@ -305,11 +309,20 @@ fn client_window_button(
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn activate_window_button(button: WindowButton, window: &mut Window) {
+fn activate_window_button(
+    button: WindowButton,
+    window: &mut Window,
+    cx: &mut App,
+    waku: &WeakEntity<Waku>,
+) {
     match button {
         WindowButton::Minimize => window.minimize_window(),
         WindowButton::Maximize => window.zoom_window(),
-        WindowButton::Close => crate::platform::hide_window(window),
+        // The drawn close button is the same gesture as the caption's —
+        // it runs the busy-work confirmation before the window goes away.
+        WindowButton::Close => {
+            let _ = waku.update(cx, |waku, cx| waku.request_window_close(window, cx));
+        }
     }
 }
 

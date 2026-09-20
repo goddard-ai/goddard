@@ -37,6 +37,18 @@ menu.close_window: 关闭窗口
 window.minimize: 最小化
 window.maximize: 最大化
 window.restore: 还原
+
+app_close.quit_title: "退出 %{app}？"
+app_close.close_title: 关闭此窗口？
+app_close.busy_sessions_one: 1 个任务仍在进行中。
+app_close.busy_sessions_many: "%{count} 个任务仍在进行中。"
+app_close.busy_terminals_one: 1 个终端正在运行命令。
+app_close.busy_terminals_many: "%{count} 个终端正在运行命令。"
+app_close.sessions_consequence_local: "本机任务将停止运行——重新打开 %{app} 后可继续。"
+app_close.sessions_consequence_remote: 远程主机上的任务会继续运行。
+app_close.terminals_consequence: 终端进程会随应用退出而终止。
+app_close.hide_consequence: 窗口将被隐藏——工作会在后台继续。
+
 updater.update: 更新
 updater.updating: 正在更新…
 updater.up_to_date: Goddard 已是最新版本

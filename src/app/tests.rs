@@ -1,3 +1,4 @@
+use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
     ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, composer_submit_action,
     dropped_file_mention, merged_submission, next_picker_highlight, pasted_text_preview,
@@ -4209,5 +4210,35 @@ fn workspace_subject_follows_the_overlay_composer() {
             &sessions
         ),
         (None, None)
+    );
+}
+
+/// The quit/close gate counts only work quitting would abandon: idle and
+/// failed sessions don't count, and neither does a session the app merely
+/// watches on a friend's daemon. Busy sessions split by owning daemon —
+/// quitting kills the local one while remote hosts keep running.
+#[test]
+fn busy_close_counts_skip_idle_and_watched_sessions() {
+    let mut sessions = vec![
+        AgentSession::new(Uuid::new_v4(), ProviderKind::Codex),
+        AgentSession::new(Uuid::new_v4(), ProviderKind::Codex),
+        AgentSession::new(Uuid::new_v4(), ProviderKind::Codex),
+        AgentSession::new(Uuid::new_v4(), ProviderKind::Codex),
+        AgentSession::new(Uuid::new_v4(), ProviderKind::Codex),
+    ];
+    sessions[1].status = SessionStatus::Working;
+    sessions[2].status = SessionStatus::Waiting;
+    sessions[3].status = SessionStatus::Failed;
+    sessions[4].status = SessionStatus::Background;
+    let watched = sessions[4].id;
+    let remote = sessions[2].id;
+
+    assert_eq!(
+        busy_owned_session_counts(&sessions, |id| id == watched, |id| id == remote),
+        (1, 1)
+    );
+    assert_eq!(
+        busy_owned_session_counts(&sessions[..1], |_| false, |_| false),
+        (0, 0)
     );
 }

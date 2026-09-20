@@ -735,7 +735,9 @@ impl Waku {
             .track_focus(&self.settings_focus)
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
-            .on_action(|_: &CloseWindow, window, _| crate::platform::hide_window(window))
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                this.request_window_close(window, cx)
+            }))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_project_action))
             .on_action(cx.listener(Self::open_settings_action))

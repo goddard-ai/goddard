@@ -385,6 +385,7 @@ mod tests {
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
             crate::app::init_terminal_close_dialog_keys(cx);
+            crate::app::init_close_dialog_keys(cx);
             crate::app::init_provider_switch_dialog_keys(cx);
             crate::app::init_push_base_dialog_keys(cx);
             crate::app::init_big_picture_keys(cx);

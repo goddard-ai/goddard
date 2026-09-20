@@ -77,6 +77,27 @@ window.maximize:
 window.restore:
   en: Restore
 
+app_close.quit_title:
+  en: "Quit %{app}?"
+app_close.close_title:
+  en: Close this window?
+app_close.busy_sessions_one:
+  en: 1 task still has work in progress.
+app_close.busy_sessions_many:
+  en: "%{count} tasks still have work in progress."
+app_close.busy_terminals_one:
+  en: 1 terminal is running a command.
+app_close.busy_terminals_many:
+  en: "%{count} terminals are running commands."
+app_close.sessions_consequence_local:
+  en: "Tasks on this computer stop running — you can resume them when you reopen %{app}."
+app_close.sessions_consequence_remote:
+  en: Tasks on remote hosts keep running.
+app_close.terminals_consequence:
+  en: Terminal processes die with the app.
+app_close.hide_consequence:
+  en: The window hides — work keeps running in the background.
+
 updater.update:
   en: Update
 updater.updating:

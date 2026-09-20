@@ -508,6 +508,7 @@ impl Render for Waku {
             let archive_dialog = self.render_archive_dialog(cx);
             let full_access_dialog = self.render_full_access_dialog(cx);
             let terminal_close_dialog = self.render_terminal_close_dialog(cx);
+            let close_dialog = self.render_close_dialog(cx);
             let provider_switch_dialog = self.render_provider_switch_dialog(cx);
             let push_base_dialog = self.render_push_base_dialog(window, cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
@@ -518,6 +519,7 @@ impl Render for Waku {
             let content = div()
                 .relative()
                 .size_full()
+                .on_action(cx.listener(Self::quit_action))
                 .on_action(cx.listener(Self::new_session_action))
                 .on_action(cx.listener(Self::new_task_in_action))
                 .on_action(cx.listener(Self::toggle_command_palette_action))
@@ -561,6 +563,7 @@ impl Render for Waku {
                 .children(archive_dialog)
                 .children(full_access_dialog)
                 .children(terminal_close_dialog)
+                .children(close_dialog)
                 .children(provider_switch_dialog)
                 .children(push_base_dialog)
                 .children(shortcuts_dialog)
@@ -608,6 +611,7 @@ impl Render for Waku {
         let archive_dialog = self.render_archive_dialog(cx);
         let full_access_dialog = self.render_full_access_dialog(cx);
         let terminal_close_dialog = self.render_terminal_close_dialog(cx);
+        let close_dialog = self.render_close_dialog(cx);
         let provider_switch_dialog = self.render_provider_switch_dialog(cx);
         let push_base_dialog = self.render_push_base_dialog(window, cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
@@ -624,6 +628,7 @@ impl Render for Waku {
             } else {
                 "Workspace"
             })
+            .on_action(cx.listener(Self::quit_action))
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_task_in_action))
@@ -983,6 +988,7 @@ impl Render for Waku {
             .children(archive_dialog)
             .children(full_access_dialog)
             .children(terminal_close_dialog)
+            .children(close_dialog)
             .children(provider_switch_dialog)
             .children(push_base_dialog)
             .children(shortcuts_dialog)
