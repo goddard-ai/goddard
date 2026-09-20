@@ -68,6 +68,7 @@ jobs:
             libxi-dev \
             libxtst-dev \
             libxkbcommon-x11-dev \
+            mold \
             pkg-config \
             xdg-desktop-portal
 
@@ -87,7 +88,11 @@ jobs:
           restore-keys: |
             ${{ matrix.os }}-rust-1.96.0-cargo-
 
+      # Same linkers the release build uses, exercised on every push so a
+      # linker incompatibility fails here instead of during a release.
       - name: Run tests
+        env:
+          RUSTFLAGS: ${{ (runner.os == 'Linux' && '-C linker=clang -C link-arg=-fuse-ld=mold') || (runner.os == 'Windows' && '-C linker=rust-lld') || '' }}
         run: cargo test --locked
 
       # The generated protocol and browser client are platform-independent, so

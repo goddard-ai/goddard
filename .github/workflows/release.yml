@@ -15,6 +15,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   version:
@@ -74,6 +76,11 @@ jobs:
     if: needs.version.outputs.published != 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    env:
+      # mold via the clang driver — far faster than GNU ld. rust-lld is the
+      # default on x86_64-linux since Rust 1.90, but not on aarch64, and mold
+      # still beats both on a binary this size.
+      RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v6
 
@@ -97,24 +104,25 @@ jobs:
             libxi-dev \
             libxtst-dev \
             libxkbcommon-x11-dev \
+            mold \
             pkg-config \
             xdg-desktop-portal
 
-      - uses: actions/cache@v6
+      # sccache caches per-crate compilation units, so it keeps hitting across
+      # the version bump that rewrites Cargo.lock every release — a target/
+      # cache would miss the exact key then cost multiple GiB of restore I/O.
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ubuntu-22.04-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
+          key: ubuntu-22.04-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ubuntu-22.04-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: rm -f target/release/goddard-*.tar.gz target/release/Goddard-*.tar.gz
+            ubuntu-22.04-rust-1.96.0-cargo-
 
       - name: Bundle
         env:
@@ -145,6 +153,8 @@ jobs:
     if: needs.version.outputs.published != 'true'
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
+    env:
+      RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v6
 
@@ -168,24 +178,25 @@ jobs:
             libxi-dev \
             libxtst-dev \
             libxkbcommon-x11-dev \
+            mold \
             pkg-config \
             xdg-desktop-portal
 
-      - uses: actions/cache@v6
+      # sccache caches per-crate compilation units, so it keeps hitting across
+      # the version bump that rewrites Cargo.lock every release — a target/
+      # cache would miss the exact key then cost multiple GiB of restore I/O.
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ubuntu-22.04-arm-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
+          key: ubuntu-22.04-arm-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ubuntu-22.04-arm-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: rm -f target/release/goddard-*.tar.gz target/release/Goddard-*.tar.gz
+            ubuntu-22.04-arm-rust-1.96.0-cargo-
 
       - name: Bundle
         env:
@@ -211,6 +222,10 @@ jobs:
     if: needs.version.outputs.published != 'true'
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      # rust-lld is a drop-in link.exe bundled in the toolchain — a large
+      # single-codegen-unit binary takes link.exe minutes it doesn't take lld.
+      RUSTFLAGS: "-C linker=rust-lld"
     steps:
       - uses: actions/checkout@v6
 
@@ -225,21 +240,18 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
-      - uses: actions/cache@v6
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: windows-latest-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
+          key: windows-latest-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            windows-latest-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/goddard-*.zip, target/release/Goddard-*.zip, target/release/Waku-*-Setup.exe, target/release/Goddard-*-Setup.exe
+            windows-latest-rust-1.96.0-cargo-
 
       - name: Bundle
         env:
@@ -263,6 +275,8 @@ jobs:
     if: needs.version.outputs.published != 'true'
     runs-on: windows-11-arm
     timeout-minutes: 90
+    env:
+      RUSTFLAGS: "-C linker=rust-lld"
     steps:
       - uses: actions/checkout@v6
 
@@ -277,21 +291,18 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
-      - uses: actions/cache@v6
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: windows-11-arm-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
+          key: windows-11-arm-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            windows-11-arm-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/goddard-*.zip, target/release/Goddard-*.zip, target/release/Waku-*-Setup.exe, target/release/Goddard-*-Setup.exe
+            windows-11-arm-rust-1.96.0-cargo-
 
       - name: Bundle
         env:
@@ -328,15 +339,18 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      - uses: actions/cache@v6
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: macos-latest-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
+          key: macos-latest-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            macos-latest-rust-1.96.0-release-
+            macos-latest-rust-1.96.0-cargo-
 
       - name: Import Apple Developer Certificate
         env:

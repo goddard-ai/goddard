@@ -206,7 +206,6 @@ ed25519-dalek = "2"
 
 [profile.release]
 lto = "thin"
-codegen-units = 1
 strip = true
 
 # Keep debug assertions and incremental builds for app code, but do not run
