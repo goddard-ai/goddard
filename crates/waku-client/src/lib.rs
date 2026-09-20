@@ -12,6 +12,7 @@ pub mod computer_use;
 mod daemons;
 pub mod discover;
 pub mod driver;
+mod mnemonic;
 pub mod persistence;
 mod process;
 mod workspace_client;
