@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::{BufRead as _, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
@@ -89,48 +88,18 @@ impl DaemonExposureSettings {
         Ok(self)
     }
 
-    fn bind_address(&self) -> String {
-        if self.enabled {
-            format!("0.0.0.0:{}", self.port)
-        } else {
-            "127.0.0.1:0".into()
-        }
+    /// The wire form sent with `setDaemonExposure` — `None` while disabled,
+    /// since the daemon's exposed listener only exists while this is on.
+    fn wire(&self) -> Option<waku_protocol::DaemonExposure> {
+        self.enabled.then(|| waku_protocol::DaemonExposure {
+            port: self.port,
+            allowed_origins: self.allowed_origins.clone(),
+            token: self.token.clone(),
+        })
     }
 }
 
-/// Parse the comma-separated exact browser origins edited by the desktop.
-/// Browser Origin headers contain only an HTTP(S) origin, never a path.
-pub fn parse_allowed_origins(text: &str) -> anyhow::Result<Vec<String>> {
-    let mut origins = Vec::new();
-    let mut seen = HashSet::new();
-    for candidate in text
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        let url = url::Url::parse(candidate)
-            .with_context(|| format!("invalid browser origin {candidate:?}"))?;
-        if !matches!(url.scheme(), "http" | "https")
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-            || url.path() != "/"
-        {
-            bail!(
-                "browser origin {candidate:?} must be an exact http:// or https:// origin without a path"
-            );
-        }
-        let origin = url.origin().ascii_serialization();
-        if origin == "null" {
-            bail!("browser origin {candidate:?} is not a network origin");
-        }
-        if seen.insert(origin.clone()) {
-            origins.push(origin);
-        }
-    }
-    Ok(origins)
-}
+pub use waku_protocol::parse_allowed_origins;
 
 pub struct DaemonProcess {
     client: DaemonClient,
@@ -162,13 +131,13 @@ impl DaemonProcess {
             command.creation_flags(CREATE_NO_WINDOW);
         }
         command
+            // The managed daemon always binds loopback; exposure is applied
+            // over the control socket afterwards so toggling it never
+            // restarts the process.
             .arg("--bind")
-            .arg(settings.bind_address())
+            .arg("127.0.0.1:0")
             .arg("--parent-pid")
             .arg(std::process::id().to_string());
-        if settings.enabled {
-            command.arg("--allow-non-loopback");
-        }
         for origin in &settings.allowed_origins {
             command.arg("--allow-origin").arg(origin);
         }
@@ -399,6 +368,12 @@ impl DaemonSupervisor {
     ) -> anyhow::Result<Self> {
         let exposure = exposure.validate()?;
         let process = DaemonProcess::spawn_configured(executable, exposure.clone())?;
+        // A stuck exposure port must not keep the daemon itself down — the
+        // local listener is the product, the exposed one is recoverable
+        // through the next reconfigure.
+        if let Err(error) = apply_daemon_exposure(&process.client(), &exposure) {
+            eprintln!("could not expose the Goddard daemon: {error:#}");
+        }
         let settings = read_settings(&process.client())?;
         let initial_stamp = ExecutableStamp::read(executable)?;
         let supervisor = Self::from_target(
@@ -508,42 +483,20 @@ impl DaemonSupervisor {
         self.inner.settings.lock().clone()
     }
 
-    /// Restart only the desktop-managed daemon with a new listener policy.
-    /// The caller should run this off the UI thread.
+    /// Apply a new listener policy to the managed daemon in place — the
+    /// daemon opens or closes its exposed socket itself, so no restart and
+    /// no session interruption. The caller should run this off the UI
+    /// thread.
     pub fn reconfigure(&self, exposure: DaemonExposureSettings) -> anyhow::Result<()> {
         let exposure = exposure.validate()?;
-        let executable = self
-            .inner
-            .executable
-            .as_ref()
-            .context("the connected daemon is managed outside Goddard Desktop")?
-            .clone();
-        let _restart = self.inner.restart.lock();
-        let previous = self
-            .inner
-            .exposure
-            .lock()
-            .clone()
-            .context("managed daemon launch settings are unavailable")?;
-        match replace_local_daemon(&self.inner, &executable, &exposure) {
-            Ok(()) => {
-                *self.inner.exposure.lock() = Some(exposure);
-                queue_settings_refresh(&self.inner);
-                Ok(())
-            }
-            Err(error) => {
-                let restore = replace_local_daemon(&self.inner, &executable, &previous);
-                if restore.is_ok() {
-                    queue_settings_refresh(&self.inner);
-                    Err(error)
-                } else {
-                    Err(error.context(format!(
-                        "the previous daemon configuration also failed to restart: {:#}",
-                        restore.unwrap_err()
-                    )))
-                }
-            }
+        if self.inner.executable.is_none() {
+            bail!("the connected daemon is managed outside Goddard Desktop");
         }
+        let _restart = self.inner.restart.lock();
+        let client = self.inner.target.lock().client();
+        set_daemon_exposure(&client, exposure.wire())?;
+        *self.inner.exposure.lock() = Some(exposure);
+        Ok(())
     }
 
     /// Queue a daemon settings update without blocking the desktop UI thread.
@@ -781,6 +734,9 @@ fn replace_local_daemon(
     // already released so UI actions never block behind process teardown.
     drop(previous);
     let replacement = DaemonProcess::spawn_configured(executable, exposure.clone())?;
+    if let Err(error) = apply_daemon_exposure(&replacement.client(), exposure) {
+        eprintln!("could not expose the Goddard daemon: {error:#}");
+    }
     let client = replacement.client();
     *inner.target.lock() = DaemonTarget::Local(replacement);
     inner
@@ -788,6 +744,30 @@ fn replace_local_daemon(
         .lock()
         .retain(|subscriber| subscriber.send(client.clone()).is_ok());
     Ok(())
+}
+
+/// Push the exposure half of a launch configuration onto a freshly spawned
+/// daemon. Disabled means the daemon keeps its startup loopback-only
+/// listener, so there is nothing to send.
+fn apply_daemon_exposure(
+    client: &DaemonClient,
+    exposure: &DaemonExposureSettings,
+) -> anyhow::Result<()> {
+    if !exposure.enabled {
+        return Ok(());
+    }
+    set_daemon_exposure(client, exposure.wire())
+}
+
+/// Send `setDaemonExposure` and verify the daemon understood it.
+fn set_daemon_exposure(
+    client: &DaemonClient,
+    exposure: Option<waku_protocol::DaemonExposure>,
+) -> anyhow::Result<()> {
+    match client.request(Uuid::nil(), Uuid::nil(), Command::SetDaemonExposure { exposure })? {
+        ResponsePayload::Exposure { .. } => Ok(()),
+        _ => bail!("Goddard daemon returned an invalid exposure response"),
+    }
 }
 
 fn queue_settings_refresh(inner: &SupervisorInner) {

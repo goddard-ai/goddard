@@ -1,0 +1,1 @@
+- Changing daemon exposure no longer restarts the daemon or interrupts running tasks: the exposed listener opens, rebinds, and closes in place over a new `setDaemonExposure` command, while the loopback listener and every active session keep running — so toggling "Expose managed daemon" in Settings is safe at any time

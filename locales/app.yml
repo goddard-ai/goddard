@@ -559,13 +559,13 @@ commands.agent_added:
 daemon.expose_title:
   en: Expose managed daemon
 daemon.expose_description:
-  en: Listen beyond this machine so another Goddard client can connect. Changing this restarts only the daemon.
+  en: Listen beyond this machine so another Goddard client can connect. Applies without restarting the daemon.
 daemon.status_local:
   en: Local only
 daemon.status_exposed:
   en: Exposed
 daemon.status_restarting:
-  en: Restarting
+  en: Applying
 daemon.connection_title:
   en: Listener access
 daemon.connection_description:
@@ -585,7 +585,7 @@ daemon.allowed_origins_placeholder:
 daemon.apply:
   en: Apply
 daemon.restarting:
-  en: Restarting…
+  en: Applying…
 daemon.credentials_title:
   en: Connection details
 daemon.credentials_description:
@@ -796,8 +796,6 @@ daemon.invalid_port:
   en: Enter a port from 1 to 65535
 daemon.invalid_settings:
   en: "Invalid daemon settings: %{error}"
-daemon.stop_active_tasks:
-  en: Stop active tasks before changing daemon access
 daemon.settings_applied:
   en: Daemon access updated
 daemon.remote_hosts_title:
@@ -867,7 +865,7 @@ sidebar.offline:
 sidebar.needs_auth:
   en: Password required
 daemon.restart_failed:
-  en: "Could not restart daemon: %{error}"
+  en: "Could not update daemon access: %{error}"
 daemon.url_copied:
   en: WebSocket URL copied
 daemon.token_copied:

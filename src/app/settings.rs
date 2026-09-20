@@ -5244,18 +5244,13 @@ impl Waku {
             self.show_toast(tr!("daemon.external_description"));
             return;
         }
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| !matches!(session.status, SessionStatus::Idle | SessionStatus::Failed))
-        {
-            self.show_toast(tr!("daemon.stop_active_tasks"));
-            return;
-        }
 
-        let needs_restart = self.state.daemon_exposure.enabled || settings.enabled;
-        if !needs_restart {
+        // Exposure changes apply over the control socket — the daemon opens
+        // or closes its exposed listener without restarting, so sessions
+        // keep running either way. Only a daemon round trip is needed when
+        // exposure is on at either end of the change.
+        let needs_daemon = self.state.daemon_exposure.enabled || settings.enabled;
+        if !needs_daemon {
             self.state.daemon_exposure = settings;
             self.save();
             cx.notify();
@@ -5275,7 +5270,6 @@ impl Waku {
                 match result {
                     Ok(()) => {
                         this.state.daemon_exposure = applied.clone();
-                        this.runtimes.clear();
                         this.daemon_port_input.update(cx, |input, cx| {
                             input.set_content(applied.port.to_string(), cx)
                         });

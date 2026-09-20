@@ -3,7 +3,7 @@ use std::io;
 use std::io::Write as _;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
@@ -21,8 +21,8 @@ use uuid::Uuid;
 use crate::model::{AgentSession, Project, ProviderKind, SessionStatus};
 use crate::protocol::MAX_WIRE_MESSAGE_BYTES;
 use crate::protocol::{
-    ClientMessage, Command, PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome,
-    ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireDriverEvent,
+    ClientMessage, Command, DaemonExposure, PROTOCOL_VERSION, ReplayCursor, Request,
+    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireDriverEvent,
 };
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -116,6 +116,10 @@ pub trait Backend: Send + Sync + 'static {
     fn lan_advertisement(&self) -> Option<(String, String)> {
         None
     }
+
+    /// Record the port a runtime-opened non-loopback listener bound, so LAN
+    /// discovery can report it. `None` once that listener closes.
+    fn note_exposed_port(&self, _port: Option<u16>) {}
 
     /// Kick any lazily-started reachability surfaces awake — `serve` calls
     /// this when it binds a non-loopback listener, since being reachable
@@ -410,6 +414,10 @@ struct RequestDispatcher {
     /// lifecycle order across desktop and web clients without serializing
     /// unrelated sessions or read-only requests.
     runtime_mailboxes: Arc<Mutex<HashMap<Uuid, RuntimeMailbox>>>,
+    /// The runtime-controlled non-loopback listener, installed by `serve`
+    /// once this dispatcher is shared so an exposure request arriving on
+    /// any listener can rebind it.
+    exposure: OnceLock<Arc<ExposureControl>>,
 }
 
 impl Hub {
@@ -761,7 +769,21 @@ impl RequestDispatcher {
             backend,
             hub,
             runtime_mailboxes: Arc::new(Mutex::new(HashMap::new())),
+            exposure: OnceLock::new(),
         }
+    }
+
+    /// Apply a requested exposure state. `None` closes the exposed listener;
+    /// `Some` opens or rebinds it — a failed bind leaves the running
+    /// listener untouched.
+    fn set_daemon_exposure(
+        &self,
+        exposure: Option<DaemonExposure>,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.exposure
+            .get()
+            .context("this daemon's listener cannot change at runtime")?
+            .set(exposure)
     }
 
     fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
@@ -977,7 +999,170 @@ pub fn serve(
         })
     });
     let active_connections = Arc::new(AtomicUsize::new(0));
-    while !shutdown.load(Ordering::Acquire) {
+    // Installed before the first connection can arrive so an exposure
+    // request on any listener can rebind the non-loopback socket.
+    let _ = dispatcher.exposure.set(Arc::new(ExposureControl {
+        dispatcher: Arc::downgrade(&dispatcher),
+        hub: hub.clone(),
+        backend: backend.clone(),
+        server_shutdown: shutdown.clone(),
+        base_options: (*options).clone(),
+        active_connections: active_connections.clone(),
+        active: Mutex::new(None),
+    }));
+    accept_loop(
+        listener,
+        token,
+        dispatcher,
+        hub,
+        shutdown.clone(),
+        shutdown,
+        options,
+        active_connections,
+    )?;
+    backend.shutdown();
+    Ok(())
+}
+
+/// The runtime-controlled non-loopback listener. `serve` owns exactly one,
+/// held by the dispatcher so a `setDaemonExposure` request on any listener
+/// reaches it.
+struct ExposureControl {
+    dispatcher: Weak<RequestDispatcher>,
+    hub: Arc<Hub>,
+    backend: Arc<dyn Backend>,
+    /// The daemon-wide stop: an exposed listener ends when it fires too.
+    server_shutdown: Arc<AtomicBool>,
+    /// `allow_shutdown` and `build_commit` inherit from the primary
+    /// listener; origins and the token always come from the request.
+    base_options: ServerOptions,
+    /// The connection cap is shared with the primary listener.
+    active_connections: Arc<AtomicUsize>,
+    active: Mutex<Option<ExposedListener>>,
+}
+
+struct ExposedListener {
+    config: DaemonExposure,
+    port: u16,
+    shutdown: Arc<AtomicBool>,
+    _advert: Option<crate::lan::LanAdvert>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl ExposedListener {
+    /// Flag the accept loop and its connections closed, then wait for the
+    /// socket to drop — bounded by the nonblocking accept poll.
+    fn stop(self) {
+        self.shutdown.store(true, Ordering::Release);
+        let _ = self.thread.join();
+    }
+}
+
+impl ExposureControl {
+    fn set(&self, exposure: Option<DaemonExposure>) -> anyhow::Result<ResponsePayload> {
+        let exposure = exposure.map(DaemonExposure::validated).transpose()?;
+        let mut active = self.active.lock();
+        let Some(config) = exposure else {
+            let previous = active.take();
+            self.backend.note_exposed_port(None);
+            drop(active);
+            if let Some(previous) = previous {
+                previous.stop();
+            }
+            return Ok(ResponsePayload::Exposure { port: None });
+        };
+        if let Some(current) = active.as_ref()
+            && current.config == config
+        {
+            return Ok(ResponsePayload::Exposure {
+                port: Some(current.port),
+            });
+        }
+        let Some(dispatcher) = self.dispatcher.upgrade() else {
+            bail!("the daemon server is shutting down");
+        };
+        // Bind before dropping the current listener: a failed rebind leaves
+        // the running exposure untouched.
+        let listener = TcpListener::bind(("0.0.0.0", config.port))
+            .with_context(|| format!("could not expose the daemon on port {}", config.port))?;
+        listener
+            .set_nonblocking(true)
+            .context("could not configure the exposed listener")?;
+        let port = listener.local_addr()?.port();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        // Reachable is exactly when LAN discovery matters: wake the share
+        // endpoint and register `_waku._tcp` just like a startup bind.
+        self.backend.kickstart_reachability();
+        let advert = self
+            .backend
+            .lan_advertisement()
+            .and_then(|(name, instance_id)| {
+                match crate::lan::LanAdvert::start(&name, &instance_id, port, PROTOCOL_VERSION) {
+                    Ok(advert) => Some(advert),
+                    Err(error) => {
+                        eprintln!("could not advertise the daemon on the LAN: {error:#}");
+                        None
+                    }
+                }
+            });
+        let options = Arc::new(ServerOptions {
+            allowed_origins: config.allowed_origins.iter().cloned().collect(),
+            ..self.base_options.clone()
+        });
+        let thread = {
+            let token = config.token.clone();
+            let hub = self.hub.clone();
+            let listener_shutdown = shutdown.clone();
+            let server_shutdown = self.server_shutdown.clone();
+            let active_connections = self.active_connections.clone();
+            std::thread::Builder::new()
+                .name("goddard-daemon-exposed".into())
+                .spawn(move || {
+                    if let Err(error) = accept_loop(
+                        listener,
+                        token,
+                        dispatcher,
+                        hub,
+                        listener_shutdown,
+                        server_shutdown,
+                        options,
+                        active_connections,
+                    ) {
+                        eprintln!("exposed daemon listener failed: {error:#}");
+                    }
+                })
+                .context("could not start the exposed daemon listener")?
+        };
+        self.backend.note_exposed_port(Some(port));
+        let previous = active.replace(ExposedListener {
+            config,
+            port,
+            shutdown,
+            _advert: advert,
+            thread,
+        });
+        drop(active);
+        if let Some(previous) = previous {
+            previous.stop();
+        }
+        Ok(ResponsePayload::Exposure { port: Some(port) })
+    }
+}
+
+/// One listener's accept loop. `shutdown` ends only this listener — the
+/// exposed socket gets a flag of its own so unexposing does not bounce the
+/// daemon — while `server_shutdown` ends everything.
+fn accept_loop(
+    listener: TcpListener,
+    token: String,
+    dispatcher: Arc<RequestDispatcher>,
+    hub: Arc<Hub>,
+    shutdown: Arc<AtomicBool>,
+    server_shutdown: Arc<AtomicBool>,
+    options: Arc<ServerOptions>,
+    active_connections: Arc<AtomicUsize>,
+) -> anyhow::Result<()> {
+    while !shutdown.load(Ordering::Acquire) && !server_shutdown.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, _)) => {
                 if active_connections
@@ -993,14 +1178,21 @@ pub fn serve(
                 let dispatcher = dispatcher.clone();
                 let hub = hub.clone();
                 let shutdown = shutdown.clone();
+                let server_shutdown = server_shutdown.clone();
                 let options = options.clone();
                 std::thread::Builder::new()
                     .name("goddard-daemon-connection".into())
                     .spawn(move || {
                         let _connection_permit = connection_permit;
-                        if let Err(error) =
-                            handle_connection(stream, &token, dispatcher, hub, shutdown, &options)
-                        {
+                        if let Err(error) = handle_connection(
+                            stream,
+                            &token,
+                            dispatcher,
+                            hub,
+                            shutdown,
+                            server_shutdown,
+                            &options,
+                        ) {
                             eprintln!("goddard-daemon connection ended: {error:#}");
                         }
                     })
@@ -1013,7 +1205,9 @@ pub fn serve(
             Err(error) => return Err(error).context("Goddard daemon listener failed"),
         }
     }
-    backend.shutdown();
+    // This listener's connections watch only its flag — make sure they end
+    // when the loop exits for either reason.
+    shutdown.store(true, Ordering::Release);
     Ok(())
 }
 
@@ -1023,6 +1217,7 @@ fn handle_connection(
     dispatcher: Arc<RequestDispatcher>,
     hub: Arc<Hub>,
     shutdown: Arc<AtomicBool>,
+    server_shutdown: Arc<AtomicBool>,
     options: &ServerOptions,
 ) -> anyhow::Result<()> {
     // Accepted sockets can inherit the listener's nonblocking flag on some
@@ -1079,7 +1274,10 @@ fn handle_connection(
         write_json(&mut socket, &reply)?;
         return Ok(());
     }
-    let (resume_from, agent) = match hello {
+    // `primary` marks the daemon's own bearer token — paired devices and
+    // scoped agent credentials are full clients, but they may not mint new
+    // listeners (and therefore new credentials) through `setDaemonExposure`.
+    let (resume_from, agent, primary) = match hello {
         ClientMessage::Hello {
             protocol_version, ..
         } if protocol_version != PROTOCOL_VERSION => {
@@ -1095,17 +1293,22 @@ fn handle_connection(
         }
         ClientMessage::Hello {
             token, resume_from, ..
-        } if token_matches(expected_token, &token)
-            || dispatcher.authenticate_paired(&token) =>
+        } if token_matches(expected_token, &token) =>
         {
-            (resume_from, None)
+            (resume_from, None, true)
+        }
+        ClientMessage::Hello {
+            token, resume_from, ..
+        } if dispatcher.authenticate_paired(&token) =>
+        {
+            (resume_from, None, false)
         }
         ClientMessage::Hello { token, .. } => match dispatcher.authenticate_agent(&token) {
             // A scoped agent credential names the Waku task it belongs to.
             // The connection gets command responses but no event replay or
             // broadcast — its token proves nothing about which sessions it
             // may observe.
-            Some(agent_task) => (Vec::new(), Some(agent_task)),
+            Some(agent_task) => (Vec::new(), Some(agent_task), false),
             None => {
                 write_json(
                     &mut socket,
@@ -1173,6 +1376,30 @@ fn handle_connection(
                                 },
                             });
                         }
+                    } else if let Command::SetDaemonExposure { exposure } = &request.command {
+                        // Listener control lives here rather than in the
+                        // dispatch path because only this connection knows
+                        // whether the caller presented the primary token.
+                        let outcome = if primary {
+                            match dispatcher.set_daemon_exposure(exposure.clone()) {
+                                Ok(payload) => ResponseOutcome::Ok { payload },
+                                Err(error) => ResponseOutcome::Error {
+                                    error: RpcError::from(error),
+                                },
+                            }
+                        } else {
+                            ResponseOutcome::Error {
+                                error: RpcError::from(anyhow::anyhow!(
+                                    "daemon exposure requires the primary authentication token"
+                                )),
+                            }
+                        };
+                        if !request.request_id.is_nil() {
+                            let _ = outgoing.send(ServerMessage::Response {
+                                request_id: request.request_id,
+                                outcome,
+                            });
+                        }
                     } else {
                         dispatcher.dispatch(request, outgoing.clone(), subscriber_id, agent);
                     }
@@ -1180,6 +1407,7 @@ fn handle_connection(
                 Ok(ClientMessage::Shutdown) => {
                     if agent.is_none() && options.allow_shutdown {
                         write_json(&mut socket, &ServerMessage::ShuttingDown)?;
+                        server_shutdown.store(true, Ordering::Release);
                         shutdown.store(true, Ordering::Release);
                         break;
                     }
@@ -3831,5 +4059,185 @@ mod tests {
         DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
         shutdown.store(true, Ordering::Release);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_exposure_opens_and_closes_a_second_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TestBackend::default()),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let expose = |exposure: Option<DaemonExposure>| {
+            client
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::SetDaemonExposure { exposure },
+                )
+                .unwrap()
+        };
+
+        let port = match expose(Some(DaemonExposure {
+            port: 0,
+            allowed_origins: Vec::new(),
+            token: "remote".into(),
+        })) {
+            ResponsePayload::Exposure { port: Some(port) } => port,
+            other => panic!("unexpected exposure response: {other:?}"),
+        };
+
+        // The exposed listener authenticates with its own token…
+        let remote = DaemonClient::connect(&format!("127.0.0.1:{port}"), "remote".into()).unwrap();
+        assert!(matches!(
+            remote
+                .request(Uuid::nil(), Uuid::nil(), Command::GetSettings)
+                .unwrap(),
+            ResponsePayload::Settings { .. }
+        ));
+        // …and rejects the loopback token.
+        assert!(
+            DaemonClient::connect(&format!("127.0.0.1:{port}"), "secret".into()).is_err()
+        );
+
+        // Reapplying the same config is a no-op — the listener survives.
+        assert!(matches!(
+            expose(Some(DaemonExposure {
+                port: 0,
+                allowed_origins: Vec::new(),
+                token: "remote".into(),
+            })),
+            ResponsePayload::Exposure {
+                port: Some(same)
+            } if same == port
+        ));
+        remote
+            .request(Uuid::nil(), Uuid::nil(), Command::GetSettings)
+            .unwrap();
+
+        // Unexposing closes the listener; the loopback side never noticed.
+        assert!(matches!(
+            expose(None),
+            ResponsePayload::Exposure { port: None }
+        ));
+        assert!(
+            DaemonClient::connect(&format!("127.0.0.1:{port}"), "remote".into()).is_err()
+        );
+        client
+            .request(Uuid::nil(), Uuid::nil(), Command::GetSettings)
+            .unwrap();
+
+        drop(remote);
+        client.shutdown();
+        server.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn paired_and_agent_tokens_cannot_change_exposure() {
+        let root = std::env::temp_dir().join(format!("waku-exposure-gate-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let agent_token = backend.agent.mint(Uuid::new_v4());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+        let owner = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+
+        // A device pairs through the owner-approved flow, then connects
+        // with its minted token.
+        let pairing = std::thread::spawn({
+            let address = address.to_string();
+            move || waku_client::pair(&address, "test-device", Duration::from_secs(10))
+        });
+        let request_id = {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let found = match owner
+                    .request(Uuid::nil(), Uuid::nil(), Command::GetPairing)
+                    .unwrap()
+                {
+                    ResponsePayload::Pairing { state } => {
+                        state.pending.first().map(|pending| pending.request_id)
+                    }
+                    _ => None,
+                };
+                if let Some(request_id) = found {
+                    break request_id;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "pair request never arrived"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+        owner
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RespondPairRequest {
+                    request_id,
+                    accept: true,
+                },
+            )
+            .unwrap();
+        let waku_client::PairReply::Granted { token, .. } =
+            pairing.join().unwrap().unwrap()
+        else {
+            panic!("pair request was not granted");
+        };
+
+        let paired = DaemonClient::connect(&address.to_string(), token).unwrap();
+        let agent = DaemonClient::connect(&address.to_string(), agent_token).unwrap();
+        for (name, client) in [("paired", &paired), ("agent", &agent)] {
+            let error = client
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::SetDaemonExposure { exposure: None },
+                )
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("primary authentication token")
+                    || error.to_string().contains("agent credential"),
+                "{name}: {error}"
+            );
+        }
+
+        owner.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

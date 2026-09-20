@@ -221,10 +221,10 @@ commands.agent_badge: 智能体
 commands.agent_added: 智能体添加了自定义命令“%{name}”。
 
 daemon.expose_title: 暴露由 Goddard 管理的守护进程
-daemon.expose_description: 允许本机之外的 Goddard 客户端连接。更改此项只会重启守护进程。
+daemon.expose_description: 允许本机之外的 Goddard 客户端连接。无需重启守护进程即可生效。
 daemon.status_local: 仅本机
 daemon.status_exposed: 已暴露
-daemon.status_restarting: 正在重启
+daemon.status_restarting: 正在应用
 daemon.connection_title: 监听访问
 daemon.connection_description: 浏览器来源必须完全匹配。多个来源请用逗号分隔。
 daemon.port: 端口
@@ -234,7 +234,7 @@ daemon.allowed_origins: 允许的浏览器来源
 daemon.allowed_origins_description: 可打开 WebSocket 的确切 http:// 或 https:// 来源。
 daemon.allowed_origins_placeholder: https://goddard.example.com, http://localhost:3001
 daemon.apply: 应用
-daemon.restarting: 正在重启…
+daemon.restarting: 正在应用…
 daemon.credentials_title: 连接信息
 daemon.credentials_description: 在 Goddard Web 中输入这些信息。此地址使用本机的局域网主机名。
 daemon.websocket_url: WebSocket 地址
@@ -267,9 +267,8 @@ daemon.phase_connected: 已连接
 daemon.phase_error: 错误
 daemon.invalid_port: 请输入 1 到 65535 之间的端口
 daemon.invalid_settings: 守护进程设置无效：%{error}
-daemon.stop_active_tasks: 更改守护进程访问设置前请先停止进行中的任务
 daemon.settings_applied: 守护进程访问设置已更新
-daemon.restart_failed: 无法重启守护进程：%{error}
+daemon.restart_failed: 无法更新守护进程访问设置：%{error}
 daemon.url_copied: 已复制 WebSocket 地址
 daemon.token_copied: 已复制守护进程令牌
 web.connect_title: 连接 Goddard 守护进程

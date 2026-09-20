@@ -39,6 +39,7 @@ pub mod computer_use;
 pub mod custom_commands;
 mod driver_wire;
 pub mod eval;
+pub mod exposure;
 pub mod friends;
 pub mod git;
 pub mod i18n;
@@ -63,6 +64,7 @@ pub mod workspace;
 mod protocol;
 
 pub use driver_wire::{decode_enum, encode_enum, event_from_wire, event_to_wire};
+pub use exposure::{DaemonExposure, parse_allowed_origins};
 pub use protocol::{
     AGENT_PARENT_TASK_ENV, AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV,
     AgentPromptDelivery, AgentWorkspace, ClientMessage, Command, DAEMON_ADDRESS_ENV,

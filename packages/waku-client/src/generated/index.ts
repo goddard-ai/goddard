@@ -52,6 +52,7 @@ export type { CreateIssueInput } from "./CreateIssueInput";
 export type { CreatedWorktree } from "./CreatedWorktree";
 export type { CustomCommand } from "./CustomCommand";
 export type { CustomCommandIcon } from "./CustomCommandIcon";
+export type { DaemonExposure } from "./DaemonExposure";
 export type { DaemonReady } from "./DaemonReady";
 export type { DaemonSettings } from "./DaemonSettings";
 export type { DaySlice } from "./DaySlice";

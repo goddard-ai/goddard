@@ -217,10 +217,10 @@ commands.agent_badge: エージェント
 commands.agent_added: エージェントがカスタムコマンド「%{name}」を追加しました。
 
 daemon.expose_title: 管理対象デーモンを公開
-daemon.expose_description: このマシン以外の Goddard クライアントから接続できるようにします。変更時はデーモンだけが再起動します。
+daemon.expose_description: このマシン以外の Goddard クライアントから接続できるようにします。デーモンを再起動せずに適用されます。
 daemon.status_local: このマシンのみ
 daemon.status_exposed: 公開中
-daemon.status_restarting: 再起動中
+daemon.status_restarting: 適用中
 daemon.connection_title: リスナーアクセス
 daemon.connection_description: ブラウザのオリジンは完全一致が必要です。複数指定する場合はカンマで区切ります。
 daemon.port: ポート
@@ -230,7 +230,7 @@ daemon.allowed_origins: 許可するブラウザオリジン
 daemon.allowed_origins_description: WebSocket を開ける正確な http:// または https:// オリジンです。
 daemon.allowed_origins_placeholder: https://goddard.example.com, http://localhost:3001
 daemon.apply: 適用
-daemon.restarting: 再起動中…
+daemon.restarting: 適用中…
 daemon.credentials_title: 接続情報
 daemon.credentials_description: Goddard Web に入力してください。URL にはこのマシンのローカルネットワーク用ホスト名が使われます。
 daemon.websocket_url: WebSocket URL
@@ -263,9 +263,8 @@ daemon.phase_connected: 接続済み
 daemon.phase_error: エラー
 daemon.invalid_port: 1 から 65535 のポートを入力してください
 daemon.invalid_settings: デーモン設定が無効です：%{error}
-daemon.stop_active_tasks: デーモンのアクセス設定を変更する前に実行中のタスクを停止してください
 daemon.settings_applied: デーモンのアクセス設定を更新しました
-daemon.restart_failed: デーモンを再起動できませんでした：%{error}
+daemon.restart_failed: デーモンのアクセス設定を更新できませんでした：%{error}
 daemon.url_copied: WebSocket URL をコピーしました
 daemon.token_copied: デーモントークンをコピーしました
 web.connect_title: Goddard デーモンに接続

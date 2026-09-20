@@ -105,6 +105,10 @@ pub struct WakuBackend {
     /// daemon executable after it binds its listener. `Arc` so the link
     /// info handler can read it inside the share runtime.
     daemon_address: Arc<Mutex<Option<String>>>,
+    /// The port a runtime-opened non-loopback listener is bound to, set by
+    /// the server's exposure control. LAN discovery reports it as
+    /// `DaemonInfo.ws_port`; `None` while unexposed.
+    exposed_port: Arc<Mutex<Option<u16>>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
@@ -183,6 +187,7 @@ impl WakuBackend {
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_start_locks: Mutex::new(HashMap::new()),
             daemon_address: Arc::new(Mutex::new(None)),
+            exposed_port: Arc::new(Mutex::new(None)),
             usage_rates_dir,
             route_policy,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
@@ -329,17 +334,21 @@ impl WakuBackend {
         let name = self.our_name.clone();
         let share_dir = self.share_dir();
         let daemon_address = self.daemon_address.clone();
+        let exposed_port = self.exposed_port.clone();
         let pairing = self.pairing.clone();
         let info: waku_share::link::InfoHandler = Arc::new(move || {
             // Only report a ws port when the daemon is actually bound
             // beyond loopback — otherwise discovery would send clients to
-            // an address they cannot reach.
-            let ws_port = daemon_address
-                .lock()
-                .as_deref()
-                .and_then(|address| address.parse::<std::net::SocketAddr>().ok())
-                .filter(|address| !address.ip().is_loopback())
-                .map(|address| address.port());
+            // an address they cannot reach. A runtime-opened listener wins
+            // over the startup bind.
+            let ws_port = exposed_port.lock().or_else(|| {
+                daemon_address
+                    .lock()
+                    .as_deref()
+                    .and_then(|address| address.parse::<std::net::SocketAddr>().ok())
+                    .filter(|address| !address.ip().is_loopback())
+                    .map(|address| address.port())
+            });
             let endpoint_id = waku_share::identity::load_or_create(&share_dir)
                 .map(|secret| secret.public().to_string())
                 .unwrap_or_default();
@@ -717,6 +726,10 @@ impl Backend for WakuBackend {
             .map(|secret| secret.public().to_string())
             .ok()?;
         Some((self.our_name.clone(), id))
+    }
+
+    fn note_exposed_port(&self, port: Option<u16>) {
+        *self.exposed_port.lock() = port;
     }
 
     fn kickstart_reachability(&self) {
@@ -3790,6 +3803,7 @@ fn handle_driver_command(
         | Command::Start { .. }
         | Command::GetSettings
         | Command::UpdateSettings { .. }
+        | Command::SetDaemonExposure { .. }
         | Command::ProbeProvider { .. }
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }

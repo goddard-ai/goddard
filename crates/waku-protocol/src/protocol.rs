@@ -27,7 +27,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -200,6 +200,14 @@ pub enum Command {
     GetSettings,
     UpdateSettings {
         settings: DaemonSettings,
+    },
+    /// Open, update, or close the daemon's non-loopback WebSocket listener.
+    /// `None` unexposes; `Some` atomically rebinds when the config changed —
+    /// the loopback listener and its sessions are never touched. Only the
+    /// primary bearer token may call it; paired devices and scoped agent
+    /// credentials are refused.
+    SetDaemonExposure {
+        exposure: Option<crate::exposure::DaemonExposure>,
     },
     /// Replace the command carrying `command.id` — or the one with its exact
     /// `name` when the id matches nothing — or append it when neither does.
@@ -857,6 +865,8 @@ pub enum ResponsePayload {
     Settings {
         settings: DaemonSettings,
     },
+    /// The bound port after `setDaemonExposure` — `None` once unexposed.
+    Exposure { port: Option<u16> },
     /// The integrations catalog joined with the user's configuration.
     Integrations {
         snapshots: Vec<crate::integrations::IntegrationSnapshot>,
@@ -1146,7 +1156,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 11);
+        assert_eq!(PROTOCOL_VERSION, 12);
     }
 
     #[test]
@@ -1155,7 +1165,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 11);
+        assert_eq!(PROTOCOL_VERSION, 12);
     }
 
     #[test]
