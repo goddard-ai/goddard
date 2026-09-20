@@ -116,6 +116,22 @@ impl Span {
         }
         out
     }
+
+    /// The flat text when the span covers exactly one inline code run and
+    /// nothing else — a backtick on each side of the grab — so the copy can
+    /// drop the fence. [`code_fenced`] verifies the fragment's markdown is
+    /// just this text inside a code fence rather than trusting the range
+    /// match alone.
+    fn lone_code(&self) -> Option<String> {
+        let markdown = &self
+            .copy
+            .fragments
+            .iter()
+            .find(|(range, _)| *range == self.range)?
+            .1;
+        code_fenced(markdown, &self.text[self.range.clone()])
+            .then(|| self.text[self.range.clone()].to_owned())
+    }
 }
 
 /// The selection state for one transcript.
@@ -310,6 +326,14 @@ impl Selection {
 
     /// The selection as markdown, spans joined in document order.
     pub fn markdown(&self) -> String {
+        // A grab of exactly one inline code run — backticks on either side
+        // and nothing else — copies the code alone; the fence is syntax,
+        // not content.
+        if let [span] = self.spans.as_slice()
+            && let Some(code) = span.lone_code()
+        {
+            return code;
+        }
         let mut out = String::new();
         let mut has_span = false;
         for span in &self.spans {
@@ -437,6 +461,25 @@ impl<G> SelectionRegistry<G> {
         }
         spans
     }
+}
+
+/// `true` when `markdown` is exactly `text` inside one backtick fence — the
+/// same run of ticks on both sides, plus the single-space pad emitted when
+/// the content itself touches a tick. Only inline code produces backtick
+/// edges, so the shape alone identifies the run.
+fn code_fenced(markdown: &str, text: &str) -> bool {
+    let fence = markdown.len() - markdown.trim_start_matches('`').len();
+    if fence == 0 || markdown.len() <= fence * 2 {
+        return false;
+    }
+    let Some(inner) = markdown[fence..].strip_suffix(&markdown[..fence]) else {
+        return false;
+    };
+    inner == text
+        || inner
+            .strip_prefix(' ')
+            .and_then(|inner| inner.strip_suffix(' '))
+            .is_some_and(|inner| inner == text)
 }
 
 /// Clamp a byte offset into `text` and snap it down to a char boundary. Mouse
@@ -986,6 +1029,92 @@ mod tests {
         // element's start drops its heading mark.
         selection.set_spans(registry.resolve((0, 3), (0, 8)));
         assert_eq!(selection.markdown(), "old c");
+    }
+
+    #[test]
+    fn markdown_copy_of_a_lone_code_span_drops_its_fence() {
+        let mut registry = SelectionRegistry::default();
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 0),
+            text: Rc::from("call make_it now"),
+            block_break: false,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::default(),
+                suffix: Rc::default(),
+                fragments: vec![(5..12, Rc::from("`make_it`"))],
+            }),
+            geometry: (),
+        });
+        let mut selection = Selection::default();
+        selection.set_spans(registry.resolve((0, 5), (0, 12)));
+        assert_eq!(selection.markdown(), "make_it");
+
+        // A grab that takes anything beyond the run keeps the fence.
+        selection.set_spans(registry.resolve((0, 5), (0, 16)));
+        assert_eq!(selection.markdown(), "`make_it` now");
+    }
+
+    #[test]
+    fn markdown_copy_strips_widened_and_padded_code_fences() {
+        let mut registry = SelectionRegistry::default();
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 0),
+            // Rendered from "`` `x` ``": the fence widens past the interior
+            // ticks and pads with spaces because the content touches them.
+            text: Rc::from("`x`"),
+            block_break: false,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::default(),
+                suffix: Rc::default(),
+                fragments: vec![(0..3, Rc::from("`` `x` ``"))],
+            }),
+            geometry: (),
+        });
+        let mut selection = Selection::default();
+        selection.set_spans(registry.resolve((0, 0), (0, 3)));
+        assert_eq!(selection.markdown(), "`x`");
+    }
+
+    #[test]
+    fn markdown_copy_keeps_fences_when_the_grab_holds_more_runs() {
+        let mut registry = SelectionRegistry::default();
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 0),
+            text: Rc::from("one and two"),
+            block_break: false,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::default(),
+                suffix: Rc::default(),
+                fragments: vec![(0..3, Rc::from("`one`")), (8..11, Rc::from("`two`"))],
+            }),
+            geometry: (),
+        });
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 1),
+            text: Rc::from("three"),
+            block_break: true,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::default(),
+                suffix: Rc::default(),
+                fragments: vec![(0..5, Rc::from("`three`"))],
+            }),
+            geometry: (),
+        });
+        let mut selection = Selection::default();
+        // Two code runs in one element still copy as markdown.
+        selection.set_spans(registry.resolve((0, 0), (0, 11)));
+        assert_eq!(selection.markdown(), "`one` and `two`");
+        // And a lone code run per element is still more than one run.
+        selection.set_spans(registry.resolve((0, 0), (1, 5)));
+        assert_eq!(selection.markdown(), "`one` and `two`\n\n`three`");
     }
 
     #[test]
