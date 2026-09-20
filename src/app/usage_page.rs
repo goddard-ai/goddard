@@ -65,6 +65,12 @@ impl Waku {
         if page != SettingsPage::Commands {
             self.custom_command_editor = None;
         }
+        // The Archived page's filter belongs to the visit: a remount starts
+        // empty rather than reviving the last visit's query. Reopening the
+        // already-selected page keeps the in-progress text.
+        if page == SettingsPage::Archived && self.settings_page != Some(SettingsPage::Archived) {
+            self.archived_search.update(cx, |input, cx| input.clear(cx));
+        }
         if page == SettingsPage::Keybindings {
             self.open_keybindings_page(window, cx);
             return;

@@ -1,0 +1,1 @@
+- The Archived Chats search now resets when you leave the page instead of reviving the last visit's query on return
